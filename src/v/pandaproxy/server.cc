@@ -114,6 +114,15 @@ struct handler_adaptor : ss::httpd::handler_base {
             co_return std::move(rp.rep);
         }
         auto sem_units = co_await ss::get_units(_ctx.mem_sem, req_size);
+
+        auto prefix = ssx::sformat(
+          "[{}:{}]",
+          rq.req->get_client_address().addr(),
+          rq.req->get_client_address().port());
+        auto req_line = ssx::sformat(
+          "{} {} HTTP/{}", rq.req->_method, rq.req->_url, rq.req->_version);
+        vlog(plog.trace, "{} handling {}", prefix, req_line);
+
         if (_ctx.as.abort_requested()) {
             set_reply_unavailable(*rp.rep);
             rp.mime_type = _exceptional_mime_type;
@@ -135,6 +144,14 @@ struct handler_adaptor : ss::httpd::handler_base {
             rp = server::reply_t{exception_reply(ex), _exceptional_mime_type};
         }
         set_and_measure_response(rp);
+        vlog(
+          plog.trace,
+          "{} responding to {}: status={} resp_size={}",
+          prefix,
+          req_line,
+          static_cast<std::underlying_type_t<ss::http::reply::status_type>>(
+            rp.rep->_status),
+          rp.rep->_content.size());
         co_return std::move(rp.rep);
     }
 
