@@ -39,6 +39,7 @@ set(handlers_srcs
   server/handlers/handler_probe.cc
   server/handlers/client_quotas.cc
   server/handlers/details/security.cc
+  server/handlers/describe_user_scram_credentials.cc
 )
 
 v_cc_library(
