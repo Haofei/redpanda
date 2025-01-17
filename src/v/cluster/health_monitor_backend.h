@@ -34,6 +34,19 @@ using health_node_cb_t = ss::noncopyable_function<void(
   const node_health_report&,
   std::optional<ss::lw_shared_ptr<const node_health_report>>)>;
 
+namespace health_monitor_backend_details {
+template<class T>
+concept partition_leader_status_handler = std::is_invocable_r_v<
+  void,
+  T,
+  const followers_stats&,
+  const model::topic_namespace&,
+  model::partition_id>;
+
+template<class T>
+concept partition_handler = std::
+  is_invocable_r_v<void, T, const model::topic_namespace&, model::partition_id>;
+} // namespace health_monitor_backend_details
 /**
  * Health monitor backend is responsible for collecting cluster health status
  * and caching cluster health information.
@@ -83,6 +96,12 @@ public:
 
     ss::future<cluster_health_overview>
       get_cluster_health_overview(model::timeout_clock::time_point);
+
+    ss::future<result<restart_risk_report>> get_current_node_restart_risks(
+      size_t limit, model::timeout_clock::time_point deadline);
+
+    ss::future<result<double>> get_current_node_in_sync_replicas_share(
+      model::timeout_clock::time_point deadline);
 
     bool does_raft0_have_leader();
 
@@ -137,6 +156,14 @@ private:
 
     std::chrono::milliseconds max_metadata_age();
     void abort_current_refresh();
+
+    ss::future<errc> walk_local_and_remote_reports(
+      health_monitor_backend_details::partition_leader_status_handler auto&&
+        local_leader_handler,
+      health_monitor_backend_details::partition_leader_status_handler auto&&
+        remote_leader_handler,
+      health_monitor_backend_details::partition_handler auto&&
+        unclaimed_partition_handler);
 
     /**
      * @brief Stucture holding the aggregated results of partition status.
@@ -200,4 +227,5 @@ private:
 
     friend struct health_report_accessor;
 };
+
 } // namespace cluster
