@@ -427,9 +427,6 @@ result<node_health_report> health_monitor_backend::process_node_reply(
 }
 
 ss::future<std::error_code> health_monitor_backend::collect_cluster_health() {
-    /**
-     * We are collecting cluster health on raft 0 leader only
-     */
     vlog(clusterlog.debug, "collecting cluster health statistics");
     // collect all reports
     auto ids = _members.local().node_ids();
