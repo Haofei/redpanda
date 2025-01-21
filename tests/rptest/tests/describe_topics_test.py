@@ -323,6 +323,20 @@ class DescribeTopicsTest(RedpandaTest):
                 "before a partition's log is eligible for compaction in a compact topic. "
                 "The topic property `min.cleanable.dirty.ratio` overrides the value of "
                 "`min_cleanable_dirty_ratio` at the topic level."),
+            "redpanda.remote.allowgaps":
+            ConfigProperty(
+                config_type="BOOLEAN",
+                value="false",
+                doc_string=
+                "This property affects the behavior of the Tiered-Storage during pause. "
+                "If 'false' (default value) Redpanda will evict from the local storage "
+                "only data which was already uploaded to the cloud storage. Eventually, "
+                "this will lead to a situation when the local volume is filled with data "
+                "which can't be evicted. When this will happen Redpanda will throttle "
+                "producers. To avoid this the property can be set to 'true'. In this "
+                "case Redpanda will allow segments that wasn't uploaded to the cloud "
+                "storage to be evicted from the local storage. The local storage "
+                "eviction may create a gap in offsets in this case."),
         }
 
         tp_spec = TopicSpec()
