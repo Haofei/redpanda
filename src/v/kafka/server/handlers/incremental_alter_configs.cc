@@ -387,6 +387,10 @@ create_topic_properties_update(
                   update.properties.iceberg_invalid_record_action,
                   cfg.value,
                   op);
+            }
+            if (cfg.name == topic_property_remote_allow_gaps) {
+                parse_and_set_optional_bool_alpha(
+                  update.properties.remote_allow_gaps, cfg.value, op);
                 continue;
             }
             if (cfg.name == topic_property_iceberg_target_lag_ms) {
@@ -397,6 +401,7 @@ create_topic_properties_update(
                   iceberg_target_lag_ms_validator{});
                 continue;
             }
+
             if (cfg.name == topic_property_min_cleanable_dirty_ratio) {
                 parse_and_set_tristate(
                   update.properties.min_cleanable_dirty_ratio,
@@ -485,7 +490,8 @@ static ss::future<chunked_vector<resp_resource_t>> alter_broker_configuration(
             //   compression.type=producer sensitive=false
             //   synonyms={DEFAULT_CONFIG:log_compression_type=producer}
             // (configuration.cc doesn't know `compression.type` but known
-            // `log_compression_type`) but for redpanda's properties it returns
+            // `log_compression_type`) but for redpanda's properties it
+            // returns
             //   redpanda.remote.read=false sensitive=false
             //   synonyms={DEFAULT_CONFIG:redpanda.remote.read=false}
             // which looks wrong because configuration.cc doesn't know
