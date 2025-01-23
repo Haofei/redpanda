@@ -145,4 +145,6 @@ TEST_P(ProtoRendering, test_protobuf_rendering) {
 }
 
 INSTANTIATE_TEST_SUITE_P(
-  Protobuf, ProtoRendering, testing::Values("empty_proto"));
+  Protobuf,
+  ProtoRendering,
+  testing::Values("empty_proto", "syntax_proto2", "syntax_proto3"));
