@@ -148,4 +148,9 @@ INSTANTIATE_TEST_SUITE_P(
   Protobuf,
   ProtoRendering,
   testing::Values(
-    "empty_proto", "syntax_proto2", "syntax_proto3", "imports", "package"));
+    "empty_proto",
+    "syntax_proto2",
+    "syntax_proto3",
+    "imports",
+    "package",
+    "file_options"));
