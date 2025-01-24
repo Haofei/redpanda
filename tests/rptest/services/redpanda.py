@@ -2554,8 +2554,6 @@ class RedpandaService(RedpandaServiceBase):
         # which can kill redpanda nodes.
         # This is a number to allow multiple callers to set it.
         self.tolerate_not_running = 0
-        # Do not fail test on crashes including asserts. This is useful when
-        # running with redpanda's fault injection enabled.
         self._tolerate_crashes = False
         self._rpk_node_config = rpk_node_config
 
@@ -5367,6 +5365,13 @@ class RedpandaService(RedpandaServiceBase):
         self._log_config.enable_finject_logging()
 
         self.logger.info(f"Set up failure injection config for nodes: {nodes}")
+
+    def set_tolerate_crashes(self, tolerate_crashes: bool):
+        """
+        Do not fail test on crashes including asserts. This is useful when
+        running with redpanda's fault injection enabled.
+        """
+        self._tolerate_crashes = tolerate_crashes
 
     def validate_controller_log(self):
         """

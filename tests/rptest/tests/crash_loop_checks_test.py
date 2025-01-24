@@ -7,6 +7,7 @@
 # the Business Source License, use of this software will be governed
 # by the Apache License, Version 2.0
 
+import signal
 from rptest.clients.offline_log_viewer import OfflineLogViewer
 from rptest.services.cluster import cluster
 from rptest.tests.redpanda_test import RedpandaTest
@@ -14,6 +15,8 @@ from rptest.services.redpanda import RedpandaService
 from rptest.util import expect_exception
 from rptest.services.redpanda import LoggingConfig
 from ducktape.errors import TimeoutError
+from ducktape.mark import matrix
+from ducktape.utils.util import wait_until
 
 
 class CrashLoopChecksTest(RedpandaTest):
@@ -24,6 +27,12 @@ class CrashLoopChecksTest(RedpandaTest):
     CRASH_LOOP_LOG = [
         "Crash loop detected. Too many consecutive crashes.*",
         ".*Failure during startup: crash_tracker::crash_loop_limit_reached \(Crash loop detected, aborting startup.\).*"
+    ]
+
+    SIGNAL_CRASH_LOG = [
+        "Aborting on",
+        "Segmentation fault on",
+        "Illegal instruction on",
     ]
 
     # main - application.cc:348 - Failure during startup: std::__1::system_error (error C-Ares:4, unreachable_host.com: Not found)
@@ -68,6 +77,18 @@ class CrashLoopChecksTest(RedpandaTest):
     def expect_crash_count(self, expected):
         crash_files = self.count_crash_files(self.broker)
         assert crash_files == expected, f"Unexpected number of crashes: {crash_files} != {expected}"
+
+    def wait_for_redpanda_stop(self, broker, timeout=10):
+        '''
+        Wait for the redpanda process to terminate (e.g. after sending a crash signal)
+        '''
+        wait_until(
+            lambda: self.redpanda.redpanda_pid(broker) == None,
+            timeout_sec=timeout,
+            backoff_sec=0.2,
+            err_msg=
+            f"Redpanda processes did not terminate on {broker.name} in {timeout} sec"
+        )
 
     @cluster(num_nodes=1, log_allow_list=CRASH_LOOP_LOG)
     def test_crash_loop_checks_with_tracker_file(self):
@@ -198,3 +219,60 @@ class CrashLoopChecksTest(RedpandaTest):
         self.logger.debug(f'First report: {report}')
         assert 'Failure during startup: std::__1::system_error (error C-Ares:4, unreachable_host.com: Not found)' == report[
             'crash_message'], f'Unexpected crash message: {report["crash_message"]}'
+
+    @cluster(num_nodes=1, log_allow_list=CRASH_LOOP_LOG + SIGNAL_CRASH_LOG)
+    @matrix(signo=[signal.SIGSEGV, signal.SIGABRT, signal.SIGILL],
+            signal_shard=[0, 1])
+    def test_crash_report_with_signal(self, signo, signal_shard):
+        if signal_shard == 0:
+            signal_thread = RedpandaService.SHARD_0_THREAD_NAME
+        else:
+            signal_thread = RedpandaService.SHARD_1_THREAD_NAME
+
+        self.redpanda.set_tolerate_crashes(True)
+        broker = self.redpanda.nodes[0]
+
+        # Send a crash signal to redpanda CRASH_LOOP_LIMIT times
+        for _ in range(CrashLoopChecksTest.CRASH_LOOP_LIMIT):
+            self.redpanda.signal_redpanda(broker,
+                                          signal=signo,
+                                          thread=signal_thread)
+            self.wait_for_redpanda_stop(broker)
+            self.redpanda.start_node(broker)
+
+        # Expect to see a crash report for each crash + a new one for the last
+        # start_node
+        self.expect_crash_count(CrashLoopChecksTest.CRASH_LOOP_LIMIT + 1)
+
+        # Sanity check the crash loop limit message has not been printed yet
+        assert not self.redpanda.search_log_node(
+            broker, "Too many consecutive crashes"
+        ), "The crash loop limit message should not have been printed yet"
+
+        # Send a crash signal + start again, now reaching the crash loop limit.
+        self.redpanda.signal_redpanda(broker,
+                                      signal=signo,
+                                      thread=signal_thread)
+        self.wait_for_redpanda_stop(broker)
+        self.redpanda.start_node(broker, expect_fail=True)
+
+        # Assert the crash loop limit message is printed with information about
+        # the crashes
+        assert self.redpanda.search_log_node(
+            broker, "Too many consecutive crashes"
+        ), "The crash loop limit should have been reached"
+
+        def signo_prefix():
+            if signo == signal.SIGSEGV:
+                return "Segmentation fault"
+            elif signo == signal.SIGABRT:
+                return "Aborting"
+            elif signo == signal.SIGILL:
+                return "Illegal instruction"
+            else:
+                assert False, "Test failure: not yet implemented"
+
+        assert self.redpanda.search_log_node(
+            broker,
+            f"Crash #4 at 20.* - {signo_prefix()} on shard {signal_shard}. Backtrace: "
+        )
