@@ -241,7 +241,6 @@ class LargeMessagesTest(RedpandaTest):
         _, sent_bytes = _get_samples(sent_metric_name)
         return read_bytes, sent_bytes
 
-    @ignore
     @cluster(num_nodes=7, log_allow_list=RESTART_LOG_ALLOW_LIST)
     @matrix(message_size_mib=[8, 16],
             apply_throughput_limits=[False, True],
