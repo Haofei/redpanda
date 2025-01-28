@@ -876,7 +876,7 @@ private:
     /// used for notifying when commits happened to log
     event_manager _event_manager;
     std::unique_ptr<probe> _probe;
-    ctx_log _ctxlog;
+    mutable ctx_log _ctxlog;
     ss::condition_variable _commit_index_updated;
 
     std::chrono::milliseconds _replicate_append_timeout;

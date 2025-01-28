@@ -3943,6 +3943,12 @@ std::vector<follower_metrics> consensus::get_follower_metrics() const {
     ret.reserve(_fstats.size());
     const auto offsets = _log->offsets();
     for (const auto& f : _fstats) {
+        vlog(
+          _ctxlog.trace,
+          "build_follower_metrics node={} meta={} lstats={}",
+          f.first.id(),
+          f.second,
+          offsets);
         ret.push_back(build_follower_metrics(
           f.first.id(),
           offsets,
