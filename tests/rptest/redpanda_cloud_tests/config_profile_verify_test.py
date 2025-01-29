@@ -79,7 +79,7 @@ class ConfigProfileVerifyTest(RedpandaCloudTest):
     def _check_aws_nodes(self):
         cmd = self.redpanda.kubectl._ssh_prefix() + [
             'aws', 'ec2', 'describe-instances',
-            '--filters="Name=tag:Name, Values=redpanda-{}-rp"'.format(
+            '--filters="Name=tag:Name, Values=redpanda-{}-rp-*"'.format(
                 self._clusterId),
             '--query="Reservations[0].Instances[*].InstanceType"'
         ]
