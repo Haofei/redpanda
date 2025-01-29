@@ -41,6 +41,9 @@ public:
     using include_malformed_files
       = ss::bool_class<struct include_malformed_files_tag>;
 
+    /// Visible for testing
+    ~recorder() = default;
+
     ss::future<> start();
     ss::future<> stop();
 
@@ -56,7 +59,6 @@ public:
 
 private:
     recorder() = default;
-    ~recorder() = default;
 
     ss::future<> ensure_crashdir_exists() const;
     ss::future<std::filesystem::path> generate_crashfile_name() const;
@@ -65,9 +67,13 @@ private:
     prepared_writer _writer;
 
     friend recorder& get_recorder();
+    friend recorder get_test_recorder();
 };
 
 /// Singleton access to global static recorder
 recorder& get_recorder();
+
+/// Make a test instance of the recorder that is not a static singleton
+recorder get_test_recorder();
 
 } // namespace crash_tracker

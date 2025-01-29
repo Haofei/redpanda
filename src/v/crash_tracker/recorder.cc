@@ -37,6 +37,8 @@ recorder& get_recorder() {
     return inst;
 }
 
+recorder get_test_recorder() { return recorder{}; }
+
 ss::future<> recorder::ensure_crashdir_exists() const {
     auto crash_report_dir = config::node().crash_report_dir_path();
     if (!co_await ss::file_exists(crash_report_dir.string())) {
