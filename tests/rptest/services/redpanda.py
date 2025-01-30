@@ -1394,6 +1394,10 @@ class RedpandaServiceBase(RedpandaServiceABC, Service):
         }
     }
 
+    # Thread name of shards to be used with redpanda_tid()
+    SHARD_0_THREAD_NAME = "redpanda"
+    SHARD_1_THREAD_NAME = "reactor-1"
+
     class FIPSMode(Enum):
         disabled = 0
         permissive = 1
@@ -3131,12 +3135,20 @@ class RedpandaService(RedpandaServiceBase):
 
         return all(self.for_nodes(self._started, check_node))
 
-    def signal_redpanda(self, node, signal=signal.SIGKILL, idempotent=False):
+    def signal_redpanda(self,
+                        node,
+                        signal=signal.SIGKILL,
+                        idempotent=False,
+                        thread=None):
         """
         :param idempotent: if true, then kill-like signals are ignored if
                            the process is already gone.
+        :param thread: if set, then the signal is sent to the given thread
         """
-        pid = self.redpanda_pid(node)
+        if thread is None:
+            pid = self.redpanda_pid(node)
+        else:
+            pid = self.redpanda_tid(node, thread)
         if pid is None:
             if idempotent and signal in {signal.SIGKILL, signal.SIGTERM}:
                 return
@@ -4187,6 +4199,20 @@ class RedpandaService(RedpandaServiceBase):
                 return None
 
             raise e
+
+    def redpanda_tid(self, node, thread):
+        """Return the thread ID of the given thread"""
+        cmd = "ps -C redpanda -T"
+        for line in node.account.ssh_capture(cmd, timeout_sec=10):
+            # Example line:
+            #     PID    SPID TTY          TIME CMD
+            # 2662879 2662879 pts/16   00:00:02 redpanda
+            self.logger.debug(f"ps output: {line}")
+            parts = line.split()
+            thread_name = parts[4]
+            if thread == thread_name:
+                return int(parts[1])
+        return None
 
     def started_nodes(self) -> List[ClusterNode]:
         return list(self._started)
