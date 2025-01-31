@@ -540,6 +540,25 @@ struct iceberg_target_lag_ms_validator {
     }
 };
 
+struct min_cleanable_dirty_ratio_validator {
+    std::optional<ss::sstring>
+    operator()(const ss::sstring&, const tristate<double>& value) {
+        double min = 0.0;
+        double max = 1.0;
+        if (value.has_optional_value()) {
+            if (value.value() < min || value.value() > max) {
+                return fmt::format(
+                  "min.cleanable.dirty.ratio {} is outside of allowed range "
+                  "[{}, {}]",
+                  value.value(),
+                  min,
+                  max);
+            }
+        }
+        return std::nullopt;
+    }
+};
+
 template<typename T, typename... ValidatorTypes>
 requires requires(
   model::topic_namespace_view tns,
