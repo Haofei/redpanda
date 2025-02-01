@@ -129,4 +129,11 @@ test --test_output=errors
 # warn if a timeout is much longer than actual runtime
 test --test_verbose_timeout_warnings
 
+# Use --config=lldb to run a test under lldb
+# to connect run `gdb-remote 7654` in an lldb session
+test:lldb --run_under='@llvm_18_toolchain_llvm//:bin/lldb-server g :7654 --'
+# Bump timeout to 1h
+test:lldb --test_timeout=3600
+test:lldb --strategy=TestRunner=local
+
 try-import %workspace%/user.bazelrc
