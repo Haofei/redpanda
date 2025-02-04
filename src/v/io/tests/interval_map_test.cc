@@ -20,9 +20,10 @@ namespace io = experimental::io;
 
 using imap = io::interval_map<uint64_t, uint64_t>;
 
-TEST(IntervalMap, InsertZeroLength) {
+TEST(IntervalMap, InsertZeroLengthInterval) {
     imap map;
     for (unsigned int i = 0; i < 10; ++i) {
+        // it doesn't matter where the interval starts
         const auto res = map.insert({i, 0}, 0);
         EXPECT_EQ(res, std::make_pair(map.end(), false));
     }
