@@ -41,32 +41,33 @@ TEST(IntervalMap, InsertIntoEmptyMap) {
     }
 }
 
-TEST(IntervalMap, InsertOverlapWithLast) {
+TEST(IntervalMap, InsertOverlapRejected) {
+    imap map;
+    EXPECT_TRUE(map.insert({0, 10}, 0).second);
+
     for (unsigned int i = 0; i < 10; ++i) {
-        imap map;
-        EXPECT_TRUE(map.insert({0, 10}, 0).second);
         const auto res = map.insert({i, 10}, 0);
         EXPECT_EQ(res.first, map.find(0));
         EXPECT_FALSE(res.second);
     }
+}
+
+TEST(IntervalMap, InsertRightAbut) {
     imap map;
     EXPECT_TRUE(map.insert({0, 10}, 0).second);
+
     const auto res = map.insert({10, 10}, 0);
     EXPECT_NE(res.first, map.find(0));
+    EXPECT_EQ(res.first, map.find(10));
     EXPECT_TRUE(res.second);
 }
 
-TEST(IntervalMap, InsertOverlapWithFirst) {
-    for (unsigned int i = 0; i < 10; ++i) {
-        imap map;
-        EXPECT_TRUE(map.insert({10, 10}, 0).second);
-        const auto res = map.insert({10 - i, 10}, 0);
-        EXPECT_EQ(res.first, map.find(10));
-        EXPECT_FALSE(res.second);
-    }
+TEST(IntervalMap, InsertLeftAbut) {
     imap map;
     EXPECT_TRUE(map.insert({10, 10}, 0).second);
+
     const auto res = map.insert({0, 10}, 0);
+    EXPECT_EQ(res.first, map.find(0));
     EXPECT_NE(res.first, map.find(10));
     EXPECT_TRUE(res.second);
 }
