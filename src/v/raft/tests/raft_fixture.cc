@@ -701,6 +701,21 @@ raft_fixture::wait_for_leader(model::timeout_clock::time_point deadline) {
     co_return get_leader().value();
 }
 
+std::optional<model::node_id> raft_fixture::random_follower_id() const {
+    auto leader_id = get_leader();
+    std::vector<model::node_id> followers;
+    std::ranges::copy_if(
+      _nodes | std::views::keys,
+      std::back_inserter(followers),
+      [leader_id](model::node_id id) { return id != leader_id; });
+
+    if (followers.empty()) {
+        return std::nullopt;
+    }
+
+    return random_generators::random_choice(followers);
+}
+
 ss::future<model::node_id> raft_fixture::wait_for_leader_change(
   model::timeout_clock::time_point deadline, model::term_id term) {
     auto has_new_leader = [this, term] {
