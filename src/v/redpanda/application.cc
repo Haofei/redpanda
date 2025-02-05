@@ -2263,6 +2263,7 @@ void application::wire_up_redpanda_services(
         smp_service_groups.kafka_smp_sg(),
         sched_groups.fetch_sg(),
         sched_groups.produce_sg(),
+        sched_groups.kafka_sg(),
         std::ref(metadata_cache),
         std::ref(controller->get_topics_frontend()),
         std::ref(controller->get_config_frontend()),
