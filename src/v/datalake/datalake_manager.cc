@@ -395,9 +395,20 @@ ss::future<uint64_t> datalake_manager::disk_usage() {
       [&total](const std::filesystem::path& path) {
           return ss::file_size(path.string())
             .then([&total](uint64_t size) { total += size; })
+            .handle_exception_type(
+              [path](const std::filesystem::filesystem_error& e) {
+                  if (e.code() == std::errc::no_such_file_or_directory) {
+                      vlog(
+                        datalake_log.debug,
+                        "Stat failed for path: {}: {}",
+                        path,
+                        e.code());
+                  }
+                  return ss::make_exception_future<>(e);
+              })
             .handle_exception([path](std::exception_ptr eptr) {
                 vlog(
-                  datalake_log.debug,
+                  datalake_log.warn,
                   "Stat failed for path: {}: {}",
                   path,
                   eptr);
