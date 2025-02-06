@@ -238,7 +238,12 @@ recorder::get_recorded_crashes(
               std::move(buf));
             result.emplace_back(
               entry.path(), std::move(crash_desc), entry.last_write_time());
-        } catch (const serde::serde_exception&) {
+        } catch (const serde::serde_exception& e) {
+            vlog(
+              ctlog.debug,
+              "Exception while deserializing a crash report file {}: {}",
+              entry.path(),
+              e);
             if (incl_malformed) {
                 result.emplace_back(
                   entry.path(), std::nullopt, entry.last_write_time());
