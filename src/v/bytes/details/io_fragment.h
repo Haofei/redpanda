@@ -129,7 +129,7 @@ class io_fragment_list {
     template<bool Const, bool Forward>
     class iter {
     public:
-        using iterator_category = std::bidirectional_iterator_tag;
+        using iterator_category = std::forward_iterator_tag;
         using container_type = typename std::
           conditional_t<Const, const io_fragment_list, io_fragment_list>;
         using value_type =
@@ -139,12 +139,13 @@ class io_fragment_list {
         using reference = value_type&;
 
     private:
-        iter(container_type* container, pointer curr)
+        iter([[maybe_unused]] container_type* container, pointer curr)
           : _current(curr)
 #ifndef NDEBUG
           , _my_generation(container->_generation)
+          , _container(container)
 #endif
-          , _container(container) {
+        {
         }
 
     public:
@@ -153,7 +154,11 @@ class io_fragment_list {
         // NOLINTNEXTLINE(hicpp-explicit-conversions)
         operator iter<true, Forward>() const {
             check_generation();
+#ifndef NDEBUG
             return {_container, _current};
+#else
+            return {nullptr, _current};
+#endif
         }
 
         reference operator*() const {
@@ -178,28 +183,6 @@ class io_fragment_list {
             ++*this;
             return tmp;
         }
-        iter& operator--() {
-            check_generation();
-            if constexpr (Forward) {
-                if (_current == nullptr) {
-                    _current = _container->_tail;
-                } else {
-                    _current = _current->_prev;
-                }
-            } else {
-                if (_current == nullptr) {
-                    _current = _container->_head;
-                } else {
-                    _current = _current->_next;
-                }
-            }
-            return *this;
-        }
-        iter operator--(int) {
-            auto tmp = *this;
-            --*this;
-            return tmp;
-        }
         bool operator==(const iter& o) const {
             check_generation();
             return _current == o._current;
@@ -218,8 +201,8 @@ class io_fragment_list {
         pointer _current = nullptr;
 #ifndef NDEBUG
         size_t _my_generation = 0;
-#endif
         container_type* _container = nullptr;
+#endif
     };
 
 public:

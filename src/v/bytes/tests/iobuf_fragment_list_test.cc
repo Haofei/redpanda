@@ -178,45 +178,6 @@ TEST(FragmentListTests, IteratorIncrement) {
     EXPECT_EQ(list.rbegin(), list.rend());
 }
 
-TEST(FragmentListTests, IteratorDecrement) {
-    io_fragment_list list;
-    io_fragment a{0};
-    io_fragment b{0};
-    io_fragment c{0};
-    list.push_back(a);
-    list.push_back(b);
-    list.push_back(c);
-    std::list<io_fragment*> shadow = {&a, &b, &c};
-    while (!list.empty()) {
-        auto it = list.end();
-        for (io_fragment* frag : std::ranges::reverse_view(shadow)) {
-            --it;
-            ASSERT_NE(it, list.end());
-            EXPECT_EQ(&*it, frag);
-        }
-        EXPECT_EQ(it, list.begin());
-        auto rit = list.rend();
-        for (io_fragment* frag : shadow) {
-            --rit;
-            ASSERT_NE(rit, list.rend());
-            EXPECT_EQ(&*rit, frag);
-        }
-        EXPECT_EQ(rit, list.rbegin());
-        auto cit = list.cend();
-        for (io_fragment* frag : std::ranges::reverse_view(shadow)) {
-            --cit;
-            ASSERT_NE(cit, list.cend());
-            EXPECT_EQ(&*cit, frag);
-        }
-        EXPECT_EQ(cit, list.cbegin());
-        list.pop_back();
-        shadow.pop_back();
-    }
-    EXPECT_EQ(list.begin(), list.end());
-    EXPECT_EQ(list.cbegin(), list.cend());
-    EXPECT_EQ(list.rbegin(), list.rend());
-}
-
 TEST(FragmentListTests, Clear) {
     io_fragment_list list;
     io_fragment a{0};
