@@ -18,6 +18,19 @@ def _is_versioned_so(file):
             return False
     return True
 
+def _override_binary_rpath(ctx, path_override, original_binary):
+    patched_binary = ctx.actions.declare_file("{}_patched".format(original_binary.path))
+
+    ctx.actions.run(
+        inputs = [original_binary],
+        outputs = [patched_binary],
+        executable = ctx.executable._patchelf,
+        arguments = ["--set-rpath", path_override, original_binary.path, "--output", patched_binary.path],
+        tools = [],
+        mnemonic = "OverrideBinaryRPath",
+    )
+    return patched_binary
+
 def _impl(ctx):
     # Collect all shared libraries from the sysroot that we used.
     shared_libraries = []
@@ -37,11 +50,16 @@ def _impl(ctx):
         if solib == ctx.file.redpanda_binary:
             continue
         shared_libraries.append(solib)
+    redpanda_binary = ctx.file.redpanda_binary
+
+    if ctx.attr.rpath_override != "":
+        #TODO: add overriding iotune and rp_util rpaths after we add them to the package
+        redpanda_binary = _override_binary_rpath(ctx, ctx.attr.rpath_override, redpanda_binary)
 
     # Create the configuration file for the packaging tool
     cfg_file = ctx.actions.declare_file("%s.config.json" % ctx.attr.name)
     cfg = {
-        "redpanda_binary": ctx.file.redpanda_binary.path,
+        "redpanda_binary": redpanda_binary.path,
         "rpk": ctx.file.rpk_binary.path if ctx.file.rpk_binary else None,
         "shared_libraries": [solib.path for solib in shared_libraries],
         "default_yaml_config": ctx.file.default_yaml_config.path if ctx.file.default_yaml_config else None,
@@ -50,7 +68,7 @@ def _impl(ctx):
     }
     ctx.actions.write(cfg_file, content = json.encode_indent(cfg))
 
-    inputs = [cfg_file, ctx.file.redpanda_binary] + shared_libraries + ctx.files.bin_wrappers
+    inputs = [cfg_file, redpanda_binary] + shared_libraries + ctx.files.bin_wrappers
 
     if ctx.file.rpk_binary:
         inputs.append(ctx.file.rpk_binary)
@@ -95,6 +113,7 @@ redpanda_package = rule(
             mandatory = True,
         ),
         "include_sysroot_libs": attr.bool(),
+        "rpath_override": attr.string(mandatory = False),
         "_tool": attr.label(
             executable = True,
             allow_files = True,
@@ -103,6 +122,12 @@ redpanda_package = rule(
         ),
         "_cc_toolchain": attr.label(
             default = Label("@bazel_tools//tools/cpp:current_cc_toolchain"),
+        ),
+        "_patchelf": attr.label(
+            executable = True,
+            allow_files = True,
+            cfg = "exec",
+            default = Label("@patchelf"),
         ),
     },
     toolchains = ["@bazel_tools//tools/cpp:toolchain_type"],
