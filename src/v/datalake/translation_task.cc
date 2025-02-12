@@ -200,11 +200,6 @@ translation_task::translate(
   const remote_path& remote_path_prefix,
   retry_chain_node& rcn,
   ss::abort_source& as) {
-    lazy_abort_source lazy_as{[&as]() {
-        return as.abort_requested()
-                 ? std::make_optional("translation task stop requested")
-                 : std::nullopt;
-    }};
     record_multiplexer mux(
       ntp,
       topic_revision,
@@ -215,12 +210,13 @@ translation_task::translate(
       *_table_creator,
       _invalid_record_action,
       _location_provider,
-      *_translation_probe,
-      lazy_as);
+      *_translation_probe);
     // Write local files
-    auto mux_result = co_await std::move(reader).consume(
-      std::move(mux), _read_timeout + model::timeout_clock::now());
 
+    co_await mux.multiplex(
+      std::move(reader), _read_timeout + model::timeout_clock::now(), as);
+
+    auto mux_result = co_await std::move(mux).finish();
     if (mux_result.has_error()) {
         vlog(
           datalake_log.warn,
@@ -242,6 +238,12 @@ translation_task::translate(
       .start_offset = write_result.start_offset,
       .last_offset = write_result.last_offset,
     };
+
+    lazy_abort_source lazy_as{[&as]() {
+        return as.abort_requested()
+                 ? std::make_optional("translation task stop requested")
+                 : std::nullopt;
+    }};
 
     // Data files.
     {
