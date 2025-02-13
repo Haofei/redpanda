@@ -148,8 +148,7 @@ public:
         chunked_vector<iceberg::manifest> manifests;
         auto files = co_await collect_all_manifest_files(table);
         for (auto& f : files) {
-            auto m = co_await io.download_manifest(
-              f.manifest_path, make_partition_key_type(table));
+            auto m = co_await io.download_manifest(f.manifest_path);
             manifests.push_back(std::move(m.assume_value()));
         }
         co_return manifests;

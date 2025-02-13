@@ -455,8 +455,7 @@ merge_append_action::merge_mfiles(
     for (const auto& mfile : to_merge) {
         // Download the manifest file and collect the entries into the merged
         // container.
-        auto mfile_res = co_await io_.download_manifest(
-          mfile.manifest_path, ctx.pk_type);
+        auto mfile_res = co_await io_.download_manifest(mfile.manifest_path);
         if (mfile_res.has_error()) {
             co_return mfile_res.error();
         }

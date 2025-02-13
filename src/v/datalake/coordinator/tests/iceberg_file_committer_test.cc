@@ -148,17 +148,9 @@ public:
         ASSERT_TRUE(mlist_res.has_value());
         const auto& mlist = mlist_res.value();
 
-        auto schema = datalake::default_schema();
-        auto pspec = iceberg::partition_spec::resolve(
-          datalake::hour_partition_spec(), schema.schema_struct);
-        ASSERT_TRUE(pspec.has_value());
-        auto pk_type = iceberg::partition_key_type::create(
-          pspec.value(), schema);
-
         // Collect all the data files for this snapshot.
         for (const auto& m : mlist.files) {
-            auto m_res
-              = manifest_io.download_manifest(m.manifest_path, pk_type).get();
+            auto m_res = manifest_io.download_manifest(m.manifest_path).get();
             ASSERT_TRUE(m_res.has_value());
             for (const auto& e : m_res.value().entries) {
                 uris->emplace_back(e.data_file.file_path());
