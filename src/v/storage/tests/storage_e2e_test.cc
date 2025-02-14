@@ -5388,3 +5388,136 @@ FIXTURE_TEST(dirty_ratio, storage_test_fixture) {
     BOOST_REQUIRE_EQUAL(disk_log->closed_segment_bytes(), 0);
     BOOST_REQUIRE_CLOSE(disk_log->dirty_ratio(), 0.0, tolerance);
 }
+
+FIXTURE_TEST(dirty_and_closed_bytes_bookkeeping, storage_test_fixture) {
+    auto log_cfg = default_log_config(test_dir);
+    using namespace storage;
+
+    ss::abort_source abs;
+    auto ntp = model::ntp("test_ns", "test_tpc", 0);
+
+    ntp_config::default_overrides overrides;
+    overrides.retention_bytes = tristate<size_t>{1};
+    overrides.cleanup_policy_bitflags
+      = model::cleanup_policy_bitflags::compaction
+        | model::cleanup_policy_bitflags::deletion;
+
+    std::unique_ptr<log_manager> mgr = std::make_unique<log_manager>(
+      log_cfg, kvstore, resources, feature_table);
+    auto deferred = ss::defer([&mgr]() mutable { mgr->stop().get(); });
+    auto log = mgr
+                 ->manage(ntp_config(
+                   ntp,
+                   mgr->config().base_dir,
+                   std::make_unique<ntp_config::default_overrides>(overrides)))
+                 .get();
+
+    auto* disk_log = static_cast<disk_log_impl*>(log.get());
+
+    housekeeping_config cfg{
+      model::timestamp::max(),
+      1,
+      model::offset::max(),
+      std::nullopt,
+      ss::default_priority_class(),
+      abs};
+
+    // add a segment with random keys until a certain size
+    auto add_segment = [&](size_t size, model::term_id term) {
+        do {
+            static const auto to_add = 1_KiB;
+            append_single_record_batch(log, 1, term, to_add, true);
+        } while (log->segments().back()->size_bytes() < size);
+    };
+
+    using func_t = std::function<void()>;
+
+    // Adds a new (random sized) segment to the log.
+    auto add_segment_func = [&]() {
+        auto size = random_generators::get_int(4_KiB, 10_MiB);
+        add_segment(size, model::term_id(1));
+    };
+
+    // Force rolls the log.
+    auto force_roll_func = [&]() {
+        disk_log->force_roll(ss::default_priority_class()).get();
+    };
+
+    // Restarts the log manager- this has the added benefit of forcing recovery
+    // from the existing segment set.
+    auto restart_log_manager_func = [&]() {
+        mgr->stop().get();
+        mgr = std::make_unique<log_manager>(
+          log_cfg, kvstore, resources, feature_table);
+        log = mgr
+                ->manage(ntp_config(
+                  ntp,
+                  mgr->config().base_dir,
+                  std::make_unique<ntp_config::default_overrides>(overrides)))
+                .get();
+        disk_log = static_cast<disk_log_impl*>(log.get());
+    };
+
+    auto adjacent_merge_func = [&]() {
+        disk_log->adjacent_merge_compact(cfg.compact).get();
+    };
+
+    auto sliding_window_func = [&]() {
+        disk_log->sliding_window_compact(cfg.compact).get();
+    };
+
+    // Prefix truncate at a random point in the log.
+    auto prefix_truncate_func = [&]() {
+        auto dirty_offset = disk_log->offsets().dirty_offset;
+        auto offset = random_generators::get_int(1L, dirty_offset());
+        disk_log
+          ->truncate_prefix(truncate_prefix_config(
+            model::offset(offset), ss::default_priority_class()))
+          .get();
+    };
+
+    // Truncate to a random point in the log.
+    auto truncate_func = [&]() {
+        auto dirty_offset = disk_log->offsets().dirty_offset;
+        auto offset = random_generators::get_int(1L, dirty_offset());
+        disk_log
+          ->truncate(storage::truncate_config(
+            model::offset{offset}, ss::default_priority_class()))
+          .get();
+    };
+
+    std::vector<func_t> funcs = {
+      add_segment_func,
+      force_roll_func,
+      restart_log_manager_func,
+      adjacent_merge_func,
+      sliding_window_func,
+      prefix_truncate_func,
+      truncate_func};
+
+#ifdef NDEBUG
+    static constexpr int num_operations = 50;
+#else
+    static constexpr int num_operations = 25;
+#endif
+
+    for (int i = 0; i < num_operations; ++i) {
+        // Invoke one of the functions that influences the dirty and closed
+        // bytes of the log.
+        random_generators::random_choice(funcs)();
+        check_dirty_and_closed_segment_bytes(log);
+        // We should drive segment production to ensure there is always
+        // something for the functions to do.
+        add_segment_func();
+
+        // Recheck post segment addition.
+        check_dirty_and_closed_segment_bytes(log);
+    }
+
+    // Sliding window compact down the rest of the log
+    bool did_compact = true;
+    while (did_compact) {
+        did_compact = disk_log->sliding_window_compact(cfg.compact).get();
+        check_dirty_and_closed_segment_bytes(log);
+    }
+}
