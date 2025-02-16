@@ -8,10 +8,12 @@
  * https://github.com/redpanda-data/redpanda/blob/master/licenses/rcl.md
  */
 
+#include "datalake/partition_spec_parser.h"
 #include "iceberg/compatibility.h"
 #include "iceberg/compatibility_types.h"
 #include "iceberg/compatibility_utils.h"
 #include "iceberg/datatypes.h"
+#include "iceberg/partition.h"
 #include "random/generators.h"
 
 #include <absl/container/btree_map.h>
@@ -164,9 +166,8 @@ std::ostream& operator<<(std::ostream& os, const field_test_case& ftc) {
       "{}->{} [expected: {}]",
       ftc.source,
       ftc.dest,
-      ftc.expected.has_error()
-        ? std::string{"ERROR"}
-        : fmt::format("promoted={}", ftc.expected.value()));
+      ftc.expected.has_error() ? std::string{"ERROR"}
+                               : fmt::format("{}", ftc.expected.value()));
     return os;
 }
 } // namespace
@@ -177,7 +178,8 @@ std::vector<field_test_case> generate_test_cases() {
     test_data.emplace_back(int_type{}, long_type{}, type_promoted::yes);
     test_data.emplace_back(int_type{}, boolean_type{}, compat_errc::mismatch);
 
-    test_data.emplace_back(date_type{}, timestamp_type{}, type_promoted::yes);
+    test_data.emplace_back(
+      date_type{}, timestamp_type{}, type_promoted::changes_partition);
     test_data.emplace_back(date_type{}, long_type{}, compat_errc::mismatch);
 
     test_data.emplace_back(float_type{}, double_type{}, type_promoted::yes);
@@ -337,6 +339,7 @@ struct struct_evolution_test_case {
     std::function<bool(const struct_type&, const struct_type&)> validator =
       [](const struct_type&, const struct_type&) { return true; };
     schema_changed any_change{true};
+    std::optional<ss::sstring> pspec{};
 };
 
 std::ostream&
@@ -359,6 +362,7 @@ static const std::vector<struct_evolution_test_case> valid_cases{
       [](const struct_type& src, const struct_type& dst) {
           return updated(*src.fields.back(), *dst.fields.back());
       },
+    .pspec = "(foo)",
   },
   struct_evolution_test_case{
     .description = "list elements are subject to type promotion rules (valid)",
@@ -383,6 +387,7 @@ static const std::vector<struct_evolution_test_case> valid_cases{
           auto& dst_list = get<list_type>(dst.fields.back());
           return updated(*src_list.element_field, *dst_list.element_field);
       },
+    .pspec = "(qux)",
   },
   struct_evolution_test_case{
     .description = "evolving a list-element struct is allowed",
@@ -441,6 +446,7 @@ static const std::vector<struct_evolution_test_case> valid_cases{
           return updated(*src_map.key_field, *dst_map.key_field)
                  && updated(*src_map.value_field, *dst_map.value_field);
       },
+    .pspec = "(a_map)",
   },
   struct_evolution_test_case{
     .description = "we can 'add' nested fields",
@@ -500,6 +506,7 @@ static const std::vector<struct_evolution_test_case> valid_cases{
           return orig_match && updated(*dest.fields[0])
                  && updated(*dest.fields[2]) && added(*dest.fields[1]);
       },
+    .pspec = "(foo,bar)",
   },
   struct_evolution_test_case{
     .description = "removing a required field works",
@@ -541,6 +548,7 @@ static const std::vector<struct_evolution_test_case> valid_cases{
                  && dst_nested.fields.empty()
                  && removed(*src_nested.fields.back());
       },
+    .pspec = "(nested)", // TODO(oren): seems wrong frankly, should this fail?
   },
   struct_evolution_test_case{
     .description
@@ -632,6 +640,7 @@ static const std::vector<struct_evolution_test_case> valid_cases{
           auto& dst_f = dst.fields.back();
           return src_f->required != dst_f->required && updated(*src_f, *dst_f);
       },
+    .pspec = "(foo)",
   },
   struct_evolution_test_case{
     .description = "reordering fields is legal",
@@ -667,6 +676,7 @@ static const std::vector<struct_evolution_test_case> valid_cases{
     // should reordered fields in a schema correspond to some parquet layout
     // change on disk?
     .any_change = schema_changed::no,
+    .pspec = "(quux,location)",
   },
   struct_evolution_test_case{
     .description
@@ -932,6 +942,27 @@ static const std::vector<struct_evolution_test_case> invalid_cases{
       },
     .validate_err = schema_evolution_errc::new_required_field,
   },
+  struct_evolution_test_case{
+    .description = "promoting from date -> timestamp is fine as long as that "
+                   "field does not appear in the partition spec",
+    .generator =
+      [](unique_id_generator& ids) {
+          struct_type s{};
+          struct_type n{};
+          n.fields.emplace_back(nested_field::create(
+            ids.get_one(), "date", field_required::no, date_type{}));
+          s.fields.emplace_back(nested_field::create(
+            ids.get_one(), "nested", field_required::no, std::move(n)));
+          return s;
+      },
+    .update =
+      [](struct_type& s) {
+          std::get<struct_type>(s.fields.back()->type).fields.back()->type
+            = timestamp_type{};
+      },
+    .validate_err = schema_evolution_errc::partition_spec_conflict,
+    .pspec = "(nested.date)",
+  },
 };
 
 static constexpr auto valid_plus_errs = [](auto&& R) {
@@ -963,6 +994,17 @@ public:
     auto& validate_err() { return GetParam().validate_err; }
     auto validator(const struct_type& src, const struct_type& dest) {
         return GetParam().validator(src, dest);
+    }
+    partition_spec gen_partition_spec(const struct_type& s) const {
+        auto raw = GetParam().pspec;
+        if (!raw.has_value()) {
+            return partition_spec{};
+        }
+        auto parsed = datalake::parse_partition_spec(raw.value());
+        EXPECT_TRUE(parsed.has_value()) << GetParam();
+        auto resolved = partition_spec::resolve(parsed.value(), s);
+        EXPECT_TRUE(resolved.has_value()) << GetParam();
+        return std::move(resolved).value();
     }
     auto& any_change() { return GetParam().any_change; }
 };
@@ -1000,10 +1042,11 @@ TEST_P(AnnotateStructTest, AnnotationWorksAndDetectsStructuralErrors) {
 
     // check that annotation works or errors as expected
     auto annotate_res = annotate_schema_transform(original_schema_struct, type);
-    ASSERT_EQ(annotate_res.has_error(), err().has_error())
+
+    ASSERT_EQ(annotate_res.has_error(), annotate_err().has_error())
       << (annotate_res.has_error()
             ? fmt::format("Unexpected error: {}", annotate_res.error())
-            : fmt::format("Expected {}", err().error()));
+            : fmt::format("Expected {}", annotate_err().error()));
 
     if (annotate_res.has_error()) {
         EXPECT_EQ(annotate_res.error(), annotate_err().error());
@@ -1055,7 +1098,8 @@ TEST_P(ValidateAnnotationTest, ValidateCatchesTypeErrors) {
         auto c2 = type.copy();
         auto annotate_res = annotate_schema_transform(c1, c2);
         ASSERT_FALSE(annotate_res.has_error());
-        auto validate_res = validate_schema_transform(c2);
+        auto validate_res = validate_schema_transform(
+          c2, gen_partition_spec(c1));
         ASSERT_FALSE(validate_res.has_error())
           << fmt::format("Unexpected error: {}", validate_res.error());
         EXPECT_EQ(validate_res.value().total(), 0);
@@ -1066,7 +1110,8 @@ TEST_P(ValidateAnnotationTest, ValidateCatchesTypeErrors) {
     ASSERT_FALSE(annotate_res.has_error());
 
     // but validate may fail
-    auto validate_res = validate_schema_transform(type);
+    auto validate_res = validate_schema_transform(
+      type, gen_partition_spec(original_schema_struct));
     ASSERT_EQ(validate_res.has_error(), validate_err().has_error())
       << (validate_res.has_error()
             ? fmt::format("Unexpected error: {}", validate_res.error())
@@ -1106,14 +1151,17 @@ TEST_P(StructEvoCompatibilityTest, CanEvolveStructsAndDetectErrors) {
     // try to evolve the original schema into the new and update the latter
     // accordingly. check against expectations (both success and expected
     // qualities of the result)
-    auto evolve_res = evolve_schema(original_schema_struct, type);
+    auto evolve_res = evolve_schema(
+      original_schema_struct, type, gen_partition_spec(original_schema_struct));
+
     ASSERT_EQ(evolve_res.has_error(), err().has_error())
       << (evolve_res.has_error()
             ? fmt::format("Unexpected error: {}", evolve_res.error())
             : fmt::format(
                 "Expected {} got {}", err().error(), evolve_res.value()));
     if (evolve_res.has_error()) {
-        ASSERT_EQ(evolve_res.error(), err().error());
+        ASSERT_EQ(evolve_res.error(), err().error())
+          << fmt::format("{}", evolve_res.error());
         return;
     }
 

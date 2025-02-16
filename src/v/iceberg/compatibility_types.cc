@@ -39,6 +39,8 @@ std::string_view to_string_view(schema_evolution_errc ec) {
         return "schema_evolution_errc::null_nested_field";
     case schema_evolution_errc::invalid_state:
         return "schema_evolution_errc::invalid_state";
+    case schema_evolution_errc::partition_spec_conflict:
+        return "schema_evolution_errc::partition_spec_conflict";
     }
 }
 

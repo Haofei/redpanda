@@ -53,6 +53,7 @@ enum class schema_evolution_errc {
     new_required_field,
     null_nested_field,
     invalid_state,
+    partition_spec_conflict,
 };
 
 /**

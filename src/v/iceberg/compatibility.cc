@@ -38,7 +38,7 @@ struct primitive_type_promotion_policy_visitor {
 
     type_check_result operator()(
       const iceberg::date_type&, const iceberg::timestamp_type&) const {
-        return type_promoted::yes;
+        return type_promoted::changes_partition;
     }
 
     type_check_result
@@ -338,17 +338,24 @@ public:
  */
 struct validate_transform_visitor {
     explicit validate_transform_visitor(
-      nested_field* f, schema_transform_state& state)
+      nested_field* f,
+      schema_transform_state& state,
+      const partition_spec& spec)
       : f_(f)
-      , state_(&state) {}
+      , state_(&state)
+      , spec_(&spec) {}
     schema_errc_result operator()(const nested_field::src_info& src) {
         bool promoted = false;
         if (src.type.has_value()) {
             if (auto ct_res = check_types(src.type.value(), f_->type);
                 ct_res.has_error()) {
                 return schema_evolution_errc::type_mismatch;
-            } else if (ct_res.value() == type_promoted::yes) {
-                promoted = true;
+            } else if (
+              ct_res.value() == type_promoted::changes_partition
+              && spec_->get_field(src.id) != nullptr) {
+                return schema_evolution_errc::partition_spec_conflict;
+            } else {
+                promoted = ct_res.value() != type_promoted::no;
             }
         }
         if (
@@ -379,6 +386,7 @@ struct validate_transform_visitor {
 private:
     nested_field* f_;
     schema_transform_state* state_;
+    const partition_spec* spec_;
 };
 
 } // namespace
@@ -396,15 +404,17 @@ annotate_schema_transform(const struct_type& source, const struct_type& dest) {
     return annotate_schema_visitor{}.visit(source, dest);
 }
 
-schema_transform_result validate_schema_transform(struct_type& dest) {
+schema_transform_result
+validate_schema_transform(struct_type& dest, const partition_spec& spec) {
     schema_transform_state state{};
     if (auto res = for_each_field(
           dest,
-          [&state](nested_field* f) {
+          [&state, &spec](nested_field* f) {
               vassert(
                 f->has_evolution_metadata(),
                 "Should have visited every destination field");
-              return std::visit(validate_transform_visitor{f, state}, f->meta);
+              return std::visit(
+                validate_transform_visitor{f, state, spec}, f->meta);
           });
         res.has_error()) {
         return res.error();
@@ -413,8 +423,8 @@ schema_transform_result validate_schema_transform(struct_type& dest) {
 }
 
 namespace {
-schema_transform_result
-do_visit_schemas(const struct_type& source, struct_type& dest) {
+schema_transform_result do_visit_schemas(
+  const struct_type& source, struct_type& dest, const partition_spec& spec) {
     schema_transform_state result;
     if (auto annotate_res = annotate_schema_transform(source, dest);
         annotate_res.has_error()) {
@@ -423,7 +433,7 @@ do_visit_schemas(const struct_type& source, struct_type& dest) {
         result += annotate_res.value();
     }
 
-    if (auto validate_res = validate_schema_transform(dest);
+    if (auto validate_res = validate_schema_transform(dest, spec);
         validate_res.has_error()) {
         return validate_res.error();
     } else {
@@ -433,9 +443,9 @@ do_visit_schemas(const struct_type& source, struct_type& dest) {
 }
 } // namespace
 
-schema_evolution_result
-evolve_schema(const struct_type& source, struct_type& dest) {
-    if (auto res = do_visit_schemas(source, dest); res.has_error()) {
+schema_evolution_result evolve_schema(
+  const struct_type& source, struct_type& dest, const partition_spec& spec) {
+    if (auto res = do_visit_schemas(source, dest, spec); res.has_error()) {
         return res.error();
     } else {
         return schema_changed{res.value().total() > 0};
@@ -444,7 +454,8 @@ evolve_schema(const struct_type& source, struct_type& dest) {
 
 fill_ids_result
 try_fill_field_ids(const struct_type& source, struct_type& dest) {
-    if (auto res = do_visit_schemas(source, dest); res.has_error()) {
+    if (auto res = do_visit_schemas(source, dest, partition_spec{});
+        res.has_error()) {
         return res.error();
     } else {
         // All we care about here is that every field got an ID

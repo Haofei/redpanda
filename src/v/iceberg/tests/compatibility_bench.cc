@@ -11,6 +11,7 @@
 #include "iceberg/compatibility.h"
 #include "iceberg/datatypes.h"
 #include "iceberg/field_collecting_visitor.h"
+#include "iceberg/partition.h"
 #include "iceberg/tests/test_schemas.h"
 
 #include <seastar/testing/perf_tests.hh>
@@ -91,7 +92,7 @@ void run_apply_transform_bench(const struct_type& source) {
     vassert(!xform.has_error(), "Expected success");
 
     perf_tests::start_measuring_time();
-    auto res = validate_schema_transform(dest);
+    auto res = validate_schema_transform(dest, partition_spec{});
     perf_tests::stop_measuring_time();
 
     vassert(!res.has_error(), "Expected success");

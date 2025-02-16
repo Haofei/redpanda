@@ -12,6 +12,7 @@
 
 #include "iceberg/compatibility_types.h"
 #include "iceberg/datatypes.h"
+#include "iceberg/partition.h"
 
 namespace iceberg {
 
@@ -31,6 +32,9 @@ namespace iceberg {
    @return The result of the type check:
              - type_promoted::yes - if src -> dest is a valid type promotion
                e.g. int -> long
+             - type_promoted::unless_partition - if src -> dest is a valid type
+               promotion but would change the value of a partition transform
+               involving src
              - type_promoted::no  - if src == dest
              - compat_errc::mismatch - if src != dest but src -> dest is not
                permitted e.g. int -> string or struct -> list
@@ -82,10 +86,14 @@ annotate_schema_transform(const struct_type& source, const struct_type& dest);
  *
  * @param dest - the proposed schema (probably extracted from some incoming
  *               record)
+ * @param spec - a partition specification against which the fields
+ *               of dest are compared to enforce that type promotions don't
+ *               interfere with existing partition fields.
  *
  * @return schema_transform_state (indicating success), or an error code
  */
-schema_transform_result validate_schema_transform(struct_type& dest);
+schema_transform_result
+validate_schema_transform(struct_type& dest, const partition_spec& spec);
 
 /**
  * evolve_schema - Prepares dest for insertion into table metadata.
@@ -107,11 +115,16 @@ schema_transform_result validate_schema_transform(struct_type& dest);
  * @param source - The source (i.e original) schema
  * @param dest   - the proposed schema (probably extracted from some incoming
  *                 record)
+ * @param spec   - The current partition spec for the target table.
+ *                 Used to enforce that type promotions don't interfere with
+ *                 partition fields.
  *
  * @return Whether the schema changed from source->dest, or an error
  */
-schema_evolution_result
-evolve_schema(const struct_type& source, struct_type& dest);
+schema_evolution_result evolve_schema(
+  const struct_type& source,
+  struct_type& dest,
+  const partition_spec& spec = partition_spec{});
 
 /**
  * try_fill_field_ids - Try to fill all dest fields with IDs from source.
