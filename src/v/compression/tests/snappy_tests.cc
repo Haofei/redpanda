@@ -12,13 +12,16 @@
 #include "compression/internal/snappy_java_compressor.h"
 #include "compression/snappy_standard_compressor.h"
 #include "random/generators.h"
+#include "utils/file_io.h"
 
 #include <seastar/core/byteorder.hh>
+#include <seastar/core/seastar.hh>
 #include <seastar/core/temporary_buffer.hh>
 #include <seastar/util/short_streams.hh>
 
 #include <gtest/gtest.h>
 
+#include <cstdlib>
 #include <snappy-sinksource.h>
 #include <snappy.h>
 
@@ -136,4 +139,33 @@ TEST(SnappyTest, CompressedVersionHeadersSnappyJavaTest) {
     snappy::GetUncompressedLength(&compressed_source, &decompressed_size);
     EXPECT_EQ(decompressed_size, data.size());
     compressed_frag->trim_front(sizeof(decompressed_size));
+}
+
+TEST(SnappyTest, LittleEndianHeadersBackwardsCompatibilitySnappyJavaTest) {
+    // Previously, version fields were erroneously written with
+    // little-endian encoding. They are now corrected to be written and decoded
+    // using big-endian, but we must retain backwards compatibility here with
+    // the existing, improperly encoded batches (as version, min_version fields
+    // with value 1 will decode to the value 16777216).
+    // See: https://github.com/redpanda-data/redpanda/issues/25091
+    auto snappy_payload_path = std::getenv("SNAPPY_PAYLOAD_PATH");
+    vassert(snappy_payload_path, "expected value for payload path");
+    auto root = std::filesystem::path(snappy_payload_path);
+
+    // The original, uncompressed data.
+    auto expected_decompressed_file = root / "uncompressed_data";
+    EXPECT_TRUE(ss::file_exists(expected_decompressed_file.c_str()).get());
+    auto expected_decompressed_buffer
+      = read_fully(expected_decompressed_file.native()).get();
+
+    // A payload that was previously compressed by redpanda, with version
+    // headers in little-endian encoding.
+    auto le_compressed_file = root / "little_endian_compressed_data.snappy";
+    EXPECT_TRUE(ss::file_exists(le_compressed_file.c_str()).get());
+    auto le_compressed_buffer = read_fully(le_compressed_file.native()).get();
+
+    auto decompressed_buffer
+      = compression::internal::snappy_java_compressor::uncompress(
+        le_compressed_buffer);
+    EXPECT_EQ(decompressed_buffer, expected_decompressed_buffer);
 }
