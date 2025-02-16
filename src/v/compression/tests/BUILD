@@ -19,6 +19,26 @@ redpanda_cc_gtest(
     ],
 )
 
+redpanda_cc_gtest(
+    name = "snappy_test",
+    timeout = "short",
+    srcs = [
+        "snappy_tests.cc",
+    ],
+    cpu = 1,
+    deps = [
+        "//src/v/base",
+        "//src/v/bytes:iobuf",
+        "//src/v/bytes:iostream",
+        "//src/v/compression",
+        "//src/v/random:generators",
+        "//src/v/test_utils:gtest",
+        "@googletest//:gtest",
+        "@seastar",
+        "@snappy",
+    ],
+)
+
 redpanda_cc_btest(
     name = "zstd_test",
     timeout = "moderate",

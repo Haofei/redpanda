@@ -34,3 +34,13 @@ rp_test(
   LABELS compression
   ARGS "-- -c 1"
 )
+
+rp_test(
+  UNIT_TEST
+  GTEST
+  BINARY_NAME snappy_tests
+  SOURCES snappy_tests.cc
+  LIBRARIES v::compression v::random v::gtest_main
+  LABELS compression
+  ARGS "-- -c 1"
+  )
