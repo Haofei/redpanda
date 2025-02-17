@@ -80,7 +80,6 @@ use_repo(non_module_dependencies, "libpciaccess")
 use_repo(non_module_dependencies, "libprotobuf_mutator")
 use_repo(non_module_dependencies, "libxml2")
 use_repo(non_module_dependencies, "lksctp")
-use_repo(non_module_dependencies, "numactl")
 use_repo(non_module_dependencies, "openssl")
 use_repo(non_module_dependencies, "openssl-fips")
 

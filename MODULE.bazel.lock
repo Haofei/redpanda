@@ -200,7 +200,7 @@
   "moduleExtensions": {
     "//bazel:extensions.bzl%non_module_dependencies": {
       "general": {
-        "bzlTransitiveDigest": "cORxC4NiQKvh99drmvHtz110VrzgRQS6rQiUU35K6es=",
+        "bzlTransitiveDigest": "OcIx1RGAf3PbzSf9LnjZOT1daHMRbUCWWaM7PXkqiKk=",
         "usagesDigest": "8eEn6X1e7HKkx2OPWUwQBOEnT9TIkMhEcXbu/wRjGno=",
         "recordedFileInputs": {},
         "recordedDirentsInputs": {},
@@ -332,16 +332,6 @@
               "url": "https://vectorized-public.s3.amazonaws.com/dependencies/lksctp-tools-1.0.19.tar.gz"
             }
           },
-          "numactl": {
-            "bzlFile": "@@bazel_tools//tools/build_defs/repo:http.bzl",
-            "ruleClassName": "http_archive",
-            "attributes": {
-              "build_file": "@@//bazel/thirdparty:numactl.BUILD",
-              "sha256": "1ee27abd07ff6ba140aaf9bc6379b37825e54496e01d6f7343330cf1a4487035",
-              "strip_prefix": "numactl-2.0.14",
-              "url": "https://vectorized-public.s3.amazonaws.com/dependencies/numactl-v2.0.14.tar.gz"
-            }
-          },
           "openssl": {
             "bzlFile": "@@bazel_tools//tools/build_defs/repo:http.bzl",
             "ruleClassName": "http_archive",
@@ -391,7 +381,8 @@
               "strip_prefix": "seastar-3aa6ca607d0227052301427d400e50bbdd70f37b",
               "url": "https://github.com/redpanda-data/seastar/archive/3aa6ca607d0227052301427d400e50bbdd70f37b.tar.gz",
               "patches": [
-                "@@//bazel/thirdparty:seastar-fortify-source.patch"
+                "@@//bazel/thirdparty:seastar-fortify-source.patch",
+                "@@//bazel/thirdparty:seastar-remove-libnuma.patch"
               ],
               "patch_args": [
                 "-p1"
@@ -5486,7 +5477,7 @@
           "@@rules_rust~~rust_host_tools~rust_host_tools//bin/rustc": "241027b94ad67beb36d0356f7cc05180daaa9966b2958cfba1d4de089d2e521c",
           "@@//bazel/thirdparty/Cargo.lock": "931fa1bc55d0e5d2e5b6d96da399569a4c2254a4bb1d99c98f71bb4b98eead73",
           "@@//bazel/thirdparty/Cargo.toml": "cb23768a6e7edc8f97215921e956f5be06521ad93cc0ecf64a932e3a8caada54",
-          "@@//MODULE.bazel": "4130765e11eb3d796f0e1cb5536c6078f381fdf8a1eea875a3c18f84521d3769",
+          "@@//MODULE.bazel": "e9e8d51ef540df806b50b9f9317e2864203ef71608440a7378b3de45eb486430",
           "@@//bazel/thirdparty/wasmtime.BUILD": "4b55deaf51f5b8be25fc3592f9bcf3d732f99632cd793c685436ddca9a177534",
           "@@rules_rust~~rust_host_tools~rust_host_tools//bin/cargo": "35099f3b7b9497b3ae95aa00886ac6839343488e5cdb958e69c16c9b58c3afb2"
         },

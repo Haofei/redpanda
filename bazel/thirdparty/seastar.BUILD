@@ -29,11 +29,6 @@ bool_flag(
 )
 
 bool_flag(
-    name = "numactl",
-    build_setting_default = True,
-)
-
-bool_flag(
     name = "hwloc",
     build_setting_default = True,
 )
@@ -98,13 +93,6 @@ config_setting(
     name = "use_logger_compile_time_fmt",
     flag_values = {
         ":logger_compile_time_fmt": "true",
-    },
-)
-
-config_setting(
-    name = "use_numactl",
-    flag_values = {
-        ":numactl": "true",
     },
 )
 
@@ -610,9 +598,6 @@ cc_library(
         ":use_io_uring": ["SEASTAR_HAVE_URING"],
         "//conditions:default": [],
     }) + select({
-        ":use_numactl": ["SEASTAR_HAVE_NUMA"],
-        "//conditions:default": [],
-    }) + select({
         # this only needs to be applied to memory.cc and reactor.cc. could be
         # split out into a separate cc_library, but we'd need to inherit all the
         # build settings. defining for all compilation units seems harmless.
@@ -656,9 +641,6 @@ cc_library(
         "//conditions:default": [],
     }) + select({
         ":use_io_uring": ["@liburing"],
-        "//conditions:default": [],
-    }) + select({
-        ":use_numactl": ["@numactl"],
         "//conditions:default": [],
     }),
 )
