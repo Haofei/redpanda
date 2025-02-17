@@ -151,15 +151,6 @@ ss::future<action::action_outcome> merge_append_action::build_updates() && {
       log.info,
       "Building append update for {} data files",
       new_data_files_.size());
-    // Look for the current schema.
-    const auto schema_id = table_.current_schema_id;
-    auto schema_it = std::ranges::find(
-      table_.schemas, schema_id, &schema::schema_id);
-    if (schema_it == table_.schemas.end()) {
-        vlog(log.error, "Table schema {} is missing from metadata", schema_id);
-        co_return action::errc::unexpected_state;
-    }
-    const auto& schema = *schema_it;
 
     // Validate our input files that their partition keys look sane.
     for (const auto& f : new_data_files_) {
@@ -241,7 +232,6 @@ ss::future<action::action_outcome> merge_append_action::build_updates() && {
 
     const table_snapshot_ctx ctx{
       .commit_uuid = commit_uuid_,
-      .schema = schema,
       .snap_id = new_snap_id,
       .seq_num = new_seq_num,
     };
@@ -282,7 +272,7 @@ ss::future<action::action_outcome> merge_append_action::build_updates() && {
           .other = {},
       },
       .manifest_list_path = new_mlist_path,
-      .schema_id = schema.schema_id,
+      .schema_id = table_.current_schema_id,
     };
     for (auto& [k, v] : snapshot_props_) {
         s.summary.other.emplace(k, v);
@@ -381,7 +371,9 @@ merge_append_action::maybe_merge_mfiles_and_new_data(
     // of if we upload a brand new manifest or merge with an existing manifest,
     // the new data files will need new entries.
     chunked_vector<manifest_entry> new_data_entries;
+    auto max_schema_id_in_added = schema::id_t::min();
     for (auto& f : new_data_files) {
+        max_schema_id_in_added = std::max(max_schema_id_in_added, f.schema_id);
         manifest_entry e{
           .status = manifest_entry_status::added,
           .snapshot_id = ctx.snap_id,
@@ -395,7 +387,7 @@ merge_append_action::maybe_merge_mfiles_and_new_data(
     if (to_merge.size() < default_min_to_merge_new_files) {
         // Upload and return. This bin is too small to merge.
         auto new_mfile_res = co_await merge_mfiles(
-          {}, std::move(new_data_entries), pspec, ctx);
+          {}, std::move(new_data_entries), max_schema_id_in_added, pspec, ctx);
         if (new_mfile_res.has_error()) {
             co_return new_mfile_res.error();
         }
@@ -404,7 +396,11 @@ merge_append_action::maybe_merge_mfiles_and_new_data(
         co_return ret;
     }
     auto merged_mfile_res = co_await merge_mfiles(
-      std::move(to_merge), std::move(new_data_entries), pspec, ctx);
+      std::move(to_merge),
+      std::move(new_data_entries),
+      max_schema_id_in_added,
+      pspec,
+      ctx);
     if (merged_mfile_res.has_error()) {
         co_return merged_mfile_res.error();
     }
@@ -416,6 +412,7 @@ ss::future<checked<manifest_file, action::errc>>
 merge_append_action::merge_mfiles(
   chunked_vector<manifest_file> to_merge,
   chunked_vector<manifest_entry> added_entries,
+  std::optional<schema::id_t> max_schema_id_in_added,
   const partition_spec& pspec,
   const table_snapshot_ctx& ctx) {
     vlogl(
@@ -432,6 +429,7 @@ merge_append_action::merge_mfiles(
     }
 
     auto merged_entries = std::move(added_entries);
+    auto max_schema_id = max_schema_id_in_added.value_or(schema::id_t::min());
     size_t existing_rows = 0;
     size_t existing_files = 0;
     auto min_seq_num = ctx.seq_num;
@@ -443,6 +441,7 @@ merge_append_action::merge_mfiles(
             co_return to_action_errc(mfile_res.error());
         }
         auto m = std::move(mfile_res).value();
+        max_schema_id = std::max(max_schema_id, m.metadata.schema.schema_id);
         existing_files += m.entries.size();
         for (auto& e : m.entries) {
             auto f_num_fields = e.data_file.partition.val->fields.size();
@@ -476,7 +475,24 @@ merge_append_action::merge_mfiles(
           std::back_inserter(merged_entries));
     }
 
-    auto pk_type = partition_key_type::create(pspec, ctx.schema);
+    // If the partition spec is not the default one, there is a risk that the
+    // partition key type can't be resolved with the current schema (e.g. if the
+    // spec uses a source column that was subsequently deleted). To prevent
+    // that, we choose the schema with the highest id among all manifests and
+    // new files with this spec. Presumably, any of these schemas can be used to
+    // resolve the key type, but we choose the one with the highest id because
+    // it should contain the "most promoted" types, and therefore partition keys
+    // for all files can be promoted to the key type resolved with this schema.
+    auto schema_id = pspec.spec_id == table_.default_spec_id
+                       ? table_.current_schema_id
+                       : max_schema_id;
+    const auto* schema = table_.get_schema(schema_id);
+    if (!schema) {
+        vlog(log.error, "Table schema {} is missing from metadata", schema_id);
+        co_return errc::unexpected_state;
+    }
+
+    auto pk_type = partition_key_type::create(pspec, *schema);
     auto partition_summaries = field_summary_val::empty_summaries(
       pspec.fields.size());
     for (auto& e : merged_entries) {
@@ -496,7 +512,7 @@ merge_append_action::merge_mfiles(
     const auto merged_manifest_path = get_manifest_path(
       table_.location, ctx.commit_uuid, generate_manifest_num());
     const auto mfile_up_res = co_await upload_as_manifest(
-      merged_manifest_path, ctx.schema, pspec, std::move(merged_entries));
+      merged_manifest_path, *schema, pspec, std::move(merged_entries));
     if (mfile_up_res.has_error()) {
         co_return to_action_errc(mfile_up_res.error());
     }
@@ -588,7 +604,7 @@ merge_append_action::pack_mlist_and_new_data(
                 continue;
             }
             auto merged_bin_res = co_await merge_mfiles(
-              std::move(bin), {}, *pspec, ctx);
+              std::move(bin), {}, std::nullopt, *pspec, ctx);
             if (merged_bin_res.has_error()) {
                 co_return merged_bin_res.error();
             }

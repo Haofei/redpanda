@@ -95,7 +95,6 @@ private:
     // fields here all pertain to the new snapshot created by this action.
     struct table_snapshot_ctx {
         const uuid_t& commit_uuid;
-        const schema& schema;
         const snapshot_id snap_id;
         const sequence_number seq_num;
     };
@@ -130,6 +129,7 @@ private:
     ss::future<checked<manifest_file, action::errc>> merge_mfiles(
       chunked_vector<manifest_file> to_merge,
       chunked_vector<manifest_entry> added_entries,
+      std::optional<schema::id_t> max_added_schema_id,
       const partition_spec& pspec,
       const table_snapshot_ctx& ctx);
 

@@ -674,8 +674,8 @@ TEST_F(MergeAppendActionTest, TestMultiplePartitionSpecs) {
           tx, files_with_first_spec(), expected_snapshots, expected_manifests);
     }
 
-    // Add new partition spec and make it default.
     {
+        // Add new partition spec and make it default.
         auto table = std::move(tx).release_metadata();
         auto new_spec = partition_spec{.spec_id = partition_spec::id_t{1}};
         new_spec.fields.push_back(partition_field{
@@ -687,6 +687,27 @@ TEST_F(MergeAppendActionTest, TestMultiplePartitionSpecs) {
         table.partition_specs.push_back(std::move(new_spec));
         table.default_spec_id = table.partition_specs.back().spec_id;
         tx = transaction(std::move(table));
+
+        // delete the field used by the old spec
+        const auto& orig_type = tx.table().schemas.at(0).schema_struct.copy();
+        chunked_vector<nested_field_ptr> fields_copy;
+        for (const auto& f : orig_type.fields) {
+            if (f->name != "bar") {
+                fields_copy.emplace_back(f->copy());
+            }
+        }
+        struct_type new_type{.fields = std::move(fields_copy)};
+        auto compat_res = evolve_schema(
+          orig_type, new_type, tx.table().partition_specs.back());
+        ASSERT_FALSE(compat_res.has_error());
+
+        auto res = tx.set_schema(iceberg::schema{
+                                   .schema_struct = std::move(new_type),
+                                   .schema_id = iceberg::schema::unassigned_id,
+                                   .identifier_field_ids = {},
+                                 })
+                     .get();
+        ASSERT_FALSE(res.has_error()) << res.error();
     }
 
     auto files_with_second_spec = [&]() {
@@ -696,7 +717,7 @@ TEST_F(MergeAppendActionTest, TestMultiplePartitionSpecs) {
           files_per_man,
           rows_per_man,
           boolean_value{true},
-          tx.table().schemas.at(0).schema_id,
+          tx.table().schemas.at(1).schema_id,
           tx.table().partition_specs.at(1).spec_id);
     };
 
