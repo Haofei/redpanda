@@ -165,6 +165,10 @@ struct prod_consume_fixture : public redpanda_thread_fixture {
         return fetch_next(consumers.front(), model::partition_id{0});
     }
 
+    kafka::kafka_probe& kafka_probe() {
+        return app._kafka_server.local().kafka_probe();
+    }
+
     std::vector<model::offset> fetch_offsets;
     std::vector<kafka::client::transport> consumers;
     std::vector<kafka::client::transport> producers;

@@ -21,6 +21,8 @@
 #include <chrono>
 #include <cstdint>
 
+struct prod_consume_fixture;
+
 namespace kafka {
 class kafka_probe {
 public:
@@ -109,6 +111,9 @@ public:
     void record_batch(uint64_t size) { _batch_size.record(size); }
 
 private:
+    // for testing
+    friend prod_consume_fixture;
+
     hist_t _produce_latency;
     hist_t _fetch_latency;
     // non partition or topic related as that is too expensive for histograms
