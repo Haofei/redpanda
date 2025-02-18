@@ -70,6 +70,12 @@ void add_segments(
         if (seg->has_appender()) {
             seg->appender().close().get();
             seg->release_appender();
+            // Since we're "rolling" the segment manually here (releasing the
+            // appender), increment closed/dirty bytes in the log.
+            if (!seg->has_clean_compact_timestamp()) {
+                b.add_dirty_segment_bytes(seg->file_size());
+            }
+            b.add_closed_segment_bytes(seg->file_size());
         }
     }
 }
