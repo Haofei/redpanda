@@ -17,7 +17,7 @@ from ducktape.tests.test import TestContext
 from ducktape.utils.util import wait_until
 from rptest.clients.types import TopicSpec
 from rptest.services.redpanda import MetricsEndpoint
-from rptest.services.redpanda_installer import RedpandaVersionLine, InstallOptions, RedpandaInstaller
+from rptest.services.redpanda_installer import RedpandaVersionTriple, InstallOptions, RedpandaInstaller
 from rptest.util import expect_exception
 
 
@@ -141,7 +141,7 @@ class JavaCompressionTest(EndToEndTest):
         https://github.com/redpanda-data/redpanda/issues/25091), but this test is parameterized
         with all compression types for completion's sake.
         """
-        pre_big_endian_snappy_fix_version = RedpandaVersionLine((24, 3))
+        pre_big_endian_snappy_fix_version = RedpandaVersionTriple((24, 3, 5))
         self.start_redpanda(num_nodes=1,
                             install_opts=InstallOptions(
                                 version=pre_big_endian_snappy_fix_version))
