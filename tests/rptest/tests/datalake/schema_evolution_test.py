@@ -439,6 +439,45 @@ ILLEGAL_TEST_CASES = {
             },
         ),
     ),
+    "drop column that appears in partition spec":
+    EvolutionTestCase(
+        initial_schema=GenericSchema(
+            fields=[
+                {
+                    "name": "verifier_string",
+                    "type": "string",
+                },
+                {
+                    "name": "ordinal",
+                    "type": "int",
+                },
+            ],
+            generate_record=lambda x: {
+                "verifier_string": f"verify-{x}",
+                "ordinal": int(x),
+            },
+            spark_table=[
+                ('verifier_string', 'string'),
+                ('ordinal', 'int'),
+            ],
+            trino_table=[
+                ('verifier_string', 'varchar'),
+                ('ordinal', 'integer'),
+            ],
+        ),
+        next_schema=GenericSchema(
+            fields=[
+                {
+                    "name": "verifier_string",
+                    "type": "string",
+                },
+            ],
+            generate_record=lambda x: {
+                "verifier_string": f"verify-{x}",
+            },
+        ),
+        partition_spec="(ordinal)",
+    ),
 }
 
 QUERY_ENGINES = [
@@ -840,7 +879,7 @@ class SchemaEvolutionE2ETests(RedpandaTest):
             )
 
         with self.setup_services(query_engine,
-                                 partition_spec=tc.partition_pspec) as dl:
+                                 partition_spec=tc.partition_spec) as dl:
             count = 10
             ctx = TranslationContext()
             tc.initial_schema.produce(dl,
