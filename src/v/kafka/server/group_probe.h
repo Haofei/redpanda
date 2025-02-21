@@ -31,11 +31,13 @@ namespace kafka {
 struct enabled_metrics {
     bool group;
     bool partition;
+    bool consumer_lag;
 
     static auto from_vector(const std::vector<ss::sstring>& metrics) {
         return enabled_metrics{
           .group = std::ranges::contains(metrics, "group"),
-          .partition = std::ranges::contains(metrics, "partition")};
+          .partition = std::ranges::contains(metrics, "partition"),
+          .consumer_lag = std::ranges::contains(metrics, "consumer_lag")};
     }
 
     constexpr auto operator<=>(const enabled_metrics&) const = default;
@@ -136,6 +138,11 @@ private:
     std::optional<metrics::public_metric_groups> _public_metrics;
 };
 
+struct consumer_lag_metrics {
+    size_t sum{};
+    size_t max{};
+};
+
 template<typename KeyType, typename ValType>
 class group_probe {
     using member_map = absl::node_hash_map<kafka::member_id, member_ptr>;
@@ -147,10 +154,12 @@ public:
     explicit group_probe(
       member_map& members,
       static_member_map& static_members,
-      offsets_map& offsets) noexcept
+      offsets_map& offsets,
+      consumer_lag_metrics& _lag_metrics) noexcept
       : _members(members)
       , _static_members(static_members)
-      , _offsets(offsets) {}
+      , _offsets(offsets)
+      , _lag_metrics(_lag_metrics) {}
 
     group_probe(const group_probe&) = delete;
     group_probe& operator=(const group_probe&) = delete;
@@ -168,6 +177,19 @@ public:
     }
 
     void deregister_group_metrics() { _public_group_metrics.reset(); }
+
+    void register_consumer_lag_metrics(const kafka::group_id& group_id) {
+        if (_public_consumer_lag_metrics.has_value()) {
+            return;
+        }
+
+        _public_consumer_lag_metrics.emplace();
+        _setup_consumer_lag_metrics(group_id);
+    }
+
+    void deregister_consumer_lag_metrics() {
+        _public_consumer_lag_metrics.reset();
+    }
 
 private:
     void _setup_public_metrics(const kafka::group_id& group_id) {
@@ -196,10 +218,38 @@ private:
              labels)});
     }
 
+    void _setup_consumer_lag_metrics(const kafka::group_id& group_id) {
+        namespace sm = ss::metrics;
+
+        if (config::shard_local_cfg().disable_public_metrics()) {
+            return;
+        }
+
+        auto group_label = metrics::make_namespaced_label("group");
+        std::vector<sm::label_instance> labels{group_label(group_id())};
+
+        _public_consumer_lag_metrics.value().add_group(
+          prometheus_sanitize::metrics_name("kafka:consumer:group"),
+          {sm::make_gauge(
+             "lag_sum",
+             [this] { return _lag_metrics.sum; },
+             sm::description(
+               "Sum of consumer group lag for all topic-partitions"),
+             labels),
+           sm::make_gauge(
+             "lag_max",
+             [this] { return _lag_metrics.max; },
+             sm::description(
+               "Maximum consumer group lag across topic-partitions"),
+             labels)});
+    }
+
     member_map& _members;
     static_member_map& _static_members;
     offsets_map& _offsets;
+    consumer_lag_metrics& _lag_metrics;
     std::optional<metrics::public_metric_groups> _public_group_metrics;
+    std::optional<metrics::public_metric_groups> _public_consumer_lag_metrics;
 };
 
 } // namespace kafka

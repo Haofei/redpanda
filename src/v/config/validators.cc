@@ -295,7 +295,7 @@ validate_iceberg_rest_catalog_auth_mode(const config::configuration& config) {
 std::optional<ss::sstring>
 validate_consumer_group_metrics(const std::vector<ss::sstring>& metrics) {
     constexpr auto supported = std::to_array<std::string_view>(
-      {"group", "partition"});
+      {"group", "partition", "consumer_lag"});
 
     // Validate results
     for (const auto& m : metrics) {

@@ -127,7 +127,7 @@ group::group(
   , _conf(conf)
   , _catchup_lock(std::move(catchup_lock))
   , _partition(std::move(partition))
-  , _probe(_members, _static_members, _offsets)
+  , _probe(_members, _static_members, _offsets, _lag_metrics)
   , _ctxlog(klog, *this)
   , _ctx_txlog(cluster::txlog, *this)
   , _md_serializer(std::move(serializer))
@@ -168,7 +168,7 @@ group::group(
   , _conf(conf)
   , _catchup_lock(std::move(catchup_lock))
   , _partition(std::move(partition))
-  , _probe(_members, _static_members, _offsets)
+  , _probe(_members, _static_members, _offsets, _lag_metrics)
   , _ctxlog(klog, *this)
   , _ctx_txlog(cluster::txlog, *this)
   , _md_serializer(std::move(serializer))
@@ -3626,6 +3626,12 @@ void group::setup_metrics() {
             _probe.register_group_metrics(_id);
         } else {
             _probe.deregister_group_metrics();
+        }
+
+        if (_enable_group_metrics().consumer_lag) {
+            _probe.register_consumer_lag_metrics(_id);
+        } else {
+            _probe.deregister_consumer_lag_metrics();
         }
     };
 

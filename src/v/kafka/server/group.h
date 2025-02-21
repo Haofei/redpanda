@@ -963,6 +963,7 @@ private:
       model::topic_partition,
       std::unique_ptr<offset_metadata_with_probe>>
       _offsets;
+    consumer_lag_metrics _lag_metrics;
     group_probe<
       model::topic_partition,
       std::unique_ptr<offset_metadata_with_probe>>

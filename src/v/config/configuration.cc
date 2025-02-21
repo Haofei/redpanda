@@ -601,7 +601,7 @@ configuration::configuration()
       *this,
       "enable_consumer_group_metrics",
       "List of enabled consumer group metrics. Accepted "
-      "Values: `group`, `partition`",
+      "Values: `group`, `partition`, `consumer_lag`",
       {.needs_restart = needs_restart::no},
       std::vector<ss::sstring>{"group", "partition"},
       validate_consumer_group_metrics)

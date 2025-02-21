@@ -662,7 +662,11 @@ class ConsumerGroupTest(RedpandaTest):
     @parametrize(enabled_group_metrics=[])
     @parametrize(enabled_group_metrics=["group"])
     @parametrize(enabled_group_metrics=["partition"])
+    @parametrize(enabled_group_metrics=["consumer_lag"])
     @parametrize(enabled_group_metrics=["group", "partition"])
+    @parametrize(enabled_group_metrics=["group", "consumer_lag"])
+    @parametrize(enabled_group_metrics=["partition", "consumer_lag"])
+    @parametrize(enabled_group_metrics=["group", "partition", "consumer_lag"])
     def test_group_metrics(self, enabled_group_metrics):
         """
         Test validating the behavior of group metrics
@@ -700,6 +704,10 @@ class ConsumerGroupTest(RedpandaTest):
                 "redpanda_kafka_consumer_group_topics"
             ],
             "partition": ["redpanda_kafka_consumer_group_committed_offset"],
+            "consumer_lag": [
+                "redpanda_kafka_consumer_group_lag_max",
+                "redpanda_kafka_consumer_group_lag_sum"
+            ]
         }
 
         def get_group_metrics_from_nodes(patterns):
