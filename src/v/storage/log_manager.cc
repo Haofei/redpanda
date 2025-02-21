@@ -19,6 +19,7 @@
 #include "resource_mgmt/memory_groups.h"
 #include "ssx/async-clear.h"
 #include "ssx/future-util.h"
+#include "ssx/watchdog.h"
 #include "storage/batch_cache.h"
 #include "storage/compacted_index_writer.h"
 #include "storage/disk_log_impl.h"
@@ -380,6 +381,13 @@ log_manager::housekeeping_scan(model::timestamp collection_threshold) {
         if (!current_log.link.is_linked()) {
             continue;
         }
+
+        // Until we better implement bailing out of compaction, the best thing
+        // we can do for observability is add a watchdog here.
+        ssx::watchdog wd5m(5min, [ntp = current_log.handle->config().ntp()] {
+            vlog(
+              gclog.warn, "{}: Housekeeping process exceeding 5 minutes", ntp);
+        });
 
         // NOTE: housekeeping holds _compaction_housekeeping_gate, that prevents
         // the removal of the parent object. this makes awaiting housekeeping
