@@ -11,6 +11,7 @@
 
 #include "kafka/server/handlers/configs/config_response_utils.h"
 
+#include "base/type_traits.h"
 #include "cluster/metadata_cache.h"
 #include "cluster/types.h"
 #include "config/configuration.h"
@@ -63,7 +64,11 @@ static void add_config_if_requested(
 
 template<typename T>
 ss::sstring describe_as_string(const T& t) {
-    return ssx::sformat("{}", t);
+    if constexpr (::detail::is_specialization_of_v<T, std::chrono::duration>) {
+        return ssx::sformat("{}", t.count());
+    } else {
+        return ssx::sformat("{}", t);
+    }
 }
 
 // Instantiate explicitly for unit testing
@@ -380,7 +385,8 @@ static ss::sstring maybe_print_tristate(const tristate<T>& tri) {
     if (tri.is_disabled() || !tri.has_optional_value()) {
         return "-1";
     }
-    return ssx::sformat("{}", tri.value());
+
+    return describe_as_string(tri.value());
 }
 
 template<typename T>
