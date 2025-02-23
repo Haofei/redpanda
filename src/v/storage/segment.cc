@@ -702,10 +702,12 @@ void segment::advance_stable_offset(size_t filepos) {
 std::ostream& operator<<(std::ostream& o, const segment::offset_tracker& t) {
     fmt::print(
       o,
-      "{{term:{}, base_offset:{}, committed_offset:{}, dirty_offset:{}}}",
+      "{{term:{}, base_offset:{}, committed_offset:{}, stable_offset:{}, "
+      "dirty_offset:{}}}",
       t.get_term(),
       t.get_base_offset(),
       t.get_committed_offset(),
+      t.get_stable_offset(),
       t.get_dirty_offset());
     return o;
 }
