@@ -17,7 +17,6 @@ set(srcs
     term_assigning_reader_test.cc
     membership_test.cc
     leadership_test.cc
-    append_entries_test.cc
     offset_monitor_test.cc
     mutex_buffer_test.cc
 

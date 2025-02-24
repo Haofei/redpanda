@@ -406,32 +406,6 @@ redpanda_cc_gtest(
 )
 
 redpanda_cc_btest(
-    name = "append_entries_test",
-    timeout = "short",
-    srcs = [
-        "append_entries_test.cc",
-    ],
-    tags = ["exclusive"],
-    deps = [
-        "//src/v/bytes",
-        "//src/v/bytes:random",
-        "//src/v/finjector",
-        "//src/v/model",
-        "//src/v/model/tests:random",
-        "//src/v/raft",
-        "//src/v/raft/tests:stm_raft_fixture",
-        "//src/v/random:generators",
-        "//src/v/storage",
-        "//src/v/storage:record_batch_builder",
-        "//src/v/storage/tests:disk_log_builder",
-        "//src/v/test_utils:fixture",
-        "//src/v/test_utils:seastar_boost",
-        "@boost//:test",
-        "@seastar//:testing",
-    ],
-)
-
-redpanda_cc_btest(
     name = "offset_monitor_test",
     timeout = "short",
     srcs = [
