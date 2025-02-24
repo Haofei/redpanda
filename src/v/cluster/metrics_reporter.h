@@ -116,6 +116,8 @@ public:
     ss::future<> start();
     ss::future<> stop();
 
+    ss::future<> wait_cluster_info_initialized(ss::abort_source&);
+
 private:
     void report_metrics();
     ss::future<> do_report_metrics();
@@ -128,6 +130,7 @@ private:
 
     consensus_ptr _raft0;
     metrics_reporter_cluster_info& _cluster_info; // owned by controller_stm
+    ss::condition_variable _cluster_info_initialized_cvar;
     ss::sharded<controller_stm>& _controller_stm;
     ss::sharded<members_table>& _members_table;
     ss::sharded<topic_table>& _topics;

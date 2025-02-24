@@ -41,6 +41,7 @@
 #include "utils/unresolved_address.h"
 
 #include <seastar/core/abort_source.hh>
+#include <seastar/core/condition-variable.hh>
 #include <seastar/core/coroutine.hh>
 #include <seastar/core/lowres_clock.hh>
 #include <seastar/core/shared_ptr.hh>
@@ -187,7 +188,20 @@ ss::future<> metrics_reporter::start() {
 ss::future<> metrics_reporter::stop() {
     vlog(clusterlog.info, "Stopping Metrics Reporter...");
     _tick_timer.cancel();
+    _cluster_info_initialized_cvar.broken();
     co_await _gate.close();
+}
+
+ss::future<>
+metrics_reporter::wait_cluster_info_initialized(ss::abort_source& as) {
+    constexpr auto retry_period = 5s;
+    while (!as.abort_requested() && !_cluster_info.is_initialized()) {
+        co_await _cluster_info_initialized_cvar
+          .wait(retry_period, [this] { return _cluster_info.is_initialized(); })
+          .handle_exception_type([](const ss::condition_variable_timed_out&) {
+              // Noop, check if abort requested and wait again
+          });
+    }
 }
 
 void metrics_reporter::report_metrics() {
@@ -398,6 +412,7 @@ ss::future<> metrics_reporter::try_initialize_cluster_info() {
     _cluster_info.uuid = fmt::format("{}", uuid_gen());
     vlog(
       clusterlog.info, "Generated cluster metrics ID {}", _cluster_info.uuid);
+    _cluster_info_initialized_cvar.signal();
 }
 
 /**
