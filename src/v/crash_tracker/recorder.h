@@ -31,7 +31,7 @@ public:
     struct recorded_crash {
         std::filesystem::path file_path;
         std::optional<crash_description> crash;
-        std::filesystem::file_time_type last_write_time;
+        std::chrono::system_clock::time_point last_write_time;
 
         ss::future<bool> is_uploaded() const;
         ss::future<> mark_uploaded() const;

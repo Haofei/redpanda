@@ -17,6 +17,7 @@
 #include "crash_tracker/types.h"
 #include "model/timestamp.h"
 #include "random/generators.h"
+#include "utils/directory_walker.h"
 #include "utils/file_io.h"
 
 #include <seastar/core/file.hh>
@@ -233,17 +234,43 @@ void recorder::record_crash_vassert(std::string_view msg) {
 
 std::chrono::system_clock::time_point
 recorder::recorded_crash::timestamp() const {
-    auto recorded_timestamp_opt = crash
-                                    ? std::make_optional(
-                                        model::to_time_point(crash->crash_time))
-                                    : std::nullopt;
-    auto lwt_sys_timepoint = std::chrono::system_clock::time_point{
-      std::chrono::duration_cast<std::chrono::system_clock::duration>(
-        last_write_time.time_since_epoch())};
-
     // Prefer the recorded timestamp, fall back to the last write time
-    return recorded_timestamp_opt.value_or(lwt_sys_timepoint);
+    return crash ? model::to_time_point(crash->crash_time) : last_write_time;
 }
+
+namespace {
+ss::future<> recorded_crashes_walker_fn(
+  std::filesystem::path basedir,
+  ss::directory_entry entry,
+  std::vector<recorder::recorded_crash>& result,
+  recorder::include_malformed_files incl_malformed) {
+    const auto path = (basedir / std::string_view{entry.name}).string();
+    if (!path.ends_with(crash_report_suffix)) {
+        // Filter only for crash files
+        co_return;
+    }
+
+    auto file_stats = co_await ss::file_stat(path);
+
+    auto buf = co_await read_fully(path);
+    try {
+        auto crash_desc = serde::from_iobuf<crash_description>(std::move(buf));
+        result.emplace_back(
+          path, std::move(crash_desc), file_stats.time_changed);
+    } catch (const serde::serde_exception& e) {
+        vlog(
+          ctlog.debug,
+          "Exception while deserializing a crash report file {}: {}",
+          path,
+          e);
+        if (incl_malformed) {
+            result.emplace_back(path, std::nullopt, file_stats.time_changed);
+        } else {
+            vlog(ctlog.warn, "Ignoring malformed crash report file {}", path);
+        }
+    }
+}
+} // namespace
 
 ss::future<std::vector<recorder::recorded_crash>>
 recorder::get_recorded_crashes(
@@ -254,36 +281,12 @@ recorder::get_recorded_crashes(
         co_return result;
     }
 
-    for (const auto& entry :
-         std::filesystem::directory_iterator(crash_report_dir)) {
-        if (!entry.path().string().ends_with(crash_report_suffix)) {
-            // Filter only for crash files
-            continue;
-        }
-
-        auto buf = co_await read_fully(entry.path());
-        try {
-            auto crash_desc = serde::from_iobuf<crash_description>(
-              std::move(buf));
-            result.emplace_back(
-              entry.path(), std::move(crash_desc), entry.last_write_time());
-        } catch (const serde::serde_exception& e) {
-            vlog(
-              ctlog.debug,
-              "Exception while deserializing a crash report file {}: {}",
-              entry.path(),
-              e);
-            if (incl_malformed) {
-                result.emplace_back(
-                  entry.path(), std::nullopt, entry.last_write_time());
-            } else {
-                vlog(
-                  ctlog.warn,
-                  "Ignoring malformed crash report file {}",
-                  entry.path());
-            }
-        }
-    }
+    co_await directory_walker::walk(
+      crash_report_dir.string(),
+      [crash_report_dir, &result, incl_malformed](ss::directory_entry entry) {
+          return recorded_crashes_walker_fn(
+            crash_report_dir, std::move(entry), result, incl_malformed);
+      });
 
     std::sort(
       result.begin(),
