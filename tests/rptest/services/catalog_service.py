@@ -11,7 +11,6 @@ from ducktape.services.service import Service
 from rptest.context import cloud_storage
 
 import abc
-from typing import Optional, Any
 from enum import Enum
 
 from pyiceberg.catalog import load_catalog
@@ -41,9 +40,6 @@ def catalog_type_to_config_string(catalog_type: CatalogType) -> str:
 
 
 class CatalogService(abc.ABC, Service):
-    # Expected to be available after initialization of derived class.
-    # Use catalog_url property to access.
-    _catalog_url: Optional[str] = None
     DEFAULT_WAREHOUSE_NAME = 'redpanda-iceberg-catalog'
 
     def __init__(self,
@@ -64,9 +60,9 @@ class CatalogService(abc.ABC, Service):
         ...
 
     @property
+    @abc.abstractmethod
     def iceberg_rest_url(self) -> str:
-        assert self._catalog_url, "URL not available because service is not started"
-        return self._catalog_url
+        ...
 
     @property
     def vendor_api_url(self) -> str:

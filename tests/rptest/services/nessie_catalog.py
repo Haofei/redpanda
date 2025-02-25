@@ -71,9 +71,12 @@ class NessieCatalog(CatalogService):
         self.compute_warehouse_path()
 
         self._vendor_api_url = None
+        self._catalog_url: Optional[str] = None
 
-    # The endpoint that directly accesses the iceberg catalog.
-    _iceberg_url: Optional[str] = None
+    @property
+    def iceberg_rest_url(self) -> str:
+        assert self._catalog_url, "URL not available because service is not started"
+        return self._catalog_url
 
     @property
     def vendor_api_url(self) -> str:

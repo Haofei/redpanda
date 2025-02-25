@@ -93,12 +93,18 @@ class IcebergRESTCatalog(CatalogService):
         # Trino <-> REST server (HadoopCatalog) <-> S3
         # Trino <-> REST server (JDBC Catalog) <-> local sqllite DB.
         self.db_file = None
+        self._catalog_url = None
 
     def catalog_type(self) -> CatalogType:
         if self.filesystem_wrapper_mode:
             return CatalogType.REST_HADOOP
         else:
             return CatalogType.REST_JDBC
+
+    @property
+    def iceberg_rest_url(self) -> str:
+        assert self._catalog_url, "URL not available because service is not started"
+        return self._catalog_url
 
     def set_filesystem_wrapper_mode(self, mode: bool):
         self.filesystem_wrapper_mode = mode
