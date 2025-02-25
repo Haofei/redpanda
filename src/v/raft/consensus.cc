@@ -3256,12 +3256,12 @@ const group_configuration& consensus::config() const {
     return _configuration_manager.get_latest();
 }
 
-ss::future<timeout_now_reply> consensus::timeout_now(timeout_now_request&& r) {
+ss::future<timeout_now_reply> consensus::timeout_now(timeout_now_request r) {
     if (unlikely(is_request_target_node_invalid("timeout_now", r))) {
-        return ss::make_ready_future<timeout_now_reply>(timeout_now_reply{
+        co_return timeout_now_reply{
           .term = _term,
           .result = timeout_now_reply::status::failure,
-        });
+        };
     }
 
     if (r.term != _term) {
@@ -3272,17 +3272,14 @@ ss::future<timeout_now_reply> consensus::timeout_now(timeout_now_request&& r) {
           r.term,
           _term);
 
-        auto f = ss::now();
         if (r.term > _term) {
-            f = step_down(r.term, "timeout_now");
+            co_await step_down(r.term, "timeout_now");
         }
 
-        return f.then([this] {
-            return ss::make_ready_future<timeout_now_reply>(timeout_now_reply{
-              .term = _term,
-              .result = timeout_now_reply::status::failure,
-            });
-        });
+        co_return timeout_now_reply{
+          .term = _term,
+          .result = timeout_now_reply::status::failure,
+        };
     }
 
     if (_vstate != vote_state::follower) {
@@ -3294,10 +3291,10 @@ ss::future<timeout_now_reply> consensus::timeout_now(timeout_now_request&& r) {
           r.node_id,
           r.term);
 
-        return ss::make_ready_future<timeout_now_reply>(timeout_now_reply{
+        co_return timeout_now_reply{
           .term = _term,
           .result = timeout_now_reply::status::failure,
-        });
+        };
     }
 
     if (_node_priority_override == zero_voter_priority) {
@@ -3309,10 +3306,10 @@ ss::future<timeout_now_reply> consensus::timeout_now(timeout_now_request&& r) {
           r.node_id,
           r.term);
 
-        return ss::make_ready_future<timeout_now_reply>(timeout_now_reply{
+        co_return timeout_now_reply{
           .term = _term,
           .result = timeout_now_reply::status::failure,
-        });
+        };
     }
 
     // start an election immediately
@@ -3329,11 +3326,11 @@ ss::future<timeout_now_reply> consensus::timeout_now(timeout_now_request&& r) {
      * the election having not yet started) and allowing the receiver to step
      * down even before it receives a request vote rpc.
      */
-    return ss::make_ready_future<timeout_now_reply>(timeout_now_reply{
+    co_return timeout_now_reply{
       .target_node_id = r.node_id,
       .term = _term,
       .result = timeout_now_reply::status::success,
-    });
+    };
 }
 
 ss::future<transfer_leadership_reply>

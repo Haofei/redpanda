@@ -128,7 +128,7 @@ public:
     ss::future<install_snapshot_reply>
     install_snapshot(install_snapshot_request&& r);
 
-    ss::future<timeout_now_reply> timeout_now(timeout_now_request&& r);
+    ss::future<timeout_now_reply> timeout_now(timeout_now_request r);
 
     /// This method adds member to a group
     ss::future<std::error_code>
