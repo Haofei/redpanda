@@ -164,7 +164,6 @@ class NessieCatalogSmokeTest(RedpandaTest):
     @cluster(num_nodes=2)
     @matrix(cloud_storage_type=supported_storage_types())
     def test_basic(self, cloud_storage_type):
-        warehouse = self.catalog_service.cloud_storage_warehouse
         catalog = self.catalog_service.client()
         namespace = "test_ns"
         catalog.create_namespace(namespace)
@@ -212,7 +211,6 @@ class NessieCatalogSmokeTest(RedpandaTest):
     @cluster(num_nodes=2)
     @matrix(cloud_storage_type=supported_storage_types())
     def test_redpanda_schema(self, cloud_storage_type):
-        warehouse = self.catalog_service.cloud_storage_warehouse
         catalog = self.catalog_service.client()
         namespace = "test_ns"
         catalog.create_namespace(namespace)
