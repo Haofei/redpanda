@@ -5682,6 +5682,7 @@ FIXTURE_TEST(compaction_scheduling, storage_test_fixture) {
     for (const auto& meta : meta_list) {
         BOOST_REQUIRE(is_set(meta.flags, bflags::lifetime_checked));
         BOOST_REQUIRE(is_set(meta.flags, bflags::compaction_checked));
+        BOOST_REQUIRE(is_set(meta.flags, bflags::should_compact));
         BOOST_REQUIRE(is_set(meta.flags, bflags::compacted));
         BOOST_REQUIRE_EQUAL(
           meta.handle->config().ntp(), (*log_it)->config().ntp());

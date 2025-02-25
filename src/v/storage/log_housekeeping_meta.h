@@ -21,6 +21,7 @@ struct log_housekeeping_meta {
         compacted = 1U,
         lifetime_checked = 1U << 1U,
         compaction_checked = 1U << 2U,
+        should_compact = 1U << 3U,
     };
     explicit log_housekeeping_meta(ss::shared_ptr<log> l) noexcept
       : handle(std::move(l)) {}
