@@ -29,11 +29,11 @@ public:
          */
         _admin = co_await ss::create_scheduling_group("admin", 100);
         /**
-         * Main Raft scheduling group. Currently used for processing Raft
+         * Raft receive scheduling group. Used for processing Raft
          * requests on the receiver side of an RPC protocol. i.e. on the
          * follower.
          */
-        _raft = co_await ss::create_scheduling_group("raft", 1000);
+        _raft_recv = co_await ss::create_scheduling_group("raft_recv", 1000);
         /**
          * Kafka scheduling group. Used for parsing and processing Kafka
          * requests.
@@ -98,7 +98,7 @@ public:
 
     ss::future<> destroy_groups() {
         co_await destroy_scheduling_group(_admin);
-        co_await destroy_scheduling_group(_raft);
+        co_await destroy_scheduling_group(_raft_recv);
         co_await destroy_scheduling_group(_kafka);
         co_await destroy_scheduling_group(_cluster);
         co_await destroy_scheduling_group(_cache_background_reclaim);
@@ -114,7 +114,7 @@ public:
     }
 
     ss::scheduling_group admin_sg() { return _admin; }
-    ss::scheduling_group raft_sg() { return _raft; }
+    ss::scheduling_group raft_recv_sg() { return _raft_recv; }
     ss::scheduling_group kafka_sg() { return _kafka; }
     ss::scheduling_group cluster_sg() { return _cluster; }
 
@@ -154,7 +154,7 @@ public:
         return {
           std::cref(_default),
           std::cref(_admin),
-          std::cref(_raft),
+          std::cref(_raft_recv),
           std::cref(_kafka),
           std::cref(_cluster),
           std::cref(_cache_background_reclaim),
@@ -173,7 +173,7 @@ private:
     ss::scheduling_group _default{
       seastar::default_scheduling_group()}; // created and managed by seastar
     ss::scheduling_group _admin;
-    ss::scheduling_group _raft;
+    ss::scheduling_group _raft_recv;
     ss::scheduling_group _kafka;
     ss::scheduling_group _cluster;
     ss::scheduling_group _cache_background_reclaim;

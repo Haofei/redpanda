@@ -63,7 +63,7 @@ ss::future<> recovery_stm::recover() {
         return ss::now();
     }
     auto sg = meta.value()->is_learner ? _scheduling.learner_recovery_sg
-                                       : _scheduling.default_sg;
+                                       : _scheduling.recv_sg;
     auto iopc = meta.value()->is_learner ? _scheduling.learner_recovery_iopc
                                          : _scheduling.default_iopc;
 
