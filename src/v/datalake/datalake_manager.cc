@@ -29,10 +29,6 @@
 
 #include <memory>
 
-// TODO(iceberg): Make me configurable
-static constexpr auto scheduler_block_size_default = 4_MiB;
-static constexpr auto scheduler_concurrent_translations = 4;
-static constexpr auto scheduler_time_slice = 30s;
 static constexpr std::string_view iceberg_data_path_prefix = "data";
 
 namespace datalake {
@@ -112,11 +108,12 @@ datalake_manager::datalake_manager(
   , _writer_scratch_space(config::node().datalake_staging_path())
   , _scheduler(
       memory_limit,
-      scheduler_block_size_default,
+      config::shard_local_cfg().datalake_scheduler_block_size_bytes(),
       translation::scheduling::scheduling_policy::make_default(
-        scheduler_concurrent_translations,
+        config::shard_local_cfg()
+          .datalake_scheduler_max_concurrent_translations(),
         std::chrono::duration_cast<translation::scheduling::clock::duration>(
-          scheduler_time_slice)))
+          config::shard_local_cfg().datalake_scheduler_time_slice_ms())))
   , _queue(sg, [](const std::exception_ptr& ex) {
       vlog(
         datalake_log.error, "unexpected error in managing translator: {}", ex);
