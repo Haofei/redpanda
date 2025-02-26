@@ -136,6 +136,10 @@ def _impl(ctx):
     out = ctx.actions.declare_directory(ctx.attr.out) if use_dir else ctx.actions.declare_file(ctx.attr.out)
     package_content = _prepare_package_content(ctx)
 
+    fips_enabled = ctx.file.fips_module != None
+    if fips_enabled != (ctx.file.fips_config != None):
+        fail("`fips_module` and `fips_config` must both be specified in", ctx.attr.name)
+
     # Create the configuration file for the packaging tool
     cfg_file = ctx.actions.declare_file("%s.config.json" % ctx.attr.name)
     cfg = {
@@ -148,6 +152,7 @@ def _impl(ctx):
         "rpk": package_content.rpk_binary.path if package_content.rpk_binary else None,
         "shared_libraries": [solib.path for solib in package_content.shared_libraries],
         "default_yaml_config": ctx.file.default_yaml_config.path if ctx.file.default_yaml_config else None,
+        "fips": {"module": ctx.file.fips_module.path, "config": ctx.file.fips_config.path} if fips_enabled else None,
         "owner": ctx.attr.owner,
         "directory_mode": use_dir,
     }
@@ -168,6 +173,10 @@ def _impl(ctx):
     for input in optional_inputs:
         if input != None:
             inputs.append(input)
+
+    if fips_enabled:
+        inputs.append(ctx.file.fips_module)
+        inputs.append(ctx.file.fips_config)
 
     # run the packaging tool
     ctx.actions.run(
@@ -209,6 +218,12 @@ redpanda_package = rule(
             allow_single_file = True,
         ),
         "default_yaml_config": attr.label(
+            allow_single_file = True,
+        ),
+        "fips_module": attr.label(
+            allow_single_file = True,
+        ),
+        "fips_config": attr.label(
             allow_single_file = True,
         ),
         "rpk_binary": attr.label(

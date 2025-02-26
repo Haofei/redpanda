@@ -15,6 +15,8 @@ redpanda_package(
 redpanda_package(
     name = "vtools_input",
     out = "bazel_out.tar.gz",
+    fips_config = "@openssl-fips//:fipsmodule_cnf",
+    fips_module = "@openssl-fips//:fipsmodule_so",
     hwloc_calc = "@hwloc//:hwloc_calc",
     hwloc_distrib = "@hwloc//:hwloc_distrib",
     include_sysroot_libs = True,
