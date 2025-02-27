@@ -53,10 +53,12 @@ static constexpr auto max_reports_per_request = std::max<size_t>(
   upload_req_bound / crash_tracker::crash_description::serde_size_overestimate);
 
 crash_reporter::crash_reporter(
+  storage::kvstore& kvs,
   ss::sharded<controller_stm>& stm,
   ss::sharded<ss::abort_source>& as,
   ss::sharded<metrics_reporter>& mr)
-  : _controller_stm(stm)
+  : _rate_limiter(kvs)
+  , _controller_stm(stm)
   , _metrics_reporter(mr)
   , _as(as)
   , _client_logger{logger, "crash-reporter"} {}
@@ -196,11 +198,20 @@ ss::future<> crash_reporter::report_crashes() {
         for (size_t i = 0; i < max_upload_attempts && !success
                            && !_as.local().abort_requested();
              ++i) {
-            success = co_await try_report_crashes(current_batch);
+            // Record the upload to the rate limiter before sending the report
+            // to ensure that if there is a crash while sending telemetry data,
+            // the rate limiter will still limit subsequent uploads
+            auto rl_wait = _rate_limiter.wait_time();
+            if (rl_wait > 0s) {
+                vlog(
+                  logger.trace,
+                  "Sleeping for {}ms for rate limit to pass",
+                  rl_wait / 1ms);
+                co_await ss::sleep_abortable(rl_wait, _as.local());
+            }
+            co_await _rate_limiter.record();
 
-            // TODO: improve rate limiting to be robust against crashes
-            constexpr auto upload_interval = 30s;
-            co_await ss::sleep_abortable(upload_interval, _as.local());
+            success = co_await try_report_crashes(current_batch);
         }
 
         if (!success) {

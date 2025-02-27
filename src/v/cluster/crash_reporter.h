@@ -47,6 +47,7 @@ public:
     static constexpr ss::shard_id shard = 0;
 
     crash_reporter(
+      storage::kvstore&,
       ss::sharded<controller_stm>&,
       ss::sharded<ss::abort_source>&,
       ss::sharded<metrics_reporter>&);
@@ -81,6 +82,7 @@ private:
     build_crash_report_payload(const report_batch&);
     iobuf serialize_payload(const crash_report_payload&);
 
+    rate_limiter _rate_limiter;
     ss::sharded<controller_stm>& _controller_stm;
     ss::sharded<metrics_reporter>& _metrics_reporter;
     ss::sharded<ss::abort_source>& _as;
