@@ -124,9 +124,7 @@ public:
       });
     }
     virtual ss::future<{{method.output_type}}>
-    {{method.name}}({{method.input_type}}, ::rpc::streaming_context&) {
-       throw std::runtime_error("unimplemented method");
-    }
+    {{method.name}}({{method.input_type}}, ::rpc::streaming_context&) = 0;
     {%- endfor %}
 private:
     ss::scheduling_group _sc;
