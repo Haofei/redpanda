@@ -209,7 +209,7 @@ class LogCompactionTest(LogCompactionTestBase, PreallocNodesTest,
                          extra_rp_conf=self.extra_rp_conf,
                          environment=environment)
 
-    def validate_log(self):
+    def validate_log(self, cleanup_policy):
         """
         After several rounds of compaction, restart the brokers,
         create a consumer, and assert that no tombstones are consumed.
@@ -258,7 +258,10 @@ class LogCompactionTest(LogCompactionTestBase, PreallocNodesTest,
 
         # There should be no dirty segments left
         assert self.get_dirty_segment_bytes() == 0
-        assert self.get_closed_segment_bytes() > 0
+        # This could race if the cleanup.policy was compact,delete,
+        # so only assert for compact topic
+        if cleanup_policy == TopicSpec.CLEANUP_COMPACT:
+            assert self.get_closed_segment_bytes() > 0
         assert self.get_dirty_ratio() < 1.0e-6
 
         consumer = KgoVerifierSeqConsumer(self.test_context,
@@ -374,7 +377,7 @@ class LogCompactionTest(LogCompactionTestBase, PreallocNodesTest,
 
         self.produce_and_consume()
 
-        self.validate_log()
+        self.validate_log(cleanup_policy)
 
         if cleanup_policy == TopicSpec.CLEANUP_COMPACT_DELETE:
             self.wait_for_log_truncation()
