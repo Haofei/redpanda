@@ -328,15 +328,13 @@ class DescribeTopicsTest(RedpandaTest):
                 config_type="BOOLEAN",
                 value="false",
                 doc_string=
-                "This property affects the behavior of the Tiered-Storage during pause. "
-                "If 'false' (default value) Redpanda will evict from the local storage "
-                "only data which was already uploaded to the cloud storage. Eventually, "
-                "this will lead to a situation when the local volume is filled with data "
-                "which can't be evicted. When this will happen Redpanda will throttle "
-                "producers. To avoid this the property can be set to 'true'. In this "
-                "case Redpanda will allow segments that wasn't uploaded to the cloud "
-                "storage to be evicted from the local storage. The local storage "
-                "eviction may create a gap in offsets in this case."),
+                "controls the eviction of locally-stored log segments when "
+                "tiered storage uploads are paused. set to `false` (default) to "
+                "only evict data that has already been uploaded to cloud storage. "
+                "if the retained data fills the local volume, redpanda will "
+                "throttle producers. set to `true` to allow the eviction of "
+                "locally-stored log segments, which may create gaps in "
+                "offsets."),
         }
 
         tp_spec = TopicSpec()

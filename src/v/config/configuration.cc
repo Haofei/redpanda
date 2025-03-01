@@ -2474,7 +2474,7 @@ configuration::configuration()
       "Redpanda will throttle producers. "
       "Set to `true` to allow the eviction of locally-stored log segments, "
       "which "
-      "may create gaps in offsets. ",
+      "may create gaps in offsets.",
       {.needs_restart = needs_restart::no, .visibility = visibility::tunable},
       false)
   , cloud_storage_azure_storage_account(
