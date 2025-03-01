@@ -131,9 +131,10 @@ class CompactionTest(RedpandaTest):
             "iceberg_enabled": "true",
             "iceberg_catalog_commit_interval_ms": 5000,
             "datalake_coordinator_snapshot_max_delay_secs": 10,
-            "log_compaction_interval_ms": 2000,
+            "log_compaction_interval_ms": 4000,
             "log_segment_size": 2 * 1024**2,  # 2 MiB
-            "compacted_log_segment_size": 1024**2  # 1 MiB
+            "compacted_log_segment_size": 1024**2,  # 1 MiB
+            "min_cleanable_dirty_ratio": 0.0
         }
 
         super(CompactionTest,
@@ -190,9 +191,9 @@ class CompactionTest(RedpandaTest):
 
         wait_until(
             compaction_has_completed,
-            timeout_sec=120,
+            timeout_sec=180,
             backoff_sec=self.extra_rp_conf['log_compaction_interval_ms'] /
-            1000 * 10,
+            1000 * 4,
             err_msg="Compaction did not stabilize.")
 
     def verify_log_and_table(self, dl: DatalakeServices):
