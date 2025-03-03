@@ -181,7 +181,10 @@ ss::future<> log_manager::start() {
                    .log_disable_housekeeping_for_tests.value())) {
         co_return;
     }
-    ssx::spawn_with_gate(_gate, [this] { return housekeeping(); });
+    ssx::spawn_with_gate(_gate, [this] {
+        return run_housekeeping_job(
+          [this]() { return housekeeping_loop(); }, "housekeeping");
+    });
     co_return;
 }
 
@@ -362,10 +365,11 @@ log_manager::housekeeping_scan(model::timestamp collection_threshold) {
     }
 }
 
-ss::future<> log_manager::housekeeping() {
+ss::future<> log_manager::run_housekeeping_job(
+  std::function<ss::future<>()> loop_func, std::string_view ctx) {
     while (!_gate.is_closed()) {
         try {
-            co_await housekeeping_loop();
+            co_await loop_func();
         } catch (...) {
             /*
              * continue on shutdown exception because it may be bubbling up from
@@ -376,11 +380,16 @@ ss::future<> log_manager::housekeeping() {
             if (ssx::is_shutdown_exception(e)) {
                 vlog(
                   stlog.debug,
-                  "Shutdown error caught in housekeeping(): {}",
+                  "Shutdown error caught in run_housekeeping_job({}): {}",
+                  ctx,
                   e);
                 continue;
             }
-            vlog(stlog.info, "Error processing housekeeping(): {}", e);
+            vlog(
+              stlog.info,
+              "Error processing run_housekeeping_job({}): {}",
+              ctx,
+              e);
         }
     }
 }

@@ -266,11 +266,11 @@ private:
       std::vector<model::record_batch_type> translator_batch_types);
     ss::future<> clean_close(ss::shared_ptr<storage::log>);
 
-    /**
-     * \brief delete old segments and trigger compacted segments
-     *        runs inside a seastar thread
-     */
-    ss::future<> housekeeping();
+    // Kicks off a housekeeping job loop behind the local `_gate`, catching any
+    // exceptions that may occur.
+    ss::future<> run_housekeeping_job(
+      std::function<ss::future<>()> loop_func, std::string_view ctx);
+
     ss::future<> housekeeping_loop();
     ss::future<> housekeeping_scan(model::timestamp);
     ssx::semaphore _housekeeping_sem{0, "log_manager::housekeeping"};
