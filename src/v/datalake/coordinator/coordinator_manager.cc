@@ -132,7 +132,9 @@ void coordinator_manager::start_managing(cluster::partition& p) {
       *file_committer_,
       *snapshot_remover_,
       config::shard_local_cfg().iceberg_catalog_commit_interval_ms.bind(),
-      config::shard_local_cfg().iceberg_default_partition_spec.bind());
+      config::shard_local_cfg().iceberg_default_partition_spec.bind(),
+      config::shard_local_cfg()
+        .iceberg_disable_automatic_snapshot_expiry.bind());
     if (p.is_leader()) {
         crd->notify_leadership(self_);
     }
