@@ -16,6 +16,7 @@
 #include "datalake/coordinator/tests/state_test_utils.h"
 #include "datalake/table_definition.h"
 #include "datalake/tests/test_utils.h"
+#include "features/feature_table.h"
 #include "iceberg/filesystem_catalog.h"
 #include "iceberg/manifest_entry.h"
 #include "iceberg/manifest_io.h"
@@ -23,6 +24,8 @@
 #include "iceberg/table_identifier.h"
 #include "iceberg/transaction.h"
 #include "iceberg/values_bytes.h"
+#include "model/fundamental.h"
+#include "storage/api.h"
 #include "test_utils/async.h"
 
 #include <seastar/util/defer.hh>
@@ -84,6 +87,20 @@ file_committer_loop(file_committer& committer, size_t num_chunks, bool& done) {
     done = true;
     co_return;
 }
+storage::api
+dummy_storage(ss::sharded<features::feature_table>& feature_table) {
+    return storage::api{
+      []() {
+          return storage::kvstore_config(
+            1_MiB,
+            config::mock_binding(10ms),
+            "dummy.dir",
+            storage::make_sanitized_file_config());
+      },
+      []() { return storage::log_config("dummy.dir", 1_GiB); },
+      feature_table};
+}
+const model::cluster_uuid cluster_uuid{uuid_t::create()};
 } // namespace
 
 class FileCommitterTest
@@ -93,11 +110,23 @@ public:
     static constexpr std::string_view base_location{"test"};
     FileCommitterTest()
       : sr(cloud_io::scoped_remote::create(10, conf))
+      , storage(dummy_storage(feature_table))
       , catalog(remote(), bucket_name, ss::sstring(base_location))
       , schema_mgr(catalog)
       , manifest_io(remote(), bucket_name)
-      , committer(catalog, manifest_io, config::mock_binding(false)) {
+      , committer(storage, catalog, manifest_io, config::mock_binding(false)) {
+        feature_table.start().get();
+        feature_table
+          .invoke_on_all(
+            [](features::feature_table& f) { f.testing_activate_all(); })
+          .get();
+        storage.start().get();
+        storage.set_cluster_uuid(cluster_uuid);
         set_expectations_and_listen({});
+    }
+    void TearDown() override {
+        storage.stop().get();
+        feature_table.stop().get();
     }
     cloud_io::remote& remote() { return sr->remote.local(); }
 
@@ -137,6 +166,8 @@ public:
     }
 
     std::unique_ptr<cloud_io::scoped_remote> sr;
+    ss::sharded<features::feature_table> feature_table;
+    storage::api storage;
     iceberg::filesystem_catalog catalog;
     datalake::catalog_schema_manager schema_mgr;
     iceberg::manifest_io manifest_io;

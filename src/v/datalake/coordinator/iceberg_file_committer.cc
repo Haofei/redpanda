@@ -25,7 +25,9 @@
 #include "iceberg/transaction.h"
 #include "iceberg/values.h"
 #include "iceberg/values_bytes.h"
+#include "storage/api.h"
 
+#include <exception>
 #include <optional>
 
 namespace datalake::coordinator {
@@ -67,7 +69,10 @@ constexpr auto commit_tag_name = "redpanda.tag";
 // Look for the Redpanda commit property in the current snapshot, or the most
 // recent ancestor if none.
 checked<std::optional<model::offset>, parse_offset_error>
-get_iceberg_committed_offset(const iceberg::table_metadata& table) {
+get_iceberg_committed_offset(
+  // XXX: cluster UUID is plumbed here but not used! Next commit will use.
+  const iceberg::table_metadata& table,
+  const model::cluster_uuid&) {
     if (!table.current_snapshot_id.has_value()) {
         return std::nullopt;
     }
@@ -212,10 +217,11 @@ checked<iceberg::partition_key, file_committer::errc> build_partition_key(
 class table_commit_builder {
 public:
     static checked<table_commit_builder, file_committer::errc> create(
+      const model::cluster_uuid& cluster,
       iceberg::table_identifier table_id,
       iceberg::table_metadata&& table,
       bool with_tag) {
-        auto meta_res = get_iceberg_committed_offset(table);
+        auto meta_res = get_iceberg_committed_offset(table, cluster);
         if (meta_res.has_error()) {
             vlog(
               datalake_log.warn,
@@ -373,6 +379,26 @@ private:
     std::optional<model::offset> new_committed_offset_;
 };
 
+ss::future<checked<model::cluster_uuid, file_committer::errc>>
+get_cluster_uuid(storage::api& storage) {
+    try {
+        auto cluster_uuid_success = co_await storage.wait_for_cluster_uuid();
+        if (!cluster_uuid_success) {
+            vlog(
+              datalake_log.info,
+              "Exiting commit after waiting for cluster UUID");
+            co_return file_committer::errc::shutting_down;
+        }
+    } catch (...) {
+        vlog(
+          datalake_log.error,
+          "Exception while waiting for cluster UUID: {}",
+          std::current_exception());
+        co_return file_committer::errc::failed;
+    }
+    co_return storage.get_cluster_uuid().value();
+}
+
 } // namespace
 
 ss::future<
@@ -380,6 +406,12 @@ ss::future<
 iceberg_file_committer::commit_topic_files_to_catalog(
   model::topic topic, const topics_state& state) const {
     vlog(datalake_log.debug, "Beginning commit for topic {}", topic);
+    auto cluster_uuid_res = co_await get_cluster_uuid(storage_);
+    if (cluster_uuid_res.has_error()) {
+        co_return cluster_uuid_res.error();
+    }
+    const auto& cluster = cluster_uuid_res.value();
+
     auto tp_it = state.topic_to_state.find(topic);
     if (
       tp_it == state.topic_to_state.end()
@@ -414,6 +446,7 @@ iceberg_file_committer::commit_topic_files_to_catalog(
             }
         } else {
             auto main_table_commit_builder_res = table_commit_builder::create(
+              cluster,
               std::move(main_table_id),
               std::move(main_table_res.value()),
               !disable_snapshot_tags_());
@@ -457,6 +490,7 @@ iceberg_file_committer::commit_topic_files_to_catalog(
             }
         } else {
             auto dlq_table_commit_builder_res = table_commit_builder::create(
+              cluster,
               std::move(dlq_table_id),
               std::move(dlq_table_res.value()),
               !disable_snapshot_tags_());
