@@ -19,7 +19,8 @@ class FakePanda:
 class CloudClusterUtils:
     def __init__(self, context: Any, logger: Any, infra_id: str,
                  infra_secret: str, provider: str, cloud_url_origin: str,
-                 oauth_url_origin: str, oauth_audience: str) -> None:
+                 oauth_url_origin: str, oauth_audience: str,
+                 rpk_public_api_url: str) -> None:
         """Initialize CloudClusterUtils.
 
         Args:
@@ -31,6 +32,7 @@ class CloudClusterUtils:
             cloud_url_origin (str): rpk cloud url
             oauth_url_origin (str): rpk cloud auth url
             oauth_audience (str): rpk cloud auth audience for issued token
+            rpk_public_api_url (str): rpk cloud public api url
         """
         self.fake_panda = FakePanda(context, logger)
         # Create rpk to use several functions that is isolated
@@ -43,6 +45,7 @@ class CloudClusterUtils:
             'RPK_CLOUD_URL': cloud_url_origin,
             'RPK_CLOUD_AUTH_URL': oauth_url_origin,
             'RPK_CLOUD_AUTH_AUDIENCE': oauth_audience,
+            'RPK_PUBLIC_API_URL': rpk_public_api_url,
             'CLOUD_URL': f'{cloud_url_origin}/api/v1'
         }
         if self.provider == 'aws':
