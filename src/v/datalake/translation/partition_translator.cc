@@ -239,9 +239,7 @@ ss::future<> partition_translator::translate_until_stopped() {
               "Translation attempt failed: {}, discarding state to reset "
               "translation",
               translate_f.get_exception());
-            // todo(tests): add more tests to exercise this branch logic
-            // todo: enhance the API to skip uploading to cloud storage.
-            co_await _translation_ctx->finish(rcn, _as).discard_result();
+            co_await _translation_ctx->discard();
             continue;
         }
 
