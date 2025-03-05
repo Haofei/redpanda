@@ -27,7 +27,7 @@ private:
 // Transforms the given value to its appropriate Iceberg value based on the
 // input transform.
 //
-// TODO: this is only implemented for the hourly transform on timestamp values!
+// TODO: this is only implemented for the time transforms !
 // This will throw if used for anything else!
 value apply_transform(const value&, const transform&);
 
