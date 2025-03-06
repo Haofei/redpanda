@@ -11,6 +11,7 @@
 #include "config/node_config.h"
 #include "crash_tracker/recorder.h"
 #include "test_utils/tmp_dir.h"
+#include "utils.h"
 
 #include <seastar/core/memory.hh>
 
@@ -20,18 +21,6 @@
 #include <stdexcept>
 
 namespace crash_tracker {
-
-class RecorderTestHelper {
-public:
-    void SetUp() { config::node().data_directory.set_value(_dir.get_path()); }
-    void TearDown() {
-        _dir.remove().get();
-        config::node().data_directory.reset();
-    }
-
-private:
-    temporary_dir _dir{"recorder_test"};
-};
 
 class RecorderTest : public testing::Test {
 public:

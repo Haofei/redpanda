@@ -280,6 +280,30 @@ void recorder::record_crash_vassert(std::string_view msg) {
     _writer.write();
 }
 
+std::optional<recorder::oom_recorder> recorder::begin_oom_recording() {
+    auto* cd_opt = _writer.fill();
+    if (!cd_opt) {
+        // The writer has already been consumed by another crash
+        return std::nullopt;
+    }
+    vassert(!_oom_writer.has_value(), "OOM recording already in progress");
+    _oom_writer.emplace(oom_writer{cd_opt});
+    auto& cd = *cd_opt;
+
+    record_backtrace(cd);
+    cd.type = crash_type::oom;
+    return [this](std::string_view ms) {
+        vassert(_oom_writer.has_value(), "OOM message already recorded");
+        (*_oom_writer)(ms);
+    };
+}
+
+void recorder::finish_oom_recording() {
+    vassert(_oom_writer.has_value(), "No OOM recording in progress");
+    _oom_writer.reset();
+    _writer.write();
+}
+
 ss::future<bool> recorder::recorded_crash::is_uploaded() const {
     co_return co_await ss::file_exists(
       to_upload_marker_path(file_path).string());
@@ -361,4 +385,14 @@ recorder::get_recorded_crashes(
 
 ss::future<> recorder::stop() { co_await _writer.release(); }
 
+void recorder::reset() { _writer.reset(); }
+
+void recorder::oom_writer::operator()(std::string_view msg) noexcept {
+    auto result = fmt::format_to_n(
+      _oom_msg_pos,
+      std::distance(_oom_msg_pos, _oom_cd->crash_message.end()),
+      "{}",
+      msg);
+    _oom_msg_pos = result.out;
+}
 } // namespace crash_tracker
