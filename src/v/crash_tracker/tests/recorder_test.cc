@@ -10,6 +10,7 @@
 
 #include "config/node_config.h"
 #include "crash_tracker/recorder.h"
+#include "crash_tracker/types.h"
 #include "test_utils/tmp_dir.h"
 #include "utils.h"
 
@@ -51,6 +52,23 @@ TEST_F(RecorderTest, TestFileCleanup) {
 
     crashes = rec.get_recorded_crashes().get();
     ASSERT_EQ(crashes.size(), recorder::crash_files_to_keep);
+}
+
+TEST_F(RecorderTest, TestLargeException) {
+    auto large_exception_msg = ss::sstring(5000, 'E');
+    const auto test_eptr = std::make_exception_ptr(
+      std::runtime_error{large_exception_msg});
+
+    auto rec = get_test_recorder();
+    rec.start().get();
+    rec.record_crash_exception(test_eptr);
+
+    auto crashes = get_test_recorder().get_recorded_crashes().get();
+    ASSERT_EQ(crashes.size(), 1);
+    ASSERT_TRUE(crashes[0].crash.has_value());
+    ASSERT_EQ(
+      crashes[0].crash->crash_message.length(),
+      crash_description::string_buffer_reserve);
 }
 
 TEST_F(RecorderTest, TestUploadMarkers) {

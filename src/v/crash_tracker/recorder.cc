@@ -25,8 +25,11 @@
 #include <seastar/core/sleep.hh>
 #include <seastar/util/print_safe.hh>
 
+#include <fmt/core.h>
+
 #include <chrono>
 #include <filesystem>
+#include <iterator>
 #include <string_view>
 
 using namespace std::chrono_literals;
@@ -155,32 +158,40 @@ ss::future<> recorder::start() {
 
 namespace {
 
+template<typename OutputIt, typename... Args>
+void format_to_safe(
+  OutputIt& it,
+  size_t& remaining,
+  fmt::format_string<Args...> fmt,
+  Args&&... args) {
+    if (remaining == 0) {
+        return; // Prevent buffer overflow
+    }
+
+    auto result = fmt::format_to_n(
+      it, remaining, fmt, std::forward<Args>(args)...);
+    size_t bytes_written = std::distance(it, result.out);
+
+    it = result.out;
+    remaining -= std::min(remaining, bytes_written);
+}
+
 void record_backtrace(crash_description& cd) {
-    size_t pos = 0;
-    auto printer = [&pos, &cd](auto fmt, auto&&... args) {
-        if (pos >= cd.stacktrace.capacity()) {
-            return; // Prevent buffer overflow
-        }
+    auto it = cd.stacktrace.begin();
+    auto remaining = cd.stacktrace.capacity();
+    auto first = true;
 
-        auto result = fmt::format_to_n(
-          cd.stacktrace.begin() + pos,
-          cd.stacktrace.capacity() - pos,
-          fmt,
-          std::forward<decltype(args)...>(args)...);
-        pos = std::min(pos + result.size, cd.stacktrace.capacity());
-    };
-
-    ss::backtrace([&pos, &printer](ss::frame f) {
-        const bool first = pos == 0;
+    ss::backtrace([&it, &remaining, &first](ss::frame f) {
         if (!first) {
-            printer(FMT_STRING(" "), " ");
+            format_to_safe(it, remaining, " ");
         }
+        first = false;
 
         if (!f.so->name.empty()) {
-            printer(FMT_STRING("{}+"), f.so->name.c_str());
+            format_to_safe(it, remaining, "{}+", f.so->name.c_str());
         }
 
-        printer(FMT_STRING("{:#x}"), f.addr);
+        format_to_safe(it, remaining, "{:#x}", f.addr);
     });
 }
 
