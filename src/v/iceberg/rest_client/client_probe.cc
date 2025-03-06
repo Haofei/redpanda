@@ -96,7 +96,138 @@ void client_probe::setup_public_metrics(
           sm::description("Total number of transport errors (TCP and TLS)"),
           labels)
           .aggregate({sm::shard_label}),
+        sm::make_counter(
+          "num_oauth_token_requests",
+          [this] { return num_oauth_token_requests; },
+          sm::description(
+            "Total number of requests sent to the oauth_token endpoint"),
+          labels)
+          .aggregate({sm::shard_label}),
+        sm::make_counter(
+          "num_oauth_token_requests_failed",
+          [this] { return num_oauth_token_requests_failed; },
+          sm::description(
+            "Number of requests sent to the oauth_token endpoint that failed"),
+          labels)
+          .aggregate({sm::shard_label}),
+        sm::make_counter(
+          "num_create_namespace_requests",
+          [this] { return num_create_namespace_requests; },
+          sm::description(
+            "Total number of requests sent to the create_namespace endpoint"),
+          labels)
+          .aggregate({sm::shard_label}),
+        sm::make_counter(
+          "num_create_namespace_requests_failed",
+          [this] { return num_create_namespace_requests_failed; },
+          sm::description("Number of requests sent to the create_namespace "
+                          "endpoint that failed"),
+          labels)
+          .aggregate({sm::shard_label}),
+        sm::make_counter(
+          "num_create_table_requests",
+          [this] { return num_create_table_requests; },
+          sm::description(
+            "Total number of requests sent to the create_table endpoint"),
+          labels)
+          .aggregate({sm::shard_label}),
+        sm::make_counter(
+          "num_create_table_requests_failed",
+          [this] { return num_create_table_requests_failed; },
+          sm::description(
+            "Number of requests sent to the create_table endpoint that failed"),
+          labels)
+          .aggregate({sm::shard_label}),
+        sm::make_counter(
+          "num_load_table_requests",
+          [this] { return num_load_table_requests; },
+          sm::description(
+            "Total number of requests sent to the load_table endpoint"),
+          labels)
+          .aggregate({sm::shard_label}),
+        sm::make_counter(
+          "num_load_table_requests_failed",
+          [this] { return num_load_table_requests_failed; },
+          sm::description(
+            "Number of requests sent to the load_table endpoint that failed"),
+          labels)
+          .aggregate({sm::shard_label}),
+        sm::make_counter(
+          "num_drop_table_requests",
+          [this] { return num_drop_table_requests; },
+          sm::description(
+            "Total number of requests sent to the drop_table endpoint"),
+          labels)
+          .aggregate({sm::shard_label}),
+        sm::make_counter(
+          "num_drop_table_requests_failed",
+          [this] { return num_drop_table_requests_failed; },
+          sm::description(
+            "Number of requests sent to the drop_table endpoint that failed"),
+          labels)
+          .aggregate({sm::shard_label}),
+        sm::make_counter(
+          "num_commit_table_update_requests",
+          [this] { return num_commit_table_update_requests; },
+          sm::description("Total number of requests sent to the "
+                          "commit_table_update endpoint"),
+          labels)
+          .aggregate({sm::shard_label}),
+        sm::make_counter(
+          "num_commit_table_update_requests_failed",
+          [this] { return num_commit_table_update_requests_failed; },
+          sm::description("Number of requests sent to the commit_table_update "
+                          "endpoint that failed"),
+          labels)
+          .aggregate({sm::shard_label}),
       });
 }
 
+void client_probe::register_request(endpoint e) {
+    switch (e) {
+        using enum endpoint;
+    case oauth_token:
+        ++num_oauth_token_requests;
+        return;
+    case create_namespace:
+        ++num_create_namespace_requests;
+        return;
+    case create_table:
+        ++num_create_table_requests;
+        return;
+    case load_table:
+        ++num_load_table_requests;
+        return;
+    case drop_table:
+        ++num_drop_table_requests;
+        return;
+    case commit_table_update:
+        ++num_commit_table_update_requests;
+        return;
+    }
+}
+
+void client_probe::register_failed_request(endpoint e) {
+    switch (e) {
+        using enum endpoint;
+    case oauth_token:
+        ++num_oauth_token_requests_failed;
+        return;
+    case create_namespace:
+        ++num_create_namespace_requests_failed;
+        return;
+    case create_table:
+        ++num_create_table_requests_failed;
+        return;
+    case load_table:
+        ++num_load_table_requests_failed;
+        return;
+    case drop_table:
+        ++num_drop_table_requests_failed;
+        return;
+    case commit_table_update:
+        ++num_commit_table_update_requests_failed;
+        return;
+    }
+}
 } // namespace iceberg::rest_client

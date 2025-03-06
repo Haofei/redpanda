@@ -18,14 +18,43 @@ namespace iceberg::rest_client {
 
 class client_probe : public http::client_probe {
 public:
+    enum class endpoint {
+        oauth_token,
+        create_namespace,
+        create_table,
+        load_table,
+        drop_table,
+        commit_table_update,
+    };
     client_probe(
       net::public_metrics_disabled public_disable, ss::metrics::label_instance);
+
+    void register_request(endpoint e);
+    void register_failed_request(endpoint e);
 
 private:
     void setup_public_metrics(
       net::public_metrics_disabled disable, ss::metrics::label_instance);
 
-    metrics::internal_metric_groups _public_metrics;
+    metrics::public_metric_groups _public_metrics;
+
+    size_t num_oauth_token_requests{0};
+    size_t num_oauth_token_requests_failed{0};
+
+    size_t num_create_namespace_requests{0};
+    size_t num_create_namespace_requests_failed{0};
+
+    size_t num_create_table_requests{0};
+    size_t num_create_table_requests_failed{0};
+
+    size_t num_load_table_requests{0};
+    size_t num_load_table_requests_failed{0};
+
+    size_t num_drop_table_requests{0};
+    size_t num_drop_table_requests_failed{0};
+
+    size_t num_commit_table_update_requests{0};
+    size_t num_commit_table_update_requests_failed{0};
 };
 
 } // namespace iceberg::rest_client
