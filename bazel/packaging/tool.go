@@ -150,7 +150,10 @@ func copyFile(src string, dst string) error {
 		return err
 	}
 	defer dstFile.Close()
-	dstFile.ReadFrom(srcFile)
+	_, err = dstFile.ReadFrom(srcFile)
+	if err != nil {
+		return err
+	}
 
 	return nil
 }
@@ -217,8 +220,12 @@ func createPackageDir(cfg pkgConfig, output string) error {
 	}
 
 	if cfg.Fips != nil {
-		file(cfg.Fips.Module, "fips", "fips.so")
-		file(cfg.Fips.Config, "fips", "fipsmodule.cnf")
+		if err := file(cfg.Fips.Module, "fips", "fips.so"); err != nil {
+			return err
+		}
+		if err := file(cfg.Fips.Config, "fips", "fipsmodule.cnf"); err != nil {
+			return err
+		}
 	}
 
 	return nil
