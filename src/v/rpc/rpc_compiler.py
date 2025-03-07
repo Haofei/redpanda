@@ -271,7 +271,7 @@ def main():
         return parser
 
     parser = generate_options()
-    options, program_options = parser.parse_known_args()
+    options = parser.parse_args()
     logger.info("%s" % options)
     _codegen(_enrich_methods(_read_file(options.service_file)),
              options.output_file)
