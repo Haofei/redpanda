@@ -20,6 +20,7 @@
 #include "utils/directory_walker.h"
 #include "utils/file_io.h"
 
+#include <seastar/core/file-types.hh>
 #include <seastar/core/file.hh>
 #include <seastar/core/seastar.hh>
 #include <seastar/core/sleep.hh>
@@ -120,7 +121,9 @@ namespace {
 ss::future<> upload_marker_walker_fn(
   std::filesystem::path basedir, ss::directory_entry entry) {
     const auto path = (basedir / std::string_view{entry.name}).string();
-    if (!path.ends_with(recorder::upload_marker_suffix)) {
+    if (
+      !path.ends_with(recorder::upload_marker_suffix)
+      || entry.type != ss::directory_entry_type::regular) {
         // Not an upload marker
         co_return;
     }
@@ -343,7 +346,9 @@ ss::future<> recorded_crashes_walker_fn(
   recorder::include_current incl_current,
   const std::optional<std::filesystem::path>& current_file) {
     const auto path = (basedir / std::string_view{entry.name}).string();
-    if (!path.ends_with(crash_report_suffix)) {
+    if (
+      !path.ends_with(crash_report_suffix)
+      || entry.type != ss::directory_entry_type::regular) {
         // Filter only for crash files
         co_return;
     }
