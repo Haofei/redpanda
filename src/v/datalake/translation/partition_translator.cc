@@ -137,6 +137,7 @@ partition_translator::translate_when_notified(kafka::offset begin_offset) {
     if (!reader) {
         co_return;
     }
+    vlog(_logger.trace, "starting translation from offset: {}", begin_offset);
     ss::timer<scheduling::clock> cancellation_timer;
     cancellation_timer.set_callback([&as] { as.request_abort(); });
 
@@ -311,8 +312,8 @@ ss::future<> partition_translator::init(
     _initialized = true;
     ssx::repeat_until_gate_closed_or_aborted(_gate, _as, [this] {
         return ss::with_scheduling_group(_sg, [this] {
-            return translate_until_stopped().handle_exception(
-              [this](const std::exception_ptr& ex) {
+            return translate_until_stopped()
+              .handle_exception([this](const std::exception_ptr& ex) {
                   auto log_level = ssx::is_shutdown_exception(ex)
                                      ? ss::log_level::debug
                                      : ss::log_level::warn;
@@ -322,6 +323,19 @@ ss::future<> partition_translator::init(
                     "[{}] Encountered exception in translation loop: {}",
                     ex,
                     _data_source->ntp());
+              })
+              .then([this] {
+                  // discard any inflight state and start from scratch
+                  return _translation_ctx->discard().then_wrapped(
+                    [this](ss::future<> f) {
+                        if (f.failed()) {
+                            vlog(
+                              _logger.warn,
+                              "Exception cleaning up inflight translation: {}",
+                              f.get_exception());
+                        }
+                        return ss::make_ready_future();
+                    });
               });
         });
     });
