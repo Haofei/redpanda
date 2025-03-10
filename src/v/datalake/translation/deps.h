@@ -226,6 +226,22 @@ public:
       ss::lw_shared_ptr<translation_probe>);
 };
 
+class translation_lag_tracker {
+public:
+    translation_lag_tracker() = default;
+    translation_lag_tracker(const translation_lag_tracker&) = delete;
+    translation_lag_tracker& operator=(const translation_lag_tracker&) = delete;
+    translation_lag_tracker(translation_lag_tracker&&) = delete;
+    translation_lag_tracker& operator=(translation_lag_tracker&&) = delete;
+
+    virtual ~translation_lag_tracker() = default;
+
+    virtual bool should_finish_inflight_translation() = 0;
+
+    static std::unique_ptr<translation_lag_tracker> make_default_lag_tracker(
+      ss::lw_shared_ptr<cluster::partition>, cluster::topic_table&);
+};
+
 std::unique_ptr<table_creator>
 make_default_table_creator(coordinator::frontend&);
 
