@@ -977,11 +977,20 @@ class ConsumerGroupTest(RedpandaTest):
                     hwm_by_tp.setdefault(key, []).append(s.value)
             return [max(hwm) for hwm in hwm_by_tp.values()]
 
-        def metrics_lag(metrics):
+        def metrics_lag_sum(metrics):
             # Arbitrarily reduce across nodes with max, there should be only one
             return max(
                 s.value
                 for s in metrics["redpanda_kafka_consumer_group_lag_sum"].
+                label_filter({
+                    "redpanda_group": group
+                }).samples)
+
+        def metrics_lag_max(metrics):
+            # Arbitrarily reduce across nodes with max, there should be only one
+            return max(
+                s.value
+                for s in metrics["redpanda_kafka_consumer_group_lag_max"].
                 label_filter({
                     "redpanda_group": group
                 }).samples)
@@ -1001,7 +1010,8 @@ class ConsumerGroupTest(RedpandaTest):
             metrics_committed(metrics)
 
         # Consumers that have not committed yet should have no lag
-        assert metrics_lag(metrics) == 0
+        assert metrics_lag_sum(metrics) == 0
+        assert metrics_lag_max(metrics) == 0
 
         self.logger.info("Committing")
         for consumer in consumers:
@@ -1015,6 +1025,10 @@ class ConsumerGroupTest(RedpandaTest):
         expected_committed_sum = sum(
             max(0, tp.offset) for consumer in consumers
             for tp in consumer.committed(consumer.assignment()) or [])
+        expected_lag_max = max(
+            produced_offsets[TopicPartition(tp.topic, tp.partition)] -
+            tp.offset for consumer in consumers
+            for tp in (consumer.committed(consumer.assignment()) or []))
 
         metrics = get_group_metrics_from_nodes()
         committed_metrics = metrics_committed(metrics)
@@ -1023,7 +1037,8 @@ class ConsumerGroupTest(RedpandaTest):
         hwm_metrics = metrics_hwm(metrics)
         hwm_sum = sum(hwm_metrics)
         hwm_len = len(hwm_metrics)
-        lag = metrics_lag(metrics)
+        lag_sum = metrics_lag_sum(metrics)
+        lag_max = metrics_lag_max(metrics)
 
         self.logger.debug(f"Expected HWM sum: {expected_hwm_sum}")
         self.logger.debug(f"Expected committed sum: {expected_committed_sum}")
@@ -1032,7 +1047,8 @@ class ConsumerGroupTest(RedpandaTest):
         self.logger.debug(
             f"Expected lag: {expected_hwm_sum - expected_committed_sum}")
         self.logger.debug(f"Calculated lag: {hwm_sum - committed_sum}")
-        self.logger.debug(f"Metrics lag: {lag}")
+        self.logger.debug(f"Metrics lag sum: {lag_sum}")
+        self.logger.debug(f"Metrics lag max: {lag_max}")
 
         assert expected_hwm_len == committed_len, f"Expected {expected_hwm_len}, got {committed_len}. Not all partitions were consumed, tweak the produce and consume counts"
 
@@ -1041,7 +1057,9 @@ class ConsumerGroupTest(RedpandaTest):
         #Check redpanda_kafka_consumer_group_committed_offset
         assert expected_committed_sum == committed_sum, f"Expected {expected_committed_sum}, got {committed_sum}"
         # Check redpanda_kafka_consumer_group_lag_sum
-        assert hwm_sum - committed_sum == lag, f"Expected {hwm_sum - committed_sum}, got {lag}"
+        assert hwm_sum - committed_sum == lag_sum, f"Expected {hwm_sum - committed_sum}, got {lag_sum}"
+        # Check redpanda_kafka_consumer_group_lag_max
+        assert expected_lag_max == lag_max, f"Expected {expected_lag_max}, got {lag_max}"
 
         for consumer in consumers:
             consumer.close()
