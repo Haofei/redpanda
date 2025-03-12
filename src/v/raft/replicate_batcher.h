@@ -13,7 +13,6 @@
 
 #include "base/outcome.h"
 #include "container/fragmented_vector.h"
-#include "model/record_batch_reader.h"
 #include "raft/types.h"
 #include "ssx/semaphore.h"
 #include "utils/mutex.h"
