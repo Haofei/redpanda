@@ -379,14 +379,14 @@ ss::future<> log_manager::run_housekeeping_job(
             auto e = std::current_exception();
             if (ssx::is_shutdown_exception(e)) {
                 vlog(
-                  stlog.debug,
+                  gclog.debug,
                   "Shutdown error caught in run_housekeeping_job({}): {}",
                   ctx,
                   e);
                 continue;
             }
             vlog(
-              stlog.info,
+              gclog.info,
               "Error processing run_housekeeping_job({}): {}",
               ctx,
               e);
