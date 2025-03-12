@@ -39,12 +39,11 @@ replicate_batcher::item::item(
     if (_replicate_opts.timeout) {
         _timeout_timer.arm(_replicate_opts.timeout.value());
     }
-    if (_replicate_opts.as) {
-        auto& as = _replicate_opts.as->get();
-        if (as.abort_requested()) {
+    if (_replicate_opts.as) [[unlikely]] {
+        _abort_sub = _replicate_opts.as->get().subscribe(
+          [this] noexcept { mark_as_aborted(); });
+        if (!_abort_sub) {
             mark_as_aborted();
-        } else {
-            _abort_sub = as.subscribe([this] noexcept { mark_as_aborted(); });
         }
     }
 }
