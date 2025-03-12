@@ -4040,7 +4040,7 @@ configuration::configuration()
       "allow to run at a given time. If a translation is requested but the "
       "number of running translations exceeds this value, the request will be "
       "put to sleep temporarily, polling until capacity becomes available.",
-      {.needs_restart = needs_restart::yes, .visibility = visibility::tunable},
+      {.needs_restart = needs_restart::no, .visibility = visibility::tunable},
       4,
       {.min = 1, .max = 8})
   , datalake_scheduler_time_slice_ms(
