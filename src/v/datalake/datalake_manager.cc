@@ -99,7 +99,6 @@ datalake_manager::datalake_manager(
   , _location_provider(cloud_io->local().provider(), bucket_name)
   , _schema_registry(schema::registry::make_default(sr_api))
   , _catalog_factory(std::move(catalog_factory))
-  , _type_resolver(std::make_unique<record_schema_resolver>(*_schema_registry))
   // TODO: The cache size is currently arbitrary. Figure out a more reasoned
   // size and allocate a share of the datalake memory semaphore to this cache.
   , _schema_cache(std::make_unique<chunked_schema_cache>(
