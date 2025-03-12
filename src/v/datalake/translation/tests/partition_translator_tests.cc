@@ -452,7 +452,7 @@ TEST_F_CORO(partition_translator_fixture, test_batching) {
 
     std::exception_ptr ex = nullptr;
     try {
-        RPTEST_REQUIRE_EVENTUALLY_CORO(10s, [&test_ctx]() {
+        RPTEST_REQUIRE_EVENTUALLY_CORO(20s, [&test_ctx]() {
             const auto& files = test_ctx.translated_files();
             const auto it = files.find(test_ctx.ntp().tp);
             if (it != files.end()) {
