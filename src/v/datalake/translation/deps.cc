@@ -415,8 +415,10 @@ public:
             _discard_translated_state = false;
         }
         if (_discard_translated_state) {
-            return ss::make_exception_future(
-              "state changed, reset translation");
+            return std::move(reader).release()->finally().then([] {
+                return ss::make_exception_future(
+                  "state changed, reset translation");
+            });
         }
         return _in_progress_translation->translate_once(std::move(reader), as);
     }
