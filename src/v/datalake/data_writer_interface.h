@@ -59,14 +59,6 @@ public:
     virtual ~writer_mem_tracker() = default;
 
     /**
-     * Reserves `bytes` worth of memory. If the memory is already available
-     * (due to unused bytes from prior reservations), does nothing. May not be
-     * called concurrently with other methods.
-     */
-    virtual ss::future<>
-    maybe_reserve_memory(size_t bytes, ss::abort_source&) = 0;
-
-    /**
      * Notify the mem tracker of current memory usage. The writer may
      * choose to compress/shrink memory upon which the tracker must be
      * notified of the current usage. May not be called concurrently with

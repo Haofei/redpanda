@@ -23,9 +23,6 @@
 namespace datalake {
 class noop_mem_tracker : public writer_mem_tracker {
 public:
-    ss::future<> maybe_reserve_memory(size_t, ss::abort_source&) override {
-        return ss::make_ready_future<>();
-    }
     ss::future<>
     update_current_memory_usage(size_t, ss::abort_source&) override {
         return ss::make_ready_future<>();

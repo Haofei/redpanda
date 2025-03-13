@@ -41,45 +41,31 @@ ss::future<cluster::errc> wait_stm_translated(
 }
 } // namespace
 
-ss::future<> noop_mem_tracker::maybe_reserve_memory(size_t, ss::abort_source&) {
-    return ss::make_ready_future<>();
-}
 ss::future<>
 noop_mem_tracker::update_current_memory_usage(size_t, ss::abort_source&) {
     return ss::make_ready_future<>();
 }
 void noop_mem_tracker::release() {}
 
-ss::future<> writer_reservations_impl::maybe_reserve_memory(
-  size_t bytes, ss::abort_source& as) {
-    while (_available_memory < bytes) {
+ss::future<> writer_reservations_impl::update_current_memory_usage(
+  size_t new_used_bytes, ss::abort_source& as) {
+    _current_used_bytes = new_used_bytes;
+    // todo: as a potential optimization we can choose to release bytes if the
+    // new usage is less than current
+    while (_current_used_bytes > _reservations.count()) {
+        // reserve any deficit
         auto reservation = co_await _reservations_tracker.reserve_memory(as);
-        _available_memory += reservation.count();
         if (_reservations.count()) {
             _reservations.adopt(std::move(reservation));
         } else {
             _reservations = std::move(reservation);
         }
     }
-    _available_memory -= bytes;
-    co_return;
-}
-
-ss::future<> writer_reservations_impl::update_current_memory_usage(
-  size_t used_bytes, ss::abort_source&) {
-    auto total_reserved = _reservations.count();
-    vassert(
-      used_bytes <= total_reserved,
-      "Used more bytes {} than reserved {}",
-      used_bytes,
-      total_reserved);
-    _available_memory = total_reserved - used_bytes;
-    return ss::make_ready_future<>();
 }
 
 void writer_reservations_impl::release() {
-    _available_memory = 0;
-    _reservations.release();
+    _current_used_bytes = 0;
+    _reservations.return_all();
 }
 
 // Creates or alters the table by delegating to the coordinator.
