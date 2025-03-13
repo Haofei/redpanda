@@ -87,6 +87,9 @@ ss::future<std::vector<cpu_profiler::shard_samples>> cpu_profiler::results(
                 std::move(shard_result.samples));
               return results;
           });
+        // sort by shard ID so the shard id lines up with the vector index
+        std::ranges::sort(
+          results, [](auto& l, auto& r) { return l.shard < r.shard; });
     }
 
     co_return results;

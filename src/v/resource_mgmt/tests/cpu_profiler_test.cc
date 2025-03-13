@@ -23,7 +23,6 @@
 
 #include <boost/test/unit_test.hpp>
 
-#include <algorithm>
 #include <chrono>
 #include <cstddef>
 #include <memory>
@@ -99,8 +98,12 @@ SEASTAR_THREAD_TEST_CASE(test_cpu_profiler_enable_override) {
                        })
                        .get();
 
-    for (auto& shard_results : results) {
+    BOOST_REQUIRE_EQUAL(ss::smp::count, results.size());
+
+    for (ss::shard_id shard_id = 0; shard_id < ss::smp::count; ++shard_id) {
+        auto& shard_results = results[shard_id];
         BOOST_TEST(shard_results.samples.size() >= 1);
+        BOOST_REQUIRE_EQUAL(shard_id, shard_results.shard);
     }
 
     // CPU profiler should be disabled so if we wait some time and collect the
