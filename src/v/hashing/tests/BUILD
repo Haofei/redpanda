@@ -1,4 +1,4 @@
-load("//bazel:test.bzl", "redpanda_cc_bench", "redpanda_cc_btest", "redpanda_cc_btest_no_seastar")
+load("//bazel:test.bzl", "redpanda_cc_bench", "redpanda_cc_btest", "redpanda_cc_btest_no_seastar", "redpanda_cc_gtest")
 
 redpanda_cc_btest(
     name = "secure_hash_test",
@@ -22,6 +22,22 @@ redpanda_cc_btest_no_seastar(
     deps = [
         "//src/v/hashing:xx",
         "//src/v/utils:named_type",
+    ],
+)
+
+redpanda_cc_gtest(
+    name = "murmur_hash_test",
+    timeout = "short",
+    srcs = [
+        "murmur_tests.cc",
+    ],
+    cpu = 1,
+    deps = [
+        "//src/v/base",
+        "//src/v/hashing:murmur",
+        "//src/v/test_utils:gtest",
+        "@googletest//:gtest",
+        "@seastar",
     ],
 )
 
