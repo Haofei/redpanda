@@ -72,7 +72,9 @@ public:
      * notified of the current usage. May not be called concurrently with
      * other methods.
      */
-    virtual void update_current_memory_usage(size_t current_bytes_usage) = 0;
+    virtual ss::future<>
+    update_current_memory_usage(size_t current_bytes_usage, ss::abort_source&)
+      = 0;
 
     /**
      * Releases all the reservations. After this caller, the reserved bytes

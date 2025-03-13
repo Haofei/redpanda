@@ -26,7 +26,10 @@ public:
     ss::future<> maybe_reserve_memory(size_t, ss::abort_source&) override {
         return ss::make_ready_future<>();
     }
-    void update_current_memory_usage(size_t) override {}
+    ss::future<>
+    update_current_memory_usage(size_t, ss::abort_source&) override {
+        return ss::make_ready_future<>();
+    }
     void release() override {}
 };
 

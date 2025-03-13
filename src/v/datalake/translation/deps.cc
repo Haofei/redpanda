@@ -44,7 +44,10 @@ ss::future<cluster::errc> wait_stm_translated(
 ss::future<> noop_mem_tracker::maybe_reserve_memory(size_t, ss::abort_source&) {
     return ss::make_ready_future<>();
 }
-void noop_mem_tracker::update_current_memory_usage(size_t) {}
+ss::future<>
+noop_mem_tracker::update_current_memory_usage(size_t, ss::abort_source&) {
+    return ss::make_ready_future<>();
+}
 void noop_mem_tracker::release() {}
 
 ss::future<> writer_reservations_impl::maybe_reserve_memory(
@@ -62,7 +65,8 @@ ss::future<> writer_reservations_impl::maybe_reserve_memory(
     co_return;
 }
 
-void writer_reservations_impl::update_current_memory_usage(size_t used_bytes) {
+ss::future<> writer_reservations_impl::update_current_memory_usage(
+  size_t used_bytes, ss::abort_source&) {
     auto total_reserved = _reservations.count();
     vassert(
       used_bytes <= total_reserved,
@@ -70,6 +74,7 @@ void writer_reservations_impl::update_current_memory_usage(size_t used_bytes) {
       used_bytes,
       total_reserved);
     _available_memory = total_reserved - used_bytes;
+    return ss::make_ready_future<>();
 }
 
 void writer_reservations_impl::release() {

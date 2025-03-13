@@ -30,7 +30,8 @@ namespace datalake::translation {
 class noop_mem_tracker : public writer_mem_tracker {
 public:
     ss::future<> maybe_reserve_memory(size_t bytes, ss::abort_source&) override;
-    void update_current_memory_usage(size_t) override;
+    ss::future<>
+    update_current_memory_usage(size_t, ss::abort_source&) override;
     void release() override;
 };
 
@@ -41,7 +42,8 @@ public:
       : _reservations_tracker(scheduling_reservations) {}
 
     ss::future<> maybe_reserve_memory(size_t bytes, ss::abort_source&) override;
-    void update_current_memory_usage(size_t) override;
+    ss::future<>
+    update_current_memory_usage(size_t, ss::abort_source&) override;
     void release() override;
 
 private:
