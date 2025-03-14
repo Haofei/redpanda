@@ -41,37 +41,39 @@ ss::future<cluster::errc> wait_stm_translated(
 }
 } // namespace
 
-ss::future<> noop_mem_tracker::maybe_reserve_memory(size_t, ss::abort_source&) {
+ss::future<>
+noop_mem_tracker::update_current_memory_usage(size_t, ss::abort_source&) {
     return ss::make_ready_future<>();
 }
-void noop_mem_tracker::update_current_memory_usage(size_t) {}
 void noop_mem_tracker::release() {}
 
-ss::future<> writer_reservations_impl::maybe_reserve_memory(
-  size_t bytes, ss::abort_source& as) {
-    while (_available_memory < bytes) {
+ss::future<> writer_reservations_impl::update_current_memory_usage(
+  size_t new_used_bytes, ss::abort_source& as) {
+    _current_used_bytes = new_used_bytes;
+    // todo: as a potential optimization we can choose to release bytes if the
+    // new usage is less than current
+    while (_current_used_bytes > _reservations.count()) {
+        // reserve any deficit
         auto reservation = co_await _reservations_tracker.reserve_memory(as);
-        _available_memory += reservation.count();
-        _total_reserved_memory += reservation.count();
-        _reservations.push_back(std::move(reservation));
+        if (_reservations.count()) {
+            _reservations.adopt(std::move(reservation));
+        } else {
+            _reservations = std::move(reservation);
+        }
     }
-    _available_memory -= bytes;
-    co_return;
-}
-
-void writer_reservations_impl::update_current_memory_usage(size_t used_bytes) {
-    vassert(
-      used_bytes <= _total_reserved_memory,
-      "Used more bytes {} than reserved {}",
-      used_bytes,
-      _total_reserved_memory);
-    _available_memory = _total_reserved_memory - used_bytes;
 }
 
 void writer_reservations_impl::release() {
-    _available_memory = 0;
-    _total_reserved_memory = 0;
-    _reservations.clear();
+    _current_used_bytes = 0;
+    _reservations.return_all();
+}
+
+size_t writer_reservations_impl::current_usage() const {
+    return _current_used_bytes;
+}
+
+size_t writer_reservations_impl::total_reserved() const {
+    return _reservations.count();
 }
 
 // Creates or alters the table by delegating to the coordinator.

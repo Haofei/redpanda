@@ -29,8 +29,8 @@ namespace datalake::translation {
 
 class noop_mem_tracker : public writer_mem_tracker {
 public:
-    ss::future<> maybe_reserve_memory(size_t bytes, ss::abort_source&) override;
-    void update_current_memory_usage(size_t) override;
+    ss::future<>
+    update_current_memory_usage(size_t, ss::abort_source&) override;
     void release() override;
 };
 
@@ -40,15 +40,17 @@ public:
       scheduling::reservations_tracker& scheduling_reservations)
       : _reservations_tracker(scheduling_reservations) {}
 
-    ss::future<> maybe_reserve_memory(size_t bytes, ss::abort_source&) override;
-    void update_current_memory_usage(size_t) override;
+    ss::future<>
+    update_current_memory_usage(size_t, ss::abort_source&) override;
     void release() override;
 
+    size_t current_usage() const;
+    size_t total_reserved() const;
+
 private:
-    size_t _available_memory{0};
-    size_t _total_reserved_memory{0};
+    size_t _current_used_bytes{0};
     scheduling::reservations_tracker& _reservations_tracker;
-    chunked_vector<ssx::semaphore_units> _reservations;
+    ssx::semaphore_units _reservations;
 };
 
 class coordinator_api {

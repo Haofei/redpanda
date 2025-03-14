@@ -14,6 +14,8 @@
 #include "model/tests/random_batch.h"
 #include "test_utils/async.h"
 
+#include <seastar/util/defer.hh>
+
 using namespace datalake::translation;
 using namespace datalake::coordinator;
 
@@ -471,4 +473,63 @@ TEST_F_CORO(partition_translator_fixture, test_batching) {
     if (ex) {
         RPTEST_FAIL_CORO(fmt::to_string(ex));
     }
+}
+
+using scheduling::scheduler_fixture;
+
+TEST_F_CORO(scheduler_fixture, test_writer_reservations_accounting) {
+    auto& reservations = *_scheduler->reservations();
+    {
+        writer_reservations_impl writer{reservations};
+
+        auto cleanup = ss::defer([&writer] { writer.release(); });
+
+        ss::abort_source as;
+
+        ASSERT_EQ_CORO(writer.current_usage(), 0);
+        ASSERT_EQ_CORO(writer.total_reserved(), 0);
+
+        auto current_usage = 1_MiB;
+        // update initial usage, should result in a reservation
+        co_await writer.update_current_memory_usage(current_usage, as);
+
+        ASSERT_EQ_CORO(writer.current_usage(), current_usage);
+        ASSERT_EQ_CORO(writer.total_reserved(), block_size);
+
+        // try 3 more times, we are still within the block limit;
+        while (current_usage <= block_size) {
+            co_await writer.update_current_memory_usage(current_usage, as);
+            current_usage += 1_MiB;
+        }
+
+        ASSERT_EQ_CORO(writer.current_usage(), block_size);
+        ASSERT_EQ_CORO(writer.total_reserved(), block_size);
+
+        current_usage += 1_MiB;
+        // update again, should reserve a new block.
+        co_await writer.update_current_memory_usage(current_usage, as);
+
+        ASSERT_EQ_CORO(writer.current_usage(), current_usage);
+        ASSERT_EQ_CORO(writer.total_reserved(), 2 * block_size);
+
+        // exhaust all memory
+        while (writer.current_usage() != total_memory) {
+            current_usage += 1_MiB;
+            co_await writer.update_current_memory_usage(current_usage, as);
+        }
+
+        ss::promise<> done;
+        // update again, should block on reservations due to memory limit
+        // exhaustion.
+        auto f = ss::with_timeout(
+          ss::steady_clock_type::now() + 500ms,
+          writer.update_current_memory_usage(current_usage + 1_MiB, as)
+            .finally([&done] { done.set_value(); }));
+
+        ASSERT_THROW_CORO(co_await std::move(f), ss::timed_out_error);
+
+        as.request_abort();
+        co_await std::move(done).get_future();
+    }
+    ASSERT_EQ_CORO(reservations.allocated_memory(), 0);
 }
