@@ -299,10 +299,24 @@ ss::future<> partition_translator::translate_until_stopped() {
 
         auto finish_result = co_await _translation_ctx->finish(rcn, _as);
         if (finish_result.has_error()) {
+            auto error = finish_result.error();
+            vlog(
+              _logger.trace, "Translation finish ran into an error: {}", error);
+            if (
+              error == translation_errc::no_data
+              || error == translation_errc::discard_error) {
+                // no data -- translation is past its lag window but nothing got
+                // translated.
+                // discard -- certain properties changed that
+                // requiring a translator reset
+                scoped_set_jitter.cancel();
+                needs_jitter = false;
+                continue;
+            }
             vlog(
               _logger.warn,
               "Failed to translate with error: {}, retrying",
-              finish_result.error());
+              error);
             continue;
         }
         auto translation_result = std::move(finish_result.value());
