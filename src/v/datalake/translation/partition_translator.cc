@@ -168,7 +168,8 @@ bool partition_translator::should_finish_inflight_translation() const {
     auto lag_window_ended = _lag_tracking->should_finish_inflight_translation();
     vlog(
       _logger.trace,
-      "current bytes flushed: {}, lag window roll: {}",
+      "Checking if translation can be finished, current bytes flushed: {}, lag "
+      "window roll: {}",
       bytes_flushed_pending_upload,
       lag_window_ended);
     return bytes_flushed_pending_upload >= partition_flushed_bytes_limit
@@ -185,7 +186,7 @@ ss::future<> partition_translator::translate_until_stopped() {
     bool needs_jitter = false;
     while (!_as.abort_requested()) {
         if (needs_jitter) {
-            co_await ss::sleep_abortable(_jitter.next_duration(), _as);
+            co_await ss::sleep_abortable(_jitter.next_jitter_duration(), _as);
         }
         // We'll keep track of if we exit early out of this iteration, in which
         // case the next iteration should see some jitter.
@@ -200,6 +201,8 @@ ss::future<> partition_translator::translate_until_stopped() {
             vlog(_logger.warn, "Failed to fetch translated offset: {}", result);
             continue;
         }
+
+        vlog(_logger.trace, "Latest coordinator fetch result: {}", result);
 
         auto last_committed_offset = result.last_iceberg_committed_offset;
         // Update partition metrics. Note that last committed offset here
@@ -295,6 +298,8 @@ ss::future<> partition_translator::translate_until_stopped() {
         }
 
         auto translation_result = co_await _translation_ctx->finish(rcn, _as);
+        vlog(
+          _logger.trace, "Translation finish result: {}", translation_result);
         if (!translation_result) {
             vlog(_logger.warn, "Failed to translate, retrying");
             continue;
