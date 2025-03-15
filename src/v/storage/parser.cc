@@ -207,7 +207,14 @@ ss::future<result<stop_parser>> continuous_batch_parser::consume_records() {
       .then(
         [this](result<iobuf, parser_errc> record)
           -> ss::future<result<stop_parser>> {
-            if (!record) {
+            if (unlikely(!record)) {
+                vlog(
+                  stlog.error,
+                  "parser::consume_records error: {} (record_batch_header: {}, "
+                  "batch consumer: {}) ",
+                  to_string(record.error()),
+                  *_header,
+                  *_consumer);
                 return ss::make_ready_future<result<stop_parser>>(
                   record.error());
             }
