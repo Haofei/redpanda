@@ -146,7 +146,16 @@ class DatalakeE2ETests(RedpandaTest):
         count = 100
         table_name = f"redpanda.{self.topic_name}"
 
-        protobuf_schema = """
+        protobuf_schema_v1 = """
+        syntax = "proto3";
+
+        message Person {
+          string name = 1;
+          int32 id = 2;
+          string email = 3;
+        }
+        """
+        protobuf_schema_v2 = """
         syntax = "proto3";
 
         message Address {
@@ -191,18 +200,7 @@ class DatalakeE2ETests(RedpandaTest):
         person_desc = pool.FindMessageTypeByName("Person")
         Person = factory.GetPrototype(person_desc)
 
-        with DatalakeServices(self.test_ctx,
-                              redpanda=self.redpanda,
-                              include_query_engines=[query_engine],
-                              catalog_type=catalog_type) as dl:
-            rpk = RpkTool(self.redpanda)
-            registered_schema = rpk.create_schema_from_str(
-                subject=f"{self.topic_name}-value",
-                schema=protobuf_schema,
-                schema_suffix="proto",
-            )
-            dl.create_iceberg_enabled_topic(
-                self.topic_name, iceberg_mode="latest_protobuf_value:Person")
+        def produce_protos():
             producer = Producer({'bootstrap.servers': self.redpanda.brokers()})
             for i in range(count):
                 record = json.dumps({
@@ -221,7 +219,62 @@ class DatalakeE2ETests(RedpandaTest):
                 producer.produce(topic=self.topic_name,
                                  value=person_proto.SerializeToString())
             producer.flush()
+
+        with DatalakeServices(self.test_ctx,
+                              redpanda=self.redpanda,
+                              include_query_engines=[query_engine],
+                              catalog_type=catalog_type) as dl:
+            rpk = RpkTool(self.redpanda)
+            rpk.create_schema_from_str(
+                subject=f"{self.topic_name}-value",
+                schema=protobuf_schema_v1,
+                schema_suffix="proto",
+            )
+            dl.create_iceberg_enabled_topic(
+                self.topic_name, iceberg_mode="latest_protobuf_value:Person")
+            produce_protos()
             dl.wait_for_translation(self.topic_name, msg_count=count)
+
+            if query_engine == QueryEngineType.TRINO:
+                trino = dl.trino()
+                trino_expected_out = [
+                    ('redpanda', 'row(partition integer, offset bigint, timestamp timestamp(6), headers array(row(key varbinary, value varbinary)), key varbinary)', '', ''),
+                    ('name', 'varchar', '', ''),
+                    ('id', 'integer', '', ''),
+                    ('email', 'varchar', '', ''),
+                ] # yapf: disable
+                trino_describe_out = trino.run_query_fetch_all(
+                    f"describe {table_name}")
+                assert trino_describe_out == trino_expected_out, str(
+                    trino_describe_out)
+            else:
+                spark = dl.spark()
+                spark_expected_out = [
+                    ('redpanda', 'struct<partition:int,offset:bigint,timestamp:timestamp_ntz,headers:array<struct<key:binary,value:binary>>,key:binary>', None),
+                    ('name', 'string', None),
+                    ('id', 'int', None),
+                    ('email', 'string', None),
+                    ('', '', ''),
+                    ('# Partitioning', '', ''),
+                    ('Part 0', 'hours(redpanda.timestamp)', '')
+                ] # yapf: disable
+                spark_describe_out = spark.run_query_fetch_all(
+                    f"describe {table_name}")
+                assert spark_describe_out == spark_expected_out, str(
+                    spark_describe_out)
+
+            # Be absolutely sure that the latest schema is being used by the
+            # translator by waiting for the cache to expire the latest schema.
+            rpk.create_schema_from_str(
+                subject=f"{self.topic_name}-value",
+                schema=protobuf_schema_v2,
+                schema_suffix="proto",
+            )
+            rpk.cluster_config_set('iceberg_latest_schema_cache_ttl_ms', '500')
+            time.sleep(1)
+            produce_protos()
+            dl.wait_for_translation_until_offset(self.topic_name,
+                                                 2 * count - 1)
 
             if query_engine == QueryEngineType.TRINO:
                 trino = dl.trino()

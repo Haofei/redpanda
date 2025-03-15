@@ -9,6 +9,7 @@
  */
 #include "base/vassert.h"
 #include "bytes/bytes.h"
+#include "config/property.h"
 #include "datalake/logger.h"
 #include "datalake/record_schema_resolver.h"
 #include "gmock/gmock.h"
@@ -274,7 +275,7 @@ TEST_F(RecordSchemaResolverTest, TestLatestSubjectSchema) {
       *sr,
       model::topic("foo"),
       "datalake.proto.nested_message.inner_message_t1",
-      0s,
+      config::mock_binding(std::chrono::milliseconds(0s)),
       std::nullopt);
     auto res = resolver.resolve_buf_type(buf.copy()).get();
     ASSERT_FALSE(res.has_error());

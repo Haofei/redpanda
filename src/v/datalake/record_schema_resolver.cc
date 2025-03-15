@@ -338,7 +338,7 @@ latest_protobuf_schema_resolver::latest_protobuf_schema_resolver(
   schema::registry& sr,
   model::topic_view topic_name,
   ss::sstring full_message_name,
-  ss::lowres_clock::duration cache_duration,
+  config::binding<std::chrono::milliseconds> cache_duration,
   std::optional<std::reference_wrapper<schema_cache>> sc)
   : sr_(&sr)
   , subject_(fmt::format("{}-value", topic_name()))
@@ -379,9 +379,12 @@ checked<pb_descriptor_lookup_result, type_resolver::errc> lookup_descriptor(
 ss::future<checked<type_and_buf, type_resolver::errc>>
 latest_protobuf_schema_resolver::resolve_buf_type(
   std::optional<iobuf> b) const {
+    auto duration = std::chrono::duration_cast<ss::lowres_clock::duration>(
+      cache_duration_());
     if (
       latest_cached_schema_
-      && latest_cached_schema_->evict_deadline > ss::lowres_clock::now()) {
+      && latest_cached_schema_->created_time + duration
+           > ss::lowres_clock::now()) {
         co_return type_and_buf{
           .type = std::make_optional(latest_cached_schema_->type.copy()),
           .parsable_buf = std::move(b),
@@ -427,8 +430,7 @@ latest_protobuf_schema_resolver::resolve_buf_type(
           .type = std::move(type),
           .type_name = res.descriptor.get().name(),
         };
-        latest_cached_schema_.emplace(
-          resolved.copy(), ss::lowres_clock::now() + cache_duration_);
+        latest_cached_schema_.emplace(resolved.copy(), ss::lowres_clock::now());
         co_return type_and_buf{
           .type = std::move(resolved),
           .parsable_buf = std::move(b),

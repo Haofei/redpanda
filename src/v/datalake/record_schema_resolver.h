@@ -10,6 +10,7 @@
 #pragma once
 
 #include "base/seastarx.h"
+#include "config/property.h"
 #include "datalake/schema_identifier.h"
 #include "iceberg/datatypes.h"
 #include "metrics/metrics.h"
@@ -182,7 +183,7 @@ public:
       schema::registry& sr,
       model::topic_view topic_name,
       ss::sstring full_message_name,
-      ss::lowres_clock::duration cache_duration,
+      config::binding<std::chrono::milliseconds> cache_duration,
       std::optional<std::reference_wrapper<schema_cache>> sc);
     latest_protobuf_schema_resolver(const latest_protobuf_schema_resolver&)
       = delete;
@@ -205,11 +206,11 @@ private:
     schema::registry* sr_;
     pandaproxy::schema_registry::subject subject_;
     ss::sstring full_message_name_;
-    ss::lowres_clock::duration cache_duration_;
+    config::binding<std::chrono::milliseconds> cache_duration_;
     std::optional<std::reference_wrapper<schema_cache>> cache_;
     struct cached_schema {
         resolved_type type;
-        ss::lowres_clock::time_point evict_deadline;
+        ss::lowres_clock::time_point created_time;
     };
     mutable std::optional<cached_schema> latest_cached_schema_;
 };

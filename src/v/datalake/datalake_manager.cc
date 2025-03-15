@@ -54,13 +54,11 @@ static std::unique_ptr<type_resolver> make_type_resolver(
     case model::iceberg_mode::variant::value_schema_id_prefix:
         return std::make_unique<record_schema_resolver>(sr, cache);
     case model::iceberg_mode::variant::latest_protobuf_value:
-        static constexpr auto cache_duration = 5min;
         return std::make_unique<latest_protobuf_schema_resolver>(
           sr,
           topic_name,
           mode.protobuf_full_name(),
-          std::chrono::duration_cast<ss::lowres_clock::duration>(
-            cache_duration),
+          config::shard_local_cfg().iceberg_latest_schema_cache_ttl_ms.bind(),
           cache);
     }
 }
