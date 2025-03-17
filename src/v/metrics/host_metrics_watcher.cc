@@ -1,6 +1,7 @@
 #include "host_metrics_watcher.h"
 
 #include "base/vlog.h"
+#include "config/configuration.h"
 
 #include <seastar/core/abort_source.hh>
 #include <seastar/core/future.hh>
@@ -67,6 +68,12 @@ void setup_parser(
 
 host_metrics_watcher::host_metrics_watcher(ss::logger& log)
   : _logger(log) {
+    if (!config::shard_local_cfg().enable_host_metrics()) {
+        return;
+    }
+
+    vlog(log.info, "Setting up host metrics exporter");
+
     setup_parser(
       _logger,
       _diskstats,
