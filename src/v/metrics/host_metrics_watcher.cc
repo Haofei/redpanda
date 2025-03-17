@@ -12,6 +12,7 @@
 
 #include <exception>
 #include <ranges>
+#include <unordered_map>
 
 namespace metrics {
 
@@ -86,6 +87,20 @@ host_metrics_watcher::host_metrics_watcher(ss::logger& log)
               setup_metrics_for_disk(diskname);
           }
       });
+
+    setup_parser(
+      _logger,
+      _netstats,
+      "/proc/net/netstat",
+      [this]() { maybe_refresh_netstat(); },
+      [this]() { setup_netstat_metrics(); });
+
+    setup_parser(
+      _logger,
+      _snmp_stats,
+      "/proc/net/snmp",
+      [this]() { maybe_refresh_snmp(); },
+      [this]() { setup_snmp_metrics(); });
 }
 
 void host_metrics_watcher::setup_metrics_for_disk(const std::string& diskname) {
@@ -113,6 +128,55 @@ void host_metrics_watcher::setup_metrics_for_disk(const std::string& diskname) {
     }
 }
 
+void host_metrics_watcher::setup_netstat_metrics() {
+    _metrics.add_group(
+      "host_netstat",
+      {
+        seastar::metrics::make_counter(
+          "bytes_received",
+          [this] {
+              maybe_refresh_netstat();
+              return _netstats.stats.bytes_received;
+          },
+          seastar::metrics::description("Host IP bytes received")),
+        seastar::metrics::make_counter(
+          "bytes_sent",
+          [this] {
+              maybe_refresh_netstat();
+              return _netstats.stats.bytes_sent;
+          },
+          seastar::metrics::description("Host IP bytes sent")),
+      });
+}
+
+void host_metrics_watcher::setup_snmp_metrics() {
+    _metrics.add_group(
+      "host_snmp",
+      {
+        seastar::metrics::make_counter(
+          "packets_received",
+          [this] {
+              maybe_refresh_snmp();
+              return _snmp_stats.stats.packets_received;
+          },
+          seastar::metrics::description("Host IP packets received")),
+        seastar::metrics::make_counter(
+          "packets_sent",
+          [this] {
+              maybe_refresh_snmp();
+              return _snmp_stats.stats.packets_sent;
+          },
+          seastar::metrics::description("Host IP packets sent")),
+        seastar::metrics::make_gauge(
+          "tcp_established",
+          [this] {
+              maybe_refresh_snmp();
+              return _snmp_stats.stats.tcp_established;
+          },
+          seastar::metrics::description("Host TCP established connections")),
+      });
+}
+
 void host_metrics_watcher::parse_diskstats(
   std::string_view diskstats_lines, diskstats_map& diskstats) {
     for (auto diskline : std::views::split(diskstats_lines, '\n')) {
@@ -137,6 +201,77 @@ void host_metrics_watcher::parse_diskstats(
             stats = std::stoull(new_stats);
         }
     }
+}
+
+std::unordered_map<ss::sstring, std::unordered_map<ss::sstring, uint64_t>>
+parse_net_like(std::string_view netstat_lines) {
+    // There doesn't seem to be good documentation around the netstat files and
+    // less clear whether they are stable so we are parse them in a bit more
+    // generic fashion.
+
+    // section -> fields -> values
+    std::unordered_map<ss::sstring, std::unordered_map<ss::sstring, uint64_t>>
+      netstat_map;
+
+    ss::sstring last_section;
+    std::vector<ss::sstring> last_fields;
+
+    // Files are basically like this:
+    // Foo: Header1 Header2 Header3
+    // Foo: Value1 Value2 Value3
+    // So we parse by going over each line and treat first line as headers and
+    // then next as values
+    for (auto line : std::views::split(netstat_lines, '\n')) {
+        auto fields_view = std::views::split(line, ' ')
+                           | std::views::filter(
+                             [](const auto& s) { return !s.empty(); });
+        auto fields = std::ranges::to<std::vector<std::string>>(fields_view);
+
+        if (fields.size() < 2) {
+            // Bogus: Need at least two columns (section and one header/value)
+            break;
+        }
+
+        if (last_section.empty()) {
+            // header line now
+            last_section = fields[0];
+            auto header_fields = fields | std::views::drop(1);
+            last_fields = std::ranges::to<std::vector<ss::sstring>>(
+              header_fields);
+        } else if (fields[0] != last_section) {
+            // bogus: section changed without values line
+            break;
+        } else {
+            // Parse values
+            auto stat_fields = fields | std::views::drop(1);
+            for (auto [field_name, value] :
+                 std::views::zip(last_fields, stat_fields)) {
+                netstat_map[fields[0]][field_name] = std::stoull(value);
+            }
+            last_section = "";
+            last_fields.clear();
+        }
+    }
+
+    return netstat_map;
+}
+
+// snmp stats are defined here: https://www.rfc-editor.org/rfc/rfc1213
+// For the Linux extensions I couldn't find a proper documentation.
+
+void host_metrics_watcher::parse_netstat(
+  std::string_view netstat_lines, netstat_stats& net_stats) {
+    auto netstat_map = parse_net_like(netstat_lines);
+    net_stats.bytes_received = netstat_map["IpExt:"]["InOctets"];
+    net_stats.bytes_sent = netstat_map["IpExt:"]["OutOctets"];
+}
+
+void host_metrics_watcher::parse_snmp(
+  std::string_view snmp_lines, snmp_stats& snmp_stats) {
+    auto snmp_map = parse_net_like(snmp_lines);
+    snmp_stats.packets_received = snmp_map["Ip:"]["InReceives"];
+    snmp_stats.packets_sent = snmp_map["Ip:"]["OutRequests"];
+    snmp_stats.tcp_established = snmp_map["Tcp:"]["CurrEstab"];
 }
 
 template<typename StatsWrapper, typename ParseF>
@@ -177,6 +312,18 @@ void refresh_stats(StatsWrapper& stats, ss::logger& logger, ParseF parsef) {
 void host_metrics_watcher::maybe_refresh_diskstats() {
     refresh_stats(_diskstats, _logger, [this](const auto& stat_lines) {
         parse_diskstats(stat_lines, _diskstats.stats);
+    });
+}
+
+void host_metrics_watcher::maybe_refresh_netstat() {
+    refresh_stats(_netstats, _logger, [this](const auto& stat_lines) {
+        parse_netstat(stat_lines, _netstats.stats);
+    });
+}
+
+void host_metrics_watcher::maybe_refresh_snmp() {
+    refresh_stats(_snmp_stats, _logger, [this](const auto& stat_lines) {
+        parse_snmp(stat_lines, _snmp_stats.stats);
     });
 }
 

@@ -48,6 +48,17 @@ public:
     // diskname -> diskstats
     using diskstats_map = std::unordered_map<ss::sstring, diskstats>;
 
+    struct netstat_stats {
+        uint64_t bytes_received = 0;
+        uint64_t bytes_sent = 0;
+    };
+
+    struct snmp_stats {
+        uint64_t tcp_established = 0;
+        uint64_t packets_received = 0;
+        uint64_t packets_sent = 0;
+    };
+
     explicit host_metrics_watcher(ss::logger& logger);
 
     // needed for construct_service stuff in `application`
@@ -57,9 +68,20 @@ public:
     static void
     parse_diskstats(std::string_view diskstats_lines, diskstats_map& stats);
 
+    // parse the actual /proc/net/netstat file. static method for testability
+    static void
+    parse_netstat(std::string_view netstat_lines, netstat_stats& stats);
+
+    // parse the actual /proc/net/snmp file. static method for testability
+    static void parse_snmp(std::string_view snmp_lines, snmp_stats& stats);
+
 private:
     void setup_metrics_for_disk(const std::string& diskname);
+    void setup_netstat_metrics();
+    void setup_snmp_metrics();
     void maybe_refresh_diskstats();
+    void maybe_refresh_netstat();
+    void maybe_refresh_snmp();
 
     ss::logger& _logger;
 
@@ -80,6 +102,12 @@ private:
 
     // /proc/diskstats
     metrics_file_info<diskstats_map> _diskstats;
+
+    // /proc/net/netstat
+    metrics_file_info<netstat_stats> _netstats;
+
+    // /proc/net/snmp
+    metrics_file_info<snmp_stats> _snmp_stats;
 
     metrics::internal_metric_groups _metrics;
 };

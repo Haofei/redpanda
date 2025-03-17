@@ -27,10 +27,20 @@ class HostMetricsTest(RedpandaTest):
 
         metrics = list(self.redpanda.metrics(self.redpanda.nodes[0]))
 
-        count = 0
+        disk_count = 0
+        netstat_count = 0
+        snmp_count = 0
         for family in metrics:
             if family.name == "vectorized_host_diskstats_reads":
                 for sample in family.samples:
-                    count = int(sample.value)
+                    disk_count += int(sample.value)
+            if family.name == "vectorized_host_netstat_bytes_received":
+                for sample in family.samples:
+                    netstat_count += int(sample.value)
+            if family.name == "vectorized_host_snmp_packets_received":
+                for sample in family.samples:
+                    snmp_count += int(sample.value)
 
-        assert count > 0, "Expected some reads"
+        assert disk_count > 0, "Expected some disk reads"
+        assert netstat_count > 0, "Expected some received bytes"
+        assert snmp_count > 0, "Expected some received packets"
