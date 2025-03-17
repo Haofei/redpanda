@@ -19,6 +19,7 @@
 
 #include <seastar/core/reactor.hh>
 #include <seastar/core/sstring.hh>
+#include <seastar/core/temporary_buffer.hh>
 #include <seastar/testing/perf_tests.hh>
 
 #include <absl/hash/hash.h>
@@ -26,6 +27,7 @@
 #include <boost/crc.hpp>
 
 #include <cstdint>
+#include <cstdlib>
 
 static constexpr size_t step_bytes = 57;
 
@@ -302,6 +304,17 @@ PERF_TEST(murmur_hash_x86_32, unaligned) {
     return murmurhash3_x86_32_continuous<1, 2, 3>();
 }
 
+PERF_TEST(murmur_hash_x86_32, iobuf) {
+    auto buf = generate_data();
+    iobuf split_buf = random_generators::split_as_iobuf(
+      {reinterpret_cast<const char*>(buf.data()), buf.size()}, 3);
+    perf_tests::start_measuring_time();
+    for (auto i = inner_iters; i--;) {
+        auto s = murmurhash3_x86_32(split_buf);
+        perf_tests::do_not_optimize(s);
+    }
+    perf_tests::stop_measuring_time();
+    return inner_iters;
 }
 
 } // namespace
