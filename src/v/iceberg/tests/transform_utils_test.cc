@@ -8,7 +8,9 @@
  * https://github.com/redpanda-data/redpanda/blob/master/licenses/rcl.md
  */
 
+#include "bytes/iobuf.h"
 #include "bytes/random.h"
+#include "iceberg/bucket_transform_hashing_visitor.h"
 #include "iceberg/transform.h"
 #include "iceberg/transform_utils.h"
 #include "iceberg/values.h"
@@ -296,6 +298,54 @@ TEST(TestTransformApplication, BucketTransform) {
     test_transform_3(test_values.decimal_val_4, 2, 50, 355);
     test_transform_3(test_values.decimal_val_5, 11, 123, 342);
     test_transform_3(test_values.decimal_val_6, 3, 3, 603);
+}
+
+TEST(TestTransformApplication, BucketTransformHashingVisitor) {
+    // test individual hash values from
+    // https://iceberg.apache.org/spec/#appendix-b-32-bit-hash-requirements
+    auto test_hash = [&](const auto& val, int32_t expected) {
+        ASSERT_EQ(bucket_transform_hashing_visitor{}(val), expected);
+    };
+    test_hash(int_value{34}, 2017239379);
+    test_hash(long_value{34}, 2017239379);
+    test_hash(decimal_value{1420}, -500754589);
+    int32_t days_since_epoch_2017_11_16 = 17486;
+    test_hash(date_value{days_since_epoch_2017_11_16}, -653330422);
+    int64_t us_since_midnight_22_31_08 = int64_t{1000000}
+                                         * (8 + 60 * (31 + 60 * 22));
+    test_hash(time_value{us_since_midnight_22_31_08}, -662762989);
+    int64_t us_since_epoch_2017_11_16__22_31_08
+      = int64_t{days_since_epoch_2017_11_16} * 86400 * 1000000
+        + us_since_midnight_22_31_08;
+    test_hash(
+      timestamp_value{us_since_epoch_2017_11_16__22_31_08}, -2047944441);
+    test_hash(
+      timestamp_value{us_since_epoch_2017_11_16__22_31_08 + 1}, -1207196810);
+    test_hash(
+      timestamptz_value{us_since_epoch_2017_11_16__22_31_08}, -2047944441);
+    test_hash(
+      timestamptz_value{us_since_epoch_2017_11_16__22_31_08 + 1}, -1207196810);
+    {
+        iobuf ib;
+        uint8_t s[]{"iceberg"};
+        ib.append(s, sizeof(s) - 1);
+        test_hash(string_value{std::move(ib)}, 1210000089);
+    }
+    test_hash(
+      uuid_value{uuid_t::from_string("f79c3e09-677c-4bbd-a479-3f349cb785e7")},
+      1488055340);
+    {
+        iobuf ib;
+        uint8_t bytes[]{0x00, 0x01, 0x02, 0x03};
+        ib.append(bytes, sizeof(bytes));
+        test_hash(fixed_value{std::move(ib)}, -188683207);
+    }
+    {
+        iobuf ib;
+        uint8_t bytes[]{0x00, 0x01, 0x02, 0x03};
+        ib.append(bytes, sizeof(bytes));
+        test_hash(binary_value{std::move(ib)}, -188683207);
+    }
 }
 
 TEST(TestTransformApplication, NumericTruncateTransform) {

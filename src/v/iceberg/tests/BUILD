@@ -480,7 +480,9 @@ redpanda_cc_gtest(
         "transform_utils_test.cc",
     ],
     deps = [
+        "//src/v/bytes:iobuf",
         "//src/v/bytes:random",
+        "//src/v/iceberg:bucket_transform_hashing_visitor",
         "//src/v/iceberg:transform",
         "//src/v/iceberg:transform_utils",
         "//src/v/iceberg:values",
