@@ -150,7 +150,8 @@ partition_translator::translate_when_notified(kafka::offset begin_offset) {
     }
     vlog(_logger.trace, "starting translation from offset: {}", begin_offset);
     ss::timer<scheduling::clock> cancellation_timer;
-    cancellation_timer.set_callback([&as] { as.request_abort(); });
+    cancellation_timer.set_callback(
+      [&as] { as.request_abort_ex(translator_time_quota_exceeded_error{}); });
 
     auto translation_f
       = _translation_ctx
@@ -270,7 +271,9 @@ ss::future<> partition_translator::run_one_translation_iteration(
         vlog(
           _logger.trace, "starting translation from offset: {}", begin_offset);
         ss::timer<scheduling::clock> cancellation_timer;
-        cancellation_timer.set_callback([&as] { as.request_abort(); });
+        cancellation_timer.set_callback([&as] {
+            as.request_abort_ex(translator_time_quota_exceeded_error{});
+        });
 
         auto translation_f
           = _translation_ctx
@@ -472,7 +475,8 @@ ss::future<> partition_translator::close() noexcept {
     _as.request_abort();
     _ready_to_translate.broken();
     if (_inflight_translation_state) {
-        _inflight_translation_state->as.request_abort();
+        _inflight_translation_state->as.request_abort_ex(
+          translator_shutdown_error{});
     }
     _data_source->close();
     co_await _gate.close();
@@ -511,6 +515,9 @@ void partition_translator::stop_translation() {
     if (_gate.is_closed() || !_inflight_translation_state) {
         return;
     }
-    _inflight_translation_state->as.request_abort();
+    // Currently only preempted on OOM error, if the policy changes
+    // to preempt on other errors, should be updated accordingly.
+    _inflight_translation_state->as.request_abort_ex(
+      translator_out_of_memory_error{});
 }
 } // namespace datalake::translation

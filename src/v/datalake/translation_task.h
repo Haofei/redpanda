@@ -46,6 +46,8 @@ public:
         flush_error,
         no_data,
         oom_error,
+        time_limit_exceeded,
+        shutting_down,
     };
 
     using custom_partitioning_enabled

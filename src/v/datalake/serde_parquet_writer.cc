@@ -22,8 +22,11 @@ ss::future<writer_error> serde_parquet_writer::add_data_struct(
         auto stats = co_await _writer.write_row(std::move(group));
         auto new_buffered_bytes = stats.buffered_size;
         if (new_buffered_bytes > _buffered_bytes) {
-            co_await _mem_tracker.reserve_bytes(
+            auto reservation_result = co_await _mem_tracker.reserve_bytes(
               new_buffered_bytes - _buffered_bytes, as);
+            if (reservation_result != reservation_error::ok) {
+                co_return map_to_writer_error(reservation_result);
+            }
         } else if (new_buffered_bytes < _buffered_bytes) {
             // underlying writer may choose to compress data when
             // a page worth of data is batched, at which point the

@@ -23,8 +23,9 @@
 namespace datalake {
 class noop_mem_tracker : public writer_mem_tracker {
 public:
-    ss::future<> reserve_bytes(size_t, ss::abort_source&) override {
-        return ss::make_ready_future<>();
+    ss::future<reservation_error>
+    reserve_bytes(size_t, ss::abort_source&) noexcept override {
+        return ss::make_ready_future<reservation_error>(reservation_error::ok);
     }
     ss::future<> free_bytes(size_t, ss::abort_source&) override {
         return ss::make_ready_future<>();

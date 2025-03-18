@@ -40,6 +40,10 @@ map_error_code(datalake::translation_task::errc errc) {
         return translation_errc::no_data;
     case datalake::translation_task::errc::oom_error:
         return translation_errc::oom_error;
+    case datalake::translation_task::errc::time_limit_exceeded:
+        return translation_errc::time_limit_exceeded;
+    case datalake::translation_task::errc::shutting_down:
+        return translation_errc::shutting_down;
     }
 }
 } // namespace
@@ -63,26 +67,39 @@ ss::future<cluster::errc> wait_stm_translated(
 }
 } // namespace
 
-ss::future<> noop_mem_tracker::reserve_bytes(size_t, ss::abort_source&) {
-    return ss::make_ready_future<>();
+ss::future<reservation_error>
+noop_mem_tracker::reserve_bytes(size_t, ss::abort_source&) noexcept {
+    return ss::make_ready_future<reservation_error>(reservation_error::ok);
 }
 ss::future<> noop_mem_tracker::free_bytes(size_t, ss::abort_source&) {
     return ss::make_ready_future<>();
 }
 void noop_mem_tracker::release() {}
 
-ss::future<>
-translator_mem_tracker::reserve_bytes(size_t bytes, ss::abort_source& as) {
+ss::future<reservation_error> translator_mem_tracker::reserve_bytes(
+  size_t bytes, ss::abort_source& as) noexcept {
     _current_usage += bytes;
-    while (_current_usage > _reservations.count()) {
-        // reserve any deficit
-        auto reservation = co_await _reservations_tracker.reserve_memory(as);
-        if (_reservations.count()) {
-            _reservations.adopt(std::move(reservation));
-        } else {
-            _reservations = std::move(reservation);
+    try {
+        while (_current_usage > _reservations.count()) {
+            // reserve any deficit
+            auto reservation = co_await _reservations_tracker.reserve_memory(
+              as);
+            if (_reservations.count()) {
+                _reservations.adopt(std::move(reservation));
+            } else {
+                _reservations = std::move(reservation);
+            }
         }
+    } catch (const translator_out_of_memory_error&) {
+        co_return reservation_error::out_of_memory;
+    } catch (const translator_shutdown_error&) {
+        co_return reservation_error::shutting_down;
+    } catch (const translator_time_quota_exceeded_error&) {
+        co_return reservation_error::time_quota_exceeded;
+    } catch (...) {
+        co_return reservation_error::unknown;
     }
+    co_return reservation_error::ok;
 }
 
 ss::future<>
@@ -379,6 +396,10 @@ std::ostream& operator<<(std::ostream& o, translation_errc ec) {
         return o << "translation_errc::discard_error";
     case oom_error:
         return o << "translation_errc::oom_error";
+    case time_limit_exceeded:
+        return o << "translation_errc::time_limit_exceeded";
+    case shutting_down:
+        return o << "translation_errc::shutting_down";
     }
 }
 

@@ -27,9 +27,28 @@
 
 namespace datalake::translation {
 
+class translator_out_of_memory_error final : public std::runtime_error {
+public:
+    explicit translator_out_of_memory_error()
+      : std::runtime_error("translator_out_of_memory") {}
+};
+
+class translator_shutdown_error final : public std::runtime_error {
+public:
+    explicit translator_shutdown_error()
+      : std::runtime_error("translator_shutdown") {}
+};
+
+class translator_time_quota_exceeded_error final : public std::runtime_error {
+public:
+    explicit translator_time_quota_exceeded_error()
+      : std::runtime_error("translator_time_quota_exceeded") {}
+};
+
 class noop_mem_tracker : public writer_mem_tracker {
 public:
-    ss::future<> reserve_bytes(size_t, ss::abort_source&) override;
+    ss::future<reservation_error>
+    reserve_bytes(size_t, ss::abort_source&) noexcept override;
     ss::future<> free_bytes(size_t, ss::abort_source&) override;
     void release() override;
 };
@@ -43,7 +62,8 @@ public:
       scheduling::reservations_tracker& scheduling_reservations)
       : _reservations_tracker(scheduling_reservations) {}
 
-    ss::future<> reserve_bytes(size_t, ss::abort_source&) override;
+    ss::future<reservation_error>
+    reserve_bytes(size_t, ss::abort_source&) noexcept override;
     ss::future<> free_bytes(size_t, ss::abort_source&) override;
     void release() override;
 
@@ -161,6 +181,8 @@ enum translation_errc {
     flush_error,
     discard_error,
     oom_error,
+    time_limit_exceeded,
+    shutting_down,
 };
 
 std::ostream& operator<<(std::ostream&, translation_errc);

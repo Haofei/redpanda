@@ -195,7 +195,11 @@ local_parquet_file_writer_factory::create_writer(
     // of too many writers, needs empirical evaluation to determine the correct
     // sizing.
     static constexpr size_t WRITER_RESERVATION_OVERHEAD = 10_KiB;
-    co_await _mem_tracker.reserve_bytes(WRITER_RESERVATION_OVERHEAD, as);
+    auto reservation_err = co_await _mem_tracker.reserve_bytes(
+      WRITER_RESERVATION_OVERHEAD, as);
+    if (reservation_err != reservation_error::ok) {
+        co_return map_to_writer_error(reservation_err);
+    }
     auto writer = std::make_unique<local_parquet_file_writer>(
       create_filename(), _writer_factory, _mem_tracker);
 
