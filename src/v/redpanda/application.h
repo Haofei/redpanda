@@ -39,6 +39,7 @@
 #include "kafka/server/fwd.h"
 #include "kafka/server/snc_quota_manager.h"
 #include "metrics/aggregate_metrics_watcher.h"
+#include "metrics/host_metrics_watcher.h"
 #include "metrics/metrics.h"
 #include "net/conn_quota.h"
 #include "net/fwd.h"
@@ -361,6 +362,8 @@ private:
     config::node_override_store _node_overrides{};
 
     std::unique_ptr<crash_tracker::service> _crash_tracker_service;
+
+    std::unique_ptr<metrics::host_metrics_watcher> _host_metrics_watcher;
 
     ss::sharded<ss::abort_source> _as;
 };

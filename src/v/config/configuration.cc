@@ -4021,6 +4021,13 @@ configuration::configuration()
       "its own.",
       {.needs_restart = needs_restart::no, .visibility = visibility::user},
       false)
+  , enable_host_metrics(
+      *this,
+      "enable_host_metrics",
+      "Enable exporting of some host metrics like /proc/diskstats, /proc/snmp "
+      "and /proc/net/netstat",
+      {.needs_restart = needs_restart::yes, .visibility = visibility::tunable},
+      false)
   , datalake_scheduler_block_size_bytes(
       *this,
       "datalake_scheduler_block_size_bytes",
