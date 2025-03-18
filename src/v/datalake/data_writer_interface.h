@@ -174,7 +174,8 @@ public:
 
     virtual ss::future<
       result<std::unique_ptr<parquet_file_writer>, writer_error>>
-    create_writer(const iceberg::struct_type& /* schema */) = 0;
+    create_writer(const iceberg::struct_type& /* schema */, ss::abort_source&)
+      = 0;
 };
 
 } // namespace datalake

@@ -175,7 +175,7 @@ local_parquet_file_writer_factory::local_parquet_file_writer_factory(
 
 ss::future<result<std::unique_ptr<parquet_file_writer>, writer_error>>
 local_parquet_file_writer_factory::create_writer(
-  const iceberg::struct_type& schema) {
+  const iceberg::struct_type& schema, ss::abort_source&) {
     auto writer = std::make_unique<local_parquet_file_writer>(
       create_filename(), _writer_factory, *_mem_tracker);
 

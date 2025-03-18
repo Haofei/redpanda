@@ -73,7 +73,8 @@ public:
       : _return_error{return_error} {}
 
     ss::future<result<std::unique_ptr<parquet_file_writer>, writer_error>>
-    create_writer(const iceberg::struct_type& schema) override {
+    create_writer(
+      const iceberg::struct_type& schema, ss::abort_source&) override {
         co_return std::make_unique<test_data_writer>(
           std::move(schema), _return_error);
     }
@@ -122,7 +123,8 @@ private:
 class test_serde_parquet_writer_factory : public parquet_file_writer_factory {
 public:
     ss::future<result<std::unique_ptr<parquet_file_writer>, writer_error>>
-    create_writer(const iceberg::struct_type& schema) override {
+    create_writer(
+      const iceberg::struct_type& schema, ss::abort_source&) override {
         auto ostream_writer = co_await _serde_parquet_factory.create_writer(
           schema, utils::make_null_output_stream(), _mem_tracker);
 
