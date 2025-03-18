@@ -188,6 +188,7 @@ public:
     std::unique_ptr<ssx::singleton_thread_worker> thread_worker;
 
     ss::sharded<crypto::ossl_context_service> ossl_context_service;
+    ss::sharded<kafka::datalake_throttle_manager> datalake_throttle_manager;
 
     ss::sharded<kafka::consumer_group_lag_metrics_frontend>
       _consumer_group_lag_metrics_frontend;

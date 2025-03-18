@@ -1416,6 +1416,29 @@ void application::wire_up_runtime_services(
           .get();
         _datalake_manager.invoke_on_all(&datalake::datalake_manager::start)
           .get();
+
+        construct_service(
+          datalake_throttle_manager,
+          [&mgr = _datalake_manager] {
+              return ssx::now(kafka::datalake_throttle_manager::backlog_status{
+                .partitions_backlog_limit_breached
+                = mgr.local().partitions_over_target_translation_backlog(),
+                .partitions_translation_blocked
+                = mgr.local().partitions_with_translation_blocked(),
+              });
+          },
+          ss::sharded_parameter([] {
+              return config::shard_local_cfg()
+                .max_kafka_throttle_delay_ms.bind();
+          }),
+          ss::sharded_parameter([] {
+              return config::shard_local_cfg().quota_manager_gc_sec.bind();
+          }))
+          .get();
+
+        datalake_throttle_manager
+          .invoke_on_all(&kafka::datalake_throttle_manager::start)
+          .get();
     }
     construct_single_service(_monitor_unsafe, std::ref(feature_table));
 
@@ -2322,6 +2345,7 @@ void application::wire_up_redpanda_services(
         std::ref(controller->get_security_frontend()),
         std::ref(controller->get_api()),
         std::ref(tx_gateway_frontend),
+        std::ref(datalake_throttle_manager),
         qdc_config,
         std::ref(*thread_worker),
         std::ref(_schema_registry))
