@@ -25,6 +25,29 @@
 
 #include <seastar/core/loop.hh>
 
+namespace {
+
+// Recoverable errors are the class of errors that donot leave the underlying
+// writers in a bad shape. Upon recoverable errors the translator may choose to
+// flush and continue as if nothing happened, so we preserve the state to
+// facilitate that.
+bool is_recoverable_error(datalake::writer_error err) {
+    switch (err) {
+    case datalake::writer_error::ok:
+    case datalake::writer_error::oom_error:
+    case datalake::writer_error::time_limit_exceeded:
+        return true;
+    case datalake::writer_error::parquet_conversion_error:
+    case datalake::writer_error::file_io_error:
+    case datalake::writer_error::no_data:
+    case datalake::writer_error::flush_error:
+    case datalake::writer_error::shutting_down:
+    case datalake::writer_error::unknown_error:
+        return false;
+    }
+}
+}; // namespace
+
 namespace datalake {
 
 namespace {
@@ -289,7 +312,7 @@ ss::future<ss::stop_iteration> record_multiplexer::do_multiplex(
 }
 
 ss::future<writer_error> record_multiplexer::flush_writers() {
-    if (_error) {
+    if (_error && !is_recoverable_error(_error.value())) {
         co_return *_error;
     }
     auto result = co_await ss::coroutine::as_future(ss::max_concurrent_for_each(
@@ -332,7 +355,7 @@ record_multiplexer::finish() && {
               std::back_inserter(_result->dlq_files));
         }
     }
-    if (_error) {
+    if (_error && !is_recoverable_error(_error.value())) {
         co_return *_error;
     }
     co_return std::move(*_result);

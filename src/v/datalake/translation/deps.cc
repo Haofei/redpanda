@@ -544,6 +544,7 @@ public:
         if (!_in_progress_translation) {
             co_return translation_errc::no_data;
         }
+        vlog(datalake_log.debug, "[{}] finishing translation", _ntp);
         if (_discard_translated_state) {
             co_await discard().discard_result();
             co_return translation_errc::discard_error;
@@ -551,6 +552,7 @@ public:
         auto task = std::exchange(_in_progress_translation, std::nullopt);
         auto result = co_await std::move(task.value())
                         .finish(_cp_enabled, _upload_path_prefix, rcn, as);
+
         if (result.has_error()) {
             co_return map_error_code(result.error());
         }
