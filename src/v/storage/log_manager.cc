@@ -501,11 +501,7 @@ ss::future<> log_manager::gc_loop() {
      * data older than this threshold may be garbage collected
      */
     while (true) {
-        try {
-            co_await _gc_sem.wait(std::max(_gc_sem.current(), size_t(1)));
-        } catch (const ss::semaphore_timed_out&) {
-            // time for some chores
-        }
+        co_await _gc_sem.wait(std::max(_gc_sem.current(), size_t(1)));
 
         /*
          * When we are in a low disk space situation we would like to reclaim
