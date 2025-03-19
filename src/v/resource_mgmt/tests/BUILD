@@ -33,6 +33,30 @@ redpanda_cc_btest(
 )
 
 redpanda_cc_btest(
+    name = "memory_sampling_tests",
+    timeout = "short",
+    srcs = [
+        "memory_sampling_tests.cc",
+    ],
+    target_compatible_with = select({
+        "@seastar//:use_system_allocator": ["@platforms//:incompatible"],
+        "//conditions:default": [],
+    }),
+    deps = [
+        "//src/v/config",
+        "//src/v/crash_tracker",
+        "//src/v/resource_mgmt:memory_sampling",
+        "//src/v/storage:batch_cache",
+        "//src/v/test_utils:fixture",
+        "//src/v/test_utils:seastar_boost",
+        "@boost//:test",
+        "@fmt",
+        "@seastar",
+        "@seastar//:testing",
+    ],
+)
+
+redpanda_cc_btest(
     name = "storage_test",
     timeout = "short",
     srcs = [
