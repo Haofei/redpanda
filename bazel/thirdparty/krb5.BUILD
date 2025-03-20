@@ -15,6 +15,12 @@ string_flag(
     make_variable = "SANITIZERS",
 )
 
+string_flag(
+    name = "linker",
+    build_setting_default = "lld",
+    make_variable = "LINKER",
+)
+
 filegroup(
     name = "srcs",
     srcs = glob(["**"]),
@@ -48,12 +54,10 @@ configure_make(
         "--disable-static",
         "--enable-asan=$(SANITIZERS)",
     ],
-    # Need to pass this additionally here because of a bug in the kerberos build where it doesn't properly pass the linker flag down
-    copts = [
-        "-fuse-ld=lld",
-    ],
     env = {
+        # Need to pass this additionally here because of a bug in the kerberos build where it doesn't properly pass the linker flag down
         "KRB5_BUILD_JOBS": "$(BUILD_JOBS)",
+        "LD": gold,
     },
     lib_source = ":srcs",
     out_shared_libs = [
