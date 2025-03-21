@@ -2,10 +2,10 @@ buf.build/gen/go/bufbuild/protovalidate/protocolbuffers/go v1.36.5-2025030720450
 buf.build/gen/go/bufbuild/protovalidate/protocolbuffers/go v1.36.5-20250307204501-0409229c3780.1/go.mod h1:eOqrCVUfhh7SLo00urDe/XhJHljj0dWMZirS0aX7cmc=
 buf.build/gen/go/grpc-ecosystem/grpc-gateway/protocolbuffers/go v1.36.5-20241220201140-4c5ba75caaf8.1 h1:HZxhWEgxCWSJ8V3iGeHDQxzb56Vmprrlb7h8XwsDw3I=
 buf.build/gen/go/grpc-ecosystem/grpc-gateway/protocolbuffers/go v1.36.5-20241220201140-4c5ba75caaf8.1/go.mod h1:LAznaLI+eD1SNx+1NfEgrWtuPofvpEP1NTSuCWp3SBw=
-buf.build/gen/go/redpandadata/cloud/connectrpc/go v1.18.1-20241024195046-353ea4645e3d.1 h1:2KtelbtNCtteyqlp2OQrvsaana+ZEbUb3XZCie4+M6k=
-buf.build/gen/go/redpandadata/cloud/connectrpc/go v1.18.1-20241024195046-353ea4645e3d.1/go.mod h1:2mfsxxdKli7scBoKS9AULpE4K3PgGtBRdAe/Q29xfjU=
-buf.build/gen/go/redpandadata/cloud/protocolbuffers/go v1.36.5-20241024195046-353ea4645e3d.1 h1:BGmpPvm3epwf6v4vyTtsB1g14VjzPcJxyGwNotDTrf4=
-buf.build/gen/go/redpandadata/cloud/protocolbuffers/go v1.36.5-20241024195046-353ea4645e3d.1/go.mod h1:PijTIgicZJyafPBpSWHWnb8PFD5LMiEzn0B3xTjBl0U=
+buf.build/gen/go/redpandadata/cloud/connectrpc/go v1.18.1-20250320090119-84779f9e5085.1 h1:ihvEybwiBEY8u6zlhdK1Rnw4xHhDOx+VtayH2/KcPSk=
+buf.build/gen/go/redpandadata/cloud/connectrpc/go v1.18.1-20250320090119-84779f9e5085.1/go.mod h1:T6/LzK1YJ2Sk5PtaDZv0BgLDgclmZLTVzpff+ZvZSAM=
+buf.build/gen/go/redpandadata/cloud/protocolbuffers/go v1.36.5-20250320090119-84779f9e5085.1 h1:qhPynp01cMZmguPvC83/9fS8xJcRfYPAPemARfRiZoQ=
+buf.build/gen/go/redpandadata/cloud/protocolbuffers/go v1.36.5-20250320090119-84779f9e5085.1/go.mod h1:xEkVyU83MoPEbDkz5xmNqvE+mITEWL6gghXFOxS2zcw=
 buf.build/gen/go/redpandadata/common/protocolbuffers/go v1.36.5-20240917150400-3f349e63f44a.1 h1:WcX5gYOh1TytXLDEBNEQ8VemG/i5TZbSSAZGI67kGis=
 buf.build/gen/go/redpandadata/common/protocolbuffers/go v1.36.5-20240917150400-3f349e63f44a.1/go.mod h1:F8FtulOoV8RBu+vmdoHY1NdBlhilGOu+qf4XmHkE77A=
 buf.build/gen/go/redpandadata/dataplane/connectrpc/go v1.18.1-20250319124900-5103d6dd4791.1 h1:pqDaDfukKNDDd4M8nRacBE29bMHv6V915eitQJBU1mM=

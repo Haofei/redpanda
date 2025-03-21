@@ -6,8 +6,8 @@ go 1.23.1
 replace github.com/hamba/avro/v2 => github.com/redpanda-data/go-avro/v2 v2.0.0-20240405204525-77b1144dc525
 
 require (
-	buf.build/gen/go/redpandadata/cloud/connectrpc/go v1.18.1-20241024195046-353ea4645e3d.1
-	buf.build/gen/go/redpandadata/cloud/protocolbuffers/go v1.36.5-20241024195046-353ea4645e3d.1
+	buf.build/gen/go/redpandadata/cloud/connectrpc/go v1.18.1-20250320090119-84779f9e5085.1
+	buf.build/gen/go/redpandadata/cloud/protocolbuffers/go v1.36.5-20250320090119-84779f9e5085.1
 	buf.build/gen/go/redpandadata/common/protocolbuffers/go v1.36.5-20240917150400-3f349e63f44a.1
 	buf.build/gen/go/redpandadata/dataplane/connectrpc/go v1.18.1-20250319124900-5103d6dd4791.1
 	buf.build/gen/go/redpandadata/dataplane/protocolbuffers/go v1.36.5-20250319124900-5103d6dd4791.1

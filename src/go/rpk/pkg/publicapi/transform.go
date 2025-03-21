@@ -18,7 +18,7 @@ import (
 	"mime/multipart"
 	"net/http"
 
-	commonv1alpha1 "buf.build/gen/go/redpandadata/common/protocolbuffers/go/redpanda/api/common/v1alpha1"
+	commonv1 "buf.build/gen/go/redpandadata/common/protocolbuffers/go/redpanda/api/common/v1"
 	"buf.build/gen/go/redpandadata/dataplane/connectrpc/go/redpanda/api/dataplane/v1/dataplanev1connect"
 	dataplanev1 "buf.build/gen/go/redpandadata/dataplane/protocolbuffers/go/redpanda/api/dataplane/v1"
 	"connectrpc.com/connect"
@@ -107,7 +107,7 @@ func (tsc *transformServiceClient) DeployTransform(ctx context.Context, r Deploy
 
 // ConnectError is the error returned by the data plane API.
 type ConnectError struct {
-	commonv1alpha1.ErrorStatus
+	commonv1.ExternalError
 	StatusCode int
 }
 
