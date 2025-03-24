@@ -31,8 +31,13 @@ class segment;
 namespace archival {
 
 enum class segment_collector_mode {
-    collect_compacted,
-    collect_non_compacted,
+    // collect segments for reupload
+    compacted_reupload,
+    // collect segments for reupload
+    non_compacted_reupload,
+    // collect segments for the first time upload
+    // may be compacted or non-compacted
+    new_upload,
 };
 
 struct segment_collector_stream {
@@ -58,6 +63,13 @@ public:
     using generation_seq = std::vector<uint64_t>;
     using sizes_seq = std::vector<uint64_t>;
 
+    segment_collector(
+      model::offset begin_inclusive,
+      const cloud_storage::partition_manifest& manifest,
+      const storage::log& log,
+      size_t max_uploaded_segment_size,
+      std::optional<model::offset> end_inclusive = std::nullopt);
+
     /// C-tor
     ///
     /// \param begin_inclusive is a first offset in range
@@ -66,25 +78,35 @@ public:
     /// \param max_uploaded_segment_size is a size limit for the offset range
     /// \param end_inclusive is a target for the end offset (if not set the
     ///        collector will try to match the size only)
+    /// \param end_exclusive last stable offset (unadjusted) of the target
+    ///        partition. in new upload mode, we won't upload a segment if
+    ///        it's dirty offset exceeds this value
+    /// \param flush_offset offset specified by a flush operation upstream,
+    ///        has no effect in reupload mode
     segment_collector(
       model::offset begin_inclusive,
       const cloud_storage::partition_manifest& manifest,
       const storage::log& log,
       size_t max_uploaded_segment_size,
-      std::optional<model::offset> end_inclusive = std::nullopt);
+      std::optional<model::offset> end_inclusive,
+      std::optional<model::offset> end_exclusive,
+      std::optional<model::offset> flush_offset);
 
     /// Collect segments
     ///
     /// \param mode defines what segments should be collected
     ///        compacted or normal.
     void collect_segments(
-      segment_collector_mode mode = segment_collector_mode::collect_compacted);
+      segment_collector_mode mode = segment_collector_mode::compacted_reupload);
 
     segment_seq segments();
 
     /// Once segments are collected, this query determines if the collected
     /// segments should replace at least one segment in manifest.
     bool should_replace_manifest_segment() const;
+
+    /// Segments are found and can be uploaded to the cloud.
+    bool segment_ready_for_upload() const;
 
     /// The starting point for the collection, this may not coincide with the
     /// start of the first collected segment. It should be aligned
@@ -118,6 +140,9 @@ private:
         const storage::ntp_config* ntp_conf;
     };
 
+    ss::lw_shared_ptr<storage::segment>
+    lower_bound(model::offset, segment_collector_mode mode) const;
+
     /// Collects segments until the end of the manifest, or until the
     /// end of compacted segments in log.
     void do_collect(segment_collector_mode mode);
@@ -142,7 +167,7 @@ private:
     /// Finds the offset which the collection needs to progress upto in order to
     /// replace at least one manifest segment. The collection is valid if it
     /// reaches the replacement boundary.
-    model::offset find_replacement_boundary() const;
+    model::offset find_replacement_boundary(segment_collector_mode mode) const;
 
     model::offset _begin_inclusive;
     model::offset _end_inclusive;
@@ -158,6 +183,8 @@ private:
     size_t _max_uploaded_segment_size;
     std::optional<model::offset> _target_end_inclusive;
     size_t _collected_size;
+    std::optional<model::offset> _end_exclusive;
+    std::optional<model::offset> _flush_offset;
 };
 
 } // namespace archival
