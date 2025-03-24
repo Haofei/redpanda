@@ -107,6 +107,7 @@ build:release --copt -mllvm --copt -inline-threshold=2500
 build:release --@seastar//:stack_guards=False --@seastar//:debug=False
 build:release --//src/v/redpanda:lto=True
 build:release --copt -flto=thin --copt -ffat-lto-objects
+build:release --copt -g --strip=never
 
 build:stamp --stamp --workspace_status_command=./bazel/stamp_vars.sh
 
