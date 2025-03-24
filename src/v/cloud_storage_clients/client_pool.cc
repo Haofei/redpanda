@@ -17,6 +17,7 @@
 #include "ssx/future-util.h"
 
 #include <seastar/core/smp.hh>
+#include <seastar/core/timed_out_error.hh>
 
 #include <algorithm>
 #include <chrono>
@@ -269,8 +270,15 @@ client_pool::acquire(ss::abort_source& as) {
             // exception. Most of the time this exception means that the
             // IAM-roles (or other source of credentials) is not configured
             // properly.
-            u = co_await ss::get_units(
-              _self_config_barrier, 1, self_config_timeout);
+            try {
+                u = co_await ss::get_units(
+                  _self_config_barrier, 1, self_config_timeout);
+            } catch (const ss::timed_out_error&) {
+                vlog(
+                  pool_log.error,
+                  "Failed to acquire credentials within timeout");
+                throw;
+            }
         }
 
         while (!client.has_value() && !_gate.is_closed()
