@@ -400,12 +400,8 @@ iobuf::try_copy_append(const char* ptr, size_t size) {
         return;
     }
 
-    if (available_bytes() > 0) {
-        if (_frags.back().is_empty()) {
-            pop_back();
-        } else {
-            _frags.back().trim();
-        }
+    if (unlikely(available_bytes() > 0 && _frags.back().is_empty())) {
+        pop_back();
     }
     append(std::make_unique<fragment>(std::move(b)));
 }
@@ -422,12 +418,8 @@ inline void iobuf::append(iobuf&& o) {
             continue;
         }
 
-        if (available_bytes() > 0) {
-            if (_frags.back().is_empty()) {
-                pop_back();
-            } else {
-                _frags.back().trim();
-            }
+        if (unlikely(!_frags.empty() && _frags.back().is_empty())) {
+            pop_back();
         }
 
         append(f);
