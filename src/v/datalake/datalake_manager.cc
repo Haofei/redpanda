@@ -436,6 +436,10 @@ ss::future<uint64_t> datalake_manager::disk_usage() {
     co_return total;
 }
 
+bool datalake_manager::max_shares_assigned() const {
+    return _backlog_controller->max_shares_assigned();
+}
+
 size_t datalake_manager::overdue_translation_partition_count() const {
     auto now = translation::scheduling::clock::now();
     return std::ranges::count_if(

@@ -35,10 +35,11 @@ class datalake_throttle_manager
   : public ss::peering_sharded_service<datalake_throttle_manager> {
 public:
     struct status {
+        bool max_shares_assigned{false};
         size_t overdue_translation_partition_count{0};
         size_t partitions_translation_blocked{0};
 
-        bool has_no_issues() const;
+        bool needs_throttling() const;
         status operator+(const status& o) const;
 
         friend std::ostream& operator<<(std::ostream&, const status&);

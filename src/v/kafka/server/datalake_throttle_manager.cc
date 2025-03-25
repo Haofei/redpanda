@@ -42,6 +42,7 @@ void datalake_throttle_manager::merge_producer_maps(
 datalake_throttle_manager::status datalake_throttle_manager::status::operator+(
   const datalake_throttle_manager::status& o) const {
     return datalake_throttle_manager::status{
+      .max_shares_assigned = max_shares_assigned || o.max_shares_assigned,
       .overdue_translation_partition_count
       = overdue_translation_partition_count
         + o.overdue_translation_partition_count,
@@ -49,17 +50,18 @@ datalake_throttle_manager::status datalake_throttle_manager::status::operator+(
                                         + o.partitions_translation_blocked};
 }
 
-bool datalake_throttle_manager::status::has_no_issues() const {
-    return overdue_translation_partition_count == 0
-           && partitions_translation_blocked == 0;
+bool datalake_throttle_manager::status::needs_throttling() const {
+    return max_shares_assigned
+           && (overdue_translation_partition_count > 0 || partitions_translation_blocked > 0);
 }
 
 std::ostream&
 operator<<(std::ostream& o, const datalake_throttle_manager::status& s) {
     fmt::print(
       o,
-      "{{overdue_translation_partition_count: {}, "
+      "{{max_shares_assigned: {}, overdue_translation_partition_count: {}, "
       "partitions_translation_blocked: {}}}",
+      s.max_shares_assigned,
       s.overdue_translation_partition_count,
       s.partitions_translation_blocked);
     return o;
@@ -113,9 +115,16 @@ ss::future<> datalake_throttle_manager::gc_and_update_global_producers_map() {
       },
       status{},
       [](status acc, status shard_status) { return acc + shard_status; });
-    if (_translation_status.has_no_issues()) {
+    if (!_translation_status.needs_throttling()) {
         _last_no_issues_timestamp = clock_type::now();
     }
+    if (_translation_status.needs_throttling()) [[unlikely]] {
+        vlog(
+          client_quota_log.info,
+          "Translation status updated: {}, throttling may be applied.",
+          _translation_status);
+    }
+
     /**
      * Collect shard local maps and while iterating over the shards update the
      * total backlog
@@ -145,7 +154,7 @@ datalake_throttle_manager::maybe_throttle_producer(
   std::optional<std::string_view> client_id) {
     // fast path, backlog is below the threshold
 
-    if (_translation_status.has_no_issues()) [[likely]] {
+    if (!_translation_status.needs_throttling()) [[likely]] {
         co_return no_throttling;
     }
 
@@ -172,7 +181,7 @@ std::chrono::milliseconds datalake_throttle_manager::get_producer_throttle(
   const std::optional<std::string_view>& client_id) {
     vassert(
       ss::this_shard_id() == 0, "Throttle can only be calculate on shard 0");
-    if (_translation_status.has_no_issues()) [[likely]] {
+    if (!_translation_status.needs_throttling()) [[likely]] {
         return no_throttling;
     }
     auto effective_client_id = get_effective_client_id(client_id);

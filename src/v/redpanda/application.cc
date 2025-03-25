@@ -1421,6 +1421,7 @@ void application::wire_up_runtime_services(
           datalake_throttle_manager,
           [&mgr = _datalake_manager] {
               return ssx::now(kafka::datalake_throttle_manager::status{
+                .max_shares_assigned = mgr.local().max_shares_assigned(),
                 .overdue_translation_partition_count
                 = mgr.local().overdue_translation_partition_count(),
                 .partitions_translation_blocked

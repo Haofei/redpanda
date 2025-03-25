@@ -92,6 +92,10 @@ public:
      * should be 0 in normal conditions.
      */
     size_t partitions_with_translation_blocked() const;
+    /**
+     * Returns true if datalake translation runs with maximum allowed priority.
+     */
+    bool max_shares_assigned() const;
 
 private:
     using translator = std::unique_ptr<translation::partition_translator>;
