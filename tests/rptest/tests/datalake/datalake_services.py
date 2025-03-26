@@ -64,6 +64,13 @@ class DatalakeServices():
 
         self.catalog_service.start()
 
+        # Better defaults for testing. We don't want to wait too long
+        # for the iceberg translation to happen.
+        if self.redpanda._extra_rp_conf.get("iceberg_target_lag_ms") is None:
+            self.redpanda.add_extra_rp_conf({
+                "iceberg_target_lag_ms": 10000,
+            })
+
         if not self.catalog_service.catalog_type() == CatalogType.REST_HADOOP:
             # REST catalog mode
             self.redpanda.add_extra_rp_conf({
@@ -167,10 +174,11 @@ class DatalakeServices():
                                      partitions=1,
                                      replicas=1,
                                      iceberg_mode="key_value",
-                                     target_lag_ms=10000,
+                                     target_lag_ms: Optional[int] = None,
                                      config: dict[str, Any] = dict()):
         config[TopicSpec.PROPERTY_ICEBERG_MODE] = iceberg_mode
-        config[TopicSpec.PROPERTY_ICEBERG_TARGET_LAG_MS] = target_lag_ms
+        if target_lag_ms:
+            config[TopicSpec.PROPERTY_ICEBERG_TARGET_LAG_MS] = target_lag_ms
         rpk = RpkTool(self.redpanda)
         rpk.create_topic(topic=name,
                          partitions=partitions,
