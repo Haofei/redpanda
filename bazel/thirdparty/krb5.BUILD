@@ -54,10 +54,13 @@ configure_make(
         "--disable-static",
         "--enable-asan=$(SANITIZERS)",
     ],
+    copts = [
+        "-fuse-ld=$LINKER",
+    ],
     env = {
         # Need to pass this additionally here because of a bug in the kerberos build where it doesn't properly pass the linker flag down
         "KRB5_BUILD_JOBS": "$(BUILD_JOBS)",
-        "LD": gold,
+        "LINKER": "$(LINKER)",
     },
     lib_source = ":srcs",
     out_shared_libs = [
@@ -70,6 +73,7 @@ configure_make(
     toolchains = [
         ":build_jobs",
         ":sanitizers",
+        ":linker",
     ],
     visibility = [
         "//visibility:public",
