@@ -104,9 +104,10 @@ class Minio:
         home_dir = self.directory / "home"
         home_dir.mkdir(parents=True, exist_ok=True)
 
-        env = dict(HOME=home_dir,
-                   MINIO_REGION_NAME=self.cfg.cloud_storage_region)
         hostname = self.cfg.cloud_storage_api_endpoint
+        env = dict(HOME=home_dir,
+                   MINIO_DOMAIN=hostname,
+                   MINIO_REGION_NAME=self.cfg.cloud_storage_region)
         port = self.cfg.cloud_storage_api_endpoint_port
         args = [
             str(self.binary), "server", "--address", f"{hostname}:{port}",
