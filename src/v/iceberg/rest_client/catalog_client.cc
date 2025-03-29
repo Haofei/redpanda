@@ -51,6 +51,7 @@ iobuf serialize_payload_as_json(const T& payload) {
 }
 static constexpr std::string_view json_content_type = "application/json";
 static constexpr std::string_view oauth_token_endpoint = "oauth/tokens";
+static constexpr std::string_view config_endpoint = "config";
 } // namespace
 
 namespace iceberg::rest_client {
@@ -95,7 +96,7 @@ catalog_client::catalog_client(
   ss::sstring endpoint,
   std::optional<credentials> credentials,
   std::optional<base_path> base_path,
-  std::optional<prefix_path> prefix,
+  std::optional<warehouse> warehouse,
   std::optional<api_version> api_version,
   std::optional<oauth_token> token,
   std::unique_ptr<retry_policy> retry_policy,
@@ -104,11 +105,72 @@ catalog_client::catalog_client(
   : _http_client(std::move(http_client))
   , _endpoint{std::move(endpoint)}
   , _credentials{std::move(credentials)}
-  , _path_components{std::move(base_path), std::move(prefix), std::move(api_version)}
+  , _path_components{std::move(base_path), std::move(api_version)}
+  , _warehouse(std::move(warehouse))
   , _oauth_token{std::move(token)}
   , _retry_policy{retry_policy ? std::move(retry_policy) : std::make_unique<default_retry_policy>()}
   , _auth_mode(auth_mode)
   , _probe(std::move(probe)) {}
+
+ss::future<expected<std::monostate>>
+catalog_client::maybe_configure(retry_chain_node& rtc) {
+    auto gh = _gate.hold();
+    if (_configured) {
+        co_return std::monostate{};
+    }
+    vlog(log.debug, "Configuring Iceberg REST catalog client");
+    auto http_request = http::request_builder{}
+                          .method(boost::beast::http::verb::get)
+                          .path(_path_components.config_api_path())
+                          .with_content_type(json_content_type);
+    if (_warehouse.has_value()) {
+        http_request.query_param_kv("warehouse", _warehouse.value()());
+    }
+    auto auth_result = co_await maybe_add_bearer_auth(http_request, rtc);
+    if (!auth_result.has_value()) {
+        co_return tl::unexpected(auth_result.error());
+    }
+    auto config = (co_await perform_request(
+                     rtc,
+                     http_request,
+                     client_probe::endpoint::create_namespace,
+                     std::nullopt))
+                    .and_then(parse_json)
+                    .and_then(
+                      parse_as_expected("get_config", parse_catalog_config));
+    if (!config.has_value()) {
+        co_return tl::unexpected(config.error());
+    }
+    static constexpr auto prefix_prop_name = "prefix";
+    std::optional<prefix_path> prefix;
+    for (const auto& [k, v] : config->defaults) {
+        vlog(log.trace, "Default catalog config: '{}': '{}'", k, v);
+        if (k == prefix_prop_name && !v.empty()) {
+            prefix = prefix_path{v};
+            vlog(
+              log.debug,
+              "Iceberg default REST catalog 'prefix' value: {}",
+              *prefix);
+        }
+    }
+    for (const auto& [k, v] : config->overrides) {
+        vlog(log.trace, "Override catalog config: '{}': '{}'", k, v);
+        if (k == prefix_prop_name && !v.empty()) {
+            prefix = prefix_path{v};
+            vlog(
+              log.debug,
+              "Iceberg override REST catalog 'prefix' value: {}",
+              *prefix);
+        }
+    }
+    if (!prefix && _warehouse) {
+        prefix = prefix_path{*_warehouse};
+    }
+    // TODO: use the config for more than just prefix setting.
+    _path_components.reset_prefix(std::move(prefix));
+    _configured = true;
+    co_return std::monostate{};
+}
 
 ss::future<expected<oauth_token>>
 catalog_client::acquire_token(retry_chain_node& rtc) {
@@ -242,6 +304,8 @@ ss::future<expected<iobuf>> catalog_client::perform_request(
         if (!request.has_value()) {
             co_return tl::unexpected(request.error());
         }
+        auto request_target = ss::sstring{
+          request->target().begin(), request->target().end()};
 
         if (_probe) {
             _probe->register_request(endpoint);
@@ -259,6 +323,12 @@ ss::future<expected<iobuf>> catalog_client::perform_request(
         }
 
         auto& error = call_res.error();
+        vlog(
+          iceberg::log.warn,
+          "[{}] error: {}, message: '{}'",
+          request_target,
+          error.err,
+          error.err_msg);
         if (error.aborted) {
             co_return tl::unexpected(
               aborted_error{"Shutting down while evaluating retry"});
@@ -288,6 +358,10 @@ ss::future<expected<create_namespace_response>>
 catalog_client::create_namespace(
   create_namespace_request req, retry_chain_node& rtc) {
     auto gh = _gate.hold();
+    auto config_result = co_await maybe_configure(rtc);
+    if (!config_result.has_value()) {
+        co_return tl::unexpected(config_result.error());
+    }
     auto http_request = namespaces{root_path()}.create().with_content_type(
       json_content_type);
 
@@ -311,6 +385,10 @@ ss::future<expected<load_table_result>> catalog_client::create_table(
   create_table_request req,
   retry_chain_node& rtc) {
     auto gh = _gate.hold();
+    auto config_result = co_await maybe_configure(rtc);
+    if (!config_result.has_value()) {
+        co_return tl::unexpected(config_result.error());
+    }
     auto http_request = table{root_path(), ns}.create().with_content_type(
       json_content_type);
 
@@ -333,6 +411,10 @@ ss::future<expected<load_table_result>> catalog_client::load_table(
   const ss::sstring& table_name,
   retry_chain_node& rtc) {
     auto gh = _gate.hold();
+    auto config_result = co_await maybe_configure(rtc);
+    if (!config_result.has_value()) {
+        co_return tl::unexpected(config_result.error());
+    }
     auto http_request = table(root_path(), ns).get(table_name);
 
     auto auth_result = co_await maybe_add_bearer_auth(http_request, rtc);
@@ -352,6 +434,10 @@ ss::future<expected<std::monostate>> catalog_client::drop_table(
   std::optional<bool> purge_requested,
   retry_chain_node& rtc) {
     auto gh = _gate.hold();
+    auto config_result = co_await maybe_configure(rtc);
+    if (!config_result.has_value()) {
+        co_return tl::unexpected(config_result.error());
+    }
     http::rest_client::rest_entity::optional_query_params params;
     if (purge_requested.has_value()) {
         params.emplace();
@@ -377,6 +463,10 @@ ss::future<expected<std::monostate>> catalog_client::drop_table(
 ss::future<expected<commit_table_response>> catalog_client::commit_table_update(
   commit_table_request commit_request, retry_chain_node& rtc) {
     auto gh = _gate.hold();
+    auto config_result = co_await maybe_configure(rtc);
+    if (!config_result.has_value()) {
+        co_return tl::unexpected(config_result.error());
+    }
     auto http_request = table(root_path(), commit_request.identifier.ns)
                           .update(commit_request.identifier.table)
                           .with_content_type(json_content_type);
@@ -397,14 +487,20 @@ ss::future<expected<commit_table_response>> catalog_client::commit_table_update(
 }
 
 path_components::path_components(
-  std::optional<base_path> base,
-  std::optional<prefix_path> prefix,
-  std::optional<api_version> api_version)
+  std::optional<base_path> base, std::optional<api_version> api_version)
   : _base{trim_slashes(std::move(base), "")}
-  , _prefix{trim_slashes(std::move(prefix), "")}
   , _api_version{trim_slashes(std::move(api_version), "v1")} {}
 
+void path_components::reset_prefix(std::optional<prefix_path> path) {
+    _prefix = trim_slashes<prefix_path>(std::move(path), "");
+    vlog(
+      log.info, "Reset Iceberg REST catalog client prefix to '{}'", *_prefix);
+}
+
 ss::sstring path_components::root_path() const {
+    vassert(
+      _prefix.has_value(),
+      "Must call reset_prefix() before calling root_path()");
     std::vector<ss::sstring> parts;
     if (!_base().empty()) {
         parts.push_back(_base());
@@ -412,8 +508,8 @@ ss::sstring path_components::root_path() const {
 
     parts.push_back(_api_version());
 
-    if (!_prefix().empty()) {
-        parts.push_back(_prefix());
+    if (!_prefix.value()().empty()) {
+        parts.push_back(_prefix.value()());
     }
 
     return absl::StrJoin(parts, "/") + "/";
@@ -427,6 +523,16 @@ ss::sstring path_components::token_api_path() const {
 
     parts.push_back(_api_version());
     return absl::StrJoin(parts, "/") + "/" + std::string{oauth_token_endpoint};
+}
+
+ss::sstring path_components::config_api_path() const {
+    std::vector<ss::sstring> parts;
+    if (!_base().empty()) {
+        parts.push_back(_base());
+    }
+
+    parts.push_back(_api_version());
+    return absl::StrJoin(parts, "/") + "/" + std::string{config_endpoint};
 }
 
 } // namespace iceberg::rest_client
