@@ -142,14 +142,24 @@ fair_scheduling_policy::choose_random_translator_group() const {
 
 ss::future<> fair_scheduling_policy::schedule_one_translation(
   executor& executor, const reservations_tracker& mem_tracker) {
-    // Wait until an empty slot frees up.
+    // Wait until an empty slot frees up or control should yield back to the
+    // scheduling loop because, for example, resource exhaustion needs to be
+    // attended to.
+    //
+    // TODO: note that the polling interval here is 1s which is quite
+    // responsive. However, if it longer then one should consider not using a
+    // sleep here because it would degrade responsiveness to _state_changed_cvar
+    // signals.
     while (!executor.as.abort_requested() && !executor.waiting.empty()
            && !mem_tracker.memory_exhausted()
+           && executor.translators_for_immediate_finish.empty()
            && executor.running.size() >= _max_concurrent_translations()) {
         co_await ss::sleep_abortable(polling_interval, executor.as);
     }
 
-    if (executor.as.abort_requested() || mem_tracker.memory_exhausted()) {
+    if (
+      executor.as.abort_requested() || mem_tracker.memory_exhausted()
+      || !executor.translators_for_immediate_finish.empty()) {
         co_return;
     }
 

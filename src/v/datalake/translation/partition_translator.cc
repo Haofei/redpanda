@@ -239,6 +239,18 @@ partition_translator::run_one_translation_iteration(
         co_await _ready_to_translate.wait(
           [this] { return _inflight_translation_state.has_value(); });
         auto& as = _inflight_translation_state->as;
+        /*
+         * before going to the trouble of building a reader and poking the
+         * translation context, check if an abort has been requested. this
+         * enables the scheduler to execute:
+         *
+         *    start_translation();
+         *    stop_translation();
+         *
+         * to realize a very fast responsiveness for driving a translator state
+         * change such as finishing the on-going translation.
+         */
+        as.check();
         auto reader = co_await _data_source->make_log_reader(
           begin_offset, datalake_priority(), as);
         if (!reader) {

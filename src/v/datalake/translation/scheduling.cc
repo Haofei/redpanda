@@ -331,7 +331,8 @@ void scheduler::notify_done(const translator_id& id) noexcept {
 }
 
 bool scheduler::requires_scheduling_actions() const {
-    return !_executor.waiting.empty() || _mem_tracker->memory_exhausted();
+    return !_executor.waiting.empty() || _mem_tracker->memory_exhausted()
+           || !_executor.translators_for_immediate_finish.empty();
 }
 
 void scheduler::notify_memory_exhausted() {
@@ -418,6 +419,11 @@ void scheduler::request_immediate_finish(
         _executor.translators_for_immediate_finish.emplace(
           i, std::move(translators[i].first));
     }
+    // there is no mechanism for backing out a request to finish, so there isn't
+    // any additional work that can be done if the requests are cleared.
+    if (!_executor.translators_for_immediate_finish.empty()) {
+        _state_changed_cvar.signal();
+    }
 }
 
 ss::future<> scheduler::main() {
@@ -428,9 +434,12 @@ ss::future<> scheduler::main() {
           [this] { return requires_scheduling_actions(); });
         vlog(
           datalake_log.trace,
-          "scheduler tick,  memory_exhausted: {}",
-          _mem_tracker->memory_exhausted());
-        if (_mem_tracker->memory_exhausted()) {
+          "scheduler tick,  memory_exhausted: {} finish: {}",
+          _mem_tracker->memory_exhausted(),
+          _executor.translators_for_immediate_finish.size());
+        if (
+          _mem_tracker->memory_exhausted()
+          || !_executor.translators_for_immediate_finish.empty()) {
             co_await _scheduling_policy->on_resource_exhaustion(
               _executor, *_mem_tracker);
         }
