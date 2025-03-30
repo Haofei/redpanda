@@ -133,6 +133,10 @@ public:
     virtual std::optional<model::term_id> get_term(model::offset) const = 0;
     virtual std::optional<model::offset>
       get_term_last_offset(model::term_id) const = 0;
+    /**
+     * Returns the last offset of a batch that base offset is smaller than or
+     * equal to the requested value and bach is indexed.
+     */
     virtual std::optional<model::offset>
     index_lower_bound(model::offset o) const = 0;
 
