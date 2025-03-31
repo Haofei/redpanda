@@ -515,7 +515,7 @@ func restartCluster(
 		return nil, fmt.Errorf("%v\n\nErrors reported from the Docker container:\n%v", err, errStr)
 	}
 
-	if !consoleState.Running {
+	if consoleState != nil && !consoleState.Running {
 		ctx, _ := common.DefaultCtx()
 		err = c.ContainerStart(ctx, consoleState.ContainerID, container.StartOptions{})
 		if err != nil {
@@ -529,11 +529,14 @@ func restartCluster(
 	}
 	err = waitForCluster(checkConsole(consoleNode), retries)
 	if err != nil {
-		errStr, cErr := getContainerErr(consoleState, c)
-		if cErr != nil {
-			return nil, fmt.Errorf("%v\nunable to get Docker container logs: %v", err, cErr)
+		if consoleState != nil {
+			errStr, cErr := getContainerErr(consoleState, c)
+			if cErr != nil {
+				return nil, fmt.Errorf("%v\nunable to get Docker container logs: %v", err, cErr)
+			}
+			return nil, fmt.Errorf("%v\n\nErrors reported from the Docker container:\n%v", err, errStr)
 		}
-		return nil, fmt.Errorf("%v\n\nErrors reported from the Docker container:\n%v", err, errStr)
+		return nil, fmt.Errorf("error restarting the console cluster: %v; you may run 'rpk container purge' and start again", err)
 	}
 	return rpNodes, nil
 }
