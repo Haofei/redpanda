@@ -10,11 +10,13 @@
 package config
 
 import (
+	"context"
 	"errors"
 	"fmt"
-	"google.golang.org/genproto/googleapis/rpc/errdetails"
 	"slices"
 	"strings"
+
+	"google.golang.org/genproto/googleapis/rpc/errdetails"
 
 	controlplanev1 "buf.build/gen/go/redpandadata/cloud/protocolbuffers/go/redpanda/api/controlplane/v1"
 	"connectrpc.com/connect"
@@ -83,89 +85,31 @@ Use the flag '--no-confirm' to avoid the confirmation prompt.`,
 		Run: func(cmd *cobra.Command, args []string) {
 			configs, err := parseArgs(args)
 			out.MaybeDieErr(err)
-
-			vp, err := p.LoadVirtualProfile(fs)
+			cfg, err := p.Load(fs)
 			out.MaybeDie(err, "rpk unable to load config: %v", err)
+			vp := cfg.VirtualProfile()
 
 			if vp.FromCloud {
 				if vp.CloudCluster.IsServerless() {
 					out.Die("rpk cluster config set is not supported for serverless clusters.")
 				}
-				cfg, err := p.Load(fs)
 				out.MaybeDie(err, "rpk unable to load config: %v", err)
-				operation, err := setCloudConfig(cmd, cfg, vp, configs)
+				operation, err := setCloudConfig(cmd.Context(), cfg, vp, configs)
 				out.MaybeDieErr(err)
 				fmt.Print("Processing configuration, this operation may take up to 10 minutes. To check the status, run 'rpk cluster config status'\n\n")
-				fmt.Printf("Operation ID: %s \n", operation.GetOperation().Id)
+				fmt.Printf("Operation ID: %s \n", operation.GetOperation().GetId())
 			} else {
-				var key, value string
-
-				// this validation is added to support the previous behavior, this will remove in next commits
-				if len(configs) > 1 {
-					out.Die("invalid arguments: %v, please use one of 'rpk cluster config set <key> <value>' or 'rpk cluster config set <key>=<value>'", args)
-				}
-				// Disabling Tiered Storage requires a confirmation from the user because it may lead to data loss.
-				if key == "cloud_storage_enable_remote_write" && value == "false" {
-					if !noConfirm {
-						confirmed, err := out.Confirm("Warning: disabling Tiered Storage may lead to data loss. If you only want to pause Tiered Storage temporarily, use the 'cloud_storage_enable_segment_uploads' option. Abort?")
-						out.MaybeDie(err, "unable to read user input: %v", err)
-						if confirmed {
-							out.Die("Aborted by user.")
-						}
-					}
-				}
-
-				split := strings.SplitN(configs[0], "=", 2)
-				key, value = split[0], split[1]
 				client, err := adminapi.NewClient(cmd.Context(), fs, vp)
 				out.MaybeDie(err, "unable to initialize admin client: %v", err)
 
 				schema, err := client.ClusterConfigSchema(cmd.Context())
 				out.MaybeDie(err, "unable to query config schema: %v", err)
 
-				meta, ok := schema[key]
-
-				if !ok {
-					// loop over schema, try to find key in the Aliases,
-					for _, v := range schema {
-						if slices.Contains(v.Aliases, key) {
-							meta, ok = v, true
-							break
-						}
-					}
-					if !ok {
-						out.Die("Unknown property %q", key)
-					}
-				}
-
-				upsert := make(map[string]interface{})
-				remove := make([]string, 0)
-
-				// - For scalars, pass string values through to the REST
-				// API -- it will give more informative errors than we can
-				// about validation.  Special case strings for nullable
-				// properties ('null') and for resetting to default ('')
-				// - For arrays, make an effort: otherwise the REST API
-				// may interpret a scalar string as a list of length 1
-				// (via one_or_many_property).
-
-				if meta.Nullable && value == "null" {
-					// Nullable types may be explicitly set to null
-					upsert[key] = nil
-				} else if meta.Type != "string" && (value == "") {
-					// Non-string types that receive an empty string
-					// are reset to default
-					remove = append(remove, key)
-				} else if meta.Type == "array" {
-					var a anySlice
-					err = yaml.Unmarshal([]byte(value), &a)
-					out.MaybeDie(err, "invalid list syntax")
-					upsert[key] = a
-				} else {
-					upsert[key] = value
-				}
+				upsert, remove, err := validateConfigSelfHosted(schema, configs, noConfirm)
+				out.MaybeDieErr(err)
 
 				result, err := client.PatchClusterConfig(cmd.Context(), upsert, remove)
+
 				if he := (*rpadmin.HTTPResponseError)(nil); errors.As(err, &he) {
 					// Special case 400 (validation) errors with friendly output
 					// about which configuration properties were invalid.
@@ -190,11 +134,76 @@ Use the flag '--no-confirm' to avoid the confirmation prompt.`,
 			}
 		},
 	}
+
 	cmd.Flags().BoolVar(&noConfirm, "no-confirm", false, "Disable confirmation prompt")
 	return cmd
 }
 
-func setCloudConfig(cmd *cobra.Command, cfg *config.Config, p *config.RpkProfile, configs []string) (*controlplanev1.UpdateClusterOperation, error) {
+func validateConfigSelfHosted(schema rpadmin.ConfigSchema, args []string, noConfirm bool) (map[string]any, []string, error) {
+	upsert := make(map[string]any)
+	remove := make([]string, 0)
+
+	for _, arg := range args {
+		split := strings.SplitN(arg, "=", 2)
+		key, value := split[0], split[1]
+
+		// Disabling Tiered Storage requires a confirmation from the user because it may lead to data loss.
+		if key == "cloud_storage_enable_remote_write" && value == "false" {
+			if !noConfirm {
+				confirmed, err := out.Confirm("Warning: disabling Tiered Storage may lead to data loss. If you only want to pause Tiered Storage temporarily, use the 'cloud_storage_enable_segment_uploads' option. Abort?")
+				out.MaybeDie(err, "unable to read user input: %v", err)
+				if confirmed {
+					out.Die("Aborted by user.")
+				}
+			}
+		}
+
+		meta, ok := schema[key]
+
+		if !ok {
+			// loop over schema, try to find key in the Aliases,
+			for _, v := range schema {
+				if slices.Contains(v.Aliases, key) {
+					meta, ok = v, true
+					break
+				}
+			}
+			if !ok {
+				return nil, nil, fmt.Errorf("unknown property %q", key)
+			}
+		}
+
+		// - For scalars, pass string values through to the REST
+		// API -- it will give more informative errors than we can
+		// about validation.  Special case strings for nullable
+		// properties ('null') and for resetting to default ('')
+		// - For arrays, make an effort: otherwise the REST API
+		// may interpret a scalar string as a list of length 1
+		// (via one_or_many_property).
+
+		if meta.Nullable && value == "null" {
+			// Nullable types may be explicitly set to null
+			upsert[key] = nil
+		} else if meta.Type != "string" && (value == "") {
+			// Non-string types that receive an empty string
+			// are reset to default
+			remove = append(remove, key)
+		} else if meta.Type == "array" {
+			var a anySlice
+			err := yaml.Unmarshal([]byte(value), &a)
+			if err != nil {
+				return nil, nil, fmt.Errorf("invalid list syntax: %v", err)
+			}
+			upsert[key] = a
+		} else {
+			upsert[key] = value
+		}
+	}
+
+	return upsert, remove, nil
+}
+
+func setCloudConfig(ctx context.Context, cfg *config.Config, p *config.RpkProfile, configs []string) (*controlplanev1.UpdateClusterOperation, error) {
 	cloudClient := publicapi.NewCloudClientSet(cfg.DevOverrides().PublicAPIURL, p.CurrentAuth().AuthToken)
 
 	redpandaConfigs := make(map[string]any)
@@ -220,12 +229,12 @@ func setCloudConfig(cmd *cobra.Command, cfg *config.Config, p *config.RpkProfile
 		UpdateMask: &fieldmaskpb.FieldMask{Paths: paths},
 	}
 
-	operation, err := cloudClient.Cluster.UpdateCluster(cmd.Context(), connect.NewRequest(req))
+	operation, err := cloudClient.Cluster.UpdateCluster(ctx, connect.NewRequest(req))
 	if err != nil {
 		var ce *connect.Error
 		if errors.As(err, &ce) {
 			if ce.Code() == connect.CodePermissionDenied {
-				return nil, fmt.Errorf("permission denied")
+				return nil, fmt.Errorf("this user does not have permission to update the cluster configuration, please check your role or contact admin")
 			}
 			if ce.Code() == connect.CodeNotFound {
 				return nil, fmt.Errorf("cluster not found. Please ensure the cluster exists in the cloud")
