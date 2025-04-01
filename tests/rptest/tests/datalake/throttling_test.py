@@ -92,7 +92,9 @@ class DatalakeThrottlingTest(RedpandaTest):
                 "datalake_scheduler_max_concurrent_translations":
                 0,
                 "iceberg_target_backlog_size":
-                1000
+                1000,
+                "iceberg_backlog_controller_p_coeff":
+                1.0
             })
 
             # Produce some more messages

@@ -3973,7 +3973,15 @@ configuration::configuration()
       "shares assigned to the datalake scheduling group will be proportional "
       "to the backlog size error.",
       {.needs_restart = needs_restart::no, .visibility = visibility::tunable},
-      0.000008)
+      0.00001)
+  , iceberg_backlog_controller_i_coeff(
+      *this,
+      "iceberg_backlog_controller_i_coeff",
+      "Integral coefficient for the Iceberg backlog controller. The error is "
+      "integrated (accumulated) over time and the aggregated value contributes "
+      "to the datalake translation priority with this coefficient.",
+      {.needs_restart = needs_restart::no, .visibility = visibility::tunable},
+      0.005)
   , iceberg_target_backlog_size(
       *this,
       "iceberg_target_backlog_size",
