@@ -11,6 +11,7 @@ import re
 import time
 from rptest.clients.default import DefaultClient
 from rptest.clients.rpk import RpkTool, TopicSpec
+from rptest.services.admin import Admin
 from rptest.services.cluster import cluster
 from random import randint
 
@@ -104,9 +105,21 @@ class DatalakeThrottlingTest(RedpandaTest):
                 "iceberg_target_backlog_size":
                 1000,
                 "iceberg_backlog_controller_p_coeff":
-                1.0
+                1.0,
+                "iceberg_throttle_backlog_size_ratio":
+                0.0005
             })
+            admin = Admin(self.redpanda)
 
+            # Set the disk space to relatively small value
+            new_total = 20 * (1024 * 1024 * 1024)
+            new_free = 10 * (1024 * 1024 * 1024)
+            admin.set_disk_stat_override(
+                "data",
+                self.redpanda.nodes[0],
+                total_bytes=new_total,
+                free_bytes=new_free,
+            )
             # Produce some more messages
             wait_until(lambda: self.producer_throttled(dl), timeout_sec=60)
 
