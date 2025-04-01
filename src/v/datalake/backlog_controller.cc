@@ -54,7 +54,7 @@ void backlog_controller::update() {
 
     _current_sample = _sampling_f();
 
-    auto current_err = _setpoint() - _current_sample;
+    auto current_err = _current_sample - _setpoint();
     auto update = _proportional_coeff() * current_err;
 
     update = std::clamp(static_cast<int>(update), _min_shares, _max_shares);

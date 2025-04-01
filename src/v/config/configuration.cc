@@ -3971,10 +3971,9 @@ configuration::configuration()
       "iceberg_backlog_controller_p_coeff",
       "Proportional coefficient for the Iceberg backlog controller. Number of "
       "shares assigned to the datalake scheduling group will be proportional "
-      "to the backlog size error. More negative value means larger and faster "
-      "changes in the number of shares in the datalake scheduling group.",
+      "to the backlog size error.",
       {.needs_restart = needs_restart::no, .visibility = visibility::tunable},
-      -0.000008)
+      0.000008)
   , iceberg_target_backlog_size(
       *this,
       "iceberg_target_backlog_size",
