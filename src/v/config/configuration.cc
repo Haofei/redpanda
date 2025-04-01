@@ -4084,7 +4084,7 @@ configuration::configuration()
       "Size, in bytes, of the amount of per translator data that may be "
       "flushed to disk before the translator will upload and remove its "
       "current on disk data.",
-      {.needs_restart = needs_restart::yes, .visibility = visibility::tunable},
+      {.needs_restart = needs_restart::no, .visibility = visibility::tunable},
       32_MiB,
       {.min = 1_MiB})
   , datalake_disk_space_monitor_enable(
@@ -4109,7 +4109,7 @@ configuration::configuration()
       *this,
       "datalake_scratch_space_size_bytes",
       "Size, in bytes, of the amount of scratch space datalake should use.",
-      {.needs_restart = needs_restart::yes, .visibility = visibility::tunable},
+      {.needs_restart = needs_restart::no, .visibility = visibility::tunable},
       5_GiB)
   , datalake_disk_usage_overage_coeff(
       *this,
