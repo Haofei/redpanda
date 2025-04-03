@@ -152,6 +152,6 @@ class DatalakeOMBTest(RedpandaTest):
             # Ensure 10% of messages were succesfully translated as a basic correctness test.
             dl.wait_for_translation(
                 topic_name,
-                msg_count=(0.1 * benchmark.benchmark_time()) *
+                msg_count=(0.1 * benchmark.benchmark_time() * 60) *
                 (producer_rate_bytes_s // payload_size),
                 op=operator.gt)
