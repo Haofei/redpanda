@@ -145,13 +145,13 @@ class DatalakeOMBTest(RedpandaTest):
                                                topology="ensemble",
                                                local_payload_dir=payloads)
             benchmark.start()
-            benchmark_time_min = benchmark.benchmark_time() + 5
+            benchmark_time_min = benchmark.benchmark_time_mins() + 5
             benchmark.wait(timeout_sec=benchmark_time_min * 60)
             benchmark.check_succeed()
 
             # Ensure 10% of messages were succesfully translated as a basic correctness test.
             dl.wait_for_translation(
                 topic_name,
-                msg_count=(0.1 * benchmark.benchmark_time() * 60) *
+                msg_count=(0.1 * benchmark.benchmark_time_mins() * 60) *
                 (producer_rate_bytes_s // payload_size),
                 op=operator.gt)
