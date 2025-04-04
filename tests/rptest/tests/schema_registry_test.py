@@ -615,12 +615,36 @@ message ProtoType {
   float f =  1;
 }"""
 
+schema_avro_def = """
+{
+    "type": "record",
+    "name": "myrecord",
+    "fields": [
+        {
+            "name": "f1",
+            "type": "string"
+        }
+    ]
+}"""
+
 schema_proto_dependee_def = """
 syntax = "proto3";
 
 import "schema_proto.proto";
 message Dependee {
   ProtoType p =  1;
+}"""
+
+schema_avro_dependee_def = """
+{
+    "type": "record",
+    "name": "myotherrecord",
+    "fields": [
+        {
+            "name": "f2",
+            "type": "string"
+        }
+    ]
 }"""
 
 soft_deleted_schemas = {
@@ -633,6 +657,11 @@ soft_deleted_schemas = {
         "subject": "schema_json",
         "schema": json_number_schema_def,
         "type": "JSON",
+    },
+    "avro": {
+        "subject": "schema_avro",
+        "schema": schema_avro_def,
+        "type": "AVRO",
     }
 }
 dependent_schemas = {
@@ -649,7 +678,7 @@ dependent_schemas = {
         "type":
         "PROTOBUF",
         "id":
-        3,
+        4,
     },
     "json": {
         "subject":
@@ -664,7 +693,22 @@ dependent_schemas = {
         "type":
         "JSON",
         "id":
-        4,
+        5,
+    },
+    "avro": {
+        "subject":
+        "schema_avro_dependee_schema",
+        "schema":
+        schema_avro_dependee_def,
+        "references": [{
+            "name": "schema_avro.avro",
+            "subject": "schema_avro",
+            "version": 1
+        }],
+        "type":
+        "AVRO",
+        "id":
+        6,
     },
 }
 
@@ -3401,7 +3445,7 @@ class SchemaRegistryTestMethods(SchemaRegistryEndpoints):
 
         #Test setup. Insert and soft-delete schemas to be referencedby
 
-        for name in ["proto", "json"]:
+        for name in ["proto", "json", "avro"]:
             schema = soft_deleted_schemas[name]
             result_raw = self._post_subjects_subject_versions(
                 subject=schema["subject"],
@@ -3411,16 +3455,16 @@ class SchemaRegistryTestMethods(SchemaRegistryEndpoints):
                 }))
             assert result_raw.status_code == requests.codes.ok, \
                     f"Expected {requests.codes.ok} but got {result_raw.status_code} during test setup. "\
-                    f"Request content: {result_raw.content}"
+                    f"Request content: {result_raw.content}. Processing {name}."
 
             result_raw = self._delete_subject_version(
                 subject=schema["subject"], version=1)
             assert result_raw.status_code == requests.codes.ok, \
                     f"Expected {requests.codes.ok} but got {result_raw.status_code} during test setup. "\
-                    f"Request content: {result_raw.content}"
+                    f"Request content: {result_raw.content}. Processing {name}."
 
         #Register schemas that reference the soft-deleted schemas
-        for name in ["proto", "json"]:
+        for name in ["proto", "json", "avro"]:
             schema = dependent_schemas[name]
             result_raw = self._post_subjects_subject_versions(
                 subject=schema["subject"],
@@ -3431,11 +3475,11 @@ class SchemaRegistryTestMethods(SchemaRegistryEndpoints):
                 }))
             assert result_raw.status_code == requests.codes.ok, \
                     f"Expected {requests.codes.ok} but got {result_raw.status_code}. "\
-                    f"Request content: {result_raw.content}"
+                    f"Request content: {result_raw.content}. Processing {name}."
             result_id = result_raw.json()["id"]
             assert result_id == schema["id"], \
                     f"Expected id {schema['id']} but got {result_id}. "\
-                    f"Request content: {result_raw.content}"
+                    f"Request content: {result_raw.content}. Processing {name}."
 
 
 class SchemaRegistryModeNotMutableTest(SchemaRegistryEndpoints):
