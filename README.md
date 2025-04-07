@@ -137,24 +137,17 @@ docker pull docker.redpanda.com/redpandadata/redpanda-unstable:v25.1.1-rc1
 
 # Community
 
-[Slack](https://redpanda.com/slack): This is the primary way the community interacts in real time. :)
-
-[Github Discussions](https://github.com/redpanda-data/redpanda/discussions): This is for longer, async, thoughtful discussions.
-
-[GitHub Issues](https://github.com/redpanda-data/redpanda/issues): This is reserved only for actual issues. Please use the mailing list for discussions.
-
-[Code of Conduct](./CODE_OF_CONDUCT.md)
-
-[Contribute to the Code](./CONTRIBUTING.md)
+- [Slack](https://redpanda.com/slack): This is the primary way the community interacts in real time. :)
+- [Github Discussions](https://github.com/redpanda-data/redpanda/discussions): This is for longer, async, thoughtful discussions.
+- [GitHub Issues](https://github.com/redpanda-data/redpanda/issues): This is reserved only for actual issues. Please use the mailing list for discussions.
+- [Code of Conduct](./CODE_OF_CONDUCT.md)
+- [Contribute to the Code](./CONTRIBUTING.md)
 
 # Resources
 
-[Redpanda Documentation](https://docs.redpanda.com/home/)
+- [Redpanda Documentation](https://docs.redpanda.com/home/)
+- [Redpanda Blog](https://www.redpanda.com/blog)
+- [Upcoming Redpanda Events](https://www.redpanda.com/events)
+- [Redpanda Support](https://support.redpanda.com/)
+- [Redpanda University](https://university.redpanda.com/)
 
-[Redpanda Blog](https://www.redpanda.com/blog)
-
-[Upcoming Redpanda Events](https://www.redpanda.com/events)
-
-[Redpanda Support](https://support.redpanda.com/)
-
-[Redpanda University](https://university.redpanda.com/)
