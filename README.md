@@ -69,17 +69,17 @@ For amd64:
 
 ```
 curl -LO \
-  https://dl.redpanda.com/nzc4ZYQK3WRGd9sy/redpanda/raw/names/redpanda-amd64/versions/23.3.6/redpanda-24.2.7-amd64.tar.gz
+  https://dl.redpanda.com/nzc4ZYQK3WRGd9sy/redpanda/raw/names/redpanda-amd64/versions/25.1.1/redpanda-25.1.1-amd64.tar.gz
 ```
 
 For arm64:
 
 ```
 curl -LO \
-  https://dl.redpanda.com/nzc4ZYQK3WRGd9sy/redpanda/raw/names/redpanda-arm64/versions/23.3.6/redpanda-24.2.7-arm64.tar.gz
+  https://dl.redpanda.com/nzc4ZYQK3WRGd9sy/redpanda/raw/names/redpanda-arm64/versions/25.1.1/redpanda-25.1.1-arm64.tar.gz
 ```
 
-Replace `24.2.7` with the version you want to download. See [Release Notes](https://github.com/redpanda-data/redpanda/releases).
+Replace `25.1.1` with the version you want to download. See [Release Notes](https://github.com/redpanda-data/redpanda/releases).
 
 ## Build Manually
 
@@ -131,10 +131,10 @@ sudo yum install redpanda
 
 ### RC releases on Docker
 
-Example with `v23.1.1-rc1`:
+Example with `v25.1.1-rc1`:
 
 ```bash
-docker pull docker.redpanda.com/redpandadata/redpanda-unstable:v23.1.1-rc1
+docker pull docker.redpanda.com/redpandadata/redpanda-unstable:v25.1.1-rc1
 ```
 
 # Community
