@@ -101,7 +101,7 @@ ss::future<writer_error> local_parquet_file_writer::flush() {
     if (!_initialized) {
         co_return writer_error::flush_error;
     }
-    if (_error != writer_error::ok) {
+    if (_error != writer_error::ok && !is_recoverable_error(_error)) {
         co_return _error;
     }
     auto result = co_await ss::coroutine::as_future(_writer->flush());
