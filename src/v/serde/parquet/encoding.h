@@ -29,6 +29,7 @@ class plain_encoder<boolean_value> {
 public:
     void add_value(boolean_value v);
     iobuf get_encoded_buf();
+    size_t size_bytes() const;
 
 private:
     iobuf buf;
@@ -41,6 +42,7 @@ class numeric_plain_encoder {
 public:
     void add_value(value_type);
     iobuf get_encoded_buf();
+    size_t size_bytes() const;
 
 private:
     iobuf buf;
@@ -65,6 +67,7 @@ class plain_encoder<byte_array_value> {
 public:
     void add_value(byte_array_value&&);
     iobuf get_encoded_buf();
+    size_t size_bytes() const;
 
 private:
     iobuf buf;
@@ -75,6 +78,7 @@ class plain_encoder<fixed_byte_array_value> {
 public:
     void add_value(fixed_byte_array_value&&);
     iobuf get_encoded_buf();
+    size_t size_bytes() const;
 
 private:
     iobuf buf;

@@ -38,6 +38,10 @@ iobuf plain_encoder<boolean_value>::get_encoded_buf() {
     return std::exchange(buf, {});
 }
 
+size_t plain_encoder<boolean_value>::size_bytes() const {
+    return buf.size_bytes();
+}
+
 template<typename value_type>
 void numeric_plain_encoder<value_type>::add_value(value_type v) {
     if constexpr (std::is_integral_v<decltype(v.val)>) {
@@ -50,6 +54,11 @@ void numeric_plain_encoder<value_type>::add_value(value_type v) {
 template<typename value_type>
 iobuf numeric_plain_encoder<value_type>::get_encoded_buf() {
     return std::exchange(buf, {});
+}
+
+template<typename value_type>
+size_t numeric_plain_encoder<value_type>::size_bytes() const {
+    return buf.size_bytes();
 }
 
 template class numeric_plain_encoder<int32_value>;
@@ -68,12 +77,21 @@ iobuf plain_encoder<byte_array_value>::get_encoded_buf() {
     return std::exchange(buf, {});
 }
 
+size_t plain_encoder<byte_array_value>::size_bytes() const {
+    return buf.size_bytes();
+}
+
 void plain_encoder<fixed_byte_array_value>::add_value(
   fixed_byte_array_value&& v) {
     buf.append(std::move(v.val));
 }
+
 iobuf plain_encoder<fixed_byte_array_value>::get_encoded_buf() {
     return std::exchange(buf, {});
+}
+
+size_t plain_encoder<fixed_byte_array_value>::size_bytes() const {
+    return buf.size_bytes();
 }
 
 namespace {

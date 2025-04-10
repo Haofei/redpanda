@@ -102,15 +102,6 @@ public:
           });
         _rep_levels.push_back(rl);
         _def_levels.push_back(dl);
-
-        // NOTE: This does not account for the underlying buffer memory
-        // but we don't want account for the capacity here, ideally we
-        // always use the full capacity in our value buffer, and eagerly
-        // accounting that usage might cause callers to overagressively
-        // flush pages/row groups.
-        _current_page_memory_usage += value_memory_usage
-                                      + static_cast<int64_t>(
-                                        sizeof(rep_level) + sizeof(def_level));
     }
 
     ss::future<> flush_page() {
@@ -186,7 +177,6 @@ public:
         full_page_data.append(std::move(encoded_def_levels));
         full_page_data.append(std::move(encoded_data));
         _current_page_stats.reset();
-        _current_page_memory_usage = 0;
         _total_memory_usage += static_cast<int32_t>(
           full_page_data.size_bytes());
         _flushed_pages.push_back(data_page{
@@ -197,11 +187,18 @@ public:
     }
 
     int64_t memory_usage() const override {
-        return _total_memory_usage + _current_page_memory_usage;
+        return _total_memory_usage + current_page_memory_usage();
     }
 
     int64_t current_page_memory_usage() const override {
-        return _current_page_memory_usage;
+        // NOTE: This does account for the underlying buffer memory
+        // but we don't want to account for the capacity here, ideally we
+        // always use the full capacity in our value buffer, and eagerly
+        // accounting that usage might cause callers to overagressively
+        // flush pages/row groups.
+        return _value_buffer.size_bytes()
+               + (_rep_levels.size() * sizeof(_rep_levels[0]))
+               + (_def_levels.size() * sizeof(_def_levels[0]));
     }
 
     ss::future<> next_page() override { return flush_page(); }
@@ -238,7 +235,6 @@ public:
 private:
     column_stats_collector<value_type, comparator> _current_page_stats;
     column_stats_collector<value_type, comparator> _flushed_stats;
-    int64_t _current_page_memory_usage = 0;
     int64_t _total_memory_usage = 0;
     plain_encoder<value_type> _value_buffer;
     chunked_vector<def_level> _def_levels;
