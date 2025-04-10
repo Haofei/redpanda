@@ -450,7 +450,7 @@ class CloudCluster():
 
     def _get_cluster_console_url(self):
         cluster = self.rpcloud.get_cluster(self.current.cluster_id)
-        return cluster['redpandaConsole']['url']
+        return cluster['redpanda_console']['url']
 
     def _get_network(self) -> dict[str, Any] | None:
         if type(self.current.network_id) is not str:
@@ -557,17 +557,23 @@ class CloudCluster():
         """
         return self.rpcloud.get_cluster(_id)
 
+    def _get_legacy_cluster(self, _id: str) -> dict[str, Any]:
+        """
+        Calls deprecated cloud API to get cluster info
+        """
+        return self.rpcloud.get_legacy_cluster(_id)
+
     def _update_live_cluster_info(self):
         """
         Update info from existing cluster (BYOC)
         """
-        # get cluster data
-        _c = self._get_cluster(self.current.cluster_id)
+        # get cluster data (needs legacy data, revisit for DEVPROD-2525)
+        _c = self._get_legacy_cluster(self.current.cluster_id)
         # Fill in immediate configuration
         self.current._isAlive = True if _c['status'][
             'health'] == 'healthy' else False
         self.current.name = _c['name']
-        self.current.namespace_uuid = _c['resource_group_id']
+        self.current.namespace_uuid = _c['namespaceUuid']
         self.current.install_pack_ver = _c['spec']['installPackVersion']
         self.current.region = _c['spec']['region']
         self.current.region_id = self._get_region_id()
@@ -587,11 +593,12 @@ class CloudCluster():
         :return: string or None if failure
         """
 
-        cluster = self._get_cluster(self.current.cluster_id)
-        base_url = cluster['status']['listeners']['redpandaConsole'][
-            'default']['urls'][0]
-        username = cluster['spec']['consolePrometheusCredentials']['username']
-        password = cluster['spec']['consolePrometheusCredentials']['password']
+        base_url = self._get_cluster_console_url()
+        # revisit when there's a public API endpoint for prometheus
+        # credentials (DEVPROD-2525)
+        legacy = self._get_legacy_cluster(self.current.cluster_id)
+        username = legacy['spec']['consolePrometheusCredentials']['username']
+        password = legacy['spec']['consolePrometheusCredentials']['password']
         b64 = base64.b64encode(bytes(f'{username}:{password}', 'utf-8'))
         token = b64.decode('utf-8')
         headers = {'Authorization': f'Basic {token}'}
@@ -785,8 +792,7 @@ class CloudCluster():
     @cache
     def panda_proxy_url(self):
         cluster = self._get_cluster(self.current.cluster_id)
-        return cluster['status']['listeners']['pandaProxy']['panda-proxy'][
-            'urls'][0]
+        return cluster['http_proxy']['url']
 
     def _query_panda_proxy(self, path):
         # Prepare credentials
@@ -827,15 +833,13 @@ class CloudCluster():
 
         # list cluster specs
         self._logger.info(f"Cluster '{self.current.cluster_id}': "
-                          f"health = '{cluster['status']['health']}', "
                           f"state = '{cluster['state']}'")
 
         # Check if panda-proxy is available
-        if not 'panda-proxy' in cluster['status']['listeners']['pandaProxy']:
+        if not 'url' in cluster['http_proxy']:
             return warn_and_return("Panda-Proxy listener is not available")
         else:
-            _u = cluster['status']['listeners']['pandaProxy']['panda-proxy'][
-                'urls'][0]
+            _u = self.panda_proxy_url()
             self._logger.info(f"Panda-Proxy listener: '{_u}'")
 
         # Check that cluster is operational
@@ -1081,8 +1085,7 @@ class CloudCluster():
         """Create ACLs for user
         """
 
-        cluster = self.rpcloud.get_cluster(self.current.cluster_id)
-        base_url = cluster['redpandaConsole']['url']
+        base_url = self._get_cluster_console_url()
         for rt in ('Topic', 'Group', 'TransactionalID'):
             payload = {
                 'host': '*',

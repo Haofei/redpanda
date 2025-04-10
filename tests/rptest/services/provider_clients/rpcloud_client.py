@@ -129,6 +129,15 @@ class RpCloudApiClient(object):
             _e += f"/{id}"
         return _e
 
+    # delete for DEVPROD-2525
+    @staticmethod
+    def legacy_cluster_endpoint(id=None):
+        _e = "/api/v1/clusters"
+        if id:
+            _e += f"/{id}"
+        return _e
+
+    # try converting to /v1beta2/networks again for DEVPROD-2525
     @staticmethod
     def network_endpoint(id=None):
         _e = "/api/v1/networks"
@@ -138,7 +147,8 @@ class RpCloudApiClient(object):
 
     @staticmethod
     def network_peering_endpoint(id=None, peering_id=None):
-        # the network_peerings API has no public API replacement yet :(
+        # the network_peerings API has no public API replacement yet.
+        # revisit for DEVPROD-2525
         _e = "/api/v1/networks"
         if id:
             _e += f"/{id}/network-peerings"
@@ -180,7 +190,8 @@ class RpCloudApiClient(object):
         # return it
         return _ret
 
-    # the network_peerings API has no public API replacement yet :(
+    # the network_peerings API has no public API replacement yet.
+    # revisit for DEVPROD-2525
     def list_network_peerings(self, network_id, ns_uuid=None):
         _ret = self._http_get(self.network_peering_endpoint(id=network_id),
                               params=self._prepare_params(ns_uuid=ns_uuid))
@@ -191,6 +202,12 @@ class RpCloudApiClient(object):
                                   base_url=self._config.public_api_url)
         return _cluster['cluster']
 
+    # delete for DEVPROD-2525
+    def get_legacy_cluster(self, cluster_id: str):
+        _cluster = self._http_get(self.legacy_cluster_endpoint(id=cluster_id))
+        return _cluster
+
+    # not porting this endpoint until DEVPROD-2525
     def get_network(self, network_id):
         _network = self._http_get(self.network_endpoint(id=network_id))
         return _network
