@@ -87,7 +87,7 @@ public:
     /// version.
     ///
     /// return the schema_version and schema_id, and whether it's new.
-    insert_result insert(unparsed_schema schema) {
+    insert_result insert(subject_schema schema) {
         auto [sub, def] = std::move(schema).destructure();
         auto id = insert_schema(std::move(def)).id;
         auto [version, inserted] = insert_subject(std::move(sub), id);
@@ -95,13 +95,23 @@ public:
     }
 
     ///\brief Return a schema definition by id.
-    result<unparsed_schema_definition>
-    get_schema_definition(const schema_id& id) const {
+    result<schema_definition> get_schema_definition(const schema_id& id) const {
         auto it = _schemas.find(id);
         if (it == _schemas.end()) {
             return not_found(id);
         }
         return {it->second.definition.share()};
+    }
+
+    ///\brief Return the id of the schema, if it already exists.
+    std::optional<schema_id> get_schema_id(const schema_definition& def) const {
+        const auto s_it = std::find_if(
+          _schemas.begin(), _schemas.end(), [&](const auto& s) {
+              const auto& entry = s.second;
+              return def == entry.definition;
+          });
+        return s_it == _schemas.end() ? std::optional<schema_id>{}
+                                      : s_it->first;
     }
 
     ///\brief Return a list of subject-versions for the shema id.
@@ -157,7 +167,7 @@ public:
     }
 
     ///\brief Return a schema by subject and version.
-    result<unparsed_subject_schema> get_subject_schema(
+    result<stored_schema> get_subject_schema(
       const subject& sub,
       std::optional<schema_version> version,
       include_deleted inc_del) const {
@@ -166,7 +176,7 @@ public:
 
         auto def = BOOST_OUTCOME_TRYX(get_schema_definition(v_id.id));
 
-        return unparsed_subject_schema{
+        return stored_schema{
           .schema = {sub, std::move(def)},
           .version = v_id.version,
           .id = v_id.id,
@@ -614,7 +624,7 @@ public:
         schema_id id;
         bool inserted;
     };
-    insert_schema_result insert_schema(unparsed_schema_definition def) {
+    insert_schema_result insert_schema(schema_definition def) {
         const auto s_it = std::find_if(
           _schemas.begin(), _schemas.end(), [&](const auto& s) {
               const auto& entry = s.second;
@@ -630,7 +640,7 @@ public:
         return {id, inserted};
     }
 
-    bool upsert_schema(schema_id id, unparsed_schema_definition def) {
+    bool upsert_schema(schema_id id, schema_definition def) {
         return _schemas.insert_or_assign(id, schema_entry(std::move(def)))
           .second;
     }
@@ -771,15 +781,12 @@ public:
         }
     };
 
-    ///\brief _schemas const getter
-    const auto& get_schemas() const { return _schemas; }
-
 private:
     struct schema_entry {
-        explicit schema_entry(unparsed_schema_definition definition)
+        explicit schema_entry(schema_definition definition)
           : definition{std::move(definition)} {}
 
-        unparsed_schema_definition definition;
+        schema_definition definition;
     };
 
     class subject_entry {
