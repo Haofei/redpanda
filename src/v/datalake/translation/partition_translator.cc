@@ -168,9 +168,19 @@ partition_translator::fetch_translation_offsets(retry_chain_node& rcn) {
     // least until 'wait_for_data' returns and we re-enter the loop.
     _data_source->update_commit_lag(last_committed_offset);
 
-    // LTO stands for last translated offset
-    const auto checkpointed_lto = result.last_added_offset.value_or(
-      kafka::prev_offset(_data_source->min_offset_for_translation()));
+    auto next_start_offset = result.last_added_offset
+                               ? kafka::next_offset(*result.last_added_offset)
+                               : _data_source->min_offset_for_translation();
+
+    // Replicate an initialized last translated offset to unblock the max
+    // collectible offset while pinning this Kafka offset from
+    // application-facing retention or compaction.
+    //
+    // NOTE: kafka::prev_offset(0) is kafka::offset::min() (uninitialized).
+    // in this case we want -1 to differentiate from uninitialized.
+    auto checkpointed_lto = next_start_offset == kafka::offset{0}
+                              ? kafka::offset{-1}
+                              : kafka::prev_offset(next_start_offset);
     /**
      * We do not replicate the timestamp of the highest translated offset
      * here as this information is not present in coordinator. This is fine

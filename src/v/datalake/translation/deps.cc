@@ -315,6 +315,10 @@ public:
     }
 
     kafka::offset min_offset_for_translation() const final {
+        auto highest_translated = _stm->cached_highest_translated_offset();
+        if (highest_translated != kafka::offset::min()) {
+            return kafka::next_offset(highest_translated);
+        }
         return calculate_min_offset_for_translation(
           _partition->is_read_replica_mode_enabled(), *_partition_proxy);
     }
@@ -772,59 +776,25 @@ public:
     }
 
     std::optional<size_t> translation_backlog() const final {
+        auto lso_res = _partition_proxy->last_stable_offset();
+        if (lso_res.has_error()) {
+            return std::nullopt;
+        }
+        auto max_translatable = kafka::prev_offset(
+          model::offset_cast(lso_res.value()));
         auto checkpointed_lto = _stm->cached_highest_translated_offset();
-
-        const auto final_lto
-          = _inflight_translation_lto
-              ? std::max(checkpointed_lto, *_inflight_translation_lto)
-              : checkpointed_lto;
-
-        auto min_offset_for_translation = calculate_min_offset_for_translation(
-          _partition->is_read_replica_mode_enabled(), *_partition_proxy);
-
-        if (final_lto <= min_offset_for_translation) {
-            return _partition->size_bytes();
+        auto next_to_translate
+          = checkpointed_lto == kafka::offset::min()
+              ? calculate_min_offset_for_translation(
+                  _partition->is_read_replica_mode_enabled(), *_partition_proxy)
+              : kafka::next_offset(checkpointed_lto);
+        if (_inflight_translation_lto) {
+            next_to_translate = std::max(
+              kafka::next_offset(*_inflight_translation_lto),
+              next_to_translate);
         }
-
-        const auto log_lto = highest_log_offset_below_next(
-          _partition->log(), final_lto);
-
-        const auto max_translatable_offset = model::prev_offset(
-          _partition->last_stable_offset());
-
-        if (log_lto == max_translatable_offset) {
-            return 0;
-        }
-        /**
-         * It is possible that the last stable offset is not yet established or
-         * simply smaller than the highest translated offset. f.e. during the
-         * partition movement. In such cases, we cannot calculate the backlog.
-         */
-        if (log_lto > max_translatable_offset) {
-            return std::nullopt;
-        }
-
-        auto size_after_translated = _partition->log()->size_bytes_after_offset(
-          log_lto);
-
-        auto size_after_max_translatable
-          = _partition->log()->size_bytes_after_offset(max_translatable_offset);
-
-        if (size_after_translated < size_after_max_translatable) {
-            vlog(
-              datalake_log.error,
-              "Expected partition {} size after translated offset({}) {} to be "
-              "greater than or equal to the size of log after max translatable "
-              "offset({}): {}",
-              _partition->ntp().path(),
-              log_lto,
-              size_after_translated,
-              max_translatable_offset,
-              size_after_max_translatable);
-            return std::nullopt;
-        }
-
-        return size_after_translated - size_after_max_translatable;
+        return _partition_proxy->estimate_size_between(
+          next_to_translate, max_translatable);
     }
 
     std::optional<model::timestamp> get_translated_offset_timestamp_estimate(

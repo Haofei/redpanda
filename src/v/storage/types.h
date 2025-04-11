@@ -95,9 +95,27 @@ public:
     virtual ss::future<> ensure_local_snapshot_exists(model::offset) = 0;
     // hints stm_manager that now it's a good time to make a snapshot
     virtual void write_local_snapshot_in_background() = 0;
-    // lets the stm control snapshotting and log eviction by limiting
-    // log eviction attempts to offsets not greater than this.
+
+    // Lets the STM control snapshotting and local data removal by limiting
+    // local log eviction and compaction attempts to offsets not greater than
+    // this.
+    //
+    // For example, this can be used to ensure local data is not removed before
+    // first uploading it to tiered storage.
     virtual model::offset max_collectible_offset() = 0;
+
+    // Lets the STM limit application-facing removal or compaction of data by
+    // limiting GC or compaction attempts to offsets exclusively below this
+    // offset. For data that is in both tiered storage and local storage, the
+    // pin will not prevent removal of the local data because applications will
+    // still see the data from tiered storage.
+    //
+    // For example, this can be used to ensure data is written to Iceberg
+    // before being removed from the Kafka-application-facing log.
+    //
+    // May refer to a Kafka offset that does not exist, i.e. it may be up to or
+    // equal to the high watermark.
+    virtual std::optional<kafka::offset> lowest_pinned_data_offset() const = 0;
 
     virtual model::offset last_applied() const = 0;
 
@@ -169,6 +187,7 @@ public:
     }
 
     model::offset max_collectible_offset();
+    std::optional<kafka::offset> lowest_pinned_data_offset() const;
 
     ss::future<fragmented_vector<model::tx_range>>
     aborted_tx_ranges(model::offset to, model::offset from) {

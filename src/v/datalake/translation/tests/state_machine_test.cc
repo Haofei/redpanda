@@ -164,14 +164,7 @@ TEST_F_CORO(translator_stm_fixture, state_machine_ops) {
     // enable iceberg.
     co_await enable_iceberg();
 
-    model::offset max_collectible_offset{};
-    {
-        auto log = std::get<0>(node_stms.begin()->second)->raft()->log();
-        max_collectible_offset
-          = datalake::translation::highest_log_offset_below_next(
-            log, new_translated_offset);
-    }
-    co_await check_max_collectible_offset(max_collectible_offset);
+    co_await check_max_collectible_offset(model::offset::max());
     co_await check_highest_translated_offset(new_translated_offset);
     co_await check_highest_translated_timestamp(new_catchup_timestamp);
 
@@ -189,7 +182,7 @@ TEST_F_CORO(translator_stm_fixture, state_machine_ops) {
     co_await restart_nodes();
 
     co_await enable_iceberg();
-    co_await check_max_collectible_offset(max_collectible_offset);
+    co_await check_max_collectible_offset(model::offset::max());
     co_await check_highest_translated_offset(new_translated_offset);
     co_await check_highest_translated_timestamp(new_catchup_timestamp);
 }

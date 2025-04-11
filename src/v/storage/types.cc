@@ -31,6 +31,17 @@ model::offset stm_manager::max_collectible_offset() {
     return result;
 }
 
+std::optional<kafka::offset> stm_manager::lowest_pinned_data_offset() const {
+    std::optional<kafka::offset> result;
+    for (const auto& stm : _stms) {
+        auto pinned = stm->lowest_pinned_data_offset();
+        if (pinned) {
+            result = std::min(*pinned, result.value_or(kafka::offset::max()));
+        }
+    }
+    return result;
+}
+
 std::ostream& operator<<(std::ostream& o, const disk& d) {
     fmt::print(
       o,
