@@ -3468,7 +3468,7 @@ class SchemaRegistryTestMethods(SchemaRegistryEndpoints):
         test_subjects_subject(normalized, expected_version=2, norm=True)
 
     @cluster(num_nodes=3)
-    @matrix(stype=["json"])
+    @matrix(stype=["json", "proto"])
     def test_missing_references(self, stype):
         """
         Missing references should return an error message with details of the missing reference
