@@ -645,8 +645,14 @@ sanitize_avro_schema_definition(schema_definition def) {
 }
 
 ss::future<subject_schema> make_canonical_avro_schema(
-  schema_getter&, subject_schema unparsed_schema, normalize) {
-    auto [sub, schema] = std::move(unparsed_schema).destructure();
+  schema_getter&, subject_schema unparsed_schema, normalize norm) {
+    auto [sub, unparsed] = std::move(unparsed_schema).destructure();
+    auto [def, type, refs] = std::move(unparsed).destructure();
+    if (norm) {
+        std::sort(refs.begin(), refs.end());
+        refs.erase(std::unique(refs.begin(), refs.end()), refs.end());
+    }
+    schema_definition schema{std::move(def), type, std::move(refs)};
     // TODO: Check references
     // co_await collect_schema(store, {}, sub, {sub, schema.share()});
     co_return subject_schema{
