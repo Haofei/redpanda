@@ -11,6 +11,7 @@
 
 #include "error.h"
 
+#include "bytes/iobuf_parser.h"
 #include "pandaproxy/error.h"
 #include "pandaproxy/schema_registry/error.h"
 #include "pandaproxy/schema_registry/errors.h"
@@ -156,6 +157,7 @@ error_info no_reference_found_for(
                     | std::views::transform([](const auto& ref) {
                           return fmt::format("{{{:e}}}", ref);
                       });
+    iobuf_const_parser parser{schema.def().raw()};
     return {
       error_code::schema_missing_reference,
       fmt::format(
@@ -166,7 +168,7 @@ error_info no_reference_found_for(
         schema.sub()(),
         to_string_view(schema.def().type()),
         fmt::join(fmt_refs, ", "),
-        schema.def().raw()(),
+        parser.read_string(parser.bytes_left()),
         fmt::join(fmt_refs, ", "),
         to_string_view(schema.type()),
         sub(),
