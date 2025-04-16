@@ -212,7 +212,7 @@
   "moduleExtensions": {
     "//bazel:extensions.bzl%non_module_dependencies": {
       "general": {
-        "bzlTransitiveDigest": "zeVh9jz8NxWJEFV5nxz4uzVBn3nNPb951lh46efMXJ0=",
+        "bzlTransitiveDigest": "kMKjJBdb2IH9kGY4fz+CkTAk8TyOzYqgTRt7Qxs9eRQ=",
         "usagesDigest": "FEiDyZe9eAU6yEqnarZf0XMEUk+prUyYClvq1RU1J98=",
         "recordedFileInputs": {},
         "recordedDirentsInputs": {},
@@ -223,8 +223,7 @@
             "attributes": {
               "build_file": "@@//bazel/thirdparty:ada.BUILD",
               "sha256": "caae8ecdb96fd4a50828205a327b62d047a028f08cd370b74178e23903140831",
-              "strip_prefix": "",
-              "url": "https://github.com/ada-url/ada/releases/download/v3.2.2/singleheader.zip"
+              "url": "https://vectorized-public.s3.us-west-2.amazonaws.com/dependencies/ada-3.2.2.single-header.zip"
             }
           },
           "avro": {
