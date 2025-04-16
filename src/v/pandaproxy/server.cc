@@ -17,6 +17,7 @@
 #include "pandaproxy/probe.h"
 #include "pandaproxy/reply.h"
 #include "rpc/rpc_utils.h"
+#include "utils/truncating_logger.h"
 
 #include <seastar/core/coroutine.hh>
 #include <seastar/http/function_handlers.hh>
@@ -80,13 +81,15 @@ struct handler_adaptor : ss::httpd::handler_base {
       ss::httpd::path_description& path_desc,
       const ss::sstring& metrics_group_name,
       json::serialization_format exceptional_mime_type,
-      ss::logger& log)
+      ss::logger& log,
+      truncating_logger& req_log)
       : _pending_requests(pending_requests)
       , _ctx(ctx)
       , _handler(std::move(handler))
       , _probe(path_desc, metrics_group_name)
       , _exceptional_mime_type(exceptional_mime_type)
-      , _log(log) {}
+      , _log(log)
+      , _req_log(req_log) {}
 
     ss::future<std::unique_ptr<ss::http::reply>> handle(
       const ss::sstring&,
@@ -150,6 +153,18 @@ struct handler_adaptor : ss::httpd::handler_base {
               url,
               std::current_exception());
             auto er = exception_reply(_log, ex);
+            auto& erb = er.get_json_body();
+            if (_req_log.is_enabled(ss::log_level::trace) && erb.has_value()) {
+                iobuf_parser parser{rjson_serialize_iobuf(*erb)};
+                vlog(
+                  _req_log.trace,
+                  "{} sending response {} {}: {:?}",
+                  prefix,
+                  method,
+                  url,
+                  parser.read_string(
+                    std::min(parser.bytes_left(), max_log_line_bytes)));
+            }
             rp = server::reply_t{std::move(er).build(), _exceptional_mime_type};
         }
         set_and_measure_response(rp);
@@ -170,6 +185,7 @@ struct handler_adaptor : ss::httpd::handler_base {
     probe _probe;
     json::serialization_format _exceptional_mime_type;
     ss::logger& _log;
+    truncating_logger& _req_log;
 };
 
 server::server(
@@ -180,7 +196,8 @@ server::server(
   const ss::sstring& definitions,
   context_t& ctx,
   json::serialization_format exceptional_mime_type,
-  ss::logger& log)
+  ss::logger& log,
+  truncating_logger& req_log)
   : _server(server_name)
   , _public_metrics_group_name(public_metrics_group_name)
   , _pending_reqs()
@@ -189,7 +206,8 @@ server::server(
   , _ctx(ctx)
   , _exceptional_mime_type(exceptional_mime_type)
   , _probe{}
-  , _log(log) {
+  , _log(log)
+  , _req_log(req_log) {
     _api20.set_api_doc(_server._routes);
     _api20.register_api_file(_server._routes, header);
     _api20.add_definitions_file(_server._routes, definitions);
@@ -209,7 +227,8 @@ void server::route(server::route_t r) {
       r.path_desc,
       _public_metrics_group_name,
       _exceptional_mime_type,
-      _log);
+      _log,
+      _req_log);
     r.path_desc.set(_server._routes, handler);
 }
 
