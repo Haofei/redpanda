@@ -482,7 +482,10 @@ ss::future<pb::FileDescriptorProto> import_schema(
         // Otherwise log the error details and throw an appropriate error for
         // the response
         vlog(
-          srlog.warn, "Failed to decode schema {}: {}", schema.sub(), e.what());
+          srlog.warn,
+          "Failed to decode schema {}: {:?}",
+          schema.sub(),
+          e.what());
         throw as_exception(invalid_schema(schema));
     }
 }
