@@ -334,9 +334,7 @@ sharded_store::has_schema(subject_schema schema, include_deleted inc_del) {
                 break;
             }
         } catch (const exception& e) {
-            if (
-              e.code() == error_code::subject_not_found
-              || e.code() == error_code::subject_version_not_found) {
+            if (failed_subject_schema_lookup(e.code())) {
             } else if (
               // Stored schemas might be invalid if imported improperly
               e.code() == error_code::schema_invalid) {
