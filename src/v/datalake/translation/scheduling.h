@@ -327,7 +327,15 @@ struct executor {
      * finished with lowest value being highest priority.
      */
     using finish_priority = size_t;
-    absl::btree_map<finish_priority, translator_id>
+    struct finish_request {
+        translator_id id;
+        translator::stop_reason reason;
+
+        finish_request(translator_id id, translator::stop_reason reason)
+          : id(std::move(id))
+          , reason(reason) {}
+    };
+    absl::btree_map<finish_priority, finish_request>
       translators_for_immediate_finish;
 
     ss::gate gate;
@@ -411,8 +419,18 @@ public:
      * the total size of the translator which can be used to avoid requerying
      * for the same information from the translator status API.
      */
-    void request_immediate_finish(
-      chunked_vector<std::pair<translator_id, size_t>>);
+    struct finish_request {
+        translator_id id;
+        size_t size;
+        translator::stop_reason reason;
+
+        finish_request(
+          translator_id id, size_t size, translator::stop_reason reason)
+          : id(std::move(id))
+          , size(size)
+          , reason(reason) {}
+    };
+    void request_immediate_finish(chunked_vector<finish_request>);
 
 private:
     ss::future<> main();

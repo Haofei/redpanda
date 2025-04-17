@@ -410,7 +410,7 @@ size_t scheduler::running_translators() const {
 }
 
 void scheduler::request_immediate_finish(
-  chunked_vector<std::pair<translator_id, size_t>> translators) {
+  chunked_vector<finish_request> translators) {
     _executor.translators_for_immediate_finish.clear();
     // `i` captures both priority (lowest is highest), and serves as a unique
     // identifer. see `on_resource_exhaustion` for how this property is used.
@@ -418,7 +418,9 @@ void scheduler::request_immediate_finish(
         // the flush size of the translator is thrown away here, but preserved
         // at the scheduler API level for future use by the scheduler.
         _executor.translators_for_immediate_finish.emplace(
-          i, std::move(translators[i].first));
+          i,
+          executor::finish_request(
+            std::move(translators[i].id), translators[i].reason));
     }
     // there is no mechanism for backing out a request to finish, so there isn't
     // any additional work that can be done if the requests are cleared.

@@ -378,14 +378,16 @@ ss::future<> datalake_manager::check_and_manage_disk_space() {
     size_t schedule_total_bytes = 0;
     absl::flat_hash_map<
       ss::shard_id,
-      chunked_vector<std::pair<translator_id, size_t>>>
+      chunked_vector<translation::scheduling::scheduler::finish_request>>
       schedule;
     for (auto& it : std::ranges::reverse_view(usage)) {
         if (schedule_total_bytes >= adjusted_target_excess) {
             break;
         }
-        schedule[it.second.first].push_back(
-          std::make_pair(it.second.second, it.first));
+        schedule[it.second.first].emplace_back(
+          it.second.second,
+          it.first,
+          translation::scheduling::translator::stop_reason::out_of_disk);
         schedule_total_bytes += it.first;
         num_translators++;
     }
