@@ -386,6 +386,34 @@ ss::future<> datalake_manager::check_and_manage_disk_space() {
     using index_type = absl::btree_multimap<size_t, translator_info>;
 
     /*
+     * it may be the case that there is plenty of free space, but each scheduler
+     * is holding on to unused units. so the first step is to go harvest excess
+     * units and then take additional action if we are really out of space.
+     */
+    auto excess_units = co_await container().map_reduce0(
+      [](datalake_manager& mgr) {
+          return mgr._scheduler.release_unused_disk_units();
+      },
+      size_t{0},
+      [](size_t acc, size_t units) { return acc + units; });
+
+    // if schedulers miss their disk units, they'll come say hi
+    if (excess_units > 0) {
+        _core0_disk_bytes_reservable.signal(excess_units);
+    }
+
+    vlog(
+      datalake_log.debug,
+      "Collected {} unused disk reservation units, remaining {}",
+      human::bytes(excess_units),
+      human::bytes(_core0_disk_bytes_reservable.current()));
+
+    // low disk problem solved?
+    if (!disk_space_soft_limit_exceeded()) {
+        co_return;
+    }
+
+    /*
      * Collect disk usage from all translators managed by the scheduler, and
      * combine these usages from across all cores to create a global set of
      * translators ordered by their disk usage.
