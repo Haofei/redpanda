@@ -805,14 +805,11 @@ redpanda_cc_gtest(
 
 redpanda_cc_bench(
     name = "kafka_fetch_rpbench",
-    timeout = "moderate",
     srcs = [
         "fetch_bench.cc",
     ],
     cpu = 2,
-    duration = 1,
     memory = "4GiB",
-    runs = 1,
     tags = ["exclusive"],
     deps = [
         ":kafka_test_utils",
