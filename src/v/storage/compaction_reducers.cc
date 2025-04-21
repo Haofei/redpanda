@@ -174,7 +174,7 @@ copy_data_segment_reducer::filter(model::record_batch batch) {
         // contiguousness of the offset space.
         auto placeholder = make_placeholder_batch(batch.header());
         vlog(
-          stlog.debug,
+          gclog.debug,
           "installing a placeholder {} for compacted batch: {}",
           placeholder,
           batch);
@@ -438,7 +438,7 @@ ss::future<ss::stop_iteration> tx_reducer::operator()(model::record_batch&& b) {
           can_discard_tx_data_batch(b)
           || can_discard_consumer_offsets_batch(b)) {
             vlog(
-              stlog.trace, "discarded batch during compaction: {}", b.header());
+              gclog.trace, "discarded batch during compaction: {}", b.header());
             _stats.batches_discarded++;
             co_return ss::stop_iteration::no;
         }
