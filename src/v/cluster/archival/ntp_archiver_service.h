@@ -19,6 +19,7 @@
 #include "cluster/archival/archival_policy.h"
 #include "cluster/archival/probe.h"
 #include "cluster/archival/scrubber.h"
+#include "cluster/archival/segment_reupload.h"
 #include "cluster/archival/types.h"
 #include "cluster/fwd.h"
 #include "config/property.h"
