@@ -908,6 +908,10 @@ segment_collector::make_upload_candidate_stream(
   ss::lowres_clock::duration segment_lock_duration) {
     auto candidate_res = co_await make_upload_candidate(segment_lock_duration);
 
+    vassert(
+      !std::holds_alternative<std::monostate>(candidate_res),
+      "Unexpected default upload candidate creation result");
+
     if (std::holds_alternative<candidate_creation_error>(candidate_res)) {
         vlog(
           archival_log.warn,
