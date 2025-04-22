@@ -23,6 +23,7 @@
 #include "datalake/translation_task.h"
 #include "kafka/data/partition_proxy.h"
 #include "kafka/utils/txn_reader.h"
+#include "utils/human.h"
 
 #include <seastar/util/defer.hh>
 
@@ -45,6 +46,8 @@ map_error_code(datalake::translation_task::errc errc) {
         return translation_errc::time_limit_exceeded;
     case datalake::translation_task::errc::shutting_down:
         return translation_errc::shutting_down;
+    case datalake::translation_task::errc::out_of_disk:
+        return translation_errc::out_of_disk;
     }
 }
 } // namespace
@@ -69,6 +72,16 @@ ss::future<cluster::errc> wait_stm_translated(
 } // namespace
 
 ss::future<reservation_error>
+noop_disk_tracker::reserve_bytes(size_t, ss::abort_source&) noexcept {
+    return ss::make_ready_future<reservation_error>(reservation_error::ok);
+}
+ss::future<> noop_disk_tracker::free_bytes(size_t, ss::abort_source&) {
+    return ss::make_ready_future<>();
+}
+void noop_disk_tracker::release() {}
+void noop_disk_tracker::release_unused() {}
+
+ss::future<reservation_error>
 noop_mem_tracker::reserve_bytes(size_t, ss::abort_source&) noexcept {
     return ss::make_ready_future<reservation_error>(reservation_error::ok);
 }
@@ -76,6 +89,7 @@ ss::future<> noop_mem_tracker::free_bytes(size_t, ss::abort_source&) {
     return ss::make_ready_future<>();
 }
 void noop_mem_tracker::release() {}
+writer_disk_tracker& noop_mem_tracker::disk() { return _disk; }
 
 ss::future<reservation_error> translator_mem_tracker::reserve_bytes(
   size_t bytes, ss::abort_source& as) noexcept {
@@ -97,6 +111,8 @@ ss::future<reservation_error> translator_mem_tracker::reserve_bytes(
         co_return reservation_error::shutting_down;
     } catch (const translator_time_quota_exceeded_error&) {
         co_return reservation_error::time_quota_exceeded;
+    } catch (const translator_out_of_disk_error&) {
+        co_return reservation_error::out_of_disk;
     } catch (...) {
         co_return reservation_error::unknown;
     }
@@ -118,6 +134,57 @@ size_t translator_mem_tracker::current_usage() const { return _current_usage; }
 
 size_t translator_mem_tracker::total_reserved() const {
     return _reservations.count();
+}
+
+writer_disk_tracker& translator_mem_tracker::disk() { return _disk; }
+
+ss::future<reservation_error> translator_disk_tracker::reserve_bytes(
+  size_t bytes, ss::abort_source& as) noexcept {
+    _current_usage += bytes;
+    try {
+        while (_current_usage > _reservations.count()) {
+            auto reservation = co_await _reservations_tracker.reserve_disk(
+              bytes, as);
+            if (_reservations.count()) {
+                _reservations.adopt(std::move(reservation));
+            } else {
+                _reservations = std::move(reservation);
+            }
+        }
+    } catch (const translator_out_of_memory_error&) {
+        co_return reservation_error::out_of_memory;
+    } catch (const translator_shutdown_error&) {
+        co_return reservation_error::shutting_down;
+    } catch (const translator_time_quota_exceeded_error&) {
+        co_return reservation_error::time_quota_exceeded;
+    } catch (const translator_out_of_disk_error&) {
+        co_return reservation_error::out_of_disk;
+    } catch (...) {
+        co_return reservation_error::unknown;
+    }
+    co_return reservation_error::ok;
+}
+ss::future<>
+translator_disk_tracker::free_bytes(size_t bytes, ss::abort_source&) {
+    // we don't update the reservation here as the next time we call
+    // reserve_bytes we'll have already reserved an excess amount
+    _current_usage -= std::min(_current_usage, bytes);
+    return ss::now();
+}
+void translator_disk_tracker::release() {
+    _current_usage = 0;
+    _reservations.return_all();
+}
+void translator_disk_tracker::release_unused() {
+    if (_reservations.count() > _current_usage) {
+        const auto units = _reservations.count() - _current_usage;
+        _reservations.return_units(units);
+        vlog(
+          datalake_log.debug,
+          "Releasing {} excess disk reservation. Current reserved {}",
+          human::bytes(units),
+          human::bytes(_reservations.count()));
+    }
 }
 
 // Creates or alters the table by delegating to the coordinator.
@@ -401,6 +468,8 @@ std::ostream& operator<<(std::ostream& o, translation_errc ec) {
         return o << "translation_errc::time_limit_exceeded";
     case shutting_down:
         return o << "translation_errc::shutting_down";
+    case out_of_disk:
+        return o << "translation_errc::out_of_disk";
     }
 }
 
@@ -538,7 +607,12 @@ public:
                   }
                   return ss::now();
               })
-              .finally([this]() { _mem_tracker.release(); });
+              .finally([this]() {
+                  _mem_tracker.release();
+                  // the translator finished a round of translation and may be
+                  // taken out of the running state, so give back unused units.
+                  _mem_tracker.disk().release_unused();
+              });
         }
         return ss::now();
     }
@@ -547,7 +621,11 @@ public:
     finish(retry_chain_node& rcn, ss::abort_source& as) final {
         // This is strictly not needed as flush() is always called after
         // every scheduler iteration but we do it just to be extra cautious.
-        auto cleanup = ss::defer([this] { _mem_tracker.release(); });
+        auto cleanup = ss::defer([this] {
+            _mem_tracker.release();
+            // staging data will be deleted via finish()
+            _mem_tracker.disk().release();
+        });
         if (!_in_progress_translation) {
             co_return translation_errc::no_data;
         }
@@ -567,6 +645,8 @@ public:
     }
 
     ss::future<> discard() final {
+        // staging data will be deleted via discard()
+        auto cleanup = ss::defer([this] { _mem_tracker.disk().release(); });
         if (!_in_progress_translation) {
             co_return;
         }
