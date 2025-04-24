@@ -24,6 +24,7 @@
 #include "security/scram_algorithm.h"
 #include "security/scram_authenticator.h"
 #include "security/types.h"
+#include "test_utils/random_bytes.h"
 
 #include <absl/algorithm/container.h>
 #include <boost/test/tools/old/interface.hpp>
@@ -357,12 +358,89 @@ FIXTURE_TEST(metadata_empty_topic_name, metadata_fixture) {
           .include_topic_authorized_operations = false}};
     };
     const kafka::metadata_response_data default_response;
-    for (api_version ver{8}; ver < api_version{10}; ++ver) {
+    for (api_version ver{8}; ver < api_version{12}; ++ver) {
         auto resp = client.dispatch(make_request(), ver).get();
         BOOST_REQUIRE(resp.data.errored());
         BOOST_REQUIRE(!resp.data.topics.empty());
+        if (ver <= api_version{9}) {
+            BOOST_REQUIRE_EQUAL(
+              resp.data.topics.front().error_code,
+              kafka::error_code::invalid_topic_exception);
+        } else {
+            BOOST_REQUIRE_EQUAL(
+              resp.data.topics.front().error_code,
+              kafka::error_code::invalid_request);
+            BOOST_REQUIRE(resp.data.brokers.empty());
+            BOOST_REQUIRE_EQUAL(
+              resp.data.cluster_id, default_response.cluster_id);
+            BOOST_REQUIRE_EQUAL(
+              resp.data.controller_id, default_response.controller_id);
+        }
+    }
+}
+
+FIXTURE_TEST(metadata_non_empty_topic_id, metadata_fixture) {
+    using kafka::api_version;
+    ss::sstring test_topic_name = "metadata_non_empty_topic_id";
+
+    create_topic(test_topic_name, 1, 1);
+
+    auto client = make_kafka_client().get();
+    client.connect().get();
+
+    const auto make_request = [&]() {
+        auto uuid = kafka::uuid::from_string(
+          bytes_to_base64(tests::random_bytes(16)));
+        return kafka::metadata_request{.data{
+          .topics = {{{
+            .topic_id{uuid},
+            .name{test_topic_name},
+          }}},
+          .allow_auto_topic_creation = false,
+          .include_cluster_authorized_operations = false,
+          .include_topic_authorized_operations = false}};
+    };
+    const kafka::metadata_response_data default_response;
+    for (api_version ver{10}; ver < api_version{12}; ++ver) {
+        auto resp = client.dispatch(make_request(), ver).get();
+        BOOST_REQUIRE(resp.data.errored());
+        BOOST_REQUIRE(!resp.data.topics.empty());
+        const auto expected = kafka::error_code::invalid_request;
+        BOOST_REQUIRE_EQUAL(resp.data.topics.front().error_code, expected);
+        BOOST_REQUIRE(resp.data.brokers.empty());
+        BOOST_REQUIRE_EQUAL(resp.data.cluster_id, default_response.cluster_id);
         BOOST_REQUIRE_EQUAL(
-          resp.data.topics.front().error_code,
-          kafka::error_code::invalid_topic_exception);
+          resp.data.controller_id, default_response.controller_id);
+    }
+}
+
+FIXTURE_TEST(metadata_cluster_auth, metadata_fixture) {
+    // Cluster authorized operations are returned only from v8 to v10
+    using namespace kafka;
+    using api = kafka::metadata_api;
+
+    auto client = make_kafka_client().get();
+    client.connect().get();
+
+    const auto make_request = [&]() {
+        return metadata_request{.data{
+          .topics = {},
+          .allow_auto_topic_creation = false,
+          .include_cluster_authorized_operations = true,
+          .include_topic_authorized_operations = false}};
+    };
+
+    const metadata_response_data default_response;
+    const auto cluster_ops = kafka::details::to_bit_field(
+      kafka::details::get_allowed_operations<security::acl_cluster_name>());
+
+    for (api_version ver{1}; ver < api::max_valid; ++ver) {
+        auto resp = client.dispatch(make_request(), ver).get();
+        BOOST_REQUIRE(!resp.data.errored());
+        const auto expected
+          = (ver >= api_version{8} && ver <= api_version{10})
+              ? cluster_ops
+              : default_response.cluster_authorized_operations;
+        BOOST_REQUIRE_EQUAL(resp.data.cluster_authorized_operations, expected);
     }
 }
