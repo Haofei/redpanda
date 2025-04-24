@@ -24,6 +24,8 @@ bool page_cache::evict::operator()(page& page) noexcept {
     return false;
 }
 
-size_t page_cache::cost::operator()(const page& /*page*/) noexcept { return 1; }
+size_t page_cache::cost::operator()(const page& page) noexcept {
+    return page.size();
+}
 
 } // namespace experimental::io
