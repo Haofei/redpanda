@@ -28,6 +28,7 @@ Configuration = namedtuple("Configuration", [
     "type",
     "topic",
     "binary_dump",
+    "partition",
 ])
 
 
@@ -107,6 +108,8 @@ class OfflineLogViewer():
             if ntp.nspace in ["kafka", "kafka_internal"]:
                 if self._config.topic and ntp.topic != self._config.topic:
                     continue
+                if self._should_skip_partition(ntp.partition):
+                    continue
                 logger.info(f'topic: {ntp.topic}, partition: {ntp.partition}')
                 log = KafkaLog(ntp, headers_only=headers_only)
                 self.stream_json(log)
@@ -124,6 +127,8 @@ class OfflineLogViewer():
         logs = {}
         for ntp in store.ntps:
             if ntp.nspace == "kafka" and ntp.topic == "__consumer_offsets":
+                if self._should_skip_partition(ntp.partition):
+                    continue
                 logs[str(ntp)] = SerializableGenerator(OffsetsLog(ntp))
         self.stream_json(logs, wrap_with_gen=False)
 
@@ -218,6 +223,11 @@ class OfflineLogViewer():
             logger.error(f"Unknown type: {self._config.type}")
             sys.exit(1)
 
+    def _should_skip_partition(self, partition_id):
+        if self._config.partition is None:
+            return False
+        return self._config.partition != partition_id
+
 
 def build_config(options):
     return Configuration(
@@ -225,6 +235,7 @@ def build_config(options):
         type=options.type,
         topic=options.topic,
         binary_dump=options.dump,
+        partition=options.partition,
     )
 
 
@@ -259,6 +270,11 @@ def main():
             action='store_true',
             help='output binary dumps of keys and values being parsed')
         parser.add_argument('--force', action='store_true', help='Deprecated')
+        parser.add_argument('--partition',
+                            type=int,
+                            required=False,
+                            default=None,
+                            help="if set, will parse only this partition")
         return parser
 
     parser = generate_options()
