@@ -212,6 +212,7 @@ class Batch:
         header = self.header._asdict()
         attrs = header['attrs']
         header["type_name"] = self.type.name
+        header["term"] = self.term
         header['expanded_attrs'] = {
             'compression':
             Batch.CompressionType(attrs & Batch.compression_mask).name,
@@ -264,13 +265,15 @@ class Batch:
 
 
 class BatchIterator:
-    def __init__(self, path):
+    def __init__(self, path, term):
         self.path = path
+        self.term = term
         self.file = open(path, "rb")
         self.idx = 0
 
     def __next__(self):
         b = Batch.from_stream(self.file, self.idx)
+
         if b is None:
             fsize = os.stat(self.path).st_size
             if fsize != self.file.tell():
@@ -279,6 +282,7 @@ class BatchIterator:
                 )
             raise StopIteration()
         self.idx += 1
+        b.term = self.term
         return b
 
     def __del__(self):
@@ -288,9 +292,17 @@ class BatchIterator:
 class Segment:
     def __init__(self, path):
         self.path = path
+        self.term = self._parse_term()
+
+    def _parse_term(self):
+        m = SEGMENT_NAME_PATTERN.match(os.path.basename(self.path))
+        if m is None:
+            raise RuntimeError(f"Invalid segment path: {self.path}")
+
+        return int(m['term'])
 
     def __iter__(self):
-        return BatchIterator(self.path)
+        return BatchIterator(self.path, self.term)
 
 
 class Ntp:
