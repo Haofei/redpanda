@@ -12,12 +12,20 @@
 
 namespace experimental::io {
 
+page_cache::page_cache(config cfg)
+  : cache_(cfg, evict(this)) {}
+
 void page_cache::insert(page& page) noexcept { cache_.insert(page); }
 
 void page_cache::remove(const page& page) noexcept { cache_.remove(page); }
 
+page_cache::evict::evict(page_cache* cache)
+  : cache_(cache) {}
+
 bool page_cache::evict::operator()(page& page) noexcept {
+    cache_->evict_stats_.total++;
     if (page.may_evict()) {
+        cache_->evict_stats_.granted++;
         page.clear();
         return true;
     }
@@ -26,6 +34,22 @@ bool page_cache::evict::operator()(page& page) noexcept {
 
 size_t page_cache::cost::operator()(const page& page) noexcept {
     return page.size();
+}
+
+uint64_t page_cache::stats::evictions_requested() const {
+    return evictions_requested_;
+}
+
+uint64_t page_cache::stats::evictions_granted() const {
+    return evictions_granted_;
+}
+
+uint64_t page_cache::stats::evictions_rejected() const {
+    return evictions_requested_ - evictions_granted_;
+}
+
+struct page_cache::stats page_cache::stats() const noexcept {
+    return {evict_stats_.total, evict_stats_.granted};
 }
 
 } // namespace experimental::io

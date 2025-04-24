@@ -12,14 +12,26 @@
 #include "io/page.h"
 #include "utils/s3_fifo.h"
 
+#include <seastar/core/memory.hh>
+
 namespace experimental::io {
 
 /**
  * The page cache tracks pages and controls cache eviction.
  */
 class page_cache {
-    struct evict {
+    class evict {
+    public:
+        struct stats {
+            uint64_t total{0};
+            uint64_t granted{0};
+        };
+
+        explicit evict(page_cache*);
         bool operator()(page&) noexcept;
+
+    private:
+        page_cache* cache_;
     };
 
     struct cost {
@@ -35,8 +47,7 @@ public:
     /**
      * Initialize with the given configuration.
      */
-    explicit page_cache(config cfg)
-      : cache_(cfg) {}
+    explicit page_cache(config cfg);
 
     /**
      * Insert @page into the cache.
@@ -52,7 +63,28 @@ public:
      */
     void remove(const page&) noexcept;
 
+    struct stats {
+    public:
+        [[nodiscard]] uint64_t evictions_requested() const;
+        [[nodiscard]] uint64_t evictions_granted() const;
+        [[nodiscard]] uint64_t evictions_rejected() const;
+
+    private:
+        friend page_cache;
+
+        // NOLINTNEXTLINE(bugprone-easily-swappable-parameters)
+        stats(uint64_t evictions_requested, uint64_t evictions_granted)
+          : evictions_requested_(evictions_requested)
+          , evictions_granted_(evictions_granted) {}
+
+        uint64_t evictions_requested_;
+        uint64_t evictions_granted_;
+    };
+
+    [[nodiscard]] stats stats() const noexcept;
+
 private:
+    evict::stats evict_stats_;
     cache_type cache_;
 };
 
