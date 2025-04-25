@@ -2842,23 +2842,20 @@ ss::future<std::optional<timequery_result>>
 disk_log_impl::timequery(timequery_config cfg) {
     vassert(!_closed, "timequery on closed log - {}", *this);
     if (_segs.empty()) {
-        return ss::make_ready_future<std::optional<timequery_result>>();
+        co_return std::nullopt;
     }
-    return make_reader(cfg).then([cfg](model::record_batch_reader reader) {
-        return model::consume_reader_to_memory(
-                 std::move(reader), model::no_timeout)
-          .then([cfg](model::record_batch_reader::storage_t st) {
-              using ret_t = std::optional<timequery_result>;
-              auto& batches = std::get<model::record_batch_reader::data_t>(st);
-              if (
-                !batches.empty()
-                && batches.front().header().max_timestamp >= cfg.time) {
-                  return ret_t(batch_timequery(
-                    batches.front(), cfg.min_offset, cfg.time, cfg.max_offset));
-              }
-              return ret_t();
-          });
-    });
+
+    auto reader = co_await make_reader(cfg);
+    auto batches = co_await model::consume_reader_to_memory(
+      std::move(reader), model::no_timeout);
+
+    if (
+      !batches.empty() && batches.front().header().max_timestamp >= cfg.time) {
+        co_return batch_timequery(
+          batches.front(), cfg.min_offset, cfg.time, cfg.max_offset);
+    }
+
+    co_return std::nullopt;
 }
 
 ss::future<> disk_log_impl::remove_segment_permanently(
