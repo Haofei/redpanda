@@ -64,6 +64,7 @@
 #include <chrono>
 #include <exception>
 #include <iterator>
+#include <limits>
 #include <optional>
 #include <sstream>
 #include <stdexcept>
@@ -969,6 +970,115 @@ disk_log_impl::find_adjacent_compaction_range(const compaction_config& cfg) {
     }
 
     return range;
+}
+
+std::optional<
+  std::vector<std::pair<segment_set::iterator, segment_set::iterator>>>
+disk_log_impl::find_adjacent_compaction_ranges(
+  const compaction_config& cfg, std::optional<model::offset> new_start_offset) {
+    if (_segs.size() < 2) {
+        return std::nullopt;
+    }
+
+    // the chosen segments all need to be stable.
+    // Each participating segment should individually pass the
+    // compactible offset check for the compacted segment to be stable.
+    // Additionally each segment should have finished self compaction.
+    // This is needed by transactions because the compaction index of
+    // segments with transactional batches is only populated during self
+    // compaction. Not having this check would result in concatenating
+    // with an empty compaction index and a data loss.
+    auto unstable =
+      [&cfg, new_start_offset](ss::lw_shared_ptr<segment>& seg) -> bool {
+        // Don't bother considering segments below the new start offset for
+        // adjacent compaction.
+        if (
+          new_start_offset.has_value()
+          && seg->offsets().get_base_offset() < new_start_offset.value()) {
+            return true;
+        }
+        return !seg->finished_self_compaction() || seg->has_appender()
+               || !seg->has_compactible_offsets(cfg);
+    };
+
+    // Ensure that the adjacent segments do not span an offset space greater
+    // than the maximum value that can be represented by a uint32_t. This must
+    // be enforced due to use of roaring::bitmap in the compacted_offset_list,
+    // which is used to deduplicate records during self compaction and sliding
+    // window compaction. Overflows in this area could lead to incorrect
+    // compaction.
+    auto valid_offset_range = [](
+                                ss::lw_shared_ptr<segment>& first,
+                                ss::lw_shared_ptr<segment>& last) -> bool {
+        auto base_offset_first_seg = first->offsets().get_base_offset();
+        auto dirty_offset_last_seg = last->offsets().get_dirty_offset();
+        int64_t offset_delta = dirty_offset_last_seg()
+                               - base_offset_first_seg();
+        static constexpr int64_t u32_max = static_cast<int64_t>(
+          std::numeric_limits<uint32_t>::max());
+        return offset_delta <= u32_max;
+    };
+
+    std::vector<std::pair<segment_set::iterator, segment_set::iterator>> ranges;
+
+    auto it = _segs.begin();
+    size_t current_size{0};
+    model::term_id current_term{(*it)->offsets().get_term()};
+
+    std::pair<segment_set::iterator, segment_set::iterator> current_range = {
+      it, it};
+    while (it != _segs.end()) {
+        auto& seg = *it;
+        auto seg_size = seg->size_bytes();
+        auto seg_term = seg->offsets().get_term();
+
+        current_size += seg_size;
+
+        auto num_segments_in_range = std::distance(
+          current_range.first, current_range.second);
+
+        bool term_boundary = seg_term != current_term;
+        bool size_boundary = current_size
+                             > _manager.config().max_compacted_segment_size();
+        bool is_unstable = unstable(seg);
+        bool is_valid_offset_range = valid_offset_range(
+          *current_range.first, seg);
+
+        if (
+          term_boundary || size_boundary || is_unstable
+          || !is_valid_offset_range) {
+            if (num_segments_in_range > 1) {
+                ranges.push_back(current_range);
+            }
+
+            auto next_it = is_unstable ? std::next(it) : it;
+            auto next_size = is_unstable ? 0 : seg_size;
+            auto next_term = next_it != _segs.end()
+                               ? (*next_it)->offsets().get_term()
+                               : model::term_id{};
+            current_range = {next_it, next_it};
+            current_size = next_size;
+            current_term = next_term;
+
+            if (!is_unstable) {
+                ++current_range.second;
+            }
+
+        } else {
+            ++current_range.second;
+        }
+        ++it;
+    }
+
+    if (std::distance(current_range.first, current_range.second) > 1) {
+        ranges.push_back(current_range);
+    }
+
+    if (ranges.empty()) {
+        return std::nullopt;
+    }
+
+    return ranges;
 }
 
 ss::future<std::optional<compaction_result>>

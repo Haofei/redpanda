@@ -634,6 +634,7 @@ redpanda_cc_gtest(
         "//src/v/test_utils:gtest",
         "//src/v/test_utils:random",
         "//src/v/test_utils:random_bytes",
+        "//src/v/test_utils:scoped_config",
         "//src/v/utils:directory_walker",
         "//src/v/utils:to_string",
         "//src/v/utils:tristate",

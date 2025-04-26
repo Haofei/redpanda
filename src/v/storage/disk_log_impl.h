@@ -282,6 +282,20 @@ public:
 
     std::optional<model::timestamp> earliest_dirty_segment_ts() const final;
 
+    // Finds every sub-range of adjacent segments that can be compacted
+    // together. A valid segment range consists of segments with the same raft
+    // term, and a combined size less than max_compacted_segment_size.
+    // This function guarantees that segments in returned ranges can be
+    // combined. The ranges are guaranteed to contain one or more segments.
+    //
+    // Returns std::nullopt if no valid ranges of segments could be found.
+    // Otherwise, a vector containing pairs of iterators to the segments.
+    std::optional<
+      std::vector<std::pair<segment_set::iterator, segment_set::iterator>>>
+    find_adjacent_compaction_ranges(
+      const compaction_config& cfg,
+      std::optional<model::offset> new_start_offset = std::nullopt);
+
 private:
     friend class disk_log_appender; // for multi-term appends
     friend class disk_log_builder;  // for tests

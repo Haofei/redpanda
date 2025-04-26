@@ -5873,3 +5873,263 @@ TEST_F(storage_test_fixture, log_compaction_enable_sliding_window) {
     storage::testing_details::log_manager_accessor::housekeeping_scan(mgr)
       .get();
 }
+
+struct segment_fields {
+    ssize_t size;
+    model::term_id term;
+    bool mark_as_stable;
+    std::optional<model::offset> base_offset_override{std::nullopt};
+    std::optional<model::offset> dirty_offset_override{std::nullopt};
+};
+
+struct sliding_ranges_test_case {
+    ss::sstring desc;
+    std::vector<segment_fields> segment_fields;
+    std::optional<model::offset> new_start_offset{std::nullopt};
+    // These ranges have the same inclusivity as the iterator
+    // constructor for std::vector, i.e [first, last).
+    std::vector<std::pair<size_t, size_t>> expected_ranges;
+};
+
+TEST_F(storage_test_fixture, find_sliding_ranges) {
+    auto log_cfg = default_log_config(test_dir);
+    log_cfg.max_compacted_segment_size = config::mock_binding<size_t>(1_MiB);
+    storage::ntp_config::default_overrides overrides;
+    overrides.cleanup_policy_bitflags
+      = model::cleanup_policy_bitflags::compaction;
+
+    ss::abort_source as;
+    storage::log_manager mgr = make_log_manager(log_cfg);
+
+    auto deferred = ss::defer([&mgr]() mutable { mgr.stop().get(); });
+
+    // add a segment with random keys until a certain size
+    auto add_segment = [](auto& log, size_t size, model::term_id term) {
+        do {
+            append_single_record_batch(log, 1, term, 1, true);
+        } while (log->segments().back()->size_bytes() < size);
+    };
+
+    static constexpr int64_t u32_max = std::numeric_limits<uint32_t>::max();
+    // Don't forget that the active segment will occupy the last index
+    // beyond the segment fields detailed below.
+    // clang-format off
+    std::vector<sliding_ranges_test_case> test_cases = {
+      sliding_ranges_test_case{
+	  .desc="Mix of ranges due to raft terms and max size",
+	  .segment_fields={
+	    {5_KiB, model::term_id{0}, true},     // 0 A
+	    {100_KiB, model::term_id{0}, true},   // 1 A
+	    {500_KiB, model::term_id{0}, true},   // 2 A
+	    {1024_KiB, model::term_id{0}, true},  // 3  -
+	    {1_KiB, model::term_id{1}, true},     // 4   B
+	    {2_KiB, model::term_id{1}, true},     // 5   B
+	    {3_KiB, model::term_id{1}, true},     // 6   B
+	    {100_KiB, model::term_id{1}, true},   // 7   B
+	    {50_KiB, model::term_id{2}, true},    // 8    -
+	    {50_KiB, model::term_id{3}, true},    // 9    -
+	    {50_KiB, model::term_id{4}, true},    // 10   -
+	    {50_KiB, model::term_id{5}, true},    // 11   -
+	    {1024_KiB, model::term_id{5}, true}}, // 12   -
+	                                          // 13   - (Active)
+	  .expected_ranges = {
+	    {0, 3}, {4, 8}}},
+      sliding_ranges_test_case{
+	  .desc="Some unstable segments creating gap in ranges",
+	  .segment_fields={
+	    {5_KiB, model::term_id{0}, true},    // 0 -
+	    {100_KiB, model::term_id{0}, false}, // 1 -
+	    {500_KiB, model::term_id{0}, false}, // 2 -
+	    {1024_KiB, model::term_id{0}, true}, // 3 -
+	    {1_KiB, model::term_id{1}, true},    // 4  A
+	    {2_KiB, model::term_id{1}, true},    // 5  A
+	    {3_KiB, model::term_id{1}, true},    // 6  A
+	    {100_KiB, model::term_id{1}, true}}, // 7  A
+	                                         // 8   - (Active)
+	  .expected_ranges = {{4, 8}}},
+      sliding_ranges_test_case{
+	  .desc="One unstable segment",
+	  .segment_fields={
+	    {5_KiB, model::term_id{0}, false}}, // 0 -
+	                                        // 1 - (Active)
+	  .expected_ranges = {}},
+      sliding_ranges_test_case{
+	  .desc="One stable segment",
+	  .segment_fields={
+	    {5_KiB, model::term_id{0}, true}}, // 0 -
+	                                       // 1 - (Active)
+	  .expected_ranges = {}},
+      sliding_ranges_test_case{
+	  .desc="All stable segments of the same term with total size less than max compacted segment size",
+	  .segment_fields={
+	    {5_KiB, model::term_id{0}, true},    // 0 A
+	    {100_KiB, model::term_id{0}, true},  // 1 A
+	    {100_KiB, model::term_id{0}, true}}, // 2 A
+	                                         // 3  - (Active)
+	  .expected_ranges = {{0, 3}}},
+      sliding_ranges_test_case{
+	  .desc="Alternating stable and unstable segments",
+	  .segment_fields={
+	    {5_KiB, model::term_id{0}, true},     // 0 -
+	    {100_KiB, model::term_id{0}, false},  // 1 -
+	    {100_KiB, model::term_id{0}, true},   // 2 -
+	    {100_KiB, model::term_id{0}, false},  // 3 -
+	    {100_KiB, model::term_id{0}, true},   // 4 -
+	    {100_KiB, model::term_id{0}, false}}, // 5 -
+	                                          // 6 - (Active)
+	  .expected_ranges = {}},
+      sliding_ranges_test_case{
+	  .desc="All unstable segments",
+	  .segment_fields={
+	    {5_KiB, model::term_id{0}, false},    // 0 -
+	    {100_KiB, model::term_id{0}, false},  // 1 -
+	    {100_KiB, model::term_id{0}, false},  // 2 -
+	    {100_KiB, model::term_id{0}, false},  // 3 -
+	    {100_KiB, model::term_id{0}, false},  // 4 -
+	    {100_KiB, model::term_id{0}, false}}, // 5 -
+	                                          // 6 - (Active)
+	  .expected_ranges = {}},
+      sliding_ranges_test_case{
+	  .desc="All unique segment terms",
+	  .segment_fields={
+	    {5_KiB, model::term_id{0}, true},    // 0 -
+	    {100_KiB, model::term_id{1}, true},  // 1 -
+	    {100_KiB, model::term_id{2}, true},  // 2 -
+	    {100_KiB, model::term_id{3}, true},  // 3 -
+	    {100_KiB, model::term_id{4}, true},  // 4 -
+	    {100_KiB, model::term_id{5}, true}}, // 5 -
+	                                         // 6 - (Active)
+	  .expected_ranges = {}},
+      sliding_ranges_test_case{
+	  .desc="All stable segments with boundaries set by max compacted segment size",
+	  .segment_fields={
+	    {500_KiB, model::term_id{0}, true},        // 0 A
+	    {500_KiB, model::term_id{0}, true},        // 1 A
+	    {100_KiB, model::term_id{0}, true},        // 2  -
+	    {1_MiB - 10_KiB, model::term_id{0}, true}, // 3   B
+	    {5_KiB, model::term_id{0}, true},          // 4   B
+	    {100_KiB, model::term_id{0}, true}},       // 5    -
+	                                               // 6    - (Active)
+	  .expected_ranges = {{0, 2}, {3, 5}}},
+      sliding_ranges_test_case{
+	  .desc="Just one valid segment at the end",
+	  .segment_fields={
+	    {5_KiB, model::term_id{0}, false},   // 0 -
+	    {100_KiB, model::term_id{0}, false}, // 1 -
+	    {100_KiB, model::term_id{0}, false}, // 2 -
+	    {100_KiB, model::term_id{0}, false}, // 3 -
+	    {100_KiB, model::term_id{0}, false}, // 4 -
+	    {100_KiB, model::term_id{0}, true}}, // 5 -
+	                                         // 6 - (Active)
+	  .expected_ranges = {}},
+      sliding_ranges_test_case{
+	  .desc="uint32_t max boundary allowing segment merging",
+	  .segment_fields={
+	    {5_KiB, model::term_id{0}, true},                                          // 0 A
+	    {100_KiB, model::term_id{0}, true, std::nullopt, model::offset{u32_max}}}, // 1 A
+	                                                                               // 2 - (Active)
+	  .expected_ranges = {{0, 2}}},
+      sliding_ranges_test_case{
+	  .desc="one past uint32_t max boundary preventing segment merging",
+	  .segment_fields={
+	    {5_KiB, model::term_id{0}, true},                                            // 0 -
+	    {100_KiB, model::term_id{0}, true, std::nullopt, model::offset{u32_max+1}}}, // 1 -
+	                                                                                 // 2 - (Active)
+	  .expected_ranges = {}},
+      sliding_ranges_test_case{
+	  .desc="Mergable segments below new_start_offset should be ignored",
+	  .segment_fields={
+	    {5_KiB, model::term_id{0}, true},     // 0 -
+	    {100_KiB, model::term_id{0}, true},   // 1 -
+	    {500_KiB, model::term_id{0}, true}},  // 2 -
+	                                          // 3 - (Active)
+	  .new_start_offset=model::offset::max(),
+	  .expected_ranges = {}},
+      sliding_ranges_test_case{
+	  .desc="Some mergable segment ranges above and below new_start_offset.",
+	  .segment_fields={
+	    {5_KiB, model::term_id{0}, true, model::offset{0}},      // 0 -
+	    {100_KiB, model::term_id{0}, true, model::offset{1}},    // 1 -
+	    {500_KiB, model::term_id{0}, true, model::offset{2}},    // 2 -
+	    {5_KiB, model::term_id{0}, true, model::offset{101}},    // 3  A
+	    {100_KiB, model::term_id{0}, true, model::offset{102}},  // 4  A
+	    {500_KiB, model::term_id{0}, true, model::offset{103}}}, // 5  A
+	                                                             // 6   - (Active)
+	  .new_start_offset=model::offset{100},
+	  .expected_ranges = {{3, 6}}},
+    };
+    // clang-format on
+
+    for (int test_case_index = 0; const auto& test_case : test_cases) {
+        vlog(e2e_test_log.info, "Running test case: {}", test_case.desc);
+        const auto& segment_fields = test_case.segment_fields;
+        const auto& expected_ranges = test_case.expected_ranges;
+        auto ntp = model::ntp(
+          "default", fmt::format("test-{}", test_case_index++), 0);
+        auto log = mgr
+                     .manage(storage::ntp_config(
+                       ntp,
+                       mgr.config().base_dir,
+                       std::make_unique<storage::ntp_config::default_overrides>(
+                         overrides)))
+                     .get();
+
+        auto* disk_log = static_cast<storage::disk_log_impl*>(log.get());
+
+        for (const auto& segment_field : segment_fields) {
+            add_segment(log, segment_field.size, segment_field.term);
+            disk_log->force_roll().get();
+        }
+
+        storage::compaction_config cfg(model::offset::max(), std::nullopt, as);
+
+        for (size_t i = 0; i < segment_fields.size(); ++i) {
+            auto& seg = disk_log->segments()[i];
+            if (segment_fields[i].mark_as_stable) {
+                // We need to self compact segments before they are
+                // considered in the adjacent compaction ranges
+                seg->mark_as_finished_self_compaction();
+            }
+
+            auto& ot = const_cast<storage::segment::offset_tracker&>(
+              seg->offsets());
+            if (segment_fields[i].dirty_offset_override.has_value()) {
+                // Override the dirty offset of the segment, if specified
+                ot.set_offset(storage::segment::offset_tracker::dirty_offset_t{
+                  *segment_fields[i].dirty_offset_override});
+            }
+            if (segment_fields[i].base_offset_override.has_value()) {
+                // Override the base offset of the segment, if specified
+                storage::testing_details::offset_tracker_accessor::base_offset(
+                  ot)
+                  = *segment_fields[i].base_offset_override;
+            }
+        }
+
+        std::unordered_map<ss::sstring, size_t> segment_filename_index_map;
+        for (size_t i = 0; const auto& segment : disk_log->segments()) {
+            segment_filename_index_map[segment->filename()] = i++;
+        }
+
+        auto adjacent_ranges = disk_log->find_adjacent_compaction_ranges(
+          cfg, test_case.new_start_offset);
+        if (!expected_ranges.empty()) {
+            ASSERT_TRUE(adjacent_ranges.has_value());
+            ASSERT_EQ(adjacent_ranges->size(), expected_ranges.size());
+            for (size_t expected_ranges_index = 0;
+                 const auto& seg_it : *adjacent_ranges) {
+                auto first_index = segment_filename_index_map.at(
+                  (*seg_it.first)->filename());
+                ASSERT_EQ(
+                  first_index, expected_ranges[expected_ranges_index].first);
+                auto second_index = segment_filename_index_map.at(
+                  (*seg_it.second)->filename());
+                ASSERT_EQ(
+                  second_index, expected_ranges[expected_ranges_index].second);
+                ++expected_ranges_index;
+            }
+        } else {
+            ASSERT_TRUE(!adjacent_ranges.has_value());
+        }
+    }
+}
