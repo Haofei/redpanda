@@ -189,6 +189,8 @@ def read_topic_config(rdr: Reader, version):
         # see https://github.com/redpanda-data/redpanda/pull/6613
         decoded['properties']['remote_delete'] = False
     decoded['is_migrated'] = rdr.read_bool() if version >= 2 else False
+    decoded['tp_id'] = rdr.read_optional(
+        Reader.read_uuid) if version >= 3 else None
 
     return decoded
 
@@ -197,7 +199,7 @@ def read_topic_configuration_assignment_serde(rdr: Reader):
     return rdr.read_envelope(
         lambda rdr, _: {
             'cfg':
-            rdr.read_envelope(read_topic_config, 2),
+            rdr.read_envelope(read_topic_config, 3),
             'assignments':
             rdr.read_serde_vector(lambda r: r.read_envelope(
                 lambda ir, _: {
