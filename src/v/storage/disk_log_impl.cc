@@ -783,7 +783,10 @@ ss::future<bool> disk_log_impl::sliding_window_compact(
         const bool is_clean_compacted = seg->offsets().get_base_offset()
                                         >= idx_start_offset;
 
-        if (!co_await segment_needs_rewrite_with_offset_map(cfg, seg, map)) {
+        const bool segment_needs_rewrite
+          = internal::may_have_removable_tombstones(seg, cfg)
+            || co_await segment_needs_rewrite_with_offset_map(cfg, seg, map);
+        if (!segment_needs_rewrite) {
             vlog(
               gclog.trace,
               "[{}] segment does not require rewrite with provided offset map: "
@@ -1398,8 +1401,11 @@ ss::future<bool> disk_log_impl::chunked_sliding_window_compact(
                 continue;
             }
 
-            if (!co_await segment_needs_rewrite_with_offset_map(
-                  compact_cfg, s, map)) {
+            const bool segment_needs_rewrite
+              = internal::may_have_removable_tombstones(s, compact_cfg)
+                || co_await segment_needs_rewrite_with_offset_map(
+                  compact_cfg, s, map);
+            if (!segment_needs_rewrite) {
                 vlog(
                   gclog.trace,
                   "[{}] segment does not require rewrite with provided offset "
