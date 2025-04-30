@@ -358,11 +358,14 @@ def read_incremental_topic_update_serde(rdr: Reader):
                 'iceberg_partition_spec':
                 read_property_update_serde(
                     rdr, lambda r: r.read_optional(Reader.read_string)),
+                'topic_id':
+                read_property_update_serde(
+                    rdr, lambda r: r.read_optional(Reader.read_uuid)),
             }
 
         return incr_obj
 
-    return rdr.read_envelope(incr_topic_upd, reader_version=7)
+    return rdr.read_envelope(incr_topic_upd, reader_version=8)
 
 
 def read_create_partitions_serde(rdr: Reader):
