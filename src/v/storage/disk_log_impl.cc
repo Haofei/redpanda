@@ -721,7 +721,19 @@ ss::future<bool> disk_log_impl::sliding_window_compact(
     }
 
     if (needs_chunked_sliding_window_compact) {
-        co_return co_await chunked_sliding_window_compact(cfg, segs, map);
+        bool did_compact = false;
+        try {
+            did_compact = co_await chunked_sliding_window_compact(
+              cfg, segs, map);
+        } catch (...) {
+            vlog(
+              gclog.debug,
+              "[{}] failed to perform chunked sliding window compaction. "
+              "Stopping compaction: {}",
+              config().ntp(),
+              std::current_exception());
+        }
+        co_return did_compact;
     }
 
     vlog(

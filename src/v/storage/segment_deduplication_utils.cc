@@ -270,6 +270,9 @@ ss::future<bool> index_chunk_of_segment_for_map(
   key_offset_map& map,
   probe& pb,
   model::offset& last_indexed_offset) {
+    if (seg->is_closed()) {
+        throw segment_closed_exception();
+    }
     co_await map.reset();
     auto read_holder = co_await seg->read_lock();
     auto start_offset_inclusive = model::next_offset(last_indexed_offset);
