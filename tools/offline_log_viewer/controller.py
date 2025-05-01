@@ -222,10 +222,11 @@ def read_inc_update_op_serde(rdr: Reader):
 
 
 def read_property_update_serde(rdr: Reader, type_reader):
-    return rdr.read_envelope(lambda rdr, _: {
-        'value': type_reader(rdr),
-        'op': read_inc_update_op_serde(rdr),
-    })
+    return rdr.read_envelope(
+        lambda rdr, _: {
+            'value': rdr.read_tristate(type_reader),
+            'op': read_inc_update_op_serde(rdr),
+        })
 
 
 def read_incremental_topic_update_serde(rdr: Reader):
@@ -280,35 +281,43 @@ def read_incremental_topic_update_serde(rdr: Reader):
         if version >= 4:
             incr_obj |= {
                 'record_key_schema_id_validation':
-                rdr.read_optional(Reader.read_bool)
+                read_property_update_serde(
+                    rdr, lambda r: r.read_optional(Reader.read_bool))
             }
             incr_obj |= {
                 'record_key_schema_id_validation_compat':
-                rdr.read_optional(Reader.read_bool)
+                read_property_update_serde(
+                    rdr, lambda r: r.read_optional(Reader.read_bool))
             }
             incr_obj |= {
                 'record_key_subject_name_strategy':
-                rdr.read_optional(Reader.read_serde_enum)
+                read_property_update_serde(
+                    rdr, lambda r: r.read_optional(Reader.read_serde_enum))
             }
             incr_obj |= {
                 'record_key_subject_name_strategy_compat':
-                rdr.read_optional(Reader.read_serde_enum)
+                read_property_update_serde(
+                    rdr, lambda r: r.read_optional(Reader.read_serde_enum))
             }
             incr_obj |= {
                 'record_value_schema_id_validation':
-                rdr.read_optional(Reader.read_bool)
+                read_property_update_serde(
+                    rdr, lambda r: r.read_optional(Reader.read_bool))
             }
             incr_obj |= {
                 'record_value_schema_id_validation_compat':
-                rdr.read_optional(Reader.read_bool)
+                read_property_update_serde(
+                    rdr, lambda r: r.read_optional(Reader.read_bool))
             }
             incr_obj |= {
                 'record_value_subject_name_strategy':
-                rdr.read_optional(Reader.read_serde_enum)
+                read_property_update_serde(
+                    rdr, lambda r: r.read_optional(Reader.read_serde_enum))
             }
             incr_obj |= {
                 'record_value_subject_name_strategy_compat':
-                rdr.read_optional(Reader.read_serde_enum)
+                read_property_update_serde(
+                    rdr, lambda r: r.read_optional(Reader.read_serde_enum))
             }
         if version >= 5:
             incr_obj |= {
@@ -321,21 +330,32 @@ def read_incremental_topic_update_serde(rdr: Reader):
             }
         if version >= 6:
             incr_obj |= {
-                'write_caching': rdr.read_optional(Reader.read_serde_enum),
-                'flush_ms': rdr.read_optional(Reader.read_int64),
-                'flush_bytes': rdr.read_optional(Reader.read_int64)
+                'write_caching':
+                read_property_update_serde(
+                    rdr, lambda r: r.read_optional(Reader.read_serde_enum)),
+                'flush_ms':
+                read_property_update_serde(
+                    rdr, lambda r: r.read_optional(Reader.read_int64)),
+                'flush_bytes':
+                read_property_update_serde(
+                    rdr, lambda r: r.read_optional(Reader.read_int64))
             }
         if version >= 7:
             incr_obj |= {
-                'iceberg_mode': read_iceberg_mode(rdr),
+                'iceberg_mode':
+                read_property_update_serde(rdr, read_iceberg_mode),
                 'leaders_preference':
-                rdr.read_optional(read_leaders_preference),
-                'iceberg_delete': rdr.read_optional(Reader.read_bool),
+                read_property_update_serde(
+                    rdr, lambda r: r.read_optional(read_leaders_preference)),
+                'iceberg_delete':
+                read_property_update_serde(
+                    rdr, lambda r: r.read_optional(Reader.read_bool)),
             }
         if version >= 8:
             incr_obj |= {
                 'iceberg_partition_spec':
-                rdr.read_optional(Reader.read_string),
+                read_property_update_serde(
+                    rdr, lambda r: r.read_optional(Reader.read_string)),
             }
 
         return incr_obj
