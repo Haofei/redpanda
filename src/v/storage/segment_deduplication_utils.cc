@@ -224,6 +224,7 @@ ss::future<index_state> deduplicate_segment(
       &appender,
       seg->path().is_internal_topic(),
       should_offset_delta_times,
+      seg->index().base_offset(),
       segment_last_offset,
       compaction_placeholder_enabled,
       &cmp_idx_writer,

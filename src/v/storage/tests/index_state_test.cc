@@ -19,9 +19,9 @@
 
 static storage::index_state make_random_index_state(
   storage::offset_delta_time apply_offset = storage::offset_delta_time::yes) {
-    auto st = storage::index_state::make_empty_index(apply_offset);
+    auto base_offset = model::offset(random_generators::get_int<int64_t>());
+    auto st = storage::index_state::make_empty_index(base_offset, apply_offset);
     st.bitflags = random_generators::get_int<uint32_t>();
-    st.base_offset = model::offset(random_generators::get_int<int64_t>());
     st.max_offset = model::offset(random_generators::get_int<int64_t>());
     st.base_timestamp = model::timestamp(random_generators::get_int<int64_t>());
     st.max_timestamp = model::timestamp(random_generators::get_int<int64_t>());
@@ -265,10 +265,10 @@ BOOST_AUTO_TEST_CASE(binary_compatibility_test) {
     // format. In order to do this the index_state has to be refactored and the
     // columnar part has to be extracted. But the serialized form shouldn't
     // change.
+    auto base_offset = model::offset(6321451485771820344);
     auto expected_state = storage::index_state::make_empty_index(
-      storage::offset_delta_time::yes);
+      base_offset, storage::offset_delta_time::yes);
     // NOLINTBEGIN(cppcoreguidelines-avoid-magic-numbers)
-    expected_state.base_offset = model::offset(6321451485771820344);
     expected_state.base_timestamp = model::timestamp(5331697842032508203);
     expected_state.max_offset = model::offset(6925876299231340900);
     expected_state.max_timestamp = model::timestamp(659192121601013627);

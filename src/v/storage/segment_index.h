@@ -253,6 +253,8 @@ public:
     ss::future<size_t> disk_usage();
     void clear_cached_disk_usage() { _disk_usage_size.reset(); }
 
+    const index_state& get_index_state() const { return _state; }
+
 private:
     ss::future<bool> materialize_index_from_file(ss::file);
     ss::future<> flush_to_file(ss::file);

@@ -208,8 +208,10 @@ offset_time_index::offset_time_index(
 
 uint32_t offset_time_index::raw_value() const { return _val; }
 
-index_state index_state::make_empty_index(offset_delta_time with_offset) {
+index_state index_state::make_empty_index(
+  model::offset base_offset, offset_delta_time with_offset) {
     index_state idx{};
+    idx.base_offset = base_offset;
     idx.with_offset = with_offset;
 
     return idx;
