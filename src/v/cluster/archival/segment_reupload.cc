@@ -89,6 +89,20 @@ std::ostream& operator<<(std::ostream& s, const upload_candidate& c) {
     return s;
 }
 
+std::ostream& operator<<(std::ostream& s, const segment_collector_stream& c) {
+    if (c.size == 0) {
+        return s << "{empty}";
+    }
+    fmt::print(
+      s,
+      "{{starting_offset: {}, content_length: {}, final_offset: {}, term: {}}}",
+      c.start_offset,
+      c.size,
+      c.end_offset,
+      c.term);
+    return s;
+}
+
 std::ostream& operator<<(std::ostream& os, candidate_creation_error err) {
     os << "candidate creation error: ";
     switch (err) {
@@ -1013,7 +1027,7 @@ ss::future<candidate_creation_result> segment_collector::make_upload_candidate(
       },
       std::move(locks_resolved)};
 }
-ss::future<result<segment_collector_stream>>
+ss::future<segment_collector_stream_result>
 segment_collector::make_upload_candidate_stream(
   ss::lowres_clock::duration segment_lock_duration) {
     auto candidate_res = co_await make_upload_candidate(segment_lock_duration);
@@ -1023,41 +1037,35 @@ segment_collector::make_upload_candidate_stream(
       "Unexpected default upload candidate creation result");
 
     if (std::holds_alternative<candidate_creation_error>(candidate_res)) {
-        vlog(
-          archival_log.warn,
-          "Candidate creation error: {}",
-          std::get<candidate_creation_error>(candidate_res));
-        co_return error_outcome::offset_not_found;
+        auto err = std::get<candidate_creation_error>(candidate_res);
+        vlog(archival_log.warn, "Candidate creation error: {}", err);
+        co_return err;
     } else if (std::holds_alternative<skip_offset_range>(candidate_res)) {
-        const auto& skip = std::get<skip_offset_range>(candidate_res);
+        auto skip = std::get<skip_offset_range>(candidate_res);
         vlog(
           archival_log.debug,
           "Skipping offset range: {}-{}, reason: {}",
           skip.begin_offset,
           skip.end_offset,
           skip.reason);
-        co_return segment_collector_stream{
-          .start_offset = skip.begin_offset,
-          .end_offset = skip.end_offset,
-          .size = 0,
-          .min_timestamp = {},
-          .max_timestamp = {},
-          .skip_offset_range = true,
-          .create_input_stream = []() -> ss::input_stream<char> {
-              throw std::runtime_error("The upload should be skipped");
-          },
-        };
+        co_return skip;
     }
 
     auto& cand_with_locks = std::get<upload_candidate_with_locks>(
       candidate_res);
 
     auto& cand = cand_with_locks.candidate;
+    auto front = cand.sources.front();
 
     segment_collector_stream stream;
     stream.start_offset = cand.starting_offset;
     stream.end_offset = cand.final_offset;
+    stream.min_timestamp = cand.base_timestamp;
+    stream.max_timestamp = cand.max_timestamp;
     stream.size = cand.content_length;
+    stream.is_compacted = front->is_compacted_segment()
+                          && eligible_for_compacted_reupload(*front);
+    stream.term = cand.term;
     stream.create_input_stream =
       [segments = cand.sources,
        locks = std::move(cand_with_locks.read_locks),

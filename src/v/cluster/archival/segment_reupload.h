@@ -108,16 +108,26 @@ struct segment_collector_stream {
     size_t size;
     // The time range of the segments that are being uploaded.
     model::timestamp min_timestamp, max_timestamp;
-    // If this is set to true, the offset range should be skipped.
-    // The 'create_input_stream' method shouldn't be invoked.
-    bool skip_offset_range{false};
+
+    bool is_compacted{false};
 
     // Create the input_stream for the segment upload.
     // The generator function here is stateful and holds the segments and the
     // locks. The function can only be called once.
     // The object should be kept alive until the stream is alive.
     ss::noncopyable_function<ss::input_stream<char>()> create_input_stream;
+
+    model::term_id term;
+
+    friend std::ostream&
+    operator<<(std::ostream& s, const segment_collector_stream&);
 };
+
+using segment_collector_stream_result = std::variant<
+  std::monostate,
+  segment_collector_stream,
+  skip_offset_range,
+  candidate_creation_error>;
 
 bool eligible_for_compacted_reupload(const storage::segment&);
 
@@ -193,7 +203,7 @@ public:
     size_t collected_size() const;
 
     // Create a stream for the upload candidate.
-    ss::future<result<segment_collector_stream>> make_upload_candidate_stream(
+    ss::future<segment_collector_stream_result> make_upload_candidate_stream(
       ss::lowres_clock::duration segment_lock_duration);
 
 private:
