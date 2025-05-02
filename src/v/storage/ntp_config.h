@@ -33,7 +33,8 @@ public:
     // is handled during adl/serde decode).
     static constexpr bool default_remote_delete{true};
     static constexpr bool legacy_remote_delete{false};
-    static constexpr bool default_iceberg_enabled{false};
+    static inline model::iceberg_mode default_iceberg_mode
+      = model::iceberg_mode{};
     static constexpr bool default_cloud_topic_enabled{false};
 
     static constexpr std::chrono::milliseconds read_replica_retention{3600000};
@@ -78,8 +79,16 @@ public:
 
         std::optional<std::chrono::milliseconds> flush_ms;
         std::optional<size_t> flush_bytes;
-        bool iceberg_enabled{default_iceberg_enabled};
+        model::iceberg_mode iceberg_mode{default_iceberg_mode};
         bool cloud_topic_enabled{default_cloud_topic_enabled};
+
+        // Should not be enabled at the same time as any other tiered storage
+        // properties.
+        tristate<std::chrono::milliseconds> tombstone_retention_ms;
+
+        tristate<double> min_cleanable_dirty_ratio;
+        // Controls behavior during pause
+        std::optional<bool> remote_allow_gaps;
 
         friend std::ostream&
         operator<<(std::ostream&, const default_overrides&);
@@ -113,21 +122,25 @@ public:
       model::ntp n,
       ss::sstring base_dir,
       std::unique_ptr<default_overrides> overrides,
-      model::revision_id id,
-      model::initial_revision_id initial_id) noexcept
+      model::revision_id rev,
+      model::revision_id topic_rev,
+      model::initial_revision_id remote_rev) noexcept
       : _ntp(std::move(n))
       , _base_dir(std::move(base_dir))
       , _overrides(std::move(overrides))
-      , _revision_id(id)
-      , _initial_rev(initial_id) {}
+      , _revision_id(rev)
+      , _topic_rev(topic_rev)
+      , _remote_rev(remote_rev) {}
 
     const model::ntp& ntp() const { return _ntp; }
     model::ntp& ntp() { return _ntp; }
 
     model::revision_id get_revision() const { return _revision_id; }
 
-    model::initial_revision_id get_initial_revision() const {
-        return _initial_rev;
+    model::revision_id get_topic_revision() const { return _topic_rev; }
+
+    model::initial_revision_id get_remote_revision() const {
+        return _remote_rev;
     }
 
     const ss::sstring& base_directory() const { return _base_dir; }
@@ -222,6 +235,15 @@ public:
                && _overrides->read_replica.value();
     }
 
+    bool is_remote_allow_gaps_enabled() const {
+        auto cluster_default
+          = config::shard_local_cfg().cloud_storage_enable_remote_allow_gaps();
+        if (_overrides == nullptr) {
+            return cluster_default;
+        }
+        return _overrides->remote_allow_gaps.value_or(cluster_default);
+    }
+
     /**
      * True if the topic is configured for "normal" tiered storage, i.e.
      * both reads and writes to S3, and is not a read replica.
@@ -292,6 +314,40 @@ public:
                           : cluster_default;
     }
 
+    std::optional<std::chrono::milliseconds> tombstone_retention_ms() const {
+        if (is_read_replica_mode_enabled()) {
+            // RRR sanity check.
+            return std::nullopt;
+        }
+        auto& cluster_default
+          = config::shard_local_cfg().tombstone_retention_ms();
+        if (_overrides) {
+            // Tombstone deletion should not be enabled at the same time as
+            // tiered storage.
+            if (
+              _overrides->shadow_indexing_mode.has_value()
+              && _overrides->shadow_indexing_mode.value()
+                   != model::shadow_indexing_mode::disabled) {
+                return std::nullopt;
+            }
+            // If the tristate is disabled, return nullopt.
+            if (_overrides->tombstone_retention_ms.is_disabled()) {
+                return std::nullopt;
+            }
+            // If the tristate has a value, use it.
+            if (_overrides->tombstone_retention_ms.has_optional_value()) {
+                return _overrides->tombstone_retention_ms.value();
+            }
+
+            // If the tristate holds an empty optional, fall back to cluster
+            // default.
+            return cluster_default;
+        }
+        // Fall back to cluster default, since _overrides being nullptr signals
+        // that remote.read and remote.write is disabled for this topic.
+        return cluster_default;
+    }
+
     std::optional<model::cleanup_policy_bitflags>
     cleanup_policy_override() const {
         return _overrides ? _overrides->cleanup_policy_bitflags : std::nullopt;
@@ -303,12 +359,15 @@ public:
         return cleanup_policy_override().value_or(cluster_default);
     }
 
-    bool iceberg_enabled() const {
+    model::iceberg_mode iceberg_mode() const {
         if (!config::shard_local_cfg().iceberg_enabled) {
-            return false;
+            return model::iceberg_mode::disabled;
         }
-        return _overrides ? _overrides->iceberg_enabled
-                          : default_iceberg_enabled;
+        return _overrides ? _overrides->iceberg_mode : default_iceberg_mode;
+    }
+
+    bool iceberg_enabled() const {
+        return iceberg_mode() != model::iceberg_mode::disabled;
     }
 
     bool cloud_topic_enabled() const {
@@ -317,6 +376,29 @@ public:
         }
         return _overrides ? _overrides->cloud_topic_enabled
                           : default_cloud_topic_enabled;
+    }
+
+    std::optional<double> min_cleanable_dirty_ratio() const {
+        if (_overrides) {
+            if (_overrides->min_cleanable_dirty_ratio.is_disabled()) {
+                return std::nullopt;
+            }
+            if (_overrides->min_cleanable_dirty_ratio.has_optional_value()) {
+                return _overrides->min_cleanable_dirty_ratio.value();
+            }
+        }
+        return config::shard_local_cfg().min_cleanable_dirty_ratio();
+    }
+
+    ntp_config copy() const {
+        return {
+          _ntp,
+          _base_dir,
+          _overrides ? std::make_unique<default_overrides>(*_overrides)
+                     : nullptr,
+          _revision_id,
+          _topic_rev,
+          _remote_rev};
     }
 
 private:
@@ -328,19 +410,18 @@ private:
 
     std::unique_ptr<default_overrides> _overrides;
 
-    /**
-     * A number indicating an id of the NTP in case it was created more
-     * than once (i.e. created, deleted and then created again)
-     */
+    /// Revision of the command that resulted in this partition appearing on
+    /// this node (i.e. it will changed if the partition replica is moved back
+    /// and forth from/to the node, as well as if the topic is re-created). It
+    /// is used in constructing the local directory path.
     model::revision_id _revision_id{0};
 
-    /**
-     * A number indicating an initial revision of the NTP. The revision
-     * of the NTP might change when the partition is moved between the
-     * nodes. The initial revision is the revision_id that was assigned
-     * to the topic when it was created.
-     */
-    model::initial_revision_id _initial_rev{0};
+    /// Revision of the topic creation command.
+    model::revision_id _topic_rev;
+
+    /// This revision is used to construct cloud storage paths. It differs from
+    /// _topic_revision in case of recovered topics or read replicas.
+    model::initial_revision_id _remote_rev{0};
 
     // in storage/types.cc
     friend std::ostream& operator<<(std::ostream&, const ntp_config&);

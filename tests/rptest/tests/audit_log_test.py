@@ -23,7 +23,7 @@ from typing import Any, Optional
 
 from ducktape.cluster.cluster import ClusterNode
 from ducktape.errors import TimeoutError
-from ducktape.mark import matrix, ok_to_fail, ok_to_fail_fips
+from ducktape.mark import matrix, ignore
 from keycloak import KeycloakOpenID
 from rptest.clients.default import DefaultClient
 from rptest.clients.kcl import KCL
@@ -40,6 +40,7 @@ from rptest.services.rpk_consumer import RpkConsumer
 from rptest.tests.cluster_config_test import wait_for_version_sync
 from rptest.tests.redpanda_test import RedpandaTest
 from rptest.util import expect_exception, wait_until, wait_until_result
+from rptest.utils.mode_checks import skip_fips_mode
 from rptest.utils.rpk_config import read_redpanda_cfg
 from rptest.utils.schema_registry_utils import Mode, get_subjects, put_mode
 from urllib.parse import urlparse
@@ -709,7 +710,7 @@ class AuditLogTestsAppLifecycle(AuditLogTestBase):
                  and record['app']['feature']['name'] == feature) or
                 (feature is None and 'feature' not in record['app']))
 
-    @ok_to_fail_fips
+    @skip_fips_mode
     @cluster(num_nodes=5)
     def test_app_lifecycle(self):
         _ = self.find_matching_record(
@@ -723,8 +724,8 @@ class AuditLogTestsAppLifecycle(AuditLogTestBase):
                     True), lambda record_count: record_count == 3,
             "Single redpanda start event per node")
 
-    @ok_to_fail  # https://github.com/redpanda-data/redpanda/issues/16198
-    @ok_to_fail_fips
+    @ignore  # https://github.com/redpanda-data/redpanda/issues/16198
+    @skip_fips_mode
     @cluster(num_nodes=5)
     def test_drain_on_audit_disabled(self):
         """
@@ -752,7 +753,7 @@ class AuditLogTestsAppLifecycle(AuditLogTestBase):
             filter_unique_stop_events, lambda record_count: record_count == 3,
             "Three more stop events observed per node")
 
-    @ok_to_fail_fips
+    @skip_fips_mode
     @cluster(num_nodes=5)
     def test_recovery_mode(self):
         """
@@ -818,7 +819,7 @@ class AuditLogTestAdminApi(AuditLogTestBase):
                                                           'trace'
                                                       }))
 
-    @ok_to_fail_fips
+    @skip_fips_mode
     @cluster(num_nodes=4)
     def test_config_rejected(self):
         """
@@ -839,7 +840,7 @@ class AuditLogTestAdminApi(AuditLogTestBase):
         except requests.HTTPError:
             pass
 
-    @ok_to_fail_fips
+    @skip_fips_mode
     @cluster(num_nodes=5)
     def test_audit_log_functioning(self):
         """
@@ -902,7 +903,7 @@ class AuditLogTestAdminApi(AuditLogTestBase):
         self.logger.debug("Finished 500 api calls with management disabled")
         _ = number_of_records_matching(api_keys, 1000)
 
-    @ok_to_fail_fips
+    @skip_fips_mode
     @cluster(num_nodes=4)
     def test_audit_log_metrics(self):
         """
@@ -989,7 +990,7 @@ class AuditLogTestAdminAuthApi(AuditLogTestBase):
         self.admin.create_user(self.ignored_user, self.ignored_pass,
                                self.algorithm)
 
-    @ok_to_fail_fips
+    @skip_fips_mode
     @cluster(num_nodes=5)
     def test_excluded_principal(self):
         self.setup_cluster()
@@ -1060,7 +1061,7 @@ class AuditLogTestKafkaApi(AuditLogTestBase):
                        sasl_mechanism=mechanism)
         self.default_client = DefaultClient(self.redpanda)
 
-    @ok_to_fail_fips
+    @skip_fips_mode
     @cluster(num_nodes=4)
     def test_audit_topic_protections(self):
         """Validates audit topic protections
@@ -1072,7 +1073,7 @@ class AuditLogTestKafkaApi(AuditLogTestBase):
             if 'TOPIC_AUTHORIZATION_FAILED' not in e.stderr:
                 raise
 
-    @ok_to_fail_fips
+    @skip_fips_mode
     @cluster(num_nodes=5)
     def test_excluded_topic(self):
         """
@@ -1125,7 +1126,7 @@ class AuditLogTestKafkaApi(AuditLogTestBase):
         except TimeoutError:
             pass
 
-    @ok_to_fail_fips
+    @skip_fips_mode
     @cluster(num_nodes=5)
     def test_management(self):
         """Validates management messages
@@ -1276,7 +1277,7 @@ class AuditLogTestKafkaApi(AuditLogTestBase):
             _ = self.find_matching_record(test.filter_function,
                                           test.valid_count, test.desc())
 
-    @ok_to_fail_fips
+    @skip_fips_mode
     @cluster(num_nodes=5)
     def test_produce(self):
         """Validates produce audit messages
@@ -1329,7 +1330,7 @@ class AuditLogTestKafkaApi(AuditLogTestBase):
             _ = self.find_matching_record(test.filter_function,
                                           test.valid_count, test.desc())
 
-    @ok_to_fail_fips
+    @skip_fips_mode
     @cluster(num_nodes=4, log_allow_list=AUDIT_LOG_ALLOW_LIST)
     def test_no_auth_enabled(self):
         """The expected behavior of the system when working with no auth
@@ -1397,7 +1398,7 @@ class AuditLogTestKafkaApi(AuditLogTestBase):
         if exc is not None:
             raise exc
 
-    @ok_to_fail_fips
+    @skip_fips_mode
     @cluster(num_nodes=5)
     def test_consume(self):
         """
@@ -1505,7 +1506,7 @@ class AuditLogTestKafkaAuthnApi(AuditLogTestBase):
             'name'] == service_name and record['actor']['user'][
                 'name'] == username
 
-    @ok_to_fail_fips
+    @skip_fips_mode
     @cluster(num_nodes=5)
     def test_excluded_principal(self):
         """
@@ -1570,7 +1571,7 @@ class AuditLogTestKafkaAuthnApi(AuditLogTestBase):
         except TimeoutError:
             pass
 
-    @ok_to_fail_fips
+    @skip_fips_mode
     @cluster(num_nodes=5)
     def test_authn_messages(self):
         """Verifies that authentication messages are audited
@@ -1590,7 +1591,7 @@ class AuditLogTestKafkaAuthnApi(AuditLogTestBase):
         assert len(
             records) == 1, f"Expected only one record got {len(records)}"
 
-    @ok_to_fail_fips
+    @skip_fips_mode
     @cluster(num_nodes=5)
     def test_authn_failure_messages(self):
         """Validates that failed authentication messages are audited
@@ -1617,7 +1618,7 @@ class AuditLogTestKafkaAuthnApi(AuditLogTestBase):
         assert len(
             records) == 1, f'Expected only one record, got {len(records)}'
 
-    @ok_to_fail_fips
+    @skip_fips_mode
     @cluster(num_nodes=5)
     def test_no_audit_user_authn(self):
         """
@@ -1713,7 +1714,7 @@ class AuditLogTestInvalidConfig(AuditLogTestInvalidConfigBase):
                                                             self.password,
                                                             self.algorithm)))
 
-    @ok_to_fail_fips
+    @skip_fips_mode
     @cluster(num_nodes=4,
              log_allow_list=[
                  r'Failed to append authentication event to audit log',
@@ -1756,6 +1757,7 @@ class AuditLogTestInvalidConfigMTLS(AuditLogTestInvalidConfigBase):
               self).__init__(test_context=test_context,
                              security=self._security_config)
 
+    @skip_fips_mode
     @cluster(
         num_nodes=4,
         log_allow_list=[
@@ -1839,7 +1841,7 @@ class AuditLogTestKafkaTlsApi(AuditLogTestBase):
                         == protocol_name) and record[
                             'status_id'] == 1 and record['user']['uid'] == dn
 
-    @ok_to_fail_fips
+    @skip_fips_mode
     @cluster(num_nodes=5)
     def test_mtls(self):
         """
@@ -1949,7 +1951,7 @@ class AuditLogTestOauth(AuditLogTestBase):
                         'name': role
                     }] if role is not None else True)
 
-    @ok_to_fail_fips
+    @skip_fips_mode
     @cluster(num_nodes=6)
     @matrix(authz_match=[AuthorizationMatch.ACL, AuthorizationMatch.RBAC])
     def test_kafka_oauth(self, authz_match):
@@ -2021,7 +2023,7 @@ class AuditLogTestOauth(AuditLogTestBase):
         assert 1 == len(
             records), f"Expected one record but received {len(records)}"
 
-    @ok_to_fail_fips
+    @skip_fips_mode
     @cluster(num_nodes=6)
     def test_admin_oauth(self):
         """
@@ -2087,7 +2089,7 @@ class AuditLogTestSchemaRegistry(AuditLogTestBase):
             log_config=LoggingConfig('info',
                                      logger_levels={
                                          'auditing': 'trace',
-                                         'pandaproxy': 'trace'
+                                         'schemaregistry': 'trace'
                                      }),
             schema_registry_config=sr_config)
 
@@ -2137,7 +2139,7 @@ class AuditLogTestSchemaRegistry(AuditLogTestBase):
 
         wait_until(user_exists, timeout_sec=10, backoff_sec=1)
 
-    @ok_to_fail_fips
+    @skip_fips_mode
     @cluster(num_nodes=5)
     def test_sr_audit(self):
         self.setup_cluster()
@@ -2158,7 +2160,7 @@ class AuditLogTestSchemaRegistry(AuditLogTestBase):
             lambda record: self.match_authn_record(record, StatusID.SUCCESS),
             lambda record_count: record_count == 1, 'authn attempt in sr')
 
-    @ok_to_fail_fips
+    @skip_fips_mode
     @cluster(num_nodes=5)
     def test_sr_audit_bad_authn(self):
         # Not calling self.setup_cluster() here so the user does not exist
@@ -2183,7 +2185,7 @@ class AuditLogTestSchemaRegistry(AuditLogTestBase):
                 lambda record: self.match_api_record(record, "subjects"),
                 lambda aggregate_count: aggregate_count >= 1, 'API call')
 
-    @ok_to_fail_fips
+    @skip_fips_mode
     @cluster(num_nodes=5)
     def test_sr_audit_bad_authz(self):
         self.setup_cluster()
@@ -2209,3 +2211,106 @@ class AuditLogTestSchemaRegistry(AuditLogTestBase):
             lambda record: self.match_api_record(record, "mode", StatusID.
                                                  FAILURE),
             lambda aggregate_count: aggregate_count >= 1, 'API call')
+
+
+class AuditLogTestSanctionMode(AuditLogTestBase):
+    """Validates the behaviour of audit logging under sanctioning mode
+    """
+    def __init__(self, test_context):
+
+        super(AuditLogTestSanctionMode,
+              self).__init__(test_context=test_context,
+                             audit_log_config=AuditLogConfig(num_partitions=1,
+                                                             event_types=[]),
+                             log_config=LoggingConfig('info',
+                                                      logger_levels={
+                                                          'auditing':
+                                                          'trace',
+                                                          'kafka':
+                                                          'trace',
+                                                          'admin_api_server':
+                                                          'trace',
+                                                      }))
+
+        # Disable the built in trial license to trigger "sanctioning mode"
+        self.redpanda.set_environment(
+            {'__REDPANDA_DISABLE_BUILTIN_TRIAL_LICENSE': True})
+
+    @skip_fips_mode
+    @cluster(num_nodes=5)
+    def test_sanctioning_mode(self):
+        self.redpanda.logger.debug(
+            "Verify that auditing continues to work in sanctioning mode")
+        self.modify_audit_event_types(['management'])
+        created_topic = "created_topic"
+        self.super_rpk.create_topic(topic=created_topic)
+
+        self.redpanda.logger.debug(
+            "Verify that consuming the audit log topic is not allowed")
+        with expect_exception(RpkException,
+                              lambda e: 'UNKNOWN_SERVER_ERROR' in e.stderr):
+            self.super_rpk.consume(self.audit_log)
+
+        self.redpanda.search_log_any(
+            f"{self.redpanda.ENTERPRISE_LICENSE_NAG} to consume the audit log topic"
+        )
+
+        self.redpanda.logger.debug(
+            "Install a license to get out of sanctioning mode")
+        self.redpanda.install_license()
+
+        self.redpanda.logger.debug(
+            "Verify that audit log events recorded during sanctioning mode are consumable after a valid license is installed"
+        )
+
+        def matches_topic_creation(record):
+            return record['class_uid'] == 6003 \
+                and record['api']['service']['name'] == self.kafka_rpc_service_name \
+                and {'name': created_topic, 'type': 'topic'} in record['resources']
+
+        records = self.find_matching_record(
+            matches_topic_creation, lambda record_count: record_count >= 1,
+            "Expected to observe a management API event for the topic creation"
+        )
+        assert len(records) > 0, \
+            f'Did not receive any audit records for topic {created_topic}'
+
+
+class AuditLogTestReproducer(AuditLogTestBase):
+    """Reproducer and regression test for a bug in the audit logging client where having kafka_batch_max_bytes > audit_client_max_buffer_size lead to no audit messages being produced and the audit log buffers filling up."""
+    def __init__(self, test_context):
+
+        super(AuditLogTestReproducer, self).__init__(
+            test_context=test_context,
+            audit_log_config=AuditLogConfig(num_partitions=1,
+                                            event_types=['management']),
+            extra_rp_conf={
+                "kafka_batch_max_bytes": "26214400",
+                "audit_client_max_buffer_size": "16777216",
+            },
+            log_config=LoggingConfig('info',
+                                     logger_levels={
+                                         'auditing': 'trace',
+                                         'kafka': 'trace',
+                                         'kafka/client': 'trace',
+                                         'admin_api_server': 'trace',
+                                     }))
+
+    @skip_fips_mode
+    @cluster(num_nodes=5)
+    def test_sanctioning_mode(self):
+        self.redpanda.logger.debug("Triggering an audit log event")
+        created_topic = "created_topic"
+        self.super_rpk.create_topic(topic=created_topic)
+
+        def matches_topic_creation(record):
+            return record['class_uid'] == 6003 \
+                and record['api']['service']['name'] == self.kafka_rpc_service_name \
+                and {'name': created_topic, 'type': 'topic'} in record['resources']
+
+        records = self.find_matching_record(
+            matches_topic_creation, lambda record_count: record_count >= 1,
+            "Expected to observe a management API event for the topic creation"
+        )
+        assert len(records) > 0, \
+            f'Did not receive any audit records for topic {created_topic}'

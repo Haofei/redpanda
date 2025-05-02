@@ -153,15 +153,22 @@ ss::future<begin_tx_reply> rm_partition_frontend::dispatch_begin_tx(
         leader,
         timeout,
         [ntp, pid, tx_seq, transaction_timeout_ms, timeout, tm](
-          tx_gateway_client_protocol cp) {
+          tx_gateway_client_protocol cp) mutable {
             return cp.begin_tx(
-              begin_tx_request{ntp, pid, tx_seq, transaction_timeout_ms, tm},
+              begin_tx_request{
+                std::move(ntp), pid, tx_seq, transaction_timeout_ms, tm},
               rpc::client_opts(model::timeout_clock::now() + timeout));
         })
       .then(&rpc::get_ctx_data<begin_tx_reply>)
-      .then([ntp](result<begin_tx_reply> r) {
+      .then([ntp, leader](result<begin_tx_reply> r) {
           if (r.has_error()) {
-              vlog(txlog.warn, "got error {} on remote begin tx", r.error());
+              vlog(
+                txlog.warn,
+                "error dispatching begin_tx request for {} against partition "
+                "leader: {} - {}",
+                ntp,
+                leader,
+                r.error().message());
               return begin_tx_reply{ntp, tx::errc::timeout};
           }
 
@@ -318,15 +325,21 @@ ss::future<commit_tx_reply> rm_partition_frontend::dispatch_commit_tx(
         ss::this_shard_id(),
         leader,
         timeout,
-        [ntp, pid, tx_seq, timeout](tx_gateway_client_protocol cp) {
+        [ntp, pid, tx_seq, timeout](tx_gateway_client_protocol cp) mutable {
             return cp.commit_tx(
-              commit_tx_request{ntp, pid, tx_seq, timeout},
+              commit_tx_request{std::move(ntp), pid, tx_seq, timeout},
               rpc::client_opts(model::timeout_clock::now() + timeout));
         })
       .then(&rpc::get_ctx_data<commit_tx_reply>)
-      .then([](result<commit_tx_reply> r) {
+      .then([ntp, leader](result<commit_tx_reply> r) {
           if (r.has_error()) {
-              vlog(txlog.warn, "got error {} on remote commit tx", r.error());
+              vlog(
+                txlog.warn,
+                "error dispatching commit_tx request for {} against partition "
+                "leader: {} - {}",
+                ntp,
+                leader,
+                r.error().message());
               return commit_tx_reply{tx::errc::timeout};
           }
 
@@ -461,15 +474,21 @@ ss::future<abort_tx_reply> rm_partition_frontend::dispatch_abort_tx(
         ss::this_shard_id(),
         leader,
         timeout,
-        [ntp, pid, tx_seq, timeout](tx_gateway_client_protocol cp) {
+        [ntp, pid, tx_seq, timeout](tx_gateway_client_protocol cp) mutable {
             return cp.abort_tx(
-              abort_tx_request{ntp, pid, tx_seq, timeout},
+              abort_tx_request{std::move(ntp), pid, tx_seq, timeout},
               rpc::client_opts(model::timeout_clock::now() + timeout));
         })
       .then(&rpc::get_ctx_data<abort_tx_reply>)
-      .then([](result<abort_tx_reply> r) {
+      .then([ntp, leader](result<abort_tx_reply> r) {
           if (r.has_error()) {
-              vlog(txlog.warn, "got error {} on remote abort tx", r.error());
+              vlog(
+                txlog.warn,
+                "error dispatching commit_tx request for {} against partition "
+                "leader: {} - {}",
+                ntp,
+                leader,
+                r.error().message());
               return abort_tx_reply{tx::errc::timeout};
           }
 
@@ -538,6 +557,62 @@ ss::future<abort_tx_reply> rm_partition_frontend::do_abort_tx(
               return cluster::abort_tx_reply{ec};
           });
       });
+}
+
+ss::future<get_producers_reply>
+rm_partition_frontend::get_producers_locally(get_producers_request request) {
+    get_producers_reply reply;
+    auto partition = _partition_manager.local().get(request.ntp);
+    if (!partition || !partition->is_leader()) {
+        reply.error_code = tx::errc::not_coordinator;
+        co_return reply;
+    }
+    reply.error_code = tx::errc::none;
+    auto stm = partition->raft()->stm_manager()->get<rm_stm>();
+    if (!stm) {
+        // maybe an internal (non data) partition
+        co_return reply;
+    }
+    const auto& producers = stm->get_producers();
+    reply.producer_count = producers.size();
+    for (const auto& [pid, state] : producers) {
+        producer_state_info producer_info;
+        producer_info.pid = state->id();
+        // fill in the idempotent producer state.
+        const auto& requests = state->idempotent_request_state();
+        for (const auto& request : requests.inflight_requests()) {
+            idempotent_request_info request_info;
+            request_info.first_sequence = request->first_sequence();
+            request_info.last_sequence = request->last_sequence();
+            request_info.term = request->term();
+            producer_info.inflight_requests.push_back(std::move(request_info));
+        }
+
+        for (const auto& request : requests.finished_requests()) {
+            idempotent_request_info request_info;
+            request_info.first_sequence = request->first_sequence();
+            request_info.last_sequence = request->last_sequence();
+            request_info.term = request->term();
+            producer_info.finished_requests.push_back(std::move(request_info));
+        }
+        producer_info.last_update = state->last_update_timestamp();
+
+        // Fill in transactional producer state, if any.
+        const auto& tx_state = state->transaction_state();
+        if (state->has_transaction_in_progress() && tx_state) {
+            producer_info.tx_begin_offset = tx_state->first;
+            producer_info.tx_end_offset = tx_state->last;
+            producer_info.tx_seq = tx_state->sequence;
+            producer_info.tx_timeout = tx_state->timeout;
+            producer_info.coordinator_partition
+              = tx_state->coordinator_partition;
+        }
+        reply.producers.push_back(std::move(producer_info));
+        if (reply.producers.size() > request.max_producers_to_include) {
+            break;
+        }
+    }
+    co_return reply;
 }
 
 } // namespace cluster

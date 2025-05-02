@@ -16,9 +16,10 @@ import (
 	"net/http"
 	"os"
 	"runtime"
-	"time"
 
+	"github.com/redpanda-data/redpanda/src/go/rpk/pkg/fips"
 	"github.com/redpanda-data/redpanda/src/go/rpk/pkg/httpapi"
+	"github.com/redpanda-data/redpanda/src/go/rpk/pkg/plugin"
 )
 
 const pluginBaseURL = "https://rpk-plugins.redpanda.com"
@@ -75,13 +76,9 @@ type connectRepoClient struct {
 }
 
 func newRepoClient() (*connectRepoClient, error) {
-	timeout := 240 * time.Second
-	if t := os.Getenv("RPK_PLUGIN_DOWNLOAD_TIMEOUT"); t != "" {
-		duration, err := time.ParseDuration(t)
-		if err != nil {
-			return nil, fmt.Errorf("unable to parse RPK_PLUGIN_DOWNLOAD_TIMEOUT: %v", err)
-		}
-		timeout = duration
+	timeout, err := plugin.GetPluginDownloadTimeout()
+	if err != nil {
+		return nil, err
 	}
 	return &connectRepoClient{
 		cl: httpapi.NewClient(
@@ -96,7 +93,11 @@ func newRepoClient() (*connectRepoClient, error) {
 
 func (c *connectRepoClient) Manifest(ctx context.Context) (*connectManifest, error) {
 	var manifest connectManifest
-	err := c.cl.Get(ctx, fmt.Sprintf("%v/connect/manifest.json", getPluginURL()), nil, &manifest)
+	path := fmt.Sprintf("%v/connect/manifest.json", getPluginURL())
+	if fips.IsEnabled() {
+		path = fmt.Sprintf("%v/connect-fips/manifest.json", getPluginURL())
+	}
+	err := c.cl.Get(ctx, path, nil, &manifest)
 	if err != nil {
 		return nil, fmt.Errorf("unable to retrieve Redpanda Connect manifest: %v", err)
 	}

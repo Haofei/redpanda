@@ -7,11 +7,12 @@ is not stamped (ie. dev builds).
 """
 
 def _expand_with_stamp_vars(ctx):
+    toolchain = ctx.toolchains[Label("@rules_python//python:toolchain_type")]
     ctx.actions.run(
         outputs = [ctx.outputs.out],
         inputs = [ctx.file.defaults_file, ctx.file.template, ctx.info_file],
-        tools = [ctx.executable._tool],
-        executable = ctx.executable._tool,
+        tools = [ctx.executable._tool, toolchain.py3_runtime.interpreter],
+        executable = ctx.executable._tool.path,
         arguments = [
             "--template",
             ctx.file.template.path,
@@ -26,7 +27,6 @@ def _expand_with_stamp_vars(ctx):
     )
     return DefaultInfo(
         files = depset([ctx.outputs.out]),
-        runfiles = ctx.runfiles(files = [ctx.outputs.out]),
     )
 
 expand_with_stamp_vars = rule(
@@ -50,4 +50,7 @@ expand_with_stamp_vars = rule(
             mandatory = True,
         ),
     },
+    toolchains = [
+        "@rules_python//python:toolchain_type",
+    ],
 )

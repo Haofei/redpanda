@@ -1224,27 +1224,13 @@ ss::future<result<join_node_reply>> members_manager::replicate_new_node_uuid(
       co_await make_join_node_success_reply(get_node_id(node_uuid)));
 }
 
-static bool contains_address(
-  const net::unresolved_address& address,
-  const members_table::cache_t& brokers) {
-    return std::find_if(
-             brokers.begin(),
-             brokers.end(),
-             [&address](const auto& p) {
-                 return p.second.broker.rpc_address() == address;
-             })
-           != brokers.end();
-}
-
 ss::future<result<join_node_reply>>
 members_manager::handle_join_request(const join_node_request req) {
     using ret_t = result<join_node_reply>;
     using status_t = join_node_reply::status_code;
 
-    bool node_id_assignment_supported = _feature_table.local().is_active(
-      features::feature::node_id_assignment);
     bool req_has_node_uuid = !req.node_uuid.empty();
-    if (node_id_assignment_supported && !req_has_node_uuid) {
+    if (!req_has_node_uuid) {
         vlog(
           clusterlog.warn,
           "Invalid join request for node ID {}, node UUID is required",
@@ -1254,13 +1240,6 @@ members_manager::handle_join_request(const join_node_request req) {
     std::optional<model::node_id> req_node_id = std::nullopt;
     if (req.node.id() >= 0) {
         req_node_id = req.node.id();
-    }
-    if (!node_id_assignment_supported && !req_node_id) {
-        vlog(
-          clusterlog.warn,
-          "Got request to assign node ID, but feature not active",
-          req.node.id());
-        co_return errc::invalid_request;
     }
     if (
       req_has_node_uuid
@@ -1324,7 +1303,7 @@ members_manager::handle_join_request(const join_node_request req) {
           join_node_reply{status_t::not_ready, model::unassigned_node_id});
     }
 
-    if (likely(node_id_assignment_supported && req_has_node_uuid)) {
+    if (likely(req_has_node_uuid)) {
         const auto it = _id_by_uuid.find(node_uuid);
         if (!req_node_id) {
             if (it == _id_by_uuid.end()) {
@@ -1401,22 +1380,6 @@ members_manager::handle_join_request(const join_node_request req) {
                 }
                 return ss::make_ready_future<ret_t>(r.error());
             });
-    }
-
-    // Older versions of Redpanda don't support having multiple servers pointed
-    // at the same address.
-    if (
-      !node_id_assignment_supported
-      && contains_address(
-        req.node.rpc_address(), _members_table.local().nodes())) {
-        vlog(
-          clusterlog.info,
-          "Broker {} address ({}) conflicts with the address of another "
-          "node",
-          req.node.id(),
-          req.node.rpc_address());
-        co_return ret_t(
-          join_node_reply{status_t::conflict, model::unassigned_node_id});
     }
 
     if (req.node.id() != _self.id()) {
@@ -1687,10 +1650,6 @@ members_manager::initialize_broker_connection(const model::broker& broker) {
 }
 
 ss::future<std::error_code> members_manager::add_node(model::broker broker) {
-    if (!command_based_membership_active()) {
-        return _raft0->add_group_member(
-          std::move(broker), model::revision_id(0));
-    }
     return replicate_and_wait(
       _controller_stm,
       _as,
@@ -1699,10 +1658,6 @@ ss::future<std::error_code> members_manager::add_node(model::broker broker) {
 }
 
 ss::future<std::error_code> members_manager::update_node(model::broker broker) {
-    if (!command_based_membership_active()) {
-        return _raft0->update_group_member(std::move(broker));
-    }
-
     return replicate_and_wait(
       _controller_stm,
       _as,
@@ -1716,6 +1671,12 @@ members_manager::persist_members_in_kvstore(model::offset update_offset) {
       "cluster_members");
     auto current_members_snapshot = read_members_from_kvstore();
     if (current_members_snapshot.update_offset >= update_offset) {
+        vlog(
+          clusterlog.trace,
+          "skipping persisting members, update offset {}, current snapshot "
+          "offset: {}",
+          update_offset,
+          current_members_snapshot.update_offset);
         return ss::now();
     }
     std::vector<model::broker> brokers;

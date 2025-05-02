@@ -251,6 +251,10 @@ public:
     /// Find the earliest segment that has max timestamp >= t
     std::optional<segment_meta> timequery(model::timestamp t) const;
 
+    /// Returns an estimate for the size of data between the given Kafka
+    /// offsets inclusive. This is a best-effort method that may overestimate.
+    size_t estimate_size_between(kafka::offset begin, kafka::offset end) const;
+
     remote_segment_path generate_segment_path(
       const segment_meta&, const remote_path_provider&) const;
     remote_segment_path generate_segment_path(
@@ -448,7 +452,7 @@ public:
     /// Serialize manifest object
     ///
     /// \param out output stream that should be used to output the json
-    void serialize_json(std::ostream& out) const;
+    void serialize_json(std::ostream& out, bool include_segments = true) const;
 
     // Serialize the manifest to an ss::output_stream in JSON format
     /// \param out output stream to serialize into; must be kept alive
@@ -699,5 +703,7 @@ private:
     // skipped by the STM).
     model::offset _applied_offset;
 };
+
+std::ostream& operator<<(std::ostream& o, const partition_manifest& f);
 
 } // namespace cloud_storage

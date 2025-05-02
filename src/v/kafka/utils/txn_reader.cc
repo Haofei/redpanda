@@ -11,7 +11,7 @@
 
 #include "txn_reader.h"
 
-#include "kafka/server/partition_proxy.h"
+#include "kafka/data/partition_proxy.h"
 #include "model/fundamental.h"
 #include "model/record.h"
 #include "model/record_batch_reader.h"
@@ -195,6 +195,10 @@ bool read_committed_reader::is_end_of_stream() const {
     return _underlying->is_end_of_stream();
 }
 
+ss::future<> read_committed_reader::finally() noexcept {
+    return _underlying->finally();
+}
+
 ss::future<model::record_batch_reader::storage_t>
 read_committed_reader::do_load_slice(
   model::timeout_clock::time_point deadline) {
@@ -215,8 +219,11 @@ read_committed_reader::do_load_slice(
     }
     // Mark stream as filtered by deleting the tracker.
     _tracker = nullptr;
+
+    co_await _underlying->finally();
     _underlying = make_txn_filtered_reader(
       std::move(batches), aborted_txn_markers);
+
     co_return co_await _underlying->do_load_slice(deadline);
 }
 

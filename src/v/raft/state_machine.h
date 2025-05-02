@@ -119,6 +119,7 @@ protected:
 
     consensus* _raft;
     ss::gate _gate;
+    ss::abort_source _as;
 
 private:
     class batch_applicator {
@@ -139,9 +140,8 @@ private:
 
     ss::io_priority_class _io_prio;
     ss::logger& _log;
-    offset_monitor _waiters;
+    offset_monitor<model::offset> _waiters;
     model::offset _next;
-    ss::abort_source _as;
     model::offset _bootstrap_last_applied;
 };
 

@@ -19,6 +19,7 @@
 #include "cloud_storage/remote.h"
 #include "cloud_storage_clients/client_pool.h"
 #include "cloud_storage_clients/configuration.h"
+#include "cloud_topics/dl_stm/dl_stm_factory.h"
 #include "cluster/archival/archival_metadata_stm.h"
 #include "cluster/archival/archiver_manager.h"
 #include "cluster/archival/ntp_archiver_service.h"
@@ -85,24 +86,30 @@
 #include "config/node_config.h"
 #include "config/seed_server.h"
 #include "config/types.h"
+#include "crash_tracker/signals.h"
 #include "crypto/ossl_context_service.h"
+#include "datalake/cloud_data_io.h"
+#include "datalake/coordinator/catalog_factory.h"
+#include "datalake/coordinator/coordinator_manager.h"
 #include "datalake/coordinator/frontend.h"
 #include "datalake/coordinator/service.h"
 #include "datalake/coordinator/state_machine.h"
 #include "datalake/datalake_manager.h"
+#include "datalake/translation/state_machine.h"
 #include "debug_bundle/debug_bundle_service.h"
 #include "features/feature_table_snapshot.h"
 #include "features/fwd.h"
 #include "finjector/stress_fiber.h"
 #include "kafka/client/configuration.h"
+#include "kafka/server/consumer_group_lag_metrics_frontend.h"
+#include "kafka/server/consumer_group_lag_metrics_service.h"
 #include "kafka/server/coordinator_ntp_mapper.h"
 #include "kafka/server/group_manager.h"
 #include "kafka/server/group_router.h"
 #include "kafka/server/group_tx_tracker_stm.h"
-#include "kafka/server/queue_depth_monitor.h"
+#include "kafka/server/queue_depth_monitor_config.h"
 #include "kafka/server/quota_manager.h"
 #include "kafka/server/rm_group_frontend.h"
-#include "kafka/server/server.h"
 #include "kafka/server/snc_quota_manager.h"
 #include "kafka/server/usage_manager.h"
 #include "metrics/prometheus_sanitize.h"
@@ -153,6 +160,7 @@
 #include <seastar/core/seastar.hh>
 #include <seastar/core/sharded.hh>
 #include <seastar/core/shared_ptr.hh>
+#include <seastar/core/sleep.hh>
 #include <seastar/core/smp.hh>
 #include <seastar/core/thread.hh>
 #include <seastar/json/json_elements.hh>
@@ -177,9 +185,6 @@
 #include <exception>
 #include <memory>
 #include <vector>
-
-// Crash tracking resets every 1h.
-static constexpr model::timestamp_clock::duration crash_reset_duration{1h};
 
 static void set_local_kafka_client_config(
   std::optional<kafka::client::configuration>& client_config,
@@ -279,8 +284,8 @@ application::~application() {
 void application::shutdown() {
     storage.invoke_on_all(&storage::api::stop_cluster_uuid_waiters).get();
     // Stop accepting new requests.
-    if (_kafka_server.local_is_initialized()) {
-        _kafka_server.invoke_on_all(&net::server::shutdown_input).get();
+    if (_kafka_server.ref().local_is_initialized()) {
+        _kafka_server.shutdown_input().get();
     }
     if (_rpc.local_is_initialized()) {
         _rpc.invoke_on_all(&rpc::rpc_server::shutdown_input).get();
@@ -340,6 +345,21 @@ void application::shutdown() {
     if (cloud_io.local_is_initialized()) {
         cloud_io.invoke_on_all(&cloud_io::remote::request_stop).get();
     }
+    /**
+     * Shutdown the datalake services before stopping all the partitions.
+     * NOTE: translators may call into the coordinator via the coordinator
+     * frontend; stop the coordinators first to stop all work as quickly as
+     * possible.
+     */
+    if (_datalake_coordinator_mgr.local_is_initialized()) {
+        _datalake_coordinator_mgr
+          .invoke_on_all(&datalake::coordinator::coordinator_manager::shutdown)
+          .get();
+    }
+    if (_datalake_manager.local_is_initialized()) {
+        _datalake_manager.invoke_on_all(&datalake::datalake_manager::shutdown)
+          .get();
+    }
 
     // Stop all partitions before destructing the subsystems (transaction
     // coordinator, etc). This interrupts ongoing replication requests,
@@ -352,8 +372,8 @@ void application::shutdown() {
 
     // Wait for all requests to finish before destructing services that may be
     // used by pending requests.
-    if (_kafka_server.local_is_initialized()) {
-        _kafka_server.invoke_on_all(&net::server::wait_for_shutdown).get();
+    if (_kafka_server.ref().local_is_initialized()) {
+        _kafka_server.wait_for_shutdown().get();
         _kafka_server.stop().get();
     }
     if (_kafka_conn_quotas.local_is_initialized()) {
@@ -434,7 +454,7 @@ int application::run(int ac, char** av) {
       "node-id-overrides",
       po::value<std::vector<config::node_id_override>>()->multitoken(),
       "Override node UUID and ID iff current UUID matches "
-      "- usage: <current UUID>:<new UUID>:<new ID>");
+      "- usage: <current UUID>:<new UUID>:<new ID>[/ignore_existing_node_id]?");
 
     // Validate command line args using options registered by the app and
     // seastar. Keep the resulting variables in a temporary map so they don't
@@ -495,9 +515,9 @@ int application::run(int ac, char** av) {
                 });
                 // must initialize configuration before services
                 hydrate_config(cfg);
+                init_crashtracker(app_signal);
                 initialize();
                 check_environment();
-                check_for_crash_loop();
                 setup_metrics();
                 wire_up_and_start(app_signal);
                 post_start_tasks();
@@ -518,6 +538,10 @@ int application::run(int ac, char** av) {
                   _log.error,
                   "Failure during startup: {}",
                   std::current_exception());
+                if (_crash_tracker_service) {
+                    _crash_tracker_service->get_recorder()
+                      .record_crash_exception(std::current_exception());
+                }
                 return 1;
             }
             return 0;
@@ -576,12 +600,8 @@ void application::initialize(
      * Disable the logger for protobuf; some interfaces don't allow a pluggable
      * error collector.
      */
-#if PROTOBUF_VERSION < 5027000
-    google::protobuf::SetLogHandler(nullptr);
-#else
     // Protobuf uses absl logging in the latest version
     absl::SetMinLogLevel(absl::LogSeverityAtLeast::kInfinity);
-#endif
 
     /*
      * allocate per-core zstd decompression workspace and per-core
@@ -949,6 +969,7 @@ void application::check_environment() {
     syschecks::systemd_message("checking environment (CPU, Mem)").get();
     syschecks::cpu();
     syschecks::memory(config::node().developer_mode());
+    memory_groups().log_memory_group_allocations(_log);
     storage::directories::initialize(
       config::node().data_directory().as_sstring())
       .get();
@@ -1022,99 +1043,10 @@ void application::check_environment() {
     }
 }
 
-/// Here we check for too many consecutive unclean shutdowns/crashes
-/// and abort the startup sequence if the limit exceeds
-/// crash_loop_limit until the operator intervenes. Crash tracking
-/// is reset if the node configuration changes or its been 1h since
-/// the broker last failed to start. This metadata is tracked in the
-/// tracker file. This is to prevent on disk state from piling up in
-/// each unclean run and creating more state to recover for the next run.
-void application::check_for_crash_loop() {
-    if (config::node().developer_mode()) {
-        // crash loop tracking has value only in long running clusters
-        // that can potentially accumulate state across restarts.
-        return;
-    }
-    auto file_path = config::node().crash_loop_tracker_path();
-    std::optional<crash_tracker_metadata> maybe_crash_md;
-    if (
-      // Tracking is reset every time the broker boots in recovery mode.
-      !config::node().recovery_mode_enabled()
-      && ss::file_exists(file_path.string()).get()) {
-        // Ok to read the entire file, it contains a serialized uint32_t.
-        auto buf = read_fully(file_path).get();
-        try {
-            maybe_crash_md = serde::from_iobuf<crash_tracker_metadata>(
-              std::move(buf));
-        } catch (const serde::serde_exception&) {
-            // A malformed log file, ignore and reset it later.
-            // We truncate it below.
-            vlog(_log.warn, "Ignorning malformed tracker file {}", file_path);
-        }
-    }
-
-    // Compute the checksum of the current node configuration.
-    auto current_config
-      = read_fully_to_string(config::node().get_cfg_file_path()).get();
-    auto checksum = xxhash_64(current_config.c_str(), current_config.length());
-
-    if (maybe_crash_md) {
-        auto& crash_md = maybe_crash_md.value();
-        auto& limit = config::node().crash_loop_limit.value();
-
-        // Check if it has been atleast 1h since last unsuccessful restart.
-        // Tracking resets every 1h.
-        auto time_since_last_start
-          = model::duration_since_epoch(model::timestamp::now())
-            - model::duration_since_epoch(crash_md._last_start_ts);
-
-        auto crash_limit_ok = !limit || crash_md._crash_count <= limit.value();
-        auto node_config_changed = crash_md._config_checksum != checksum;
-        auto tracking_reset = time_since_last_start > crash_reset_duration;
-
-        auto ok_to_proceed = crash_limit_ok || node_config_changed
-                             || tracking_reset;
-
-        if (!ok_to_proceed) {
-            vlog(
-              _log.error,
-              "Crash loop detected. Too many consecutive crashes {}, exceeded "
-              "{} configured value {}. To recover Redpanda from this state, "
-              "manually remove file at path {}. Crash loop automatically "
-              "resets 1h after last crash or with node configuration changes.",
-              crash_md._crash_count,
-              config::node().crash_loop_limit.name(),
-              limit.value(),
-              file_path);
-            throw std::runtime_error("Crash loop detected, aborting startup.");
-        }
-
-        vlog(
-          _log.debug,
-          "Consecutive crashes detected: {} node config changed: {} "
-          "time based tracking reset: {}",
-          crash_md._crash_count,
-          node_config_changed,
-          tracking_reset);
-
-        if (node_config_changed || tracking_reset) {
-            crash_md._crash_count = 0;
-        }
-    }
-
-    // Truncate and bump the crash count. We consider a run to be unclean by
-    // default unless the scheduled cleanup (that runs very late in shutdown)
-    // resets the file. See schedule_crash_tracker_file_cleanup().
-    auto new_crash_count = maybe_crash_md
-                             ? maybe_crash_md.value()._crash_count + 1
-                             : 1;
-    crash_tracker_metadata updated{
-      ._crash_count = new_crash_count,
-      ._config_checksum = checksum,
-      ._last_start_ts = model::timestamp::now()};
-    write_fully(file_path, serde::to_iobuf(updated)).get();
-    ss::sync_directory(config::node().data_directory.value().as_sstring())
-      .get();
+void application::init_crashtracker(::stop_signal& app_signal) {
+    _crash_tracker_service = std::make_unique<crash_tracker::service>();
+    _crash_tracker_service->start(app_signal.abort_source()).get();
+    crash_tracker::install_sighandlers();
 }
 
 void application::schedule_crash_tracker_file_cleanup() {
@@ -1125,12 +1057,8 @@ void application::schedule_crash_tracker_file_cleanup() {
     // next run.
     // We emplace it in the front to make it the last task to run.
     _deferred.emplace_front([&] {
-        auto file = config::node().crash_loop_tracker_path().string();
-        if (ss::file_exists(file).get()) {
-            ss::remove_file(file).get();
-            ss::sync_directory(config::node().data_directory().as_sstring())
-              .get();
-            vlog(_log.debug, "Deleted crash loop tracker file: {}", file);
+        if (_crash_tracker_service) {
+            _crash_tracker_service->stop().get();
         }
     });
 }
@@ -1174,7 +1102,7 @@ void application::configure_admin_server() {
       &_transform_service,
       std::ref(audit_mgr),
       std::ref(_tx_manager_migrator),
-      std::ref(_kafka_server),
+      std::ref(_kafka_server.ref()),
       std::ref(tx_gateway_frontend),
       std::ref(_debug_bundle_service))
       .get();
@@ -1323,7 +1251,8 @@ make_upload_controller_config(ss::scheduling_group sg) {
 // add additional services in here
 void application::wire_up_runtime_services(
   model::node_id node_id, ::stop_signal& app_signal) {
-    wire_up_redpanda_services(node_id, app_signal);
+    std::optional<cloud_storage_clients::bucket_name> bucket;
+    wire_up_redpanda_services(node_id, app_signal, bucket);
     if (_proxy_config) {
         construct_single_service(
           _proxy,
@@ -1416,16 +1345,45 @@ void application::wire_up_runtime_services(
     }
 
     if (datalake_enabled()) {
+        vassert(
+          bucket.has_value(),
+          "Bucket should have been set when configuring cloud IO");
+        // Construct datalake subsystems, now that dependencies are
+        // already constructed.
         syschecks::systemd_message("Starting datalake services").get();
+        construct_service(
+          _datalake_coordinator_mgr,
+          node_id,
+          std::ref(storage),
+          std::ref(raft_group_manager),
+          std::ref(partition_manager),
+          std::ref(controller->get_topics_state()),
+          std::ref(controller->get_topics_frontend()),
+          _schema_registry.get(),
+          ss::sharded_parameter(
+            [bucket](cloud_io::remote& remote)
+              -> std::unique_ptr<datalake::coordinator::catalog_factory> {
+                return datalake::coordinator::get_catalog_factory(
+                  config::shard_local_cfg(),
+                  remote,
+                  *bucket,
+                  ss::metrics::label_instance{"role", "coordinator"});
+            },
+            std::ref(cloud_io)),
+          std::ref(cloud_io),
+          std::ref(*bucket))
+          .get();
         construct_service(
           _datalake_coordinator_fe,
           node_id,
+          &_datalake_coordinator_mgr,
           &raft_group_manager,
           &partition_manager,
           &controller->get_topics_frontend(),
           &metadata_cache,
           &controller->get_partition_leaders(),
-          &controller->get_shard_table())
+          &controller->get_shard_table(),
+          &_connection_cache)
           .get();
 
         construct_service(
@@ -1437,22 +1395,72 @@ void application::wire_up_runtime_services(
           &controller->get_topics_frontend(),
           &controller->get_partition_leaders(),
           &controller->get_shard_table(),
+          &feature_table,
           &_datalake_coordinator_fe,
+          &cloud_io,
+          ss::sharded_parameter(
+            [bucket](cloud_io::remote& remote)
+              -> std::unique_ptr<datalake::coordinator::catalog_factory> {
+                return datalake::coordinator::get_catalog_factory(
+                  config::shard_local_cfg(),
+                  remote,
+                  *bucket,
+                  ss::metrics::label_instance{"role", "translator"});
+            },
+            std::ref(cloud_io)),
+          _schema_registry.get(),
           &_as,
+          *bucket,
           sched_groups.datalake_sg(),
           memory_groups().datalake_max_memory())
           .get();
-    }
+        datalake::datalake_manager::prepare_staging_directory(
+          config::node().datalake_staging_path())
+          .get();
+        _datalake_manager.invoke_on_all(&datalake::datalake_manager::start)
+          .get();
 
+        construct_service(
+          datalake_throttle_manager,
+          [&mgr = _datalake_manager] {
+              return ssx::now(kafka::datalake_throttle_manager::status{
+                .max_shares_assigned = mgr.local().max_shares_assigned(),
+                .total_translation_backlog
+                = mgr.local().total_translation_backlog(),
+
+              });
+          },
+          std::ref(storage_node),
+          ss::sharded_parameter([] {
+              return config::shard_local_cfg()
+                .max_kafka_throttle_delay_ms.bind();
+          }),
+          ss::sharded_parameter([] {
+              return config::shard_local_cfg().quota_manager_gc_sec.bind();
+          }),
+          ss::sharded_parameter([] {
+              return config::shard_local_cfg()
+                .iceberg_throttle_backlog_size_ratio.bind();
+          }))
+          .get();
+
+        datalake_throttle_manager
+          .invoke_on_all(&kafka::datalake_throttle_manager::start)
+          .get();
+    }
     construct_single_service(_monitor_unsafe, std::ref(feature_table));
 
     construct_service(_debug_bundle_service, &storage.local().kvs()).get();
+
+    construct_single_service(_host_metrics_watcher, std::ref(_log));
 
     configure_admin_server();
 }
 
 void application::wire_up_redpanda_services(
-  model::node_id node_id, ::stop_signal& app_signal) {
+  model::node_id node_id,
+  ::stop_signal& app_signal,
+  std::optional<cloud_storage_clients::bucket_name>& bucket_name) {
     ss::smp::invoke_on_all([] {
         resources::available_memory::local().register_metrics();
     }).get();
@@ -1486,7 +1494,9 @@ void application::wire_up_redpanda_services(
     raft_group_manager
       .start(
         node_id,
-        sched_groups.raft_sg(),
+        sched_groups.raft_recv_sg(),
+        sched_groups.raft_send_sg(),
+        sched_groups.raft_heartbeats(),
         [] {
             return raft::group_manager::configuration{
               .heartbeat_interval
@@ -1513,6 +1523,14 @@ void application::wire_up_redpanda_services(
               .enable_longest_log_detection
               = config::shard_local_cfg()
                   .raft_enable_longest_log_detection.bind(),
+              .max_buffered_bytes_per_node
+              = config::shard_local_cfg()
+                  .raft_max_buffered_follower_append_entries_bytes_per_shard
+                  .bind(),
+              .max_inflight_requests_per_node
+              = config::shard_local_cfg()
+                  .raft_max_inflight_follower_append_entries_requests_per_shard
+                  .bind(),
             };
         },
         [] {
@@ -1544,12 +1562,12 @@ void application::wire_up_redpanda_services(
 
     model::cloud_storage_backend backend{model::cloud_storage_backend::unknown};
     cloud_storage_clients::bucket_name bucket{};
-    if (archival_storage_enabled()) {
-        syschecks::systemd_message("Starting cloud storage api").get();
-        ss::sharded<cloud_storage::configuration> cloud_configs;
+    ss::sharded<cloud_storage::configuration> cloud_configs;
+    auto stop_config = ss::defer(
+      [&cloud_configs] { cloud_configs.stop().get(); });
+    if (requires_cloud_io()) {
+        syschecks::systemd_message("Starting cloud IO").get();
         cloud_configs.start().get();
-        auto stop_config = ss::defer(
-          [&cloud_configs] { cloud_configs.stop().get(); });
         cloud_configs
           .invoke_on_all([](cloud_storage::configuration& c) {
               return cloud_storage::configuration::get_config().then(
@@ -1588,6 +1606,11 @@ void application::wire_up_redpanda_services(
           }))
           .get();
         cloud_io.invoke_on_all(&cloud_io::remote::start).get();
+        bucket_name = cloud_configs.local().bucket_name;
+    }
+
+    if (archival_storage_enabled()) {
+        syschecks::systemd_message("Starting cloud storage api").get();
         construct_service(
           cloud_storage_api,
           std::ref(cloud_io),
@@ -1838,7 +1861,11 @@ void application::wire_up_redpanda_services(
 
     syschecks::systemd_message("Creating auditing subsystem").get();
     construct_service(
-      audit_mgr, controller.get(), std::ref(*_audit_log_client_config))
+      audit_mgr,
+      node_id,
+      controller.get(),
+      std::ref(*_audit_log_client_config),
+      &metadata_cache)
       .get();
 
     syschecks::systemd_message("Creating metadata dissemination service").get();
@@ -2006,13 +2033,20 @@ void application::wire_up_redpanda_services(
           _reconciler,
           &partition_manager,
           &cloud_io,
-          cloud_storage_clients::bucket_name(
-            config::shard_local_cfg().cloud_storage_bucket().value()))
+          &shadow_index_cache,
+          bucket)
           .get();
     }
 
     // group membership
     syschecks::systemd_message("Creating kafka group manager").get();
+    construct_service(
+      _consumer_group_lag_metrics_frontend,
+      node_id,
+      std::ref(_connection_cache),
+      std::ref(metadata_cache),
+      std::ref(partition_manager))
+      .get();
     construct_service(
       _group_manager,
       model::kafka_consumer_offsets_nt,
@@ -2021,8 +2055,8 @@ void application::wire_up_redpanda_services(
       std::ref(controller->get_topics_state()),
       std::ref(tx_gateway_frontend),
       std::ref(controller->get_feature_table()),
-      &kafka::make_consumer_offsets_serializer,
-      kafka::enable_group_metrics::yes)
+      std::ref(_consumer_group_lag_metrics_frontend),
+      &kafka::make_consumer_offsets_serializer)
       .get();
     construct_service(
       offsets_recoverer,
@@ -2277,9 +2311,9 @@ void application::wire_up_redpanda_services(
           });
       })
       .get();
-    std::optional<kafka::qdc_monitor::config> qdc_config;
+    std::optional<kafka::qdc_monitor_config> qdc_config;
     if (config::shard_local_cfg().kafka_qdc_enable()) {
-        qdc_config = kafka::qdc_monitor::config{
+        qdc_config = kafka::qdc_monitor_config{
           .latency_alpha = config::shard_local_cfg().kafka_qdc_latency_alpha(),
           .max_latency = config::shard_local_cfg().kafka_qdc_max_latency_ms(),
           .window_count = config::shard_local_cfg().kafka_qdc_window_count(),
@@ -2295,10 +2329,12 @@ void application::wire_up_redpanda_services(
     syschecks::systemd_message("Starting kafka RPC {}", kafka_cfg.local())
       .get();
     _kafka_server
-      .start(
+      .init(
         &kafka_cfg,
         smp_service_groups.kafka_smp_sg(),
         sched_groups.fetch_sg(),
+        sched_groups.produce_sg(),
+        sched_groups.kafka_sg(),
         std::ref(metadata_cache),
         std::ref(controller->get_topics_frontend()),
         std::ref(controller->get_config_frontend()),
@@ -2319,6 +2355,7 @@ void application::wire_up_redpanda_services(
         std::ref(controller->get_security_frontend()),
         std::ref(controller->get_api()),
         std::ref(tx_gateway_frontend),
+        std::ref(datalake_throttle_manager),
         qdc_config,
         std::ref(*thread_worker),
         std::ref(_schema_registry))
@@ -2336,6 +2373,10 @@ ss::future<> application::set_proxy_config(ss::sstring name, std::any val) {
     return _proxy->set_config(std::move(name), std::move(val));
 }
 
+bool application::requires_cloud_io() {
+    return archival_storage_enabled() || datalake_enabled();
+}
+
 bool application::archival_storage_enabled() {
     const auto& cfg = config::shard_local_cfg();
     return cfg.cloud_storage_enabled();
@@ -2347,7 +2388,8 @@ bool application::wasm_data_transforms_enabled() {
 }
 
 bool application::datalake_enabled() {
-    return config::shard_local_cfg().iceberg_enabled();
+    return config::shard_local_cfg().iceberg_enabled()
+           && !config::node().recovery_mode_enabled();
 }
 
 ss::future<>
@@ -2400,6 +2442,11 @@ void application::wire_up_bootstrap_services() {
     ss::smp::invoke_on_all([] {
         return storage::internal::chunks().start();
     }).get();
+    _deferred.emplace_back([] {
+        ss::smp::invoke_on_all([] {
+            return storage::internal::chunks().stop();
+        }).get();
+    });
     construct_service(stress_fiber_manager).get();
     syschecks::systemd_message("Constructing storage services").get();
     construct_single_service_sharded(
@@ -2679,32 +2726,52 @@ void application::wire_up_and_start(::stop_signal& app_signal, bool test_mode) {
     cluster::cluster_discovery cd(
       node_uuid, storage.local(), app_signal.abort_source());
 
-    bool ever_ran_controller = storage.local()
-                                 .kvs()
-                                 .get(
-                                   storage::kvstore::key_space::controller,
-                                   cluster::controller::invariants_key())
-                                 .has_value();
+    auto invariants_buf = storage.local().kvs().get(
+      storage::kvstore::key_space::controller,
+      cluster::controller::invariants_key());
+
+    bool ever_ran_controller = invariants_buf.has_value();
+
+    bool has_id = config::node().node_id().has_value() && ever_ran_controller;
+
+    bool force_override = _node_overrides.node_id().has_value()
+                          && _node_overrides.ignore_existing_node_id();
 
     model::node_id node_id;
-    if (config::node().node_id().has_value() && ever_ran_controller) {
+    if (has_id && !force_override) {
         vlog(
-          _log.debug,
+          _log.info,
           "Running with already-established node ID {}",
           config::node().node_id());
         node_id = config::node().node_id().value();
     } else if (auto id = _node_overrides.node_id(); id.has_value()) {
         vlog(
           _log.warn,
-          "Overriding node ID: {} -> {}",
+          "Overriding node ID: {} -> {} [ignore_existing_node_id? {}]",
           config::node().node_id(),
-          id);
+          id,
+          has_id && force_override);
         node_id = id.value();
         // null out the config'ed ID indiscriminately; it will be set outside
         // the conditional
         ss::smp::invoke_on_all([] {
             config::node().node_id.set_value(std::nullopt);
         }).get();
+        if (invariants_buf.has_value()) {
+            auto invariants
+              = reflection::from_iobuf<cluster::configuration_invariants>(
+                std::move(invariants_buf.value()));
+            invariants.node_id = node_id;
+            storage.local()
+              .kvs()
+              .put(
+                storage::kvstore::key_space::controller,
+                cluster::controller::invariants_key(),
+                reflection::to_iobuf(
+                  cluster::configuration_invariants{invariants}))
+              .get();
+            vlog(_log.debug, "Force-updated local node_id to {}", node_id);
+        }
     } else {
         auto registration_result = cd.register_with_cluster().get();
         node_id = registration_result.assigned_node_id;
@@ -2864,20 +2931,6 @@ void application::wire_up_and_start(::stop_signal& app_signal, bool test_mode) {
 
 void application::start_runtime_services(
   cluster::cluster_discovery& cd, ::stop_signal& app_signal) {
-    ssx::background = feature_table.invoke_on_all(
-      [this](features::feature_table& ft) {
-          return ft.await_feature_then(
-            features::feature::rpc_transport_unknown_errc, [this] {
-                if (ss::this_shard_id() == 0) {
-                    vlog(
-                      _log.debug, "All nodes support unknown RPC error codes");
-                }
-                // Redpanda versions <= v22.3.x don't properly parse error
-                // codes they don't know about.
-                _rpc.local().set_use_service_unavailable();
-            });
-      });
-
     // single instance
     node_status_backend.invoke_on_all(&cluster::node_status_backend::start)
       .get();
@@ -2886,27 +2939,30 @@ void application::start_runtime_services(
       .invoke_on_all([this](cluster::partition_manager& pm) {
           pm.register_factory<cluster::tm_stm_factory>(feature_table);
           pm.register_factory<cluster::id_allocator_stm_factory>();
-          pm.register_factory<transform::transform_offsets_stm_factory>(
-            controller->get_topics_state());
+          pm.register_factory<transform::transform_offsets_stm_factory>();
           pm.register_factory<cluster::rm_stm_factory>(
             config::shard_local_cfg().enable_transactions.value(),
             config::shard_local_cfg().enable_idempotence.value(),
             tx_gateway_frontend,
             producer_manager,
-            feature_table,
-            controller->get_topics_state());
+            feature_table);
           pm.register_factory<cluster::log_eviction_stm_factory>(
             storage.local().kvs());
           pm.register_factory<cluster::archival_metadata_stm_factory>(
             config::shard_local_cfg().cloud_storage_enabled(),
             cloud_storage_api,
-            feature_table,
-            controller->get_topics_state());
-          pm.register_factory<kafka::group_tx_tracker_stm_factory>();
+            feature_table);
+          pm.register_factory<kafka::group_tx_tracker_stm_factory>(
+            feature_table);
           pm.register_factory<cluster::partition_properties_stm_factory>(
             storage.local().kvs(),
             config::shard_local_cfg().rm_sync_timeout_ms.bind());
           pm.register_factory<datalake::coordinator::stm_factory>();
+          pm.register_factory<datalake::translation::stm_factory>(
+            config::shard_local_cfg().iceberg_enabled());
+          if (config::shard_local_cfg().development_enable_cloud_topics()) {
+              pm.register_factory<experimental::cloud_topics::dl_stm_factory>();
+          }
       })
       .get();
     partition_manager.invoke_on_all(&cluster::partition_manager::start).get();
@@ -2915,6 +2971,9 @@ void application::start_runtime_services(
     raft_group_manager.invoke_on_all(&raft::group_manager::start).get();
 
     syschecks::systemd_message("Starting Kafka group manager").get();
+    _consumer_group_lag_metrics_frontend
+      .invoke_on_all(&kafka::consumer_group_lag_metrics_frontend::start)
+      .get();
     _group_manager.invoke_on_all(&kafka::group_manager::start).get();
 
     // Initialize the Raft RPC endpoint before the rest of the runtime RPC
@@ -2929,8 +2988,9 @@ void application::start_runtime_services(
               runtime_services.push_back(std::make_unique<raft::service<
                                            cluster::partition_manager,
                                            cluster::shard_table>>(
-                sched_groups.raft_sg(),
+                sched_groups.raft_recv_sg(),
                 smp_service_groups.raft_smp_sg(),
+                sched_groups.raft_heartbeats(),
                 partition_manager,
                 shard_table.local(),
                 config::shard_local_cfg().raft_heartbeat_interval_ms(),
@@ -2949,6 +3009,13 @@ void application::start_runtime_services(
       offsets_recovery_requestor;
     if (offsets_recovery_router.local_is_initialized()) {
         offsets_recovery_requestor = offsets_recovery_manager;
+    }
+    if (_datalake_coordinator_mgr.local_is_initialized()) {
+        // Before starting the controller, start the coordinator manager so we
+        // don't miss any partition/leadership notifications.
+        _datalake_coordinator_mgr
+          .invoke_on_all(&datalake::coordinator::coordinator_manager::start)
+          .get();
     }
     controller
       ->start(
@@ -2985,13 +3052,13 @@ void application::start_runtime_services(
               std::ref(offsets_recovery_router),
               std::ref(offsets_upload_router)));
           runtime_services.push_back(std::make_unique<cluster::id_allocator>(
-            sched_groups.raft_sg(),
+            sched_groups.raft_recv_sg(),
             smp_service_groups.raft_smp_sg(),
             std::ref(id_allocator_frontend)));
           // _rm_group_proxy is wrap around a sharded service with only
           // `.local()' access so it's ok to share without foreign_ptr
           runtime_services.push_back(std::make_unique<cluster::tx_gateway>(
-            sched_groups.raft_sg(),
+            sched_groups.raft_recv_sg(),
             smp_service_groups.raft_smp_sg(),
             std::ref(tx_gateway_frontend),
             _rm_group_proxy.get(),
@@ -3001,8 +3068,9 @@ void application::start_runtime_services(
               runtime_services.push_back(std::make_unique<raft::service<
                                            cluster::partition_manager,
                                            cluster::shard_table>>(
-                sched_groups.raft_sg(),
+                sched_groups.raft_recv_sg(),
                 smp_service_groups.raft_smp_sg(),
+                sched_groups.raft_heartbeats(),
                 partition_manager,
                 shard_table.local(),
                 config::shard_local_cfg().raft_heartbeat_interval_ms(),
@@ -3037,13 +3105,13 @@ void application::start_runtime_services(
 
           runtime_services.push_back(
             std::make_unique<cluster::node_status_rpc_handler>(
-              sched_groups.node_status(),
+              sched_groups.raft_heartbeats(),
               smp_service_groups.cluster_smp_sg(),
               std::ref(node_status_backend)));
 
           runtime_services.push_back(
             std::make_unique<cluster::self_test_rpc_handler>(
-              sched_groups.node_status(),
+              sched_groups.raft_heartbeats(),
               smp_service_groups.cluster_smp_sg(),
               std::ref(self_test_backend)));
 
@@ -3091,12 +3159,18 @@ void application::start_runtime_services(
               smp_service_groups.cluster_smp_sg(),
               std::ref(controller->get_data_migration_frontend()),
               std::ref(controller->get_data_migration_irpc_frontend())));
-
+          if (datalake_enabled()) {
+              runtime_services.push_back(
+                std::make_unique<datalake::coordinator::rpc::service>(
+                  sched_groups.datalake_sg(),
+                  smp_service_groups.datalake_sg(),
+                  &_datalake_coordinator_fe));
+          }
           runtime_services.push_back(
-            std::make_unique<datalake::coordinator::rpc::service>(
-              sched_groups.datalake_sg(),
-              smp_service_groups.datalake_sg(),
-              &_datalake_coordinator_fe));
+            std::make_unique<kafka::consumer_group_lag_metrics_service>(
+              sched_groups.cluster_sg(),
+              smp_service_groups.cluster_smp_sg(),
+              std::ref(_consumer_group_lag_metrics_frontend)));
 
           s.add_services(std::move(runtime_services));
 
@@ -3168,10 +3242,7 @@ void application::start_runtime_services(
     space_manager->start().get();
 
     if (config::shard_local_cfg().development_enable_cloud_topics()) {
-        _reconciler
-          .invoke_on_all(
-            &experimental::cloud_topics::reconciler::reconciler::start)
-          .get();
+        _reconciler.invoke_on_all([](auto& app) { return app.start(); }).get();
     }
 }
 
@@ -3213,7 +3284,7 @@ void application::start_kafka(
         cvar.wait().get();
     }
 
-    _kafka_server.invoke_on_all(&net::server::start).get();
+    _kafka_server.start().get();
     vlog(
       _log.info,
       "Started Kafka API server listening at {}",

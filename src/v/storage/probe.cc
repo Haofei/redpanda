@@ -21,9 +21,17 @@
 
 namespace storage {
 
-void node_probe::set_disk_metrics(
+void node_probe::set_data_disk_metrics(
   uint64_t total_bytes, uint64_t free_bytes, disk_space_alert alert) {
-    _disk = {
+    _data_disk = {
+      .total_bytes = total_bytes,
+      .free_bytes = free_bytes,
+      .space_alert = alert};
+}
+
+void node_probe::set_cache_disk_metrics(
+  uint64_t total_bytes, uint64_t free_bytes, disk_space_alert alert) {
+    _cache_disk = {
       .total_bytes = total_bytes,
       .free_bytes = free_bytes,
       .space_alert = alert};
@@ -40,19 +48,43 @@ void node_probe::setup_node_metrics() {
       {
         sm::make_gauge(
           "total_bytes",
-          [this] { return _disk.total_bytes; },
+          [this] { return _data_disk.total_bytes; },
           sm::description("Total size of attached storage, in bytes."))
           .aggregate({sm::shard_label}),
         sm::make_gauge(
           "free_bytes",
-          [this] { return _disk.free_bytes; },
+          [this] { return _data_disk.free_bytes; },
           sm::description("Disk storage bytes free."))
           .aggregate({sm::shard_label}),
         sm::make_gauge(
           "free_space_alert",
           [this] {
               return static_cast<std::underlying_type_t<disk_space_alert>>(
-                _disk.space_alert);
+                _data_disk.space_alert);
+          },
+          sm::description(
+            "Status of low storage space alert. 0-OK, 1-Low Space 2-Degraded"))
+          .aggregate({sm::shard_label}),
+      });
+
+    _public_metrics.add_group(
+      prometheus_sanitize::metrics_name("storage:cache_disk"),
+      {
+        sm::make_gauge(
+          "total_bytes",
+          [this] { return _cache_disk.total_bytes; },
+          sm::description("Total size of attached storage, in bytes."))
+          .aggregate({sm::shard_label}),
+        sm::make_gauge(
+          "free_bytes",
+          [this] { return _cache_disk.free_bytes; },
+          sm::description("Disk storage bytes free."))
+          .aggregate({sm::shard_label}),
+        sm::make_gauge(
+          "free_space_alert",
+          [this] {
+              return static_cast<std::underlying_type_t<disk_space_alert>>(
+                _cache_disk.space_alert);
           },
           sm::description(
             "Status of low storage space alert. 0-OK, 1-Low Space 2-Degraded"))
@@ -162,6 +194,50 @@ void probe::setup_metrics(const model::ntp& ntp) {
           "compaction_removed_bytes",
           [this] { return _compaction_removed_bytes; },
           sm::description("Number of bytes removed by a compaction operation"),
+          labels),
+        sm::make_counter(
+          "tombstones_removed",
+          [this] { return _tombstones_removed; },
+          sm::description("Number of tombstone records removed by compaction "
+                          "due to the delete.retention.ms setting."),
+          labels),
+        sm::make_counter(
+          "cleanly_compacted_segment",
+          [this] { return _segment_cleanly_compacted; },
+          sm::description(
+            "Number of segments cleanly compacted (i.e, had their "
+            "keys de-duplicated with all previous segments "
+            "before them to the front of the log)"),
+          labels),
+        sm::make_counter(
+          "segments_marked_tombstone_free",
+          [this] { return _segments_marked_tombstone_free; },
+          sm::description("Number of segments that have been verified through "
+                          "the compaction process to be tombstone free."),
+          labels),
+        sm::make_counter(
+          "complete_sliding_window_rounds",
+          [this] { return _num_rounds_window_compaction; },
+          sm::description("Number of rounds of sliding window compaction that "
+                          "have been driven to completion."),
+          labels),
+        sm::make_counter(
+          "chunked_compaction_runs",
+          [this] { return _num_chunked_compaction_runs; },
+          sm::description(
+            "Number of times chunked compaction was ran. This metric also "
+            "corresponds to the number of times the compaction key-offset map "
+            "was unable to be built for a single segment."),
+          labels),
+        sm::make_gauge(
+          "dirty_segment_bytes",
+          [this] { return _dirty_segment_bytes; },
+          sm::description("Number of bytes within dirty segments of the log"),
+          labels),
+        sm::make_gauge(
+          "closed_segment_bytes",
+          [this] { return _closed_segment_bytes; },
+          sm::description("Number of bytes within closed segments of the log"),
           labels),
       },
       {},

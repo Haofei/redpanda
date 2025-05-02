@@ -15,8 +15,8 @@
 #include "cloud_storage/cache_service.h"
 #include "cluster/node/local_monitor.h"
 #include "cluster/partition_manager.h"
+#include "datalake/datalake_manager.h"
 #include "metrics/prometheus_sanitize.h"
-#include "storage/disk_log_impl.h"
 #include "utils/human.h"
 
 #include <seastar/core/metrics_registration.hh>
@@ -92,12 +92,34 @@ ss::future<> disk_space_manager::stop() {
         _storage_node->local().unregister_disk_notification(
           node::disk_type::data, _data_disk_nid);
     }
+    _as.request_abort();
     _control_sem.broken();
     co_await _gate.close();
 }
 
 ss::future<> disk_space_manager::run_loop() {
     vassert(ss::this_shard_id() == run_loop_core, "Run on wrong core");
+
+    // Always wait for the trim interval after startup to ensure that
+    // partitions are fully started. Known sources of skew early in the node
+    // startup phase:
+    // 1. controller_backend::start() doesn't wait for the first reconciliation
+    // round, so not all partitions may yet exist in the partition manager.
+    // 2. Even though partition::start() waits for STMs to apply local snapshots
+    // (and therefore have a recent-enough state), some STMs don't return
+    // a sensible max_collectible_offset until later. For example:
+    //   * rm_stm waits until it is replayed up to raft committed index
+    //   * archival_metadata_stm waits until the state is marked "clean"
+    //     (i.e. until the corresponding manifest is uploaded to the cloud).
+    //     Moreover, because the snapshot stores only the boolean "dirty" flag,
+    //     we can't reliably restore the "last clean at" offset just from the
+    //     snapshot.
+    try {
+        co_await ss::sleep_abortable(
+          config::shard_local_cfg().retention_local_trim_interval(), _as);
+    } catch (ss::sleep_aborted&) {
+        co_return;
+    }
 
     while (!_gate.is_closed()) {
         try {
@@ -486,13 +508,34 @@ size_t eviction_policy::evict_until_active_segment(
       });
 }
 
+ss::future<storage::usage_report> disk_space_manager::disk_usage() {
+    /*
+     * log and kvstore usage.
+     */
+    auto report = co_await _storage->local().disk_usage();
+
+    /*
+     * datalake scratch space usage. from the perspective of space management
+     * the data used by datalake is not reclaimable. it is reported in the
+     * report as more "log data" the same way that kvstore data is reported.
+     */
+    const auto datalake_usage
+      = co_await datalake::datalake_manager::disk_usage();
+    vlog(rlog.debug, "Datalake usage: {}", human::bytes(datalake_usage));
+
+    _probe.set_total_datalake_usage(datalake_usage);
+    report.usage.data += datalake_usage;
+
+    co_return report;
+}
+
 ss::future<> disk_space_manager::manage_data_disk(uint64_t target_size) {
     /*
      * query log storage usage across all cores
      */
     storage::usage_report usage;
     try {
-        usage = co_await _storage->local().disk_usage();
+        usage = co_await disk_usage();
     } catch (...) {
         vlog(
           rlog.info,
@@ -691,6 +734,11 @@ void disk_space_manager::probe::setup_metrics() {
       [this]() { return _total_usage; },
       sm::description(
         "Total amount of disk usage under control of space management.")));
+
+    defs.emplace_back(sm::make_gauge(
+      "datalake_disk_usage_bytes",
+      [this]() { return _total_datalake_usage; },
+      sm::description("Total amount of disk usage by datalake.")));
 
     defs.emplace_back(sm::make_gauge(
       "retention_reclaimable_bytes",

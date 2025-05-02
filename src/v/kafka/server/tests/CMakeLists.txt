@@ -8,7 +8,6 @@ rp_test(
     types_conversion_tests.cc
     topic_utils_test.cc
     handler_interface_test.cc
-    snc_quota_manager_test.cc
     validator_tests.cc
     fetch_unit_test.cc
     config_utils_test.cc
@@ -64,6 +63,7 @@ set(srcs
   topic_recreate_test.cc
   fetch_session_test.cc
   alter_config_test.cc
+  create_partition_test.cc
   produce_consume_test.cc
   group_metadata_serialization_test.cc
   partition_reassignments_test.cc
@@ -72,11 +72,23 @@ set(srcs
 
 rp_test(
   FIXTURE_TEST
-  BINARY_NAME kafka_server
-  SOURCES ${srcs}
-  LIBRARIES v::seastar_testing_main v::application v::raft v::kafka v::config v::storage_test_utils v::kafka_test_utils
-  ARGS "-- -c 1"
-  LABELS kafka
+  BINARY_NAME
+    kafka_server
+  SOURCES
+    ${srcs}
+  LIBRARIES
+    v::seastar_testing_main
+    v::application
+    v::raft
+    v::kafka
+    v::config
+    v::storage_test_utils
+    v::kafka_test_utils
+    v::test_random_bytes
+  ARGS
+    "-- -c 1"
+  LABELS
+    kafka
 )
 
 rp_test(

@@ -12,7 +12,6 @@
 #include "base/seastarx.h"
 #include "bytes/iostream.h"
 #include "serde/parquet/metadata.h"
-#include "src/v/serde/parquet/metadata.h"
 
 #include <seastar/core/app-template.hh>
 #include <seastar/core/coroutine.hh>
@@ -41,14 +40,14 @@ iobuf serialize_testcase(size_t test_case) {
         return encode(page_header{
           .uncompressed_page_size = 42,
           .compressed_page_size = 22,
-          .crc = 0xBEEF,
+          .crc = crc::crc32(0xBEEF),
           .type = index_page_header{},
         });
     case 1:
         return encode(page_header{
           .uncompressed_page_size = 2,
           .compressed_page_size = 1,
-          .crc = 0xDEAD,
+          .crc = crc::crc32(0xDEAD),
           .type = data_page_header{
             .num_values = 22,
             .num_nulls = 0,
@@ -57,13 +56,24 @@ iobuf serialize_testcase(size_t test_case) {
             .definition_levels_byte_length = 21,
             .repetition_levels_byte_length = 1,
             .is_compressed = false,
+            .stats = statistics{
+              .null_count = 42,
+              .max = std::make_optional<statistics::bound>(
+                iobuf::from("\xDE\xAD\xBE\xEF"),
+                false
+              ),
+              .min = std::make_optional<statistics::bound>(
+                iobuf::from("\xDE\xAD\xBE\xE0"),
+                true
+              ),
+            },
           },
         });
     case 2:
         return encode(page_header{
           .uncompressed_page_size = 99999,
           .compressed_page_size = 0,
-          .crc = 0xEEEE,
+          .crc = crc::crc32(0xEEEE),
           .type = dictionary_page_header{
             .num_values = 44,
             .data_encoding = encoding::rle,
@@ -74,12 +84,12 @@ iobuf serialize_testcase(size_t test_case) {
         return encode(file_metadata{
           .version = 2,
           .schema = flatten(schema_element{
-            .name = "root",
+            .path = {"root"},
             .children = list(
               schema_element{
                 .type = i32_type{},
                 .repetition_type = field_repetition_type::optional,
-                .name = "foo",
+                .path = {"foo"},
                 .field_id = 1,
                 .logical_type = time_type{
                   .is_adjusted_to_utc = true,
@@ -89,14 +99,14 @@ iobuf serialize_testcase(size_t test_case) {
               schema_element{
                 .type = byte_array_type{.fixed_length = 16},
                 .repetition_type = field_repetition_type::required,
-                .name = "bar",
+                .path = {"bar"},
                 .field_id = 2,
                 .logical_type = uuid_type{},
               },
               schema_element{
                 .type = bool_type{},
                 .repetition_type = field_repetition_type::repeated,
-                .name = "baz",
+                .path = {"baz"},
                 .field_id = 3,
               }
             ),
@@ -104,13 +114,13 @@ iobuf serialize_testcase(size_t test_case) {
           .num_rows = std::numeric_limits<int64_t>::max(),
           .row_groups = list(
              row_group{
-                .columns = {
+                .columns = list(
                   column_chunk{
                     .meta_data = {
                       .type = bool_type{},
                       .encodings = {encoding::plain, encoding::rle},
                       .path_in_schema = {"foo", "baz"},
-                      .codec = compression_codec::UNCOMPRESSED,
+                      .codec = compression_codec::uncompressed,
                       .num_values = 888,
                       .total_uncompressed_size = 9999,
                       .total_compressed_size = 9,
@@ -118,16 +128,25 @@ iobuf serialize_testcase(size_t test_case) {
                       .data_page_offset = 2,
                       .index_page_offset = 5,
                       .dictionary_page_offset = 9,
+                      .stats = statistics{
+                        .null_count = 9,
+                        .max = std::make_optional<statistics::bound>(
+                           iobuf::from("\xFF"),
+                           true
+                        ),
+                        .min = std::make_optional<statistics::bound>(
+                          iobuf::from(std::string_view{"\x00", 1}),
+                          false
+                        ),
+                      },
                     },
-                    .offset_index_offset = 23,
-                    .offset_index_length = 43,
-                    .column_index_offset = 999,
-                    .column_index_length = 876,
-                  },
-                },
+                  }
+                ),
                 .total_byte_size = 321,
                 .num_rows = 1,
                 .file_offset = 1234,
+                .total_compressed_size = 231,
+                .ordinal = 1,
              },
              row_group{
                 .total_byte_size = 99999,
@@ -145,10 +164,139 @@ iobuf serialize_testcase(size_t test_case) {
                   },
                 },
                 .file_offset = 4123,
+                .total_compressed_size = 8888,
+                .ordinal = 2,
              }
           ),
           .key_value_metadata = {{"foo", "bar"}, {"baz", "qux"}, {"nice", ""}},
           .created_by = "The best Message Broker in the West",
+          .column_orders = {column_order::type_defined, column_order::type_defined, column_order::type_defined},
+        });
+    case 4:
+        // logical type serialization test for all iceberg types
+        return encode(file_metadata{
+          .version = 2,
+          .schema = flatten(schema_element{
+            .path = {"root"},
+            .children = list(
+              schema_element{
+                .type = bool_type{},
+                .repetition_type = field_repetition_type::optional,
+                .path = {"iceberg_bool"},
+              },
+              schema_element{
+                .type = i32_type{},
+                .repetition_type = field_repetition_type::optional,
+                .path = {"iceberg_i32"},
+                .logical_type = int_type{.bit_width = 32, .is_signed = true},
+              },
+              schema_element{
+                .type = i64_type{},
+                .repetition_type = field_repetition_type::optional,
+                .path = {"iceberg_i64"},
+                .logical_type = int_type{.bit_width = 64, .is_signed = true},
+              },
+              schema_element{
+                .type = f32_type{},
+                .repetition_type = field_repetition_type::optional,
+                .path = {"iceberg_f32"},
+              },
+              schema_element{
+                .type = f64_type{},
+                .repetition_type = field_repetition_type::optional,
+                .path = {"iceberg_f64"},
+              },
+              schema_element{
+                .type = byte_array_type{.fixed_length = 16},
+                .repetition_type = field_repetition_type::optional,
+                .path = {"iceberg_decimal"},
+                .logical_type = decimal_type{.scale = 8, .precision = 38},
+              },
+              schema_element{
+                .type = i32_type{},
+                .repetition_type = field_repetition_type::optional,
+                .path = {"iceberg_date"},
+                .logical_type = date_type{},
+              },
+              schema_element{
+                .type = i64_type{},
+                .repetition_type = field_repetition_type::optional,
+                .path = {"iceberg_time"},
+                .logical_type
+                = time_type{.is_adjusted_to_utc = false, .unit = time_unit::micros},
+              },
+              schema_element{
+                .type = i64_type{},
+                .repetition_type = field_repetition_type::optional,
+                .path = {"iceberg_timestamp"},
+                .logical_type
+                = timestamp_type{.is_adjusted_to_utc = false, .unit = time_unit::micros},
+              },
+              schema_element{
+                .type = i64_type{},
+                .repetition_type = field_repetition_type::optional,
+                .path = {"iceberg_timestamptz"},
+                .logical_type
+                = timestamp_type{.is_adjusted_to_utc = true, .unit = time_unit::micros},
+              },
+              schema_element{
+                .type = byte_array_type{},
+                .repetition_type = field_repetition_type::optional,
+                .path = {"iceberg_string"},
+                .logical_type = string_type{},
+              },
+              schema_element{
+                .type = byte_array_type{.fixed_length = 16},
+                .repetition_type = field_repetition_type::optional,
+                .path = {"iceberg_uuid"},
+                .logical_type = uuid_type{},
+              },
+              schema_element{
+                .type = byte_array_type{.fixed_length = 103},
+                .repetition_type = field_repetition_type::required,
+                .path = {"iceberg_fixed"},
+              },
+              schema_element{
+                .type = byte_array_type{},
+                .repetition_type = field_repetition_type::optional,
+                .path = {"iceberg_binary"},
+              },
+              schema_element{
+                .repetition_type = field_repetition_type::optional,
+                .path = {"iceberg_string_int_map"},
+                .children = list(schema_element{
+                  .repetition_type = field_repetition_type::repeated,
+                  .path = {"map"},
+                  .children = list(
+                    schema_element{
+                      .type = byte_array_type{},
+                      .repetition_type = field_repetition_type::required,
+                      .path = {"key"},
+                      .logical_type = string_type{},
+                    },
+                    schema_element{
+                      .type = i32_type{},
+                      .repetition_type = field_repetition_type::optional,
+                      .path = {"value"},
+                    }),
+                }),
+                .logical_type = map_type{},
+              },
+              schema_element{
+                .repetition_type = field_repetition_type::optional,
+                .path = {"iceberg_int_list"},
+                .children = list(schema_element{
+                  .repetition_type = field_repetition_type::repeated,
+                  .path = {"list"},
+                  .children = list(schema_element{
+                    .type = i32_type{},
+                    .repetition_type = field_repetition_type::optional,
+                    .path = {"element"},
+                  }),
+                }),
+                .logical_type = list_type{},
+              }),
+          }),
         });
     default:
         throw std::runtime_error(

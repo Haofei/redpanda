@@ -148,20 +148,6 @@ ss::future<ss::file> make_reader_handle(
       std::move(ntp_sanitizer_config));
 }
 
-ss::future<compacted_index_writer> make_compacted_index_writer(
-  const std::filesystem::path& path,
-  ss::io_priority_class iopc,
-  storage_resources& resources,
-  std::optional<ntp_sanitizer_config> ntp_sanitizer_config) {
-    return ss::make_ready_future<compacted_index_writer>(
-      make_file_backed_compacted_index(
-        path.string(),
-        iopc,
-        false,
-        resources,
-        std::move(ntp_sanitizer_config)));
-}
-
 ss::future<segment_appender_ptr> make_segment_appender(
   const segment_full_path& path,
   size_t number_of_chunks,
@@ -238,21 +224,22 @@ natural_index_of_entries_to_keep(compacted_index_reader reader) {
 ss::future<> copy_filtered_entries(
   compacted_index_reader reader,
   roaring::Roaring to_copy_index,
-  compacted_index_writer writer) {
+  std::unique_ptr<compacted_index_writer> writer) {
     return ss::do_with(
       std::move(writer),
       [bm = std::move(to_copy_index),
-       reader](compacted_index_writer& writer) mutable {
+       reader](std::unique_ptr<compacted_index_writer>& writer) mutable {
           reader.reset();
           return reader
             .consume(
-              index_filtered_copy_reducer(std::move(bm), writer),
+              index_filtered_copy_reducer(std::move(bm), *writer),
               model::no_timeout)
             // must be last
             .finally([&writer] {
-                writer.set_flag(compacted_index::footer_flags::self_compaction);
+                writer->set_flag(
+                  compacted_index::footer_flags::self_compaction);
                 // do not handle exception on the close
-                return writer.close();
+                return writer->close();
             });
       });
 }
@@ -362,13 +349,11 @@ ss::future<storage::index_state> do_copy_segment_data(
   storage_resources& resources,
   offset_delta_time apply_offset,
   ss::sharded<features::feature_table>& feature_table) {
-    // preserve broker_timestamp and clean_compact_timestamp from the segment's
-    // index
+    // preserve base_offset, broker_timestamp, and clean_compact_timestamp from
+    // the segment's index
+    auto old_base_offset = seg->index().base_offset();
     auto old_broker_timestamp = seg->index().broker_timestamp();
     auto old_clean_compact_timestamp = seg->index().clean_compact_timestamp();
-
-    const bool past_tombstone_delete_horizon
-      = internal::is_past_tombstone_delete_horizon(seg, cfg);
 
     // find out which offsets will survive compaction
     auto idx_path = seg->reader().path().to_compacted_index();
@@ -401,56 +386,84 @@ ss::future<storage::index_state> do_copy_segment_data(
       "copying compacted segment data from {} to {}",
       seg->reader().filename(),
       tmpname);
+
+    auto segment_last_offset = seg->offsets().get_committed_offset();
+    auto compaction_placeholder_enabled = feature_table.local().is_active(
+      features::feature::compaction_placeholder_batch);
+    const bool past_tombstone_delete_horizon
+      = internal::is_past_tombstone_delete_horizon(seg, cfg);
     bool may_have_tombstone_records = false;
-    auto should_keep = [compacted_list = std::move(compacted_offsets),
-                        past_tombstone_delete_horizon,
-                        &may_have_tombstone_records](
-                         const model::record_batch& b,
-                         const model::record& r,
-                         bool) {
-        // Deal with tombstone record removal
-        if (r.is_tombstone() && past_tombstone_delete_horizon) {
-            return ss::make_ready_future<bool>(false);
-        }
 
+    auto offset_in_compacted_list =
+      [compacted_offsets = std::move(compacted_offsets)](
+        const model::record_batch& b,
+        const model::record& r) -> ss::future<bool> {
         const auto o = b.base_offset() + model::offset_delta(r.offset_delta());
-        const auto keep = compacted_list.contains(o);
-
-        if (r.is_tombstone() && keep) {
-            may_have_tombstone_records = true;
-        }
-
+        const auto keep = compacted_offsets.contains(o);
         return ss::make_ready_future<bool>(keep);
     };
 
-    model::offset segment_last_offset{};
-    if (likely(feature_table.local().is_active(
-          features::feature::compaction_placeholder_batch))) {
-        segment_last_offset = seg->offsets().get_committed_offset();
-    }
+    auto record_filter = [f = std::move(offset_in_compacted_list),
+                          &feature_table,
+                          segment_last_offset,
+                          past_tombstone_delete_horizon,
+                          &may_have_tombstone_records,
+                          &pb](
+                           const model::record_batch& b,
+                           const model::record& r,
+                           bool is_last_record_in_batch) {
+        return internal::should_keep(
+          b,
+          r,
+          is_last_record_in_batch,
+          f,
+          pb,
+          feature_table,
+          segment_last_offset,
+          past_tombstone_delete_horizon,
+          may_have_tombstone_records);
+    };
+
     auto copy_reducer = copy_data_segment_reducer(
-      std::move(should_keep),
+      std::move(record_filter),
       appender.get(),
       seg->path().is_internal_topic(),
       apply_offset,
+      old_base_offset,
       segment_last_offset,
+      compaction_placeholder_enabled,
       /*cidx=*/nullptr,
       /*inject_failure=*/false,
       cfg.asrc);
 
     // create the segment, get the in-memory index for the new segment
-    auto new_index = co_await create_segment_full_reader(
-                       seg, cfg, pb, std::move(rw_lock_holder))
-                       .consume(std::move(copy_reducer), model::no_timeout)
-                       .finally([&] {
-                           return appender->close().handle_exception(
-                             [](std::exception_ptr e) {
-                                 vlog(
-                                   gclog.error,
-                                   "Error copying index to new segment:{}",
-                                   e);
-                             });
+    auto res = co_await create_segment_full_reader(
+                 seg, cfg, pb, std::move(rw_lock_holder))
+                 .consume(std::move(copy_reducer), model::no_timeout)
+                 .finally([&] {
+                     return appender->close().handle_exception(
+                       [](std::exception_ptr e) {
+                           vlog(
+                             gclog.error,
+                             "Error copying index to new segment:{}",
+                             e);
                        });
+                 });
+    const auto& stats = res.reducer_stats;
+    if (stats.has_removed_data()) {
+        vlog(
+          gclog.info,
+          "Self compaction filtering removing data from {}: {}",
+          seg->filename(),
+          stats);
+    } else {
+        vlog(
+          gclog.debug,
+          "Self compaction filtering not removing any records from {}: {}",
+          seg->filename(),
+          stats);
+    }
+    auto& new_index = res.new_idx;
 
     // restore broker timestamp and clean compact timestamp
     new_index.broker_timestamp = old_broker_timestamp;
@@ -459,17 +472,26 @@ ss::future<storage::index_state> do_copy_segment_data(
     // Set may_have_tombstone_records
     new_index.may_have_tombstone_records = may_have_tombstone_records;
 
-    co_return new_index;
+    if (
+      seg->index().may_have_tombstone_records()
+      && !may_have_tombstone_records) {
+        pb.add_segment_marked_tombstone_free();
+    }
+
+    co_return std::move(new_index);
 }
 
 model::record_batch_reader create_segment_full_reader(
   ss::lw_shared_ptr<storage::segment> s,
   storage::compaction_config cfg,
   storage::probe& pb,
-  ss::rwlock::holder h) {
+  ss::rwlock::holder h,
+  std::optional<model::offset> start_offset) {
     auto o = s->offsets();
     auto reader_cfg = log_reader_config(
-      o.get_base_offset(), o.get_dirty_offset(), cfg.iopc);
+      start_offset.value_or(o.get_base_offset()),
+      o.get_dirty_offset(),
+      cfg.iopc);
     reader_cfg.skip_batch_cache = true;
     segment_set::underlying_t set;
     set.reserve(1);
@@ -583,7 +605,7 @@ ss::future<std::optional<size_t>> do_self_compact_segment(
 
     s->index().swap_index_state(std::move(idx));
     s->force_set_commit_offset_from_index();
-    s->release_batch_cache_index();
+    co_await s->reset_batch_cache_index();
     co_await s->index().flush();
     s->advance_generation();
     co_return s->size_bytes();
@@ -596,26 +618,26 @@ ss::future<> build_compaction_index(
   segment_full_path p,
   compaction_config cfg,
   storage_resources& resources) {
-    auto w = co_await make_compacted_index_writer(
-      p, cfg.iopc, resources, cfg.sanitizer_config);
-    auto reducer = tx_reducer(stm_manager, std::move(aborted_txs), &w);
+    auto w = storage::make_file_backed_compacted_index(
+      p, cfg.iopc, false, resources, cfg.sanitizer_config);
+    auto reducer = tx_reducer(stm_manager, std::move(aborted_txs), w.get());
     auto index_builder = co_await ss::coroutine::as_future<tx_reducer::stats>(
       std::move(rdr)
         .consume(std::move(reducer), model::no_timeout)
-        .finally([&w] { return w.close(); }));
+        .finally([&w] { return w->close(); }));
     if (index_builder.failed()) {
         auto exception = index_builder.get_exception();
         vlog(
           gclog.error,
           "Error rebuilding index: {}, {}",
-          w.filename(),
+          w->filename(),
           exception);
         std::rethrow_exception(exception);
     }
     vlog(
       gclog.info,
       "tx reducer path: {} stats {}",
-      w.filename(),
+      w->filename(),
       index_builder.get());
 }
 
@@ -724,9 +746,10 @@ ss::future<compaction_result> self_compact_segment(
           "Cannot compact an active segment. cfg:{} - segment:{}", cfg, s));
     }
 
+    const bool may_remove_tombstones = may_have_removable_tombstones(s, cfg);
     if (
       !s->has_compactible_offsets(cfg)
-      || (s->finished_self_compaction() && !may_have_removable_tombstones(s, cfg))) {
+      || (s->finished_self_compaction() && !may_remove_tombstones)) {
         co_return compaction_result{s->size_bytes()};
     }
 
@@ -735,7 +758,11 @@ ss::future<compaction_result> self_compact_segment(
       = co_await maybe_rebuild_compaction_index(
         s, stm_manager, cfg, read_holder, resources, pb);
 
-    if (state == compacted_index::recovery_state::already_compacted) {
+    const bool segment_already_compacted
+      = (state == compacted_index::recovery_state::already_compacted)
+        && !may_remove_tombstones;
+
+    if (segment_already_compacted) {
         vlog(
           gclog.debug,
           "detected {} is already compacted",
@@ -744,10 +771,10 @@ ss::future<compaction_result> self_compact_segment(
         co_return compaction_result{s->size_bytes()};
     }
 
-    vassert(
-      state == compacted_index::recovery_state::index_recovered,
-      "Unexpected state {}",
-      state);
+    const bool is_valid_index_state
+      = (state == compacted_index::recovery_state::index_recovered)
+        || (state == compacted_index::recovery_state::already_compacted);
+    vassert(is_valid_index_state, "Unexpected state {}", state);
 
     auto sz_before = s->size_bytes();
     auto apply_offset = should_apply_delta_time_offset(feature_table);
@@ -794,8 +821,7 @@ make_concatenated_segment(
     // happened to be racing with an operation like truncation or shutdown.
     for (const auto& segment : segments) {
         if (unlikely(segment->is_closed())) {
-            throw std::runtime_error(fmt::format(
-              "Aborting compaction of closed segment: {}", *segment));
+            throw segment_closed_exception();
         }
     }
 
@@ -880,7 +906,7 @@ make_concatenated_segment(
             // If even one segment in the set does not have a
             // clean_compact_timestamp, we must not mark the new index as having
             // one.
-            if (!seg->index().has_clean_compact_timestamp()) {
+            if (!seg->has_clean_compact_timestamp()) {
                 return std::nullopt;
             }
 
@@ -949,11 +975,13 @@ ss::future<std::vector<compacted_index_reader>> make_indices_readers(
 }
 
 ss::future<> rewrite_concatenated_indicies(
-  compacted_index_writer writer, std::vector<compacted_index_reader>& readers) {
+  std::unique_ptr<compacted_index_writer> writer,
+  std::vector<compacted_index_reader>& readers) {
     return ss::do_with(
-      std::move(writer), [&readers](compacted_index_writer& writer) {
+      std::move(writer),
+      [&readers](std::unique_ptr<compacted_index_writer>& writer) {
           return ss::do_with(
-            index_copy_reducer{writer},
+            index_copy_reducer{*writer},
             [&readers, &writer](index_copy_reducer& reducer) {
                 return ss::do_for_each(
                          readers.begin(),
@@ -965,7 +993,7 @@ ss::future<> rewrite_concatenated_indicies(
                                rdr.filename());
                              return rdr.consume(reducer, model::no_timeout);
                          })
-                  .finally([&writer] { return writer.close(); });
+                  .finally([&writer] { return writer->close(); });
             });
       });
 }
@@ -1008,15 +1036,14 @@ ss::future<> do_write_concatenated_compacted_index(
                           return ss::now();
                       }
 
-                      return make_compacted_index_writer(
-                               target_path,
-                               cfg.iopc,
-                               resources,
-                               cfg.sanitizer_config)
-                        .then([&readers](compacted_index_writer writer) {
-                            return rewrite_concatenated_indicies(
-                              std::move(writer), readers);
-                        });
+                      auto writer = storage::make_file_backed_compacted_index(
+                        target_path.string(),
+                        cfg.iopc,
+                        false,
+                        resources,
+                        cfg.sanitizer_config);
+                      return rewrite_concatenated_indicies(
+                        std::move(writer), readers);
                   })
                   .finally([&readers] {
                       return ss::parallel_for_each(
@@ -1135,18 +1162,25 @@ offset_delta_time should_apply_delta_time_offset(
       && feature_table.local().is_active(features::feature::node_isolation)};
 }
 
-void mark_segment_as_finished_window_compaction(
-  ss::lw_shared_ptr<segment> seg, bool set_clean_compact_timestamp) {
+ss::future<bool> mark_segment_as_finished_window_compaction(
+  ss::lw_shared_ptr<segment> seg, bool set_clean_compact_timestamp, probe& pb) {
     seg->mark_as_finished_windowed_compaction();
     if (set_clean_compact_timestamp) {
-        seg->index().maybe_set_clean_compact_timestamp(model::timestamp::now());
+        bool did_set = seg->index().maybe_set_clean_compact_timestamp(
+          model::timestamp::now());
+        if (did_set) {
+            pb.add_cleanly_compacted_segment();
+            return seg->index().flush().then([] { return true; });
+        }
     }
+
+    return ss::make_ready_future<bool>(false);
 }
 
 bool is_past_tombstone_delete_horizon(
   ss::lw_shared_ptr<segment> seg, const compaction_config& cfg) {
     if (
-      seg->index().has_clean_compact_timestamp()
+      seg->has_clean_compact_timestamp()
       && cfg.tombstone_retention_ms.has_value()) {
         auto tombstone_delete_horizon = model::timestamp(
           seg->index().clean_compact_timestamp()->value()

@@ -15,8 +15,10 @@ if(REDPANDA_RUN_CLANG_TIDY)
     if(NOT CLANG_TIDY_COMMAND)
         message(FATAL_ERROR "Could not find clang-tidy program")
     endif()
+    # IMPORTANT: Sync these with `WarningsAsErrors` field in `.clang-tidy`!
     set(clang_tidy_checks
         -*
+        cppcoreguidelines-avoid-capturing-lambda-coroutines
         bugprone-use-after-move
         bugprone-assert-side-effect
         bugprone-assignment-in-if-condition
@@ -133,6 +135,8 @@ add_subdirectory(migrations)
 add_subdirectory(datalake)
 add_subdirectory(cloud_io)
 add_subdirectory(cloud_topics)
+add_subdirectory(schema)
+add_subdirectory(crash_tracker)
 
 option(ENABLE_GIT_VERSION "Build with Git metadata" OFF)
 

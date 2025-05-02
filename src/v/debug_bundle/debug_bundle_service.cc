@@ -23,6 +23,7 @@
 #include "ssx/future-util.h"
 #include "storage/kvstore.h"
 #include "utils/external_process.h"
+#include "utils/file_io.h"
 
 #include <seastar/core/fstream.hh>
 #include <seastar/core/lowres_clock.hh>
@@ -36,7 +37,6 @@
 
 #include <boost/algorithm/string/join.hpp>
 #include <fmt/format.h>
-#include <re2/re2.h>
 
 #include <variant>
 
@@ -58,11 +58,13 @@ constexpr std::string_view logs_since_variable = "--logs-since";
 constexpr std::string_view logs_size_limit_variable = "--logs-size-limit";
 constexpr std::string_view logs_until_variable = "--logs-until";
 constexpr std::string_view metrics_interval_variable = "--metrics-interval";
+constexpr std::string_view metrics_samples_variable = "--metrics-samples";
 constexpr std::string_view partition_variable = "--partition";
 constexpr std::string_view tls_enabled_variable = "-Xtls.enabled";
 constexpr std::string_view tls_insecure_skip_verify_variable
   = "-Xtls.insecure_skip_verify";
 constexpr std::string_view k8s_namespace_variable = "--namespace";
+constexpr std::string_view k8s_label_selector = "--label-selector";
 
 bool contains_sensitive_info(const ss::sstring& arg) {
     if (arg.find(password_variable) != ss::sstring::npos) {
@@ -95,20 +97,6 @@ std::filesystem::path form_process_output_file_path(
     return base_path / form_process_output_file_name(job_id);
 }
 
-bool is_valid_rfc1123(std::string_view ns) {
-    // Regular expression for RFC1123 hostname validation
-    constexpr std::string_view rfc1123_pattern
-      = R"(^([a-zA-Z0-9]([a-zA-Z0-9-]{0,61}[a-zA-Z0-9])?))";
-
-    // Validate the hostname against the regular expression using RE2
-    return RE2::FullMatch(ns, RE2(rfc1123_pattern));
-}
-
-bool is_valid_k8s_namespace(std::string_view ns) {
-    constexpr auto max_ns_length = 63;
-    return !ns.empty() && ns.size() <= max_ns_length && is_valid_rfc1123(ns);
-}
-
 std::filesystem::path form_debug_bundle_storage_directory() {
     const auto& debug_bundle_dir
       = config::shard_local_cfg().debug_bundle_storage_dir();
@@ -118,16 +106,6 @@ std::filesystem::path form_debug_bundle_storage_directory() {
     return debug_bundle_dir.value_or(
       config::node().data_directory.value().path
       / service::debug_bundle_dir_name);
-}
-
-ss::future<iobuf> read_file(std::string_view path) {
-    iobuf buf;
-    auto file = co_await ss::open_file_dma(path, ss::open_flags::ro);
-    auto h = ss::defer([file]() mutable { ssx::background = file.close(); });
-    auto istrm = ss::make_file_input_stream(file);
-    auto ostrm = make_iobuf_ref_output_stream(buf);
-    co_await ss::copy(istrm, ostrm);
-    co_return buf;
 }
 
 ss::future<> write_file(std::string_view path, iobuf buf) {
@@ -654,12 +632,18 @@ result<std::vector<ss::sstring>> service::build_rpk_arguments(
         rv.emplace_back(
           ssx::sformat("{}s", params.metrics_interval_seconds.value().count()));
     }
+    if (params.metrics_samples.has_value()) {
+        rv.emplace_back(metrics_samples_variable);
+        rv.emplace_back(ssx::sformat("{}", params.metrics_samples.value()));
+    }
     if (params.partition.has_value()) {
         rv.emplace_back(partition_variable);
         rv.emplace_back(
           ssx::sformat("{}", fmt::join(params.partition.value(), " ")));
     }
-    if (params.tls_enabled.has_value()) {
+    if (params.tls_enabled.has_value() && *params.tls_enabled) {
+        // Only add `-Xtls.enabled=true` if it's selected.  RPK ignores
+        // the boolean value and will enable TLS if the option is present
         rv.emplace_back(
           ssx::sformat("{}={}", tls_enabled_variable, *params.tls_enabled));
     }
@@ -670,12 +654,15 @@ result<std::vector<ss::sstring>> service::build_rpk_arguments(
           *params.tls_insecure_skip_verify));
     }
     if (params.k8s_namespace.has_value()) {
-        if (!is_valid_k8s_namespace(params.k8s_namespace.value()())) {
-            return error_info(
-              error_code::invalid_parameters, "Invalid k8s namespace name");
-        }
         rv.emplace_back(k8s_namespace_variable);
         rv.emplace_back(*params.k8s_namespace);
+    }
+    if (
+      params.label_selector.has_value()
+      && !params.label_selector.value().empty()) {
+        rv.emplace_back(k8s_label_selector);
+        rv.emplace_back(
+          ssx::sformat("{}", fmt::join(params.label_selector.value(), ",")));
     }
 
     return rv;
@@ -904,7 +891,8 @@ ss::future<> service::maybe_reload_previous_run() {
       process_output_file_path);
     if (process_output_file_exists) {
         try {
-            auto buf = co_await read_file(process_output_file_path);
+            auto buf = co_await read_fully(
+              std::filesystem::path(process_output_file_path));
             iobuf_parser p(std::move(buf));
             po.emplace(serde::read<process_output>(p));
         } catch (const std::exception& e) {

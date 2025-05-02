@@ -34,8 +34,7 @@ deb_deps=(
   make
   pkgconf
   ragel
-  valgrind
-  xfslibs-dev
+  sudo
 )
 
 fedora_deps=(
@@ -47,9 +46,8 @@ fedora_deps=(
   libtool
   perl
   ragel
-  valgrind-devel
-  xfsprogs-devel
   xorg-x11-util-macros
+  sudo
 )
 
 case "$ID" in

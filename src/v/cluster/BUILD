@@ -194,12 +194,14 @@ redpanda_cc_library(
     include_prefix = "cluster",
     visibility = ["//visibility:public"],
     deps = [
+        ":cloud_metadata_offsets_recovery_router",
         "//src/v/base",
         "//src/v/cloud_storage",
         "//src/v/cloud_storage_clients",
         "//src/v/cluster",
         "//src/v/config",
         "//src/v/container:fragmented_vector",
+        "//src/v/kafka/data:partition_proxy",
         "//src/v/kafka/protocol",
         "//src/v/kafka/server",
         "//src/v/model",
@@ -214,6 +216,66 @@ redpanda_cc_library(
 )
 
 redpanda_cc_library(
+    name = "topic_memory_per_partition_default",
+    hdrs = [
+        "scheduling/topic_memory_per_partition_default.h",
+    ],
+    include_prefix = "cluster",
+    visibility = ["//visibility:public"],
+    deps = [
+        "//src/v/base",
+    ],
+)
+
+# TODO the following headers are the only headers in redpanda which are excluded
+# from clang-tidy. if you remove the exclusion then you'll observe a tangled web
+# of header dependencies. after many hours those have not yet been resolved, so
+# they are excluded here so that we don't hold up clang-tidy from being applied
+# to the entire tree.
+
+redpanda_cc_library(
+    name = "cloud_metadata_offsets_recovery_router",
+    hdrs = [
+        "cloud_metadata/offsets_recovery_router.h",
+    ],
+    include_prefix = "cluster",
+    tags = ["noclangtidy"],
+    visibility = ["//visibility:public"],
+)
+
+redpanda_cc_library(
+    name = "cloud_metadata_offsets_recovery_service",
+    hdrs = [
+        "cloud_metadata/offsets_recovery_service.h",
+    ],
+    include_prefix = "cluster",
+    tags = ["noclangtidy"],
+    visibility = ["//visibility:public"],
+)
+
+redpanda_cc_library(
+    name = "cloud_metadata_offsets_upload_router",
+    hdrs = [
+        "cloud_metadata/offsets_upload_router.h",
+    ],
+    include_prefix = "cluster",
+    tags = ["noclangtidy"],
+    visibility = ["//visibility:public"],
+)
+
+redpanda_cc_library(
+    name = "state_machine_registry",
+    hdrs = [
+        "state_machine_registry.h",
+    ],
+    include_prefix = "cluster",
+    visibility = ["//visibility:public"],
+    deps = [
+        "//src/v/raft",
+    ],
+)
+
+redpanda_cc_library(
     name = "cluster",
     srcs = [
         "archival/adjacent_segment_merger.cc",
@@ -221,14 +283,11 @@ redpanda_cc_library(
         "archival/archival_metadata_stm.cc",
         "archival/archival_policy.cc",
         "archival/archiver_manager.cc",
-        "archival/archiver_operations_api.cc",
-        "archival/archiver_operations_impl.cc",
-        "archival/archiver_scheduler_api.cc",
-        "archival/archiver_scheduler_impl.cc",
         "archival/async_data_uploader.cc",
         "archival/ntp_archiver_service.cc",
         "archival/probe.cc",
         "archival/purger.cc",
+        "archival/replica_state_validator.cc",
         "archival/retention_calculator.cc",
         "archival/scrubber.cc",
         "archival/segment_reupload.cc",
@@ -262,6 +321,7 @@ redpanda_cc_library(
         "controller_probe.cc",
         "controller_snapshot.cc",
         "controller_stm.cc",
+        "crash_reporter.cc",
         "data_migrated_resources.cc",
         "data_migration_backend.cc",
         "data_migration_frontend.cc",
@@ -368,16 +428,13 @@ redpanda_cc_library(
         "archival/archival_metadata_stm.h",
         "archival/archival_policy.h",
         "archival/archiver_manager.h",
-        "archival/archiver_operations_api.h",
-        "archival/archiver_operations_impl.h",
-        "archival/archiver_scheduler_api.h",
-        "archival/archiver_scheduler_impl.h",
         "archival/async_data_uploader.h",
         "archival/fwd.h",
         "archival/logger.h",
         "archival/ntp_archiver_service.h",
         "archival/probe.h",
         "archival/purger.h",
+        "archival/replica_state_validator.h",
         "archival/retention_calculator.h",
         "archival/scrubber.h",
         "archival/scrubber_scheduler.h",
@@ -397,11 +454,8 @@ redpanda_cc_library(
         "cloud_metadata/error_outcome.h",
         "cloud_metadata/key_utils.h",
         "cloud_metadata/manifest_downloads.h",
-        "cloud_metadata/offsets_recovery_router.h",
         "cloud_metadata/offsets_recovery_rpc_types.h",
-        "cloud_metadata/offsets_recovery_service.h",
         "cloud_metadata/offsets_snapshot.h",
-        "cloud_metadata/offsets_upload_router.h",
         "cloud_metadata/offsets_upload_rpc_types.h",
         "cloud_metadata/producer_id_recovery_manager.h",
         "cloud_metadata/types.h",
@@ -426,6 +480,7 @@ redpanda_cc_library(
         "controller_service.h",
         "controller_snapshot.h",
         "controller_stm.h",
+        "crash_reporter.h",
         "data_migrated_resources.h",
         "data_migration_backend.h",
         "data_migration_frontend.h",
@@ -516,7 +571,6 @@ redpanda_cc_library(
         "scheduling/constraints.h",
         "scheduling/leader_balancer.h",
         "scheduling/leader_balancer_constraints.h",
-        "scheduling/leader_balancer_greedy.h",
         "scheduling/leader_balancer_probe.h",
         "scheduling/leader_balancer_random.h",
         "scheduling/leader_balancer_strategy.h",
@@ -540,7 +594,6 @@ redpanda_cc_library(
         "shard_table.h",
         "simple_batch_builder.h",
         "snapshot.h",
-        "state_machine_registry.h",
         "tm_stm.h",
         "tm_stm_types.h",
         "topic_configuration.h",
@@ -571,6 +624,12 @@ redpanda_cc_library(
         "types.h",
         "version.h",
     ],
+    implementation_deps = [
+        ":topic_memory_per_partition_default",
+        "//src/v/crash_tracker",
+        "//src/v/features:enterprise_feature_messages",
+        "//src/v/resource_mgmt:memory_groups",
+    ],
     include_prefix = "cluster",
     visibility = ["//visibility:public"],
     deps = [
@@ -586,6 +645,7 @@ redpanda_cc_library(
         ":partition_balancer_rpc",
         ":run_quota",
         ":self_test_rpc",
+        ":state_machine_registry",
         ":topic_recovery_status_rpc",
         ":tx_gateway_rpc",
         ":tx_manager_migrator_rpc",
@@ -597,12 +657,16 @@ redpanda_cc_library(
         "//src/v/bytes:streambuf",
         "//src/v/cloud_storage",
         "//src/v/cloud_storage:remote_label",
+        "//src/v/cloud_storage:topic_mount_manifest_path",
         "//src/v/cloud_storage_clients",
+        "//src/v/cloud_topics/dl_stm",
+        "//src/v/cloud_topics/dl_stm:dl_stm_api",
         "//src/v/config",
         "//src/v/container:chunked_hash_map",
         "//src/v/container:contiguous_range_map",
         "//src/v/container:fragmented_vector",
         "//src/v/container:intrusive",
+        "//src/v/crash_tracker",
         "//src/v/features",
         "//src/v/features:enterprise_features",
         "//src/v/finjector",
@@ -636,6 +700,7 @@ redpanda_cc_library(
         "//src/v/serde:map",
         "//src/v/serde:named_type",
         "//src/v/serde:optional",
+        "//src/v/serde:set",
         "//src/v/serde:sstring",
         "//src/v/serde:tristate",
         "//src/v/serde:uuid",
@@ -645,10 +710,12 @@ redpanda_cc_library(
         "//src/v/ssx:async_clear",
         "//src/v/ssx:event",
         "//src/v/ssx:future_util",
+        "//src/v/ssx:rate_limited_function",
         "//src/v/ssx:semaphore",
         "//src/v/ssx:sformat",
         "//src/v/ssx:single_sharded",
         "//src/v/ssx:sleep_abortable",
+        "//src/v/ssx:when_all",
         "//src/v/storage",
         "//src/v/storage:parser_utils",
         "//src/v/storage:record_batch_builder",

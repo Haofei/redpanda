@@ -12,8 +12,9 @@ import time
 from collections import defaultdict
 from packaging.version import Version
 
-from ducktape.mark import parametrize, matrix, ok_to_fail_fips
+from ducktape.mark import parametrize, matrix
 from ducktape.utils.util import wait_until
+from rptest.clients.default import DefaultClient
 from rptest.services.admin import Admin
 from rptest.clients.rpk import RpkTool
 from rptest.clients.types import TopicSpec
@@ -27,6 +28,7 @@ from rptest.util import (
     produce_until_segments,
     wait_until_segments,
 )
+from rptest.utils.mode_checks import skip_debug_mode, skip_fips_mode
 from rptest.utils.si_utils import BucketView
 from rptest.services.cluster import cluster
 from rptest.services.redpanda import SISettings, CloudStorageType, get_cloud_storage_type
@@ -219,7 +221,7 @@ class UpgradeBackToBackTest(PreallocNodesTest):
         # Is our producer/consumer currently stopped (having already been started)?
         paused = False
 
-        wrote_at_least = None
+        wrote_at_least = 0
 
         for current_version in self.upgrade_through_versions(self.versions):
             if not started:
@@ -243,12 +245,19 @@ class UpgradeBackToBackTest(PreallocNodesTest):
             elif current_version[0:2] == (22, 1) and paused:
                 self._producer.start(clean=False)
 
-        for consumer in self._consumers:
-            consumer.wait()
+            # Wait for consumers to finish work and check invariants.
+            for consumer in self._consumers:
+                consumer.wait()
 
-        assert self._seq_consumer.consumer_status.validator.valid_reads >= wrote_at_least
-        assert self._rand_consumer.consumer_status.validator.total_reads >= self.RANDOM_READ_COUNT * self.RANDOM_READ_PARALLEL
-        assert self._cg_consumer.consumer_status.validator.valid_reads >= wrote_at_least
+            # Check consumer invariants after each upgrade.
+            assert self._seq_consumer.consumer_status.validator.valid_reads >= wrote_at_least
+            assert self._rand_consumer.consumer_status.validator.total_reads >= self.RANDOM_READ_COUNT * self.RANDOM_READ_PARALLEL
+            assert self._cg_consumer.consumer_status.validator.valid_reads >= wrote_at_least
+
+            # Restart the consumers for the next upgrade.
+            for consumer in self._consumers:
+                consumer.stop()
+                consumer.start(clean=False)
 
         # Validate that the data structures written by a mixture of historical
         # versions remain readable by our current debug tools
@@ -387,7 +396,7 @@ class UpgradeFromPriorFeatureVersionCloudStorageTest(RedpandaTest):
         super().setUp()
 
     # before v24.2, dns query to s3 endpoint do not include the bucketname, which is required for AWS S3 fips endpoints
-    @ok_to_fail_fips
+    @skip_fips_mode
     @cluster(num_nodes=4, log_allow_list=RESTART_LOG_ALLOW_LIST)
     @matrix(cloud_storage_type=get_cloud_storage_type(
         applies_only_on=[CloudStorageType.S3]))
@@ -400,7 +409,6 @@ class UpgradeFromPriorFeatureVersionCloudStorageTest(RedpandaTest):
         This ensures that rollbacks remain possible.
         """
         self.install_and_start()
-        self.redpanda.install_license()
 
         initial_version = Version(
             self.redpanda.get_version(self.redpanda.nodes[0]))
@@ -651,3 +659,92 @@ class RedpandaInstallerTest(RedpandaTest):
             version = self.redpanda._installer.highest_from_prior_feature_version(
                 version)
             limit = limit - 1
+
+
+class UpgradeAndCheckRecoveryReads(RedpandaTest):
+    """
+    Tests that validates the amount of bytes read after the upgrade
+    """
+    def __init__(self, test_context):
+        super(UpgradeAndCheckRecoveryReads, self).__init__(
+            test_context=test_context,
+            num_brokers=3,
+            extra_rp_conf={
+                # setup Redpanda to take the local snapshots eagerly
+                "log_compaction_interval_ms": 2000,
+                "storage_target_replay_bytes": 130 * 1024 * 1024
+            },
+            environment={
+                "__REDPANDA_TEST_DISABLE_BOUNDED_PROPERTY_CHECKS": "ON"
+            })
+        self.installer = self.redpanda._installer
+
+    def setUp(self):
+        self.prev_version = \
+            self.installer.highest_from_prior_feature_version(RedpandaInstaller.HEAD)
+
+        self.installer.install(self.redpanda.nodes, self.prev_version)
+        super(UpgradeAndCheckRecoveryReads, self).setUp()
+
+    @cluster(num_nodes=4, log_allow_list=RESTART_LOG_ALLOW_LIST)
+    @skip_debug_mode
+    def test_basic_upgrade(self):
+        topic = TopicSpec(partition_count=3,
+                          replication_factor=3,
+                          segment_bytes=1024 * 1024)
+
+        DefaultClient(self.redpanda).create_topic(topic)
+        msg_size = 64 * 1024
+        total_bytes = 135 * 1024 * 1024
+        msg_cnt = int(total_bytes / msg_size)
+
+        KgoVerifierProducer.oneshot(self.test_context,
+                                    self.redpanda,
+                                    topic.name,
+                                    msg_size,
+                                    msg_cnt,
+                                    batch_max_bytes=msg_size * 8,
+                                    timeout_sec=120)
+        # wait for a while to give redpanda time to create a local snapshot for
+        # the state machines
+        time.sleep(5)
+        self.redpanda.restart_nodes(self.redpanda.nodes)
+        read_before_upgrade = self.redpanda.estimate_total_disk_bytes_read(
+        ) / len(self.redpanda.nodes)
+        node = self.redpanda.nodes[0]
+        initial_version = Version(self.redpanda.get_version(node))
+
+        self.installer.install(self.redpanda.nodes, RedpandaInstaller.HEAD)
+
+        self.redpanda.restart_nodes(self.redpanda.nodes)
+        # wait for the cluster to stabilize, and any necessary recovery to finish
+        time.sleep(5)
+        read_after_upgrade = self.redpanda.estimate_total_disk_bytes_read(
+        ) / len(self.redpanda.nodes)
+
+        def to_mib_str(bytes):
+            return f"{bytes / (1024 * 1024):.2f} MiB"
+
+        head_version_str = self.redpanda.get_version(node)
+        head_version = Version(head_version_str)
+        assert initial_version < head_version, f"{initial_version} vs {head_version}"
+
+        unique_versions = wait_for_num_versions(self.redpanda, 1)
+        assert head_version_str in unique_versions, unique_versions
+        # With the upgrade we are adding new features so the amount of recovery
+        # reads may increase slightly. Now we allow it to be up to 10 % larger post upgrade.
+        after_upgrade_read_increase_ratio = 1.10
+        self.logger.info(
+            f"Recovery bytes read: [before upgrade: {to_mib_str(read_before_upgrade)} MiB, after upgrade: {to_mib_str(read_after_upgrade)} MiB] "
+        )
+        assert read_after_upgrade <= read_before_upgrade * after_upgrade_read_increase_ratio, \
+            f"Bytes read for recovery after upgrade {to_mib_str(read_after_upgrade)} is exceeding the allowed {to_mib_str(after_upgrade_read_increase_ratio * read_before_upgrade)}"
+
+        # restart once
+        self.redpanda.restart_nodes(self.redpanda.nodes)
+        read_after_restart = self.redpanda.estimate_total_disk_bytes_read(
+        ) / len(self.redpanda.nodes)
+        # wait for the cluster to stabilize, and any necessary recovery to finish
+        time.sleep(5)
+        assert read_after_restart <= 1.01*read_after_upgrade, \
+            f"Bytes read for recovery after restart {to_mib_str(read_after_restart)} is exceeding the initial read after upgrade {to_mib_str(1.01*read_after_upgrade)}"

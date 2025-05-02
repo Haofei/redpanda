@@ -18,6 +18,7 @@
 #include "cloud_storage/remote_segment.h"
 #include "cloud_storage_clients/configuration.h"
 #include "cluster/archival/archival_metadata_stm.h"
+#include "cluster/archival/ntp_archiver_service.h"
 #include "cluster/archival/types.h"
 #include "cluster/members_table.h"
 #include "config/configuration.h"
@@ -271,7 +272,7 @@ void archiver_fixture::initialize_shard(
   storage::api& api,
   const std::vector<segment_desc>& segm,
   std::optional<storage::ntp_config::default_overrides> overrides,
-  bool fit_segments) {
+  bool) {
     absl::flat_hash_map<model::ntp, size_t> all_ntp;
     for (const auto& d : segm) {
         storage::ntp_config ntpc(d.ntp, data_dir.string());
@@ -325,7 +326,7 @@ void archiver_fixture::initialize_shard(
             storage::ntp_config(
               ntp.first, data_dir.string(), std::move(defaults)),
             raft::group_id(1),
-            {nm->broker},
+            {raft::vnode(nm->broker.id(), model::revision_id(0))},
             raft::with_learner_recovery_throttle::yes,
             raft::keep_snapshotted_log::no,
             std::nullopt)
@@ -557,7 +558,8 @@ archiver_fixture::do_upload_next(
     if (model::timeout_clock::now() > deadline) {
         co_return archival::ntp_archiver::batch_result{};
     }
-    auto result = co_await archiver.upload_next_candidates(lso);
+    auto result = co_await archiver.upload_next_candidates(
+      archival_stm_fence{.emit_rw_fence_cmd = false}, lso);
     auto num_success = result.compacted_upload_result.num_succeeded
                        + result.non_compacted_upload_result.num_succeeded;
     if (num_success > 0) {
@@ -581,8 +583,10 @@ void archiver_fixture::upload_and_verify(
     tests::cooperative_spin_wait_with_timeout(
       10s,
       [&archiver, expected, lso]() {
-          return archiver.upload_next_candidates(lso).then(
-            [expected](auto result) { return result == expected; });
+          return archiver
+            .upload_next_candidates(
+              archival_stm_fence{.emit_rw_fence_cmd = false}, lso)
+            .then([expected](auto result) { return result == expected; });
       })
       .get();
 }

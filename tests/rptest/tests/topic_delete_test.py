@@ -86,7 +86,10 @@ def get_kvstore_topic_key_counts(redpanda):
                 if k['data'].get('ntp', {}).get('topic', None) == 'controller':
                     # Controller storage item
                     continue
-
+                if k['data'].get('ntp', {}).get('namespace',
+                                                None) == 'kafka_internal':
+                    # Internal topic storage item
+                    continue
                 excess_keys.append(k)
 
             redpanda.logger.info(
@@ -111,7 +114,8 @@ def topic_storage_purged(redpanda, topic_name):
             for topic_name, topic in ns.topics.items():
                 for p_id, p in topic.partitions.items():
                     for f in p.files:
-                        redpanda.logger.info(f"  {n.name}: {f}")
+                        redpanda.logger.info(
+                            f"  {n.name}: {topic_name}_{p_id}_{f}")
 
         return False
 
@@ -269,7 +273,8 @@ class TopicDeleteAfterMovementTest(RedpandaTest):
 
         self.kafka_tools = KafkaCliTools(self.redpanda)
 
-    def movement_done(self, partition, assignments):
+    def movement_done(self, partition, to_nodes):
+        assignments = [dict(node_id=n) for n in to_nodes]
         results = []
         for n in self.redpanda._started:
             info = self.admin.get_partitions(self.topic, partition, node=n)
@@ -280,7 +285,7 @@ class TopicDeleteAfterMovementTest(RedpandaTest):
             results.append(converged and info["status"] == "done")
         return all(results)
 
-    def move_topic(self, assignments):
+    def move_topic(self, to_nodes):
         for partition in range(3):
 
             def get_nodes(partition):
@@ -288,13 +293,17 @@ class TopicDeleteAfterMovementTest(RedpandaTest):
 
             nodes_before = set(
                 get_nodes(self.admin.get_partitions(self.topic, partition)))
-            nodes_after = {r['node_id'] for r in assignments}
+            nodes_after = set(to_nodes)
             if nodes_before == nodes_after:
                 continue
+            assignments = [
+                dict(node_id=n, core=PartitionMovementMixin.INVALID_CORE)
+                for n in to_nodes
+            ]
             self.admin.set_partition_replicas(self.topic, partition,
                                               assignments)
 
-            wait_until(lambda: self.movement_done(partition, assignments),
+            wait_until(lambda: self.movement_done(partition, to_nodes),
                        timeout_sec=60,
                        backoff_sec=2)
 
@@ -309,8 +318,7 @@ class TopicDeleteAfterMovementTest(RedpandaTest):
         self.admin = Admin(self.redpanda)
 
         # Move every partition to nodes 1,2,3
-        assignments = [dict(node_id=n, core=0) for n in [1, 2, 3]]
-        self.move_topic(assignments)
+        self.move_topic([1, 2, 3])
 
         down_node = self.redpanda.nodes[0]
         try:
@@ -319,8 +327,7 @@ class TopicDeleteAfterMovementTest(RedpandaTest):
                 f"chattr +i {self.redpanda.DATA_DIR}/kafka/{self.topic}")
 
             # Move every partition from node 1 to node 4
-            new_assignments = [dict(node_id=n, core=0) for n in [2, 3, 4]]
-            self.move_topic(new_assignments)
+            self.move_topic([2, 3, 4])
 
             def topic_exist_on_every_node(redpanda, topic_name):
                 storage = redpanda.storage()
@@ -480,8 +487,7 @@ class TopicDeleteCloudStorageTest(RedpandaTest):
         quiesce_uploads(self.redpanda, [topic_name], timeout_sec=60)
 
     @skip_debug_mode  # Rely on timely uploads during leader transfers
-    @cluster(num_nodes=4,
-             log_allow_list=['Failed to fetch manifest during finalize()'])
+    @cluster(num_nodes=4)
     def topic_delete_installed_snapshots_test(self):
         """
         Test the case where a partition had remote snapshots installed prior
@@ -625,9 +631,13 @@ class TopicDeleteCloudStorageTest(RedpandaTest):
             assert self.topic not in self.kafka_tools.list_topics()
 
             # Local storage deletion should proceed even if remote can't
-            wait_until(lambda: topic_storage_purged(self.redpanda, self.topic),
-                       timeout_sec=30,
-                       backoff_sec=1)
+            wait_until(
+                lambda: topic_storage_purged(self.redpanda, self.topic),
+                timeout_sec=90,
+                backoff_sec=10,
+                err_msg=
+                "Local storage purge did not complete while cloud storage was unavailable"
+            )
 
             # Erase timeout is hardcoded 60 seconds, wait long enough
             # for it to give up.
@@ -767,8 +777,7 @@ class TopicDeleteCloudStorageTest(RedpandaTest):
             raise AssertionError(f"Found unexpected lifecycle marker {marker}")
 
     @skip_debug_mode  # Rely on timely uploads during leader transfers
-    @cluster(num_nodes=5,
-             log_allow_list=['Failed to fetch manifest during finalize()'])
+    @cluster(num_nodes=5)
     @matrix(disable_delete=[False, True],
             cloud_storage_type=get_cloud_storage_type())
     def topic_delete_cloud_storage_test(self, disable_delete,
@@ -854,7 +863,10 @@ class TopicDeleteCloudStorageTest(RedpandaTest):
         nodes_after = nodes_before[1:] + [
             replacement_node,
         ]
-        new_assignments = list({'core': 0, 'node_id': n} for n in nodes_after)
+        new_assignments = list({
+            'node_id': n,
+            'core': PartitionMovementMixin.INVALID_CORE
+        } for n in nodes_after)
         admin.set_partition_replicas(self.topic, 0, new_assignments)
 
         def move_complete():

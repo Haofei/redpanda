@@ -40,8 +40,7 @@ bool check_compatible(
 }
 
 pps::compatibility_result check_compatible_verbose(
-  const pps::canonical_schema_definition& r,
-  const pps::canonical_schema_definition& w) {
+  const pps::schema_definition& r, const pps::schema_definition& w) {
     pps::sharded_store s;
     return check_compatible(
       pps::make_json_schema_definition(
@@ -160,21 +159,6 @@ static const auto error_test_cases = std::to_array({
 {
   "$comment": "the root schema is valid but the bundled schema is not",
   "$defs": {
-      "$comment": "dialect is draft-04, but id key is '$id'",
-      "$id": "https://example.com/mismatch_id",
-      "$schema": "http://json-schema.org/draft-04/schema#"
-  }
-}
-)",
-    pps::error_info{
-      pps::error_code::schema_invalid,
-      "bundled schema with mismatched dialect "
-      "'http://json-schema.org/draft-04/schema#' for id key"}},
-  error_test_case{
-    R"(
-{
-  "$comment": "the root schema is valid but the bundled schema is not",
-  "$defs": {
       "$comment": "dialect is unkown",
       "$id": "https://example.com/mismatch_id",
       "$schema": "http://json-schema.org/draft-3000/schema#"
@@ -283,6 +267,18 @@ static constexpr auto valid_test_cases = std::to_array<std::string_view>({
   R"json({"$schema": "http://json-schema.org/draft-04/schema"})json",
   R"json({"$schema": "https://json-schema.org/draft/2019-09/schema"})json",
   R"json({"$schema": "https://json-schema.org/draft/2020-12/schema"})json",
+  // this is a valid schema, as it is treated as a draft202012 (latest)
+  // and "id" is not a restricted keyword
+  R"json(
+{
+  "type": "object",
+  "title": "notABundledSchema",
+  "properties": {
+    "id":{
+      "type":"string"
+    }
+  }
+})json",
 });
 SEASTAR_THREAD_TEST_CASE(test_make_valid_json_schema) {
     for (const auto& data : valid_test_cases) {
@@ -308,15 +304,15 @@ SEASTAR_THREAD_TEST_CASE(test_make_valid_json_schema) {
 
 struct test_references_data {
     struct data {
-        pps::unparsed_schema schema;
+        pps::subject_schema schema;
         pps::error_info result;
     };
     std::array<data, 2> _schemas;
 };
 
-const auto referenced = pps::unparsed_schema{
+const auto referenced = pps::subject_schema{
   pps::subject{"referenced"},
-  pps::unparsed_schema_definition{
+  pps::schema_definition{
     R"({
   "description": "A base schema that defines a number",
   "type": "object",
@@ -329,9 +325,9 @@ const auto referenced = pps::unparsed_schema{
     pps::schema_type::json,
     {}}};
 
-const auto referencer = pps::unparsed_schema{
+const auto referencer = pps::subject_schema{
   pps::subject{"referencer"},
-  pps::unparsed_schema_definition{
+  pps::schema_definition{
     R"({
   "description": "A schema that references the base schema",
   "type": "object",
@@ -347,9 +343,9 @@ const auto referencer = pps::unparsed_schema{
       .sub{referenced.sub()},
       .version = pps::schema_version{1}}}}};
 
-const auto referencer_wrong_sub = pps::unparsed_schema{
+const auto referencer_wrong_sub = pps::subject_schema{
   referencer.sub(),
-  pps::unparsed_schema_definition{
+  pps::schema_definition{
     referencer.def().shared_raw(),
     referencer.def().type(),
     {pps::schema_reference{
@@ -364,7 +360,7 @@ const std::array test_reference_cases = {
   test_references_data{
     {{{referenced.share(), {}},
       {referencer_wrong_sub.share(),
-       {pps::error_code::schema_empty,
+       {pps::error_code::schema_missing_reference,
         R"(Invalid schema {subject=referencer,version=0,id=-1,schemaType=JSON,references=[{name='example.com/referenced.json', subject='wrong_sub', version=1}],metadata=null,ruleSet=null,schema={
   "description": "A schema that references the base schema",
   "type": "object",
@@ -382,7 +378,7 @@ SEASTAR_THREAD_TEST_CASE(test_json_schema_references) {
 
         for (const auto& [schema, result] : test._schemas) {
             pps::schema_version ver{0};
-            pps::canonical_schema canonical{};
+            pps::subject_schema canonical{};
             auto make_canonical = [&]() {
                 canonical = f.store.make_canonical_schema(schema.share()).get();
             };
@@ -2253,7 +2249,7 @@ SEASTAR_THREAD_TEST_CASE(test_compatibility_check) {
 
 namespace {
 
-const auto schema_old = pps::canonical_schema_definition({
+const auto schema_old = pps::schema_definition({
   R"(
 {
   "type": "object",
@@ -2273,7 +2269,7 @@ const auto schema_old = pps::canonical_schema_definition({
 })",
   pps::schema_type::json});
 
-const auto schema_new = pps::canonical_schema_definition({
+const auto schema_new = pps::schema_definition({
   R"(
 {
   "type": "object",

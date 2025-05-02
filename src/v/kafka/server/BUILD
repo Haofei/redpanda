@@ -1,10 +1,46 @@
 load("//bazel:build.bzl", "redpanda_cc_library")
+load("//src/v/rpc:compiler.bzl", "redpanda_cc_rpc_library")
+
+redpanda_cc_rpc_library(
+    name = "consumer_group_lag_metrics_rpc",
+    src = "consumer_group_lag_metrics_rpc.json",
+    include_prefix = "kafka/server",
+)
+
+redpanda_cc_library(
+    name = "qdc_monitor_config",
+    hdrs = [
+        "queue_depth_monitor_config.h",
+    ],
+    include_prefix = "kafka/server",
+    visibility = ["//visibility:public"],
+)
+
+redpanda_cc_library(
+    name = "logger",
+    srcs = [
+        "logger.cc",
+    ],
+    hdrs = [
+        "logger.h",
+    ],
+    include_prefix = "kafka/server",
+    visibility = [":__subpackages__"],
+    deps = [
+        "//src/v/base",
+        "//src/v/kafka/protocol:logger",
+        "//src/v/utils:truncating_logger",
+        "@seastar",
+    ],
+)
 
 redpanda_cc_library(
     name = "server",
     srcs = [
         "client_quota_translator.cc",
         "connection_context.cc",
+        "consumer_group_lag_metrics_frontend.cc",
+        "consumer_group_lag_metrics_service.cc",
         "fetch_pid_controller.cc",
         "fetch_session_cache.cc",
         "group.cc",
@@ -41,12 +77,9 @@ redpanda_cc_library(
         "handlers/topics/topic_utils.cc",
         "handlers/topics/types.cc",
         "handlers/txn_offset_commit.cc",
-        "logger.cc",
         "member.cc",
-        "partition_proxy.cc",
         "protocol_utils.cc",
         "quota_manager.cc",
-        "replicated_partition.cc",
         "requests.cc",
         "rm_group_frontend.cc",
         "server.cc",
@@ -58,6 +91,9 @@ redpanda_cc_library(
         "atomic_token_bucket.h",
         "client_quota_translator.h",
         "connection_context.h",
+        "consumer_group_lag_metrics_frontend.h",
+        "consumer_group_lag_metrics_rpc_types.h",
+        "consumer_group_lag_metrics_service.h",
         "coordinator_ntp_mapper.h",
         "errors.h",
         "fetch_metadata_cache.h",
@@ -91,12 +127,12 @@ redpanda_cc_library(
         "handlers/delete_topics.h",
         "handlers/describe_acls.h",
         "handlers/describe_client_quotas.h",
+        "handlers/describe_cluster.h",
         "handlers/describe_configs.h",
         "handlers/describe_groups.h",
         "handlers/describe_log_dirs.h",
         "handlers/describe_producers.h",
         "handlers/describe_transactions.h",
-        "handlers/details/isolated_node_utils.h",
         "handlers/details/leader_epoch.h",
         "handlers/details/security.h",
         "handlers/end_txn.h",
@@ -131,15 +167,12 @@ redpanda_cc_library(
         "handlers/topics/types.h",
         "handlers/topics/validators.h",
         "handlers/txn_offset_commit.h",
-        "latency_probe.h",
-        "logger.h",
+        "kafka_probe.h",
         "member.h",
-        "partition_proxy.h",
         "protocol_utils.h",
         "queue_depth_monitor.h",
         "quota_manager.h",
         "read_distribution_probe.h",
-        "replicated_partition.h",
         "request_context.h",
         "response.h",
         "rm_group_frontend.h",
@@ -149,9 +182,16 @@ redpanda_cc_library(
         "usage_aggregator.h",
         "usage_manager.h",
     ],
+    implementation_deps = [
+        "//src/v/features:enterprise_feature_messages",
+    ],
     include_prefix = "kafka/server",
     visibility = ["//visibility:public"],
     deps = [
+        ":consumer_group_lag_metrics_rpc",
+        ":datalake_throttle_manager",
+        ":logger",
+        ":qdc_monitor_config",
         "//src/v/base",
         "//src/v/bytes",
         "//src/v/bytes:iobuf",
@@ -160,13 +200,16 @@ redpanda_cc_library(
         "//src/v/bytes:scattered_message",
         "//src/v/cloud_storage",
         "//src/v/cluster",
+        "//src/v/cluster:state_machine_registry",
         "//src/v/config",
         "//src/v/container:chunked_hash_map",
         "//src/v/container:fragmented_vector",
         "//src/v/container:intrusive",
+        "//src/v/datalake:partition_spec_parser",
         "//src/v/features",
         "//src/v/hashing:jump_consistent",
         "//src/v/hashing:xx",
+        "//src/v/kafka/data:partition_proxy",
         "//src/v/kafka/protocol",
         "//src/v/kafka/protocol:add_offsets_to_txn",
         "//src/v/kafka/protocol:add_partitions_to_txn",
@@ -183,6 +226,7 @@ redpanda_cc_library(
         "//src/v/kafka/protocol:delete_topics",
         "//src/v/kafka/protocol:describe_acls",
         "//src/v/kafka/protocol:describe_client_quotas",
+        "//src/v/kafka/protocol:describe_cluster",
         "//src/v/kafka/protocol:describe_configs",
         "//src/v/kafka/protocol:describe_groups",
         "//src/v/kafka/protocol:describe_log_dirs",
@@ -201,6 +245,7 @@ redpanda_cc_library(
         "//src/v/kafka/protocol:list_offset",
         "//src/v/kafka/protocol:list_partition_reassignments",
         "//src/v/kafka/protocol:list_transactions",
+        "//src/v/kafka/protocol:logger",
         "//src/v/kafka/protocol:metadata",
         "//src/v/kafka/protocol:offset_commit",
         "//src/v/kafka/protocol:offset_delete",
@@ -229,6 +274,8 @@ redpanda_cc_library(
         "//src/v/kafka/protocol/schemata:describe_acls_request",
         "//src/v/kafka/protocol/schemata:describe_client_quotas_request",
         "//src/v/kafka/protocol/schemata:describe_client_quotas_response",
+        "//src/v/kafka/protocol/schemata:describe_cluster_request",
+        "//src/v/kafka/protocol/schemata:describe_cluster_response",
         "//src/v/kafka/protocol/schemata:describe_groups_response",
         "//src/v/kafka/protocol/schemata:describe_producers_response",
         "//src/v/kafka/protocol/schemata:describe_transactions_request",
@@ -274,13 +321,13 @@ redpanda_cc_library(
         "//src/v/ssx:sharded_ptr",
         "//src/v/ssx:sharded_value",
         "//src/v/ssx:thread_worker",
+        "//src/v/ssx:when_all",
         "//src/v/storage",
         "//src/v/storage:parser_utils",
         "//src/v/storage:record_batch_builder",
         "//src/v/strings:string_switch",
         "//src/v/strings:utf8",
         "//src/v/utils:absl_sstring_hash",
-        "//src/v/utils:bottomless_token_bucket",
         "//src/v/utils:ema",
         "//src/v/utils:log_hist",
         "//src/v/utils:mutex",
@@ -306,6 +353,63 @@ redpanda_cc_library(
         "@boost//:range",
         "@boost//:uuid",
         "@fmt",
+        "@seastar",
+    ],
+)
+
+redpanda_cc_library(
+    name = "datalake_throttle_manager",
+    srcs = [
+        "datalake_throttle_manager.cc",
+    ],
+    hdrs = [
+        "datalake_throttle_manager.h",
+    ],
+    include_prefix = "kafka/server",
+    visibility = [":__subpackages__"],
+    deps = [
+        ":logger",
+        "//src/v/base",
+        "//src/v/config",
+        "//src/v/container:chunked_hash_map",
+        "//src/v/metrics",
+        "//src/v/ssx:future_util",
+        "//src/v/storage",
+        "//src/v/utils:absl_sstring_hash",
+        "//src/v/utils:human",
+        "@seastar",
+    ],
+)
+
+redpanda_cc_library(
+    name = "errors",
+    hdrs = [
+        "errors.h",
+    ],
+    include_prefix = "kafka/server",
+    visibility = ["//visibility:public"],
+    deps = [
+        "//src/v/cluster",
+        "//src/v/kafka/protocol",
+    ],
+)
+
+redpanda_cc_library(
+    name = "app",
+    srcs = [
+        "app.cc",
+    ],
+    hdrs = [
+        "app.h",
+    ],
+    implementation_deps = [
+        ":server",
+    ],
+    include_prefix = "kafka/server",
+    visibility = ["//src/v/redpanda:__pkg__"],
+    deps = [
+        ":datalake_throttle_manager",
+        ":qdc_monitor_config",
         "@seastar",
     ],
 )

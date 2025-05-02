@@ -36,6 +36,7 @@ import (
 	"github.com/beevik/ntp"
 	"github.com/docker/go-units"
 	"github.com/hashicorp/go-multierror"
+	"github.com/redpanda-data/redpanda/src/go/rpk/pkg/cli/debug/common"
 	"github.com/redpanda-data/redpanda/src/go/rpk/pkg/config"
 	osutil "github.com/redpanda-data/redpanda/src/go/rpk/pkg/os"
 	"github.com/redpanda-data/redpanda/src/go/rpk/pkg/out"
@@ -61,7 +62,7 @@ func determineFilepath(fs afero.Fs, rp *config.RedpandaYaml, path string, isFlag
 	if path == "" {
 		timestamp := time.Now().Unix()
 		if rp.Redpanda.AdvertisedRPCAPI != nil {
-			path = fmt.Sprintf("%v-%d-bundle.zip", sanitizeName(rp.Redpanda.AdvertisedRPCAPI.Address), timestamp)
+			path = fmt.Sprintf("%v-%d-bundle.zip", common.SanitizeName(rp.Redpanda.AdvertisedRPCAPI.Address), timestamp)
 		} else {
 			path = fmt.Sprintf("%d-bundle.zip", timestamp)
 		}
@@ -134,6 +135,7 @@ func executeBundle(ctx context.Context, bp bundleParams) error {
 		saveCmdLine(ps),
 		saveConfig(ps, bp.y),
 		saveControllerLogDir(ps, bp.y, bp.controllerLogLimitBytes),
+		saveCrashReports(ps, bp.y),
 		saveDNSData(ctx, ps),
 		saveDataDirStructure(ps, bp.y),
 		saveDf(ctx, ps),
@@ -146,18 +148,22 @@ func executeBundle(ctx context.Context, bp bundleParams) error {
 		saveKernelSymbols(ps),
 		saveLogs(ctx, ps, bp.logsSince, bp.logsUntil, bp.logsLimitBytes),
 		saveLspci(ctx, ps),
+		saveLsblk(ctx, ps),
 		saveMdstat(ps),
 		saveMountedFilesystems(ps),
 		saveNTPDrift(ps),
 		saveResourceUsageData(ps, bp.y),
 		saveSingleAdminAPICalls(ctx, ps, bp.fs, bp.p, addrs, bp.cpuProfilerWait),
 		saveMetricsAPICalls(ctx, ps, bp.fs, bp.p, addrs, bp.metricsInterval, bp.metricsSampleCount),
+		saveStartupLog(ps, bp.y),
 		saveSlabInfo(ps),
 		saveSocketData(ctx, ps),
+		saveSoftwareInterrupts(ps),
 		saveSysctl(ctx, ps),
 		saveSyslog(ps),
 		saveTopOutput(ctx, ps),
 		saveUname(ctx, ps),
+		saveUptime(ctx, ps),
 		saveVmstat(ctx, ps),
 	}
 
@@ -470,38 +476,42 @@ func saveDataDirStructure(ps *stepParams, y *config.RedpandaYaml) step {
 // Writes the config file to the bundle, redacting SASL credentials.
 func saveConfig(ps *stepParams, y *config.RedpandaYaml) step {
 	return func() error {
+		yCp, err := createRedpandaConfigCopy(y)
+		if err != nil {
+			return err
+		}
 		// Redact SASL credentials
 		redacted := "(REDACTED)"
-		if y.Rpk.KafkaAPI.SASL != nil {
-			y.Rpk.KafkaAPI.SASL.User = redacted
-			y.Rpk.KafkaAPI.SASL.Password = redacted
+		if yCp.Rpk.KafkaAPI.SASL != nil {
+			yCp.Rpk.KafkaAPI.SASL.User = redacted
+			yCp.Rpk.KafkaAPI.SASL.Password = redacted
 		}
 		// We want to redact any blindly decoded parameters.
-		redactOtherMap(y.Other)
-		redactOtherMap(y.Redpanda.Other)
-		redactServerTLSSlice(y.Redpanda.KafkaAPITLS)
-		redactServerTLSSlice(y.Redpanda.AdminAPITLS)
-		if y.SchemaRegistry != nil {
-			for _, server := range y.SchemaRegistry.SchemaRegistryAPITLS {
+		redactOtherMap(yCp.Other)
+		redactOtherMap(yCp.Redpanda.Other)
+		redactServerTLSSlice(yCp.Redpanda.KafkaAPITLS)
+		redactServerTLSSlice(yCp.Redpanda.AdminAPITLS)
+		if yCp.SchemaRegistry != nil {
+			for _, server := range yCp.SchemaRegistry.SchemaRegistryAPITLS {
 				redactOtherMap(server.Other)
 			}
 		}
-		if y.Pandaproxy != nil {
-			redactOtherMap(y.Pandaproxy.Other)
-			redactServerTLSSlice(y.Pandaproxy.PandaproxyAPITLS)
+		if yCp.Pandaproxy != nil {
+			redactOtherMap(yCp.Pandaproxy.Other)
+			redactServerTLSSlice(yCp.Pandaproxy.PandaproxyAPITLS)
 		}
-		if y.PandaproxyClient != nil {
-			redactOtherMap(y.PandaproxyClient.Other)
-			y.PandaproxyClient.SCRAMPassword = &redacted
-			y.PandaproxyClient.SCRAMUsername = &redacted
+		if yCp.PandaproxyClient != nil {
+			redactOtherMap(yCp.PandaproxyClient.Other)
+			yCp.PandaproxyClient.SCRAMPassword = &redacted
+			yCp.PandaproxyClient.SCRAMUsername = &redacted
 		}
-		if y.SchemaRegistryClient != nil {
-			redactOtherMap(y.SchemaRegistryClient.Other)
-			y.SchemaRegistryClient.SCRAMPassword = &redacted
-			y.SchemaRegistryClient.SCRAMUsername = &redacted
+		if yCp.SchemaRegistryClient != nil {
+			redactOtherMap(yCp.SchemaRegistryClient.Other)
+			yCp.SchemaRegistryClient.SCRAMPassword = &redacted
+			yCp.SchemaRegistryClient.SCRAMUsername = &redacted
 		}
 
-		bs, err := yaml.Marshal(y)
+		bs, err := yaml.Marshal(yCp)
 		if err != nil {
 			return fmt.Errorf("couldn't encode the redpanda config as YAML: %w", err)
 		}
@@ -519,6 +529,19 @@ func redactOtherMap(other map[string]interface{}) {
 	for k := range other {
 		other[k] = "(REDACTED)"
 	}
+}
+
+func createRedpandaConfigCopy(y *config.RedpandaYaml) (*config.RedpandaYaml, error) {
+	bs, err := yaml.Marshal(y)
+	if err != nil {
+		return nil, fmt.Errorf("unable to serialize the loaded redpanda config as YAML: %v", err)
+	}
+	var cp config.RedpandaYaml
+	err = yaml.Unmarshal(bs, &cp)
+	if err != nil {
+		return nil, fmt.Errorf("unable to decode the redpanda config: %v", err)
+	}
+	return &cp, nil
 }
 
 // Saves the contents of '/proc/cpuinfo'.
@@ -540,6 +563,17 @@ func saveInterrupts(ps *stepParams) step {
 			return err
 		}
 		return writeFileToZip(ps, "proc/interrupts", bs)
+	}
+}
+
+// Saves the contents of '/proc/softirqs/'.
+func saveSoftwareInterrupts(ps *stepParams) step {
+	return func() error {
+		bs, err := afero.ReadFile(ps.fs, "/proc/softirqs")
+		if err != nil {
+			return err
+		}
+		return writeFileToZip(ps, "proc/softirqs", bs)
 	}
 }
 
@@ -803,6 +837,18 @@ func saveLspci(ctx context.Context, ps *stepParams) step {
 	}
 }
 
+// Saves the output of `lsblk --all`.
+func saveLsblk(ctx context.Context, ps *stepParams) step {
+	return func() error {
+		return writeCommandOutputToZip(
+			ctx,
+			ps,
+			filepath.Join(linuxUtilsRoot, "lsblk.txt"),
+			"lsblk", "--all",
+		)
+	}
+}
+
 // Saves the output of `dmidecode`.
 func saveDmidecode(ctx context.Context, ps *stepParams) step {
 	return func() error {
@@ -836,6 +882,13 @@ func saveFree(ctx context.Context, ps *stepParams) step {
 			filepath.Join(linuxUtilsRoot, "free.txt"),
 			"free",
 		)
+	}
+}
+
+// Saves the output of `uptime`.
+func saveUptime(ctx context.Context, ps *stepParams) step {
+	return func() error {
+		return writeCommandOutputToZip(ctx, ps, filepath.Join(linuxUtilsRoot, "uptime.txt"), "uptime")
 	}
 }
 
@@ -998,6 +1051,52 @@ func saveControllerLogDir(ps *stepParams, y *config.RedpandaYaml, logLimitBytes 
 			if err != nil {
 				return fmt.Errorf("unable to save controller logs: %v", err)
 			}
+		}
+		return nil
+	}
+}
+
+func saveStartupLog(ps *stepParams, y *config.RedpandaYaml) step {
+	return func() error {
+		if y.Redpanda.Directory == "" {
+			return fmt.Errorf("failed to save startup_log: 'redpanda.data_directory' is empty on the provided configuration file")
+		}
+		path := filepath.Join(y.Redpanda.Directory, "startup_log")
+		exists, err := afero.Exists(ps.fs, path)
+		if err != nil {
+			return fmt.Errorf("failed to save startup_log: unable to check existence of startup_log: %v", err)
+		}
+		if !exists {
+			return fmt.Errorf("skipping startup_log collection: unable to find file %q", path)
+		}
+		content, err := afero.ReadFile(ps.fs, path)
+		if err != nil {
+			return fmt.Errorf("failed to save startup_log: unable to read startup_log: %v", err)
+		}
+		err = writeFileToZip(ps, "startup_log", content)
+		if err != nil {
+			return fmt.Errorf("failed to save startup_log: %v", err)
+		}
+		return nil
+	}
+}
+
+func saveCrashReports(ps *stepParams, y *config.RedpandaYaml) step {
+	return func() error {
+		if y.Redpanda.Directory == "" {
+			return fmt.Errorf("failed to save crash_reports: 'redpanda.data_directory' is empty on the provided configuration file")
+		}
+		crashReportDir := filepath.Join(y.Redpanda.Directory, "crash_reports")
+		exists, err := afero.Exists(ps.fs, crashReportDir)
+		if err != nil {
+			return fmt.Errorf("failed to save crash_reports: unable to check existence of the crash_reports directory")
+		}
+		if !exists {
+			return fmt.Errorf("skipping crash_reports collection: directory %q does not exists", crashReportDir)
+		}
+		err = writeDirToZip(ps, crashReportDir, "crash_reports", nil)
+		if err != nil {
+			return fmt.Errorf("failed to save crash_reports: %v", err)
 		}
 		return nil
 	}

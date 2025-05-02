@@ -16,8 +16,14 @@
 #include "model/fundamental.h"
 
 #include <seastar/core/metrics_registration.hh>
+#include <seastar/util/defer.hh>
+#include <seastar/util/noncopyable_function.hh>
 
 #include <cstdint>
+
+namespace cluster {
+class archival_metadata_stm;
+}
 
 namespace archival {
 
@@ -30,7 +36,10 @@ namespace archival {
 /// The unit of measure is offset delta.
 class ntp_level_probe {
 public:
-    ntp_level_probe(per_ntp_metrics_disabled disabled, const model::ntp& ntp);
+    ntp_level_probe(
+      per_ntp_metrics_disabled disabled,
+      const model::ntp& ntp,
+      ss::shared_ptr<const cluster::archival_metadata_stm> stm);
     ntp_level_probe(const ntp_level_probe&) = delete;
     ntp_level_probe& operator=(const ntp_level_probe&) = delete;
     ntp_level_probe(ntp_level_probe&&) = delete;
@@ -56,14 +65,22 @@ public:
         _segments_deleted += deleted_count;
     };
 
-    void segments_in_manifest(int64_t count) { _segments_in_manifest = count; };
-
-    void segments_to_delete(int64_t count) { _segments_to_delete = count; };
-
-    void cloud_log_size(uint64_t size) { _cloud_log_size = size; }
-
     void compacted_replaced_bytes(size_t bytes) {
         _compacted_replaced_bytes = bytes;
+    }
+
+    /// Increment metric and return an object which decrements it
+    /// upon destruction.
+    std::optional<ss::deferred_action<ss::noncopyable_function<void()>>>
+    register_archiver_on_hold(bool paused) {
+        if (!paused) {
+            return std::nullopt;
+        }
+        _num_paused_archivers++;
+        ss::noncopyable_function<void()> lmd = [this] {
+            _num_paused_archivers--;
+        };
+        return ss::defer(std::move(lmd));
     }
 
 private:
@@ -77,17 +94,16 @@ private:
     int64_t _pending = 0;
     /// Number of segments deleted by garbage collection
     int64_t _segments_deleted = 0;
-    /// Number of accounted segments in the cloud
-    int64_t _segments_in_manifest = 0;
-    /// Number of segments awaiting deletion
-    int64_t _segments_to_delete = 0;
-    /// size in bytes of the user-visible log
-    uint64_t _cloud_log_size = 0;
     /// cloud bytes "removed" due to compaction operation
     size_t _compacted_replaced_bytes = 0;
 
+    /// total number of paused ntp_archiver instances
+    size_t _num_paused_archivers = 0;
+
     metrics::internal_metric_groups _metrics;
     metrics::public_metric_groups _public_metrics;
+
+    ss::shared_ptr<const cluster::archival_metadata_stm> _stm;
 };
 
 /// Metrics probe for upload housekeeping service

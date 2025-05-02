@@ -22,7 +22,7 @@ page::page(uint64_t offset, seastar::temporary_buffer<char> data)
 page::page(
   uint64_t offset,
   seastar::temporary_buffer<char> data,
-  const class cache_hook& hook)
+  const class utils::s3_fifo::cache_hook& hook)
   : cache_hook(hook)
   , offset_(offset)
   , size_(data.size())
@@ -72,6 +72,11 @@ void page::add_waiter(page::waiter& waiter) { waiters_.push_back(waiter); }
 void page::signal_waiters() {
     waiters_.clear_and_dispose(
       [](page::waiter* waiter) { waiter->ready.set_value(); });
+}
+
+bool page::may_evict() const {
+    return !test_flag(flags::faulting) && !test_flag(flags::dirty)
+           && use_count() == 1;
 }
 
 } // namespace experimental::io

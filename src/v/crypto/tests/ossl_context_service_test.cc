@@ -9,17 +9,22 @@
  * by the Apache License, Version 2.0
  */
 
-#include "../ssl_utils.h"
 #include "base/seastarx.h"
 #include "bytes/bytes.h"
 #include "crypto/crypto.h"
 #include "crypto/exceptions.h"
 #include "crypto/ossl_context_service.h"
-#include "crypto/tests/test_values.h"
+#include "crypto/ssl_utils.h"
 #include "crypto/types.h"
 #include "ossl_context_service_test_base.h"
 #include "ssx/thread_worker.h"
 #include "test_utils/test.h"
+#include "test_values.h"
+#include "thirdparty/openssl/crypto.h"
+#include "thirdparty/openssl/evp.h"
+#include "thirdparty/openssl/provider.h"
+#include "thirdparty/openssl/ssl.h"
+#include "thirdparty/openssl/types.h"
 
 #include <seastar/core/file-types.hh>
 #include <seastar/core/future.hh>
@@ -28,11 +33,6 @@
 #include <seastar/util/log.hh>
 
 #include <gtest/gtest.h>
-#include <openssl/crypto.h>
-#include <openssl/evp.h>
-#include <openssl/provider.h>
-#include <openssl/ssl.h>
-#include <openssl/types.h>
 
 #include <cstdlib>
 
@@ -68,11 +68,16 @@ public:
               << "Skipping FIPS test because module is not present";
         }
 #endif
-
+        auto module_dir = test_utils::get_runfile_path("src/v/crypto/tests");
+        if (!module_dir.has_value()) {
+            char* var = std::getenv("MODULE_DIR");
+            vassert(var != nullptr, "MODULE_DIR is not set");
+            module_dir = var;
+        }
         ASSERT_NO_THROW_CORO(co_await svc.start(
           std::ref(*thread_worker()),
           get_config_file_path(),
-          ::getenv("MODULE_DIR"),
+          ss::sstring{module_dir.value()},
           param.fips_mode));
 
         ASSERT_NO_THROW_CORO(

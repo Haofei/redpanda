@@ -46,15 +46,6 @@ void even_topic_distribution_constraint::update_index(const reassignment& r) {
     _topic_shard_index.at(topic_id).at(r.to) += 1;
 }
 
-std::optional<reassignment>
-even_topic_distribution_constraint::recommended_reassignment() {
-    // This method is deprecated and is ony used in `leader_balancer_greedy`
-    // which doesn't use the `even_topic_distributon_constraint`. Hence there is
-    // no need to implement it here. Once the greedy balancer has been removed
-    // this should be removed as well.
-    vassert(false, "not implemented");
-}
-
 void even_topic_distribution_constraint::rebuild_indexes() {
     _topic_shard_index.clear();
     _topic_replica_index.clear();
@@ -153,64 +144,6 @@ double even_topic_distribution_constraint::adjusted_error(
     return current_error;
 }
 
-std::optional<reassignment>
-even_shard_load_constraint::recommended_reassignment() {
-    auto [load, load_map] = build_load_indexes();
-    const auto curr_error = error();
-
-    // Consider each group from high load core, and record the reassignment
-    // involving the lowest load "to" core.
-    for (const auto& from : boost::adaptors::reverse(load)) {
-        if (mi().muted_nodes().contains(from->first.node_id)) {
-            continue;
-        }
-
-        constexpr size_t load_unset = std::numeric_limits<size_t>::max();
-        size_t lowest_load = load_unset;
-        reassignment lowest_reassign{};
-
-        // Consider each group from high load core, and record the
-        // reassignment involving the lowest load "to" core.
-        for (const auto& group : from->second) {
-            if (mi().muted_groups().contains(
-                  static_cast<uint64_t>(group.first))) {
-                continue;
-            }
-
-            // iterate over all the replicas and look for the lowest load
-            // shard in the replica list
-            for (const auto& to_shard : group.second) {
-                auto load = load_map.at(to_shard);
-                if (likely(load >= lowest_load)) {
-                    // there is no point in evaluating this move, it is
-                    // worse than the best one we've found so far.
-                    continue;
-                }
-
-                if (mi().muted_nodes().contains(to_shard.node_id)) {
-                    continue;
-                }
-
-                lowest_load = load;
-                lowest_reassign = {group.first, from->first, to_shard};
-            }
-        }
-
-        if (lowest_load != load_unset) {
-            // We found a possible reassignment while looking at the current
-            // "from" shard, and while it is the best possible reassignment
-            // found it may not improve the error
-            auto new_error = adjusted_error(
-              curr_error, lowest_reassign.from, lowest_reassign.to);
-            if (new_error + error_jitter < curr_error) {
-                return lowest_reassign;
-            }
-        }
-    }
-
-    return std::nullopt;
-}
-
 double even_shard_load_constraint::adjusted_error(
   double current_error,
   const model::broker_shard& from,
@@ -285,6 +218,10 @@ std::vector<shard_load> even_shard_load_constraint::stats() const {
           // oddly, absl::btree::size returns a signed type
           return shard_load{e->first, static_cast<size_t>(e->second.size())};
       });
+    std::sort(
+      ret.begin(), ret.end(), [](const shard_load& l, const shard_load& r) {
+          return l.shard < r.shard;
+      });
     return ret;
 }
 
@@ -320,12 +257,30 @@ double pinning_constraint::evaluate_internal(const reassignment& r) {
     return diff;
 }
 
-std::optional<reassignment> pinning_constraint::recommended_reassignment() {
-    // This method is deprecated and is ony used in `leader_balancer_greedy`
-    // which doesn't use the `even_topic_distributon_constraint`. Hence there is
-    // no need to implement it here. Once the greedy balancer has been removed
-    // this should be removed as well.
-    vassert(false, "not implemented");
+even_node_load_constraint::even_node_load_constraint(const shard_index& si) {
+    for (const auto& [bs, leaders] : si.shards()) {
+        auto& info = _node2info[bs.node_id];
+        info.shards += 1;
+        info.leaders += leaders.size();
+    }
+}
+
+void even_node_load_constraint::update_index(const reassignment& r) {
+    _node2info[r.from.node_id].leaders -= 1;
+    _node2info[r.to.node_id].leaders += 1;
+}
+
+double even_node_load_constraint::evaluate_internal(const reassignment& r) {
+    // Positive if the reassignment makes the weighted distribution more
+    // balanced. In particular, it is positive iff
+    // (from_info.leaders/from_info.shards - to_info.leaders/to_info.shards)^2
+    // decreases as a result of the reassignment (showing equivalence is
+    // straightforward with some algebraic transforms).
+    const auto& from_info = _node2info[r.from.node_id];
+    const auto& to_info = _node2info[r.to.node_id];
+    return 2 * (double(from_info.leaders) * to_info.shards
+           - double(to_info.leaders) * from_info.shards) - from_info.shards
+           - to_info.shards;
 }
 
 } // namespace cluster::leader_balancer_types

@@ -275,12 +275,11 @@ class DescribeTopicsTest(RedpandaTest):
                 doc_string=
                 "Maximum number of bytes that are not flushed per partition. If the configured threshold is reached, the log is automatically flushed even if it has not been explicitly requested."
             ),
-            "redpanda.iceberg.enabled":
+            "redpanda.iceberg.mode":
             ConfigProperty(
-                config_type="BOOLEAN",
-                value="false",
-                doc_string=
-                "Iceberg format translation enabled on this topic if true."),
+                config_type="STRING",
+                value="disabled",
+                doc_string="Iceberg enablement mode for the topic."),
             "redpanda.leaders.preference":
             ConfigProperty(
                 config_type="STRING",
@@ -288,6 +287,54 @@ class DescribeTopicsTest(RedpandaTest):
                 doc_string=
                 "Preferred location (e.g. rack) for partition leaders of this topic."
             ),
+            "delete.retention.ms":
+            ConfigProperty(
+                config_type="LONG",
+                value="-1",
+                doc_string=
+                "The retention time for tombstone records in a compacted topic. Cannot be enabled at the same time as any of `cloud_storage_enabled`, `cloud_storage_enable_remote_read`, or `cloud_storage_enable_remote_write`."
+            ),
+            "redpanda.iceberg.delete":
+            ConfigProperty(
+                config_type="BOOLEAN",
+                value="true",
+                doc_string=
+                "If true, delete the corresponding Iceberg table when deleting the topic."
+            ),
+            "redpanda.iceberg.partition.spec":
+            ConfigProperty(
+                config_type="STRING",
+                value="",
+                doc_string="Partition spec of the corresponding Iceberg table."
+            ),
+            "redpanda.iceberg.invalid.record.action":
+            ConfigProperty(
+                config_type="STRING",
+                value="dlq_table",
+                doc_string=
+                "Action to take when an invalid record is encountered."),
+            "min.cleanable.dirty.ratio":
+            ConfigProperty(
+                config_type="DOUBLE",
+                value="0.2",
+                doc_string=
+                "The minimum ratio between the number of bytes in \"dirty\" segments and "
+                "the total number of bytes in closed segments that must be reached "
+                "before a partition's log is eligible for compaction in a compact topic. "
+                "The topic property `min.cleanable.dirty.ratio` overrides the value of "
+                "`min_cleanable_dirty_ratio` at the topic level."),
+            "redpanda.remote.allowgaps":
+            ConfigProperty(
+                config_type="BOOLEAN",
+                value="false",
+                doc_string=
+                "controls the eviction of locally-stored log segments when "
+                "tiered storage uploads are paused. set to `false` (default) to "
+                "only evict data that has already been uploaded to cloud storage. "
+                "if the retained data fills the local volume, redpanda will "
+                "throttle producers. set to `true` to allow the eviction of "
+                "locally-stored log segments, which may create gaps in "
+                "offsets."),
         }
 
         tp_spec = TopicSpec()
@@ -326,11 +373,11 @@ class DescribeTopicsTest(RedpandaTest):
             self.logger.debug(
                 f"name: {name}, type: {config_type}, value: {value}, src: {source_type}"
             )
-            assert name in properties
+            assert name in properties, f"{name} not in {properties.keys()}"
             prop = properties[name]
-            assert config_type == prop.config_type
-            assert value == prop.value
-            assert source_type == prop.source_type
+            assert config_type == prop.config_type, f"{config_type=} != {prop.config_type=}"
+            assert value == prop.value, f"{value=} != {prop.value=}"
+            assert source_type == prop.source_type, f"{source_type=} != {prop.source_type=}"
 
         # The first empty line is where the table ends and the doc section begins
         assert last_pos is not None, "Something went wrong with property match"

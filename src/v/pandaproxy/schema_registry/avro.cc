@@ -20,6 +20,7 @@
 #include "pandaproxy/schema_registry/compatibility.h"
 #include "pandaproxy/schema_registry/error.h"
 #include "pandaproxy/schema_registry/errors.h"
+#include "pandaproxy/schema_registry/schema_getter.h"
 #include "pandaproxy/schema_registry/sharded_store.h"
 #include "pandaproxy/schema_registry/types.h"
 #include "strings/string_switch.h"
@@ -115,18 +116,29 @@ avro_compatibility_result check_compatible(
                       *reader.leafAt(int(r_idx)),
                       *writer.leafAt(int(w_idx)),
                       fields_p / std::to_string(r_idx) / "type"));
-                } else if (
-                  reader.defaultValueAt(int(r_idx)).type() == avro::AVRO_NULL) {
-                    // if the reader's record schema has a field with no default
-                    // value, and writer's schema does not have a field with the
-                    // same name, an error is signalled.
+                } else {
+                    // if the reader's record schema has a field with no
+                    // default value, and writer's schema does not have a
+                    // field with the same name, an error is signalled.
+                    // For union, the default must correspond to the first
+                    // type.
+                    const auto& def = reader.defaultValueAt(int(r_idx));
 
-                    // For union, the default must correspond to the first type.
-                    // The default may be null.
-                    const auto& r_leaf = reader.leafAt(int(r_idx));
-                    if (
-                      r_leaf->type() != avro::Type::AVRO_UNION
-                      || r_leaf->leafAt(0)->type() != avro::Type::AVRO_NULL) {
+                    // Note: this code is overly restrictive for null-type
+                    // fields with null defaults. This is because the Avro API
+                    // is not expressive enough to differentiate the two.
+                    // Union type field's default set to null:
+                    //   def=GenericDatum(Union(Null))
+                    // Union type field's default missing:
+                    //   def=GenericDatum(Null)
+                    // Null type field's default set to null:
+                    //   def=GenericDatum(Null)
+                    // Null type field's default missing:
+                    //   def=GenericDatum(Null)
+                    auto default_unset = !def.isUnion()
+                                         && def.type() == avro::AVRO_NULL;
+
+                    if (default_unset) {
                         compat_result.emplace<avro_incompatibility>(
                           fields_p / std::to_string(r_idx),
                           avro_incompatibility::Type::
@@ -484,7 +496,7 @@ result<void> sanitize(json::Value::Array& a, sanitize_context& ctx) {
 } // namespace
 
 avro_schema_definition::avro_schema_definition(
-  avro::ValidSchema vs, canonical_schema_definition::references refs)
+  avro::ValidSchema vs, schema_definition::references refs)
   : _impl(std::move(vs))
   , _refs(std::move(refs)) {}
 
@@ -506,11 +518,10 @@ std::ostream& operator<<(std::ostream& os, const avro_schema_definition& def) {
     return os;
 }
 
-canonical_schema_definition::raw_string avro_schema_definition::raw() const {
+schema_definition::raw_string avro_schema_definition::raw() const {
     iobuf_ostream os;
     _impl.toJson(os.ostream());
-    return canonical_schema_definition::raw_string{
-      json::minify(std::move(os).buf())};
+    return schema_definition::raw_string{json::minify(std::move(os).buf())};
 }
 
 ss::sstring avro_schema_definition::name() const {
@@ -522,38 +533,46 @@ public:
     bool contains(const ss::sstring& name) const {
         return _names.contains(name);
     }
-    bool insert(ss::sstring name, canonical_schema_definition def) {
+    bool insert(ss::sstring name, schema_definition def) {
         bool inserted = _names.insert(std::move(name)).second;
         if (inserted) {
             _schemas.push_back(std::move(def).raw());
         }
         return inserted;
     }
-    canonical_schema_definition::raw_string flatten() && {
+    schema_definition::raw_string flatten() && {
         iobuf out;
         for (auto& s : _schemas) {
             out.append(std::move(s));
             out.append("\n", 1);
         }
-        return canonical_schema_definition::raw_string{std::move(out)};
+        return schema_definition::raw_string{std::move(out)};
     }
 
 private:
     absl::flat_hash_set<ss::sstring> _names;
-    std::vector<canonical_schema_definition::raw_string> _schemas;
+    std::vector<schema_definition::raw_string> _schemas;
 };
 
 ss::future<collected_schema> collect_schema(
-  sharded_store& store,
+  schema_getter& store,
   collected_schema collected,
   ss::sstring name,
-  canonical_schema schema) {
+  subject_schema schema) {
     for (const auto& ref : schema.def().refs()) {
-        if (!collected.contains(ref.name)) {
-            auto ss = co_await store.get_subject_schema(
-              ref.sub, ref.version, include_deleted::no);
-            collected = co_await collect_schema(
-              store, std::move(collected), ref.name, std::move(ss.schema));
+        if (name != ref.name && !collected.contains(ref.name)) {
+            try {
+                auto ss = co_await store.get_subject_schema(
+                  ref.sub, ref.version, include_deleted::yes);
+                collected = co_await collect_schema(
+                  store, std::move(collected), ref.name, std::move(ss.schema));
+            } catch (const exception& e) {
+                if (failed_subject_schema_lookup(e.code())) {
+                    throw as_exception(
+                      no_reference_found_for(schema, ref.sub, ref.version));
+                }
+                throw;
+            }
         }
     }
     collected.insert(std::move(name), std::move(schema).def());
@@ -561,7 +580,7 @@ ss::future<collected_schema> collect_schema(
 }
 
 ss::future<avro_schema_definition>
-make_avro_schema_definition(sharded_store& store, canonical_schema schema) {
+make_avro_schema_definition(schema_getter& store, subject_schema schema) {
     std::optional<avro::Exception> ex;
     try {
         auto name = schema.sub()();
@@ -580,8 +599,8 @@ make_avro_schema_definition(sharded_store& store, canonical_schema schema) {
         fmt::format("Invalid schema {}", ex->what())})));
 }
 
-result<canonical_schema_definition>
-sanitize_avro_schema_definition(unparsed_schema_definition def) {
+result<schema_definition>
+sanitize_avro_schema_definition(schema_definition def) {
     json::Document doc;
     constexpr auto flags = rapidjson::kParseDefaultFlags
                            | rapidjson::kParseStopWhenDoneFlag;
@@ -619,10 +638,26 @@ sanitize_avro_schema_definition(unparsed_schema_definition def) {
         return error_info{error_code::schema_invalid, "Invalid schema"};
     }
 
-    return canonical_schema_definition{
-      canonical_schema_definition::raw_string{std::move(buf).as_iobuf()},
+    return schema_definition{
+      schema_definition::raw_string{std::move(buf).as_iobuf()},
       schema_type::avro,
       def.refs()};
+}
+
+ss::future<subject_schema> make_canonical_avro_schema(
+  schema_getter&, subject_schema unparsed_schema, normalize norm) {
+    auto [sub, unparsed] = std::move(unparsed_schema).destructure();
+    auto [def, type, refs] = std::move(unparsed).destructure();
+    if (norm) {
+        std::sort(refs.begin(), refs.end());
+        refs.erase(std::unique(refs.begin(), refs.end()), refs.end());
+    }
+    schema_definition schema{std::move(def), type, std::move(refs)};
+    // TODO: Check references
+    // co_await collect_schema(store, {}, sub, {sub, schema.share()});
+    co_return subject_schema{
+      std::move(sub),
+      sanitize_avro_schema_definition(std::move(schema)).value()};
 }
 
 compatibility_result check_compatible(

@@ -356,12 +356,17 @@ public:
     checked<tx_metadata, tm_stm::op_status>
     reset_transaction_state(tx_metadata& tx);
 
+    raft::stm_initial_recovery_policy
+    get_initial_recovery_policy() const final {
+        return raft::stm_initial_recovery_policy::read_everything;
+    }
+
 protected:
     ss::future<> apply_raft_snapshot(const iobuf&) final;
 
 private:
     std::optional<tx_metadata> find_tx(const kafka::transactional_id&);
-    ss::future<>
+    ss::future<raft::local_snapshot_applied>
     apply_local_snapshot(raft::stm_snapshot_header, iobuf&&) override;
     ss::future<raft::stm_snapshot>
     take_local_snapshot(ssx::semaphore_units apply_units) override;
@@ -376,7 +381,8 @@ private:
       do_sync(model::timeout_clock::duration);
     ss::future<checked<tx_metadata, tm_stm::op_status>>
       do_update_tx(tx_metadata, model::term_id);
-
+    ss::future<tm_stm::op_status>
+      replicate_tx_update(tx_metadata, model::term_id);
     ss::future<tm_stm::op_status> do_register_new_producer(
       model::term_id,
       kafka::transactional_id,
@@ -461,7 +467,8 @@ public:
 
     void create(
       raft::state_machine_manager_builder& builder,
-      raft::consensus* raft) final;
+      raft::consensus* raft,
+      const cluster::stm_instance_config& cfg) final;
 
 private:
     ss::sharded<features::feature_table>& _feature_table;

@@ -8,12 +8,21 @@
 // by the Apache License, Version 2.0
 
 #include "base/vlog.h"
+#include "cluster/feature_manager.h"
+#include "cluster/feature_update_action.h"
+#include "container/fragmented_vector.h"
+#include "features/feature_state.h"
+#include "features/feature_table.h"
 #include "gtest/gtest.h"
 #include "kafka/server/tests/produce_consume_utils.h"
 #include "model/namespace.h"
+#include "model/record_batch_reader.h"
 #include "model/record_batch_types.h"
+#include "model/timeout_clock.h"
 #include "random/generators.h"
 #include "redpanda/tests/fixture.h"
+#include "storage/segment.h"
+#include "storage/segment_utils.h"
 #include "storage/tests/manual_mixin.h"
 #include "storage/types.h"
 #include "test_utils/async.h"
@@ -28,6 +37,7 @@
 
 #include <chrono>
 #include <numeric>
+#include <ranges>
 
 using namespace std::chrono_literals;
 
@@ -127,7 +137,7 @@ public:
         // Generate some segments.
         size_t val_count = starting_value;
         for (size_t i = 0; i < num_segments; i++) {
-            for (int r = 0; r < batches_per_segment; r++) {
+            for (size_t r = 0; r < batches_per_segment; r++) {
                 auto kvs = tests::kv_t::sequence(
                   val_count,
                   records_per_batch,
@@ -224,7 +234,7 @@ public:
 
     ss::future<bool> do_sliding_window_compact(
       model::offset max_collect_offset,
-      std::optional<std::chrono::milliseconds> tombstone_ret_ms,
+      std::optional<std::chrono::milliseconds> tombstone_ret_ms = std::nullopt,
       std::optional<size_t> max_keys = std::nullopt) {
         // Compact, allowing the map to grow as large as we need.
         ss::abort_source never_abort;
@@ -241,6 +251,25 @@ public:
         // sliding_window_compact takes cfg by const&, so return will be a
         // use-after-free
         co_return co_await disk_log.sliding_window_compact(cfg);
+    }
+
+    ss::future<storage::compaction_result> do_segment_self_compact(
+      ss::lw_shared_ptr<storage::segment> seg,
+      model::offset max_collect_offset,
+      std::optional<std::chrono::milliseconds> tombstone_ret_ms = std::nullopt,
+      std::optional<size_t> max_keys = std::nullopt) {
+        ss::abort_source never_abort;
+        storage::compaction_config cfg(
+          max_collect_offset,
+          tombstone_ret_ms,
+          ss::default_priority_class(),
+          never_abort,
+          std::nullopt,
+          max_keys,
+          nullptr,
+          nullptr);
+        auto& disk_log = dynamic_cast<storage::disk_log_impl&>(*log);
+        co_return co_await disk_log.segment_self_compact(cfg, seg);
     }
 
 protected:
@@ -320,6 +349,10 @@ TEST_P(CompactionFixtureParamTest, TestDedupeOnePass) {
                                       model::offset(0))
                                     .get();
     ASSERT_EQ(consumed_kvs, consumed_kvs_restarted);
+
+    for (const auto& seg : log->segments()) {
+        ASSERT_EQ(seg->offsets().get_base_offset(), seg->index().base_offset());
+    }
 }
 
 INSTANTIATE_TEST_SUITE_P(
@@ -361,6 +394,103 @@ TEST_F(CompactionFixtureTest, TestDedupeMultiPass) {
     ASSERT_EQ(segments_compacted_2, segments_compacted_3);
 
     ASSERT_NO_FATAL_FAILURE(check_records(cardinality, num_segments - 1).get());
+
+    for (const auto& seg : disk_log.segments()) {
+        ASSERT_EQ(seg->offsets().get_base_offset(), seg->index().base_offset());
+    }
+}
+
+TEST_F(CompactionFixtureTest, TestChunkedCompaction) {
+    constexpr auto num_segments = 3;
+    constexpr auto cardinality = 100;
+    size_t batches_per_segment = 5;
+    size_t records_per_batch = 10;
+    map_t latest_kv_map;
+    generate_data(
+      num_segments,
+      cardinality,
+      batches_per_segment,
+      records_per_batch,
+      0,
+      false,
+      &latest_kv_map)
+      .get();
+
+    // Compact with a max keys value far below the number of keys in the
+    // segment.
+    bool did_compact = do_sliding_window_compact(
+                         log->segments().back()->offsets().get_base_offset(),
+                         std::nullopt,
+                         5)
+                         .get();
+
+    ASSERT_TRUE(did_compact);
+
+    {
+        tests::kafka_consume_transport consumer(make_kafka_client().get());
+        consumer.start().get();
+        auto consumed_kvs = consumer
+                              .consume_from_partition(
+                                topic_name,
+                                model::partition_id(0),
+                                model::offset(0))
+                              .get();
+        ASSERT_NO_FATAL_FAILURE();
+
+        ASSERT_EQ(consumed_kvs.size(), latest_kv_map.size());
+
+        // Assert the key consumed is in the latest_kv_map.
+        for (const auto& kv : consumed_kvs) {
+            ASSERT_TRUE(latest_kv_map.contains(kv.key));
+            ASSERT_EQ(kv.val, latest_kv_map[kv.key]);
+        }
+    }
+    auto& disk_log = dynamic_cast<storage::disk_log_impl&>(*log);
+    const auto& segs = disk_log.segments();
+
+    ASSERT_TRUE(segs[0]->finished_self_compaction());
+    ASSERT_TRUE(segs[0]->finished_windowed_compaction());
+    ASSERT_FALSE(segs[0]->has_clean_compact_timestamp());
+
+    ASSERT_TRUE(segs[1]->finished_self_compaction());
+    ASSERT_TRUE(segs[1]->finished_windowed_compaction());
+    ASSERT_FALSE(segs[1]->has_clean_compact_timestamp());
+
+    ASSERT_TRUE(segs[2]->finished_self_compaction());
+    ASSERT_TRUE(segs[2]->finished_windowed_compaction());
+    ASSERT_TRUE(segs[2]->has_clean_compact_timestamp());
+
+    ASSERT_TRUE(disk_log.get_last_compaction_window_start_offset().has_value());
+    ASSERT_EQ(
+      disk_log.get_last_compaction_window_start_offset().value(),
+      segs[2]->offsets().get_base_offset());
+
+    auto num_chunked_compaction_runs
+      = disk_log.get_probe().get_chunked_compaction_runs();
+    ASSERT_EQ(num_chunked_compaction_runs, 1);
+
+    // Compact again, with no limit on keys.
+    did_compact = do_sliding_window_compact(
+                    log->segments().back()->offsets().get_base_offset(),
+                    std::nullopt)
+                    .get();
+
+    ASSERT_TRUE(did_compact);
+
+    // Now the first two segments should be marked as clean.
+    ASSERT_TRUE(segs[0]->has_clean_compact_timestamp());
+    ASSERT_TRUE(segs[1]->has_clean_compact_timestamp());
+
+    ASSERT_FALSE(
+      disk_log.get_last_compaction_window_start_offset().has_value());
+
+    num_chunked_compaction_runs
+      = disk_log.get_probe().get_chunked_compaction_runs();
+    ASSERT_EQ(num_chunked_compaction_runs, 1);
+
+    for (const auto& seg : disk_log.segments()) {
+        ASSERT_EQ(seg->offsets().get_base_offset(), seg->index().base_offset());
+    }
 }
 
 TEST_F(CompactionFixtureTest, TestDedupeMultiPassAddedSegment) {
@@ -402,18 +532,18 @@ TEST_F(CompactionFixtureTest, TestDedupeMultiPassAddedSegment) {
     ASSERT_LT(segments_compacted, segments_compacted_2);
 
     // segs.size() - 2 to account for active segment.
-    for (int i = 0; i < segs.size() - 2; ++i) {
+    for (size_t i = 0; i < segs.size() - 2; ++i) {
         auto& seg = segs[i];
         ASSERT_TRUE(seg->finished_windowed_compaction());
         ASSERT_TRUE(seg->finished_self_compaction());
-        ASSERT_TRUE(seg->index().has_clean_compact_timestamp());
+        ASSERT_TRUE(seg->has_clean_compact_timestamp());
     }
 
     // The last added segment should not have had any compaction operations
     // performed.
     ASSERT_FALSE(segs[segs.size() - 2]->finished_windowed_compaction());
     ASSERT_FALSE(segs[segs.size() - 2]->finished_self_compaction());
-    ASSERT_FALSE(segs[segs.size() - 2]->index().has_clean_compact_timestamp());
+    ASSERT_FALSE(segs[segs.size() - 2]->has_clean_compact_timestamp());
 
     // We should have compacted all the way down to the start of the log, and
     // reset the start offset.
@@ -426,7 +556,7 @@ TEST_F(CompactionFixtureTest, TestDedupeMultiPassAddedSegment) {
     // Now, these values should be set.
     ASSERT_TRUE(segs[segs.size() - 2]->finished_windowed_compaction());
     ASSERT_TRUE(segs[segs.size() - 2]->finished_self_compaction());
-    ASSERT_TRUE(segs[segs.size() - 2]->index().has_clean_compact_timestamp());
+    ASSERT_TRUE(segs[segs.size() - 2]->has_clean_compact_timestamp());
 
     auto segments_compacted_3 = disk_log.get_probe().get_segments_compacted();
     ASSERT_LT(segments_compacted_2, segments_compacted_3);
@@ -447,6 +577,10 @@ TEST_F(CompactionFixtureTest, TestDedupeMultiPassAddedSegment) {
       disk_log.get_last_compaction_window_start_offset().has_value());
 
     ASSERT_NO_FATAL_FAILURE(check_records(cardinality, num_segments - 1).get());
+
+    for (const auto& seg : disk_log.segments()) {
+        ASSERT_EQ(seg->offsets().get_base_offset(), seg->index().base_offset());
+    }
 }
 
 class CompactionFixtureBatchSizeParamTest
@@ -725,8 +859,6 @@ TEST_F(CompactionFixtureTest, TestTombstones) {
     // Generate a tombstone record for "key0".
     generate_tombstones(1, 1, 1).get();
 
-    auto tombstone_retention_ms = 1000ms;
-
     auto num_tombstone_segments = 1;
     auto total_segments = num_segments + num_tombstone_segments;
 
@@ -739,7 +871,7 @@ TEST_F(CompactionFixtureTest, TestTombstones) {
     // Perform first round of sliding window compaction.
     bool did_compact = do_sliding_window_compact(
                          log->segments().back()->offsets().get_base_offset(),
-                         tombstone_retention_ms)
+                         std::nullopt)
                          .get();
 
     ASSERT_TRUE(did_compact);
@@ -764,7 +896,7 @@ TEST_F(CompactionFixtureTest, TestTombstones) {
     // clean_compact_timestamp set, since we fully indexed all of them.
     int num_clean_before = 0;
     for (const auto& seg : log->segments()) {
-        if (seg->index().has_clean_compact_timestamp()) {
+        if (seg->has_clean_compact_timestamp()) {
             ++num_clean_before;
         }
     }
@@ -775,7 +907,7 @@ TEST_F(CompactionFixtureTest, TestTombstones) {
     auto segments_compacted = log->get_probe().get_segments_compacted();
     did_compact = do_sliding_window_compact(
                     log->segments().back()->offsets().get_base_offset(),
-                    tombstone_retention_ms)
+                    std::nullopt)
                     .get();
 
     ASSERT_FALSE(did_compact);
@@ -785,7 +917,7 @@ TEST_F(CompactionFixtureTest, TestTombstones) {
     // Check that the clean_compact_timestamps got persisted in the index_state.
     int num_clean_again = 0;
     for (const auto& seg : log->segments()) {
-        if (seg->index().has_clean_compact_timestamp()) {
+        if (seg->has_clean_compact_timestamp()) {
             ++num_clean_again;
         }
     }
@@ -805,15 +937,17 @@ TEST_F(CompactionFixtureTest, TestTombstones) {
     // even after a restart.
     int num_clean_after = 0;
     for (const auto& seg : log->segments()) {
-        if (seg->index().has_clean_compact_timestamp()) {
+        if (seg->has_clean_compact_timestamp()) {
             ++num_clean_after;
         }
     }
     ASSERT_EQ(num_clean_after, num_clean_before);
 
-    // Sleep for tombstone.retention.ms time, so that the next time we attempt
+    auto tombstone_retention_ms = 1ms;
+
+    // Sleep for a short amount of time, so that the next time we attempt
     // to compact the tombstone record will be eligible for deletion.
-    ss::sleep(tombstone_retention_ms).get();
+    ss::sleep(100ms).get();
 
     did_compact = do_sliding_window_compact(
                     log->segments().back()->offsets().get_base_offset(),
@@ -881,8 +1015,8 @@ TEST_P(CompactionFixtureTombstonesParamTest, TestTombstonesCompletelyEmptyLog) {
                          .get();
 
     ASSERT_TRUE(did_compact);
-    for (int i = 0; i < num_segments; ++i) {
-        ASSERT_TRUE(log->segments()[i]->index().has_clean_compact_timestamp());
+    for (size_t i = 0; i < num_segments; ++i) {
+        ASSERT_TRUE(log->segments()[i]->has_clean_compact_timestamp());
     }
 
     {
@@ -1028,13 +1162,13 @@ TEST_P(
     }
 
     std::optional<std::chrono::milliseconds> tombstone_retention_ms
-      = wait_for_retention_ms ? 1000ms
+      = wait_for_retention_ms ? 1ms
                               : std::optional<std::chrono::milliseconds>{};
 
-    // Maybe sleep for tombstone.retention.ms time, so that the next time we
+    // Maybe sleep for a short amount of time time, so that the next time we
     // attempt to compact the tombstone records will be eligible for deletion.
     if (wait_for_retention_ms) {
-        ss::sleep(tombstone_retention_ms.value()).get();
+        ss::sleep(100ms).get();
     }
 
     did_compact = do_sliding_window_compact(
@@ -1148,7 +1282,7 @@ TEST_P(
 
         auto num_clean_compacted = 0;
         for (const auto& seg : log->segments()) {
-            if (seg->index().has_clean_compact_timestamp()) {
+            if (seg->has_clean_compact_timestamp()) {
                 ++num_clean_compacted;
             }
         }
@@ -1182,13 +1316,13 @@ TEST_P(
     }
 
     std::optional<std::chrono::milliseconds> tombstone_retention_ms
-      = wait_for_retention_ms ? 1000ms
+      = wait_for_retention_ms ? 1ms
                               : std::optional<std::chrono::milliseconds>{};
 
-    // Maybe sleep for tombstone.retention.ms time, so that the next time we
+    // Maybe sleep for a short amount of time, so that the next time we
     // attempt to compact the tombstone records will be eligible for deletion.
     if (wait_for_retention_ms) {
-        ss::sleep(tombstone_retention_ms.value()).get();
+        ss::sleep(100ms).get();
     }
 
     did_compact = do_sliding_window_compact(
@@ -1247,3 +1381,166 @@ INSTANTIATE_TEST_SUITE_P(
   RandomDistributionMultiPass,
   CompactionFixtureTombstonesMultiPassRandomParamTest,
   ::testing::Combine(::testing::Bool(), ::testing::Values(10, 25, 100)));
+
+class CompactionFixturePlaceHolderBatchTest
+  : public CompactionFixtureTest
+  , public ::testing::WithParamInterface<bool> {};
+
+TEST_P(
+  CompactionFixturePlaceHolderBatchTest,
+  TestSelfCompactionWithPlaceholderBatch) {
+    bool placeholder_batch_enabled = GetParam();
+    if (!placeholder_batch_enabled) {
+        cluster::feature_manager& feature_manager
+          = app.controller->get_feature_manager().local();
+        feature_manager
+          .write_action(cluster::feature_update_action{
+            .feature_name = ss::sstring{"compaction_placeholder_batch"},
+            .action = cluster::feature_update_action::action_t::deactivate})
+          .get();
+        auto& feature_table = app.controller->get_feature_table().local();
+        auto feature_state
+          = feature_table
+              .get_state(features::feature::compaction_placeholder_batch)
+              .get_state();
+        ASSERT_TRUE(
+          feature_state == features::feature_state::state::disabled_active);
+    }
+
+    constexpr auto num_segments = 1;
+    constexpr auto cardinality = 1;
+    size_t batches_per_segment = 1;
+    size_t records_per_batch = 1;
+    map_t latest_kv_map;
+    generate_data(
+      num_segments,
+      cardinality,
+      batches_per_segment,
+      records_per_batch,
+      0,
+      true,
+      &latest_kv_map)
+      .get();
+
+    ASSERT_EQ(latest_kv_map.size(), 1);
+
+    auto& disk_log = dynamic_cast<storage::disk_log_impl&>(*log);
+    auto& segs = disk_log.segments();
+
+    ASSERT_EQ(segs.size(), 2);
+
+    auto check_num_data_batches =
+      [](const auto& batches, int expected_num_data_batches) {
+          int num_data_batches = 0;
+          for (const auto& b : batches) {
+              if (b.header().type == model::record_batch_type::raft_data) {
+                  ++num_data_batches;
+              }
+          }
+          ASSERT_EQ(num_data_batches, expected_num_data_batches);
+      };
+
+    // Mark the segment as having completed window compaction and cleanly
+    // compacted.
+    storage::internal::mark_segment_as_finished_window_compaction(
+      segs[0], true, disk_log.get_probe())
+      .get();
+
+    // Sleep to allow self compaction to _possibly_ remove the tombstone record.
+    ss::sleep(100ms).get();
+
+    // Self compact the segment
+    do_segment_self_compact(segs[0], model::offset::max(), 1ms).get();
+
+    {
+        auto seg_0_reader_cfg = storage::log_reader_config(
+          segs[0]->offsets().get_base_offset(),
+          model::offset::max(),
+          ss::default_priority_class());
+        auto seg_0_batches = model::consume_reader_to_memory(
+                               log->make_reader(seg_0_reader_cfg).get(),
+                               model::no_timeout)
+                               .get();
+
+        // We should expect that even though the tombstone is removable, because
+        // it is the last record in the segment, it is persisted due to
+        // feature::compaction_placeholder_batch being disabled.
+        auto num_expected_data_batches = placeholder_batch_enabled ? 0 : 1;
+        check_num_data_batches(seg_0_batches, num_expected_data_batches);
+    }
+
+    ASSERT_EQ(
+      segs[0]->offsets().get_base_offset(), segs[0]->index().base_offset());
+}
+
+INSTANTIATE_TEST_SUITE_P(
+  PlaceholderBatchEnabled,
+  CompactionFixturePlaceHolderBatchTest,
+  ::testing::Bool());
+
+TEST_F(CompactionFixtureTest, TestSegmentIndexReconstructed) {
+    constexpr auto num_segments = 5;
+    constexpr auto cardinality
+      = 1000000; // Large enough to ensure no duplicates- segment index relative
+                 // offsets _should_ be the same before and after compaction.
+    size_t batches_per_segment = 100;
+    size_t records_per_batch = 10;
+    generate_data(
+      num_segments, cardinality, batches_per_segment, records_per_batch)
+      .get();
+
+    auto& disk_log = dynamic_cast<storage::disk_log_impl&>(*log);
+    auto& segs = disk_log.segments();
+
+    for (const auto& seg : segs) {
+        if (!seg->has_appender()) {
+            auto pre_compact_relative_offset_index
+              = seg->index()
+                  .get_index_state()
+                  .index.copy_relative_offset_index();
+            // Self compact the segment
+            do_segment_self_compact(seg, model::offset::max()).get();
+            auto post_compact_relative_offset_index
+              = seg->index()
+                  .get_index_state()
+                  .index.copy_relative_offset_index();
+
+            ASSERT_EQ(
+              pre_compact_relative_offset_index,
+              post_compact_relative_offset_index);
+            ASSERT_EQ(
+              seg->offsets().get_base_offset(), seg->index().base_offset());
+        }
+    }
+
+    std::vector<chunked_vector<uint32_t>>
+      pre_sliding_window_index_relative_offsets;
+    for (const auto& seg : segs) {
+        if (!seg->has_appender()) {
+            pre_sliding_window_index_relative_offsets.push_back(
+              seg->index()
+                .get_index_state()
+                .index.copy_relative_offset_index());
+        }
+    }
+
+    bool did_compact = do_sliding_window_compact(model::offset::max()).get();
+    ASSERT_TRUE(did_compact);
+
+    std::vector<chunked_vector<uint32_t>>
+      post_sliding_window_index_relative_offsets;
+    for (const auto& seg : segs) {
+        if (!seg->has_appender()) {
+            post_sliding_window_index_relative_offsets.push_back(
+              seg->index()
+                .get_index_state()
+                .index.copy_relative_offset_index());
+            ASSERT_EQ(
+              seg->offsets().get_base_offset(), seg->index().base_offset());
+        }
+    }
+
+    ASSERT_EQ(
+      pre_sliding_window_index_relative_offsets,
+      post_sliding_window_index_relative_offsets);
+}

@@ -23,6 +23,7 @@ MESSAGES = [
     "describe_acls",
     "describe_client_quotas",
     "describe_configs",
+    "describe_cluster",
     "describe_groups",
     "describe_log_dirs",
     "describe_producers",
@@ -86,6 +87,7 @@ def generate_kafka_messages(name = "generate_kafka_messages"):
                 tools = [
                     "//src/v/kafka/protocol/schemata:generator",
                 ],
+                toolchains = ["@rules_python//python:current_py_toolchain"],
             )
 
             redpanda_cc_library(

@@ -13,6 +13,7 @@
 #include "config/property.h"
 #include "metrics/metrics.h"
 #include "model/metadata.h"
+#include "raft/buffered_protocol.h"
 #include "raft/heartbeat_manager.h"
 #include "raft/notification.h"
 #include "raft/recovery_memory_quota.h"
@@ -48,12 +49,16 @@ public:
         config::binding<std::chrono::milliseconds> write_caching_flush_ms;
         config::binding<std::optional<size_t>> write_caching_flush_bytes;
         config::binding<bool> enable_longest_log_detection;
+        config::binding<size_t> max_buffered_bytes_per_node;
+        config::binding<size_t> max_inflight_requests_per_node;
     };
     using config_provider_fn = ss::noncopyable_function<configuration()>;
 
     group_manager(
       model::node_id self,
-      ss::scheduling_group raft_scheduling_group,
+      ss::scheduling_group raft_recv_sg,
+      ss::scheduling_group raft_send_sg,
+      ss::scheduling_group raft_heartbeats_sched_group,
       config_provider_fn,
       recovery_memory_quota::config_provider_fn recovery_mem_cfg,
       ss::sharded<rpc::connection_cache>& clients,
@@ -68,7 +73,7 @@ public:
 
     ss::future<ss::lw_shared_ptr<raft::consensus>> create_group(
       raft::group_id id,
-      std::vector<model::broker> nodes,
+      const std::vector<raft::vnode>& nodes,
       ss::shared_ptr<storage::log> log,
       with_learner_recovery_throttle enable_learner_recovery_throttle,
       keep_snapshotted_log = keep_snapshotted_log::no);
@@ -105,12 +110,11 @@ private:
     ss::future<xshard_transfer_state>
     do_shutdown(ss::lw_shared_ptr<consensus>, bool remove_persistent_state);
 
-    raft::group_configuration create_initial_configuration(
-      std::vector<model::broker>, model::revision_id) const;
     model::node_id _self;
-    ss::scheduling_group _raft_sg;
-    raft::consensus_client_protocol _client;
+    ss::scheduling_group _raft_recv_sg;
+    ss::scheduling_group _raft_send_sg;
     configuration _configuration;
+    ss::shared_ptr<raft::buffered_protocol> _buffered_protocol;
     raft::heartbeat_manager _heartbeats;
     ss::gate _gate;
     std::vector<ss::lw_shared_ptr<raft::consensus>> _groups;

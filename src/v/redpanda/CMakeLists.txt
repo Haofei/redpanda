@@ -63,9 +63,11 @@ v_cc_library(
     monitor_unsafe.cc
   DEPS
     Seastar::seastar
+    v::crash_tracker
     v::crypto
     v::cluster
-    v::datalake
+    v::datalake_coordinator
+    v::datalake_manager
     v::debug_bundle
     v::kafka_recovery
     v::finjector
@@ -80,7 +82,8 @@ v_cc_library(
     v::transform
     v::version 
     v::wasm
-    v::cloud_topics_reconciler
+    v::cloud_topics_app
+    v::cloud_topics_dl_stm
   )
 
 add_subdirectory(tests)

@@ -16,11 +16,34 @@
 #include "model/record.h"
 #include "raft/fwd.h"
 #include "raft/offset_monitor.h"
+#include "utils/mutex.h"
 
 namespace raft {
 using snapshot_at_offset_supported
   = ss::bool_class<struct snapshot_at_offset_supported_tag>;
 class consensus;
+
+/**
+ * Class defining the state machine behavior when it is created for the first
+ * time for a given partition.
+ *
+ * There are two possible policies:
+ *
+ *  - read_everything - when there is no other state the state machine will
+ *                      starts its existence with next offset set to the
+ *                      beginning of the local log. Be careful as read
+ *                      everything may lead to a large amount of data being
+ *                      read on startup.
+ *
+ *   - skip_to_end    - when there is no other state the state machine will
+ *                      start reading from the first confirmed committed offset
+ *                      (see state machine manager implementation for the
+ *                      detailed description).
+ */
+enum class stm_initial_recovery_policy : uint8_t {
+    read_everything = 0,
+    skip_to_end = 1,
+};
 
 /**
  * State machine interface. The class provides an interface that must be
@@ -41,9 +64,11 @@ public:
       model::offset,
       model::timeout_clock::time_point,
       std::optional<std::reference_wrapper<ss::abort_source>> as
-      = std::nullopt);
+      = std::nullopt) const;
 
     /**
+     * Applies the batch and updates the next offset to be applied.
+     *
      * This function accepts a batch reference, an implementer may copy a batch
      * with `model::record_batch::copy()` method, the interface design is a
      * consequence of having single apply fiber for all state machines built on
@@ -51,7 +76,8 @@ public:
      * whole record is applied or not. When exception is thrown from apply
      * method it will be retried with the same record batch.
      */
-    virtual ss::future<> apply(const model::record_batch&) = 0;
+    ss::future<> apply(const model::record_batch&);
+
     /**
      * This function will be called every time a snapshot is applied in apply
      * fiber. Snapshot will contain only a data specific for this state machine
@@ -93,7 +119,21 @@ public:
         return snapshot_at_offset_supported::yes;
     }
 
+    /**
+     * Returns state machine configured initial recovery policy.
+     */
+    virtual stm_initial_recovery_policy get_initial_recovery_policy() const = 0;
+
 protected:
+    /**
+     * Must always be called under apply mutex scope and apply_units argument
+     * is in place to enforce that. It is const qualified to ensure the apply
+     * impelementors do not control their lifetime.
+     */
+    virtual ss::future<>
+    apply(const model::record_batch&, const ssx::semaphore_units& apply_units)
+      = 0;
+
     /**
      *  Lifecycle is managed by state_machine_manager
      */
@@ -107,14 +147,16 @@ protected:
     model::offset next() const { return _next; }
     void set_next(model::offset offset);
 
+    mutex _apply_lock{"state_machine_base::apply_lock"};
+
     friend class batch_applicator;
     friend class state_machine_manager;
 
 private:
-    offset_monitor _waiters;
+    mutable offset_monitor<model::offset> _waiters;
     model::offset _next{0};
 };
-
+std::ostream& operator<<(std::ostream&, const stm_initial_recovery_policy&);
 /**
  * This flavor of state machine base allows implementer to opt out from taking
  * snapshot at arbitrary offset. This way a partition that the STM is based on

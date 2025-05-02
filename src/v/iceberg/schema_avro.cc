@@ -1,11 +1,12 @@
-// Copyright 2024 Redpanda Data, Inc.
-//
-// Use of this software is governed by the Business Source License
-// included in the file licenses/BSL.md
-//
-// As of the Change Date specified in that file, in accordance with
-// the Business Source License, use of this software will be governed
-// by the Apache License, Version 2.0
+/*
+ * Copyright 2024 Redpanda Data, Inc.
+ *
+ * Licensed as a Redpanda Enterprise file under the Redpanda Community
+ * License (the "License"); you may not use this file except in compliance with
+ * the License. You may obtain a copy of the License at
+ *
+ * https://github.com/redpanda-data/redpanda/blob/master/licenses/rcl.md
+ */
 #include "iceberg/schema_avro.h"
 
 #include "iceberg/datatypes.h"
@@ -78,7 +79,7 @@ struct avro_primitive_type_visitor {
         return ret;
     }
     avro::Schema operator()(const date_type&) {
-        auto ret = avro::LongSchema();
+        auto ret = avro::IntSchema();
         ret.root()->setLogicalType(avro::LogicalType(avro::LogicalType::DATE));
         return ret;
     }
@@ -156,10 +157,11 @@ struct type_and_required {
 
 // Returns the parsed Iceberg type of the given node, handling unions as
 // optional values.
-type_and_required maybe_optional_from_avro(const avro::NodePtr& n) {
+type_and_required
+maybe_optional_from_avro(const avro::NodePtr& n, with_field_ids with_ids) {
     const auto& type = n->type();
     if (type != avro::AVRO_UNION) {
-        return {type_from_avro(n), field_required::yes};
+        return {type_from_avro(n, with_ids), field_required::yes};
     }
     if (n->leaves() != 2) {
         throw std::invalid_argument(
@@ -179,8 +181,8 @@ type_and_required maybe_optional_from_avro(const avro::NodePtr& n) {
           fmt::format("Expected 1 null in union: {}", num_nulls));
     }
     const auto& child = n->leafAt(child_idx);
-    field_type parsed_type = type_from_avro(child);
-    return {type_from_avro(child), field_required::no};
+    field_type parsed_type = type_from_avro(child, with_ids);
+    return {type_from_avro(child, with_ids), field_required::no};
 }
 
 } // namespace
@@ -213,8 +215,8 @@ struct_type_to_avro(const struct_type& type, std::string_view name) {
     return avro_schema;
 }
 
-nested_field_ptr
-child_field_from_avro(const avro::NodePtr& parent, size_t child_idx) {
+nested_field_ptr child_field_from_avro(
+  const avro::NodePtr& parent, size_t child_idx, with_field_ids with_ids) {
     const auto& type = parent->type();
     if (type != avro::AVRO_RECORD) {
         throw std::invalid_argument("Expected Avro record type");
@@ -228,15 +230,18 @@ child_field_from_avro(const avro::NodePtr& parent, size_t child_idx) {
     const auto& attrs = parent->customAttributesAt(child_idx);
     auto field_id_str = attrs.getAttribute("field-id");
     if (!field_id_str.has_value()) {
-        throw std::invalid_argument("Missing field-id attribute");
+        if (with_ids) {
+            throw std::invalid_argument("Missing field-id attribute");
+        }
+        field_id_str = "0";
     }
     auto field_id = std::stoi(field_id_str.value());
-    type_and_required parsed_child = maybe_optional_from_avro(child);
+    type_and_required parsed_child = maybe_optional_from_avro(child, with_ids);
     return nested_field::create(
       field_id, name, parsed_child.required, std::move(parsed_child.type));
 }
 
-field_type type_from_avro(const avro::NodePtr& n) {
+field_type type_from_avro(const avro::NodePtr& n, with_field_ids with_ids) {
     const auto& type = n->type();
     switch (type) {
     case avro::AVRO_STRING:
@@ -275,7 +280,7 @@ field_type type_from_avro(const avro::NodePtr& n) {
         struct_type ret;
         const auto num_leaves = n->leaves();
         for (size_t i = 0; i < num_leaves; i++) {
-            ret.fields.emplace_back(child_field_from_avro(n, i));
+            ret.fields.emplace_back(child_field_from_avro(n, i, with_ids));
         }
         return ret;
     }
@@ -296,8 +301,8 @@ field_type type_from_avro(const avro::NodePtr& n) {
                 throw std::invalid_argument(fmt::format(
                   "Expected 2 leaves in key-value record: {}", n->leaves()));
             }
-            auto key_field = child_field_from_avro(kv_node, 0);
-            auto val_field = child_field_from_avro(kv_node, 1);
+            auto key_field = child_field_from_avro(kv_node, 0, with_ids);
+            auto val_field = child_field_from_avro(kv_node, 1, with_ids);
             return map_type::create(
               key_field->id,
               std::move(key_field->type),
@@ -307,11 +312,15 @@ field_type type_from_avro(const avro::NodePtr& n) {
         }
         const auto& node = dynamic_cast<const avro::NodeArray&>(*n);
         if (!node.elementId_.has_value()) {
-            throw std::invalid_argument("Avro array type missing element id");
+            if (with_ids) {
+                throw std::invalid_argument(
+                  "Avro array type missing element id");
+            }
         }
-        type_and_required parsed_child = maybe_optional_from_avro(n->leafAt(0));
+        type_and_required parsed_child = maybe_optional_from_avro(
+          n->leafAt(0), with_ids);
         return list_type::create(
-          static_cast<int32_t>(*node.elementId_),
+          static_cast<int32_t>(with_ids ? *node.elementId_ : 0),
           parsed_child.required,
           std::move(parsed_child.type));
     }

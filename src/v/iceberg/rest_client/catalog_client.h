@@ -11,10 +11,15 @@
 #pragma once
 
 #include "bytes/iobuf.h"
+#include "config/types.h"
 #include "http/client.h"
 #include "http/request_builder.h"
+#include "iceberg/rest_client/client_probe.h"
+#include "iceberg/rest_client/credentials.h"
+#include "iceberg/rest_client/error.h"
+#include "iceberg/rest_client/oauth_token.h"
 #include "iceberg/rest_client/retry_policy.h"
-#include "iceberg/rest_client/types.h"
+#include "iceberg/table_requests.h"
 #include "json/document.h"
 #include "utils/named_type.h"
 #include "utils/retry_chain_node.h"
@@ -26,23 +31,13 @@ namespace iceberg::rest_client {
 
 using base_path = named_type<ss::sstring, struct base_path_t>;
 using prefix_path = named_type<ss::sstring, struct prefix_t>;
+using warehouse = named_type<ss::sstring, struct warehouse_t>;
 using api_version = named_type<ss::sstring, struct api_version_t>;
-
-// A client source generates low level http clients for the catalog client to
-// make API calls with. Once a generic http client pool is implemented, it can
-// use the same interface and hand out client leases instead of unique ptrs.
-struct client_source {
-    // A client returned by this method call is owned by the caller. It should
-    // be shut down after use by the caller.
-    virtual std::unique_ptr<http::abstract_client> acquire() = 0;
-    virtual ~client_source() = default;
-};
 
 // Holds parts of a root path used by catalog client
 struct path_components {
     path_components(
       std::optional<base_path> base = std::nullopt,
-      std::optional<prefix_path> prefix = std::nullopt,
       std::optional<api_version> api_version = std::nullopt);
 
     // Returns root path for use in API calls not related to oauth token, joins
@@ -54,9 +49,18 @@ struct path_components {
     // /api/catalog/v1/oauth/tokens
     ss::sstring token_api_path() const;
 
+    // Same as root path but does not include the prefix, e.g.
+    // /api/catalog/v1/config
+    ss::sstring config_api_path() const;
+
+    // Resets the prefix. Guaranteed to leave the prefix non-null.
+    void reset_prefix(std::optional<prefix_path> path);
+
 private:
     base_path _base;
-    prefix_path _prefix;
+
+    // Null if not yet initialized.
+    std::optional<prefix_path> _prefix;
     api_version _api_version;
 };
 
@@ -84,19 +88,95 @@ public:
     /// \param api_version api version used to construct URLs,
     /// defaults to v1
     /// \param token an optional oauth token which will be used
-    /// if valid. If expired, a new one will be acquired \param retry_policy a
-    /// retry policy used to determine how failing calls will be retried
+    /// if valid. If expired, a new one will be acquired
+    /// \param retry_policy a retry policy used to determine how failing calls
+    /// will be retried
+    /// \param auth_mode the authentication mode to be used for obtaining an
+    /// oauth token used for API calls
     catalog_client(
-      client_source& client_source,
+      std::unique_ptr<http::abstract_client> client,
       ss::sstring endpoint,
-      credentials credentials,
+      std::optional<credentials> credentials = std::nullopt,
       std::optional<base_path> base_path = std::nullopt,
-      std::optional<prefix_path> prefix = std::nullopt,
+      std::optional<warehouse> warehouse = std::nullopt,
       std::optional<api_version> api_version = std::nullopt,
       std::optional<oauth_token> token = std::nullopt,
-      std::unique_ptr<retry_policy> retry_policy = nullptr);
+      std::unique_ptr<retry_policy> retry_policy = nullptr,
+      config::datalake_catalog_auth_mode auth_mode
+      = config::datalake_catalog_auth_mode::none,
+      ss::shared_ptr<client_probe> probe = nullptr);
+    /**
+     * The REST client allows interaction with Iceberg REST catalog implementing
+     * the Iceberg Catalog OpenApi Specification as stated here:
+     *
+     * https://github.com/apache/iceberg/blob/main/open-api/rest-catalog-open-api.yaml
+     *
+     * Public method documentation will refer to the endpoints listed in the
+     * specification.
+     */
+    /**
+     * Create namespace API
+     *
+     * POST /v1/{prefix}/namespaces
+     */
+    ss::future<expected<create_namespace_response>>
+    create_namespace(create_namespace_request, retry_chain_node&);
+
+    /**
+     * Load Table API
+     *
+     * GET /v1/{prefix}/namespaces/{namespace}/tables/{table}
+     */
+    ss::future<expected<load_table_result>> load_table(
+      const chunked_vector<ss::sstring>& ns,
+      const ss::sstring& table,
+      retry_chain_node&);
+
+    /**
+     * Create Table API
+     *
+     * POST /v1/{prefix}/namespaces/{namespace}/tables
+     */
+    ss::future<expected<load_table_result>> create_table(
+      const chunked_vector<ss::sstring>&,
+      create_table_request,
+      retry_chain_node&);
+
+    /**
+     * Drop Table API
+     *
+     * DELETE /v1/{prefix}/namespaces/{namespace}/tables/{table}
+     *
+     * NOTE: using std::monostate instead of void, because
+     * ss::future<expected<void>> is not no-throw move constructible
+     */
+    ss::future<expected<std::monostate>> drop_table(
+      const chunked_vector<ss::sstring>& ns,
+      const ss::sstring& table,
+      std::optional<bool> purge_requested,
+      retry_chain_node&);
+
+    /**
+     * Commit Table Updates API
+     *
+     * POST /v1/{prefix}/namespaces/{namespace}/tables/{table}
+     */
+    ss::future<expected<commit_table_response>>
+    commit_table_update(commit_table_request, retry_chain_node&);
+
+    // Must be called before destroying the client to prevent resource leak
+    ss::future<> shutdown();
+
+    // Configures this client based on configs from /v1/config in the catalog.
+    // Sets the prefix. Must be called before calls that use the prefix.
+    //
+    // TODO: honor more configs. As implemented, we only support getting the
+    // prefix.
+    ss::future<expected<std::monostate>> maybe_configure(retry_chain_node&);
 
 private:
+    expected<ss::gate::holder> maybe_gate();
+
     // The root url calculated from base url, prefix and api version. Given a
     // base url of "/b", an api version "v2" and a prefix of "x/y", the root url
     // is "/b/v2/x/y/". The root url is prefixed before rest entities used when
@@ -110,20 +190,35 @@ private:
     // expired. Acquired token is cached for future calls.
     ss::future<expected<ss::sstring>> ensure_token(retry_chain_node& rtc);
 
+    // Depending on the _auth_mode used in the catalog_client, authentication
+    // may be added to the http request.
+    //
+    // Returns an error if the authentication was unable to be added for any
+    // reason.
+    ss::future<expected<std::monostate>> maybe_add_bearer_auth(
+      http::request_builder& request, retry_chain_node& rtc);
+
     // Builds the request from supplied builder after validating it, performs
     // the request with optional payload, and takes care of retrying according
     // to policy
     ss::future<expected<iobuf>> perform_request(
-      retry_chain_node& rtc,
+      retry_chain_node& parent_rtc,
       http::request_builder request_builder,
+      const ss::sstring& host,
+      client_probe::endpoint endpoint,
       std::optional<iobuf> payload = std::nullopt);
 
-    std::reference_wrapper<client_source> _client_source;
-    ss::sstring _endpoint;
-    credentials _credentials;
+    ss::gate _gate;
+    std::unique_ptr<http::abstract_client> _http_client;
+    const ss::sstring _endpoint;
+    std::optional<credentials> _credentials;
     path_components _path_components;
+    std::optional<warehouse> _warehouse;
     std::optional<oauth_token> _oauth_token{std::nullopt};
     std::unique_ptr<retry_policy> _retry_policy;
+    config::datalake_catalog_auth_mode _auth_mode;
+    ss::shared_ptr<client_probe> _probe;
+    bool _configured{false};
 
     friend class catalog_client_tester;
 };

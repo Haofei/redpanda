@@ -28,8 +28,7 @@ namespace pps = pp::schema_registry;
 namespace {
 
 bool check_compatible(
-  const pps::canonical_schema_definition& r,
-  const pps::canonical_schema_definition& w) {
+  const pps::schema_definition& r, const pps::schema_definition& w) {
     pps::sharded_store s;
     return check_compatible(
              pps::make_avro_schema_definition(
@@ -42,8 +41,7 @@ bool check_compatible(
 }
 
 pps::compatibility_result check_compatible_verbose(
-  const pps::canonical_schema_definition& r,
-  const pps::canonical_schema_definition& w) {
+  const pps::schema_definition& r, const pps::schema_definition& w) {
     pps::sharded_store s;
     return check_compatible(
       pps::make_avro_schema_definition(
@@ -261,7 +259,7 @@ SEASTAR_THREAD_TEST_CASE(test_basic_full_transitive_compatibility) {
 SEASTAR_THREAD_TEST_CASE(test_avro_schema_definition) {
     // Parsing Canonical Form requires fields to be ordered:
     // name, type, fields, symbols, items, values, size
-    pps::canonical_schema_definition expected{
+    pps::schema_definition expected{
       R"({"type":"record","name":"myrecord","fields":[{"name":"f1","type":"string"},{"name":"f2","type":"string","default":"foo"}]})",
       pps::schema_type::avro};
     pps::sharded_store s;
@@ -274,7 +272,7 @@ SEASTAR_THREAD_TEST_CASE(test_avro_schema_definition) {
       std::
         is_same_v<std::decay_t<decltype(valid)>, pps::avro_schema_definition>,
       "schema2 is an avro_schema_definition");
-    pps::canonical_schema_definition avro_conversion{valid};
+    pps::schema_definition avro_conversion{valid};
     BOOST_CHECK_EQUAL(expected, avro_conversion);
     BOOST_CHECK_EQUAL(valid.name(), "myrecord");
 }
@@ -287,7 +285,7 @@ SEASTAR_THREAD_TEST_CASE(test_avro_schema_definition_custom_attributes) {
           {R"({"type":"record","name":"foo","ignored_attr":true,"fields":[{"name":"bar","type":"float","extra_attr":true}]})",
            pps::schema_type::avro})
           .value();
-    pps::canonical_schema_definition expected{
+    pps::schema_definition expected{
       R"({"type":"record","name":"foo","fields":[{"name":"bar","type":"float","extra_attr":true}]})",
       pps::schema_type::avro};
     pps::sharded_store s;
@@ -301,7 +299,7 @@ SEASTAR_THREAD_TEST_CASE(test_avro_schema_definition_custom_attributes) {
       std::
         is_same_v<std::decay_t<decltype(valid)>, pps::avro_schema_definition>,
       "schema2 is an avro_schema_definition");
-    pps::canonical_schema_definition avro_conversion{valid};
+    pps::schema_definition avro_conversion{valid};
     BOOST_CHECK_EQUAL(expected, avro_conversion);
 }
 
@@ -325,9 +323,7 @@ SEASTAR_THREAD_TEST_CASE(test_avro_alias_resolution_stopgap) {
 
 namespace {
 
-const auto schema_old = pps::sanitize_avro_schema_definition(
-                          {
-                            R"({
+const auto schema_old = R"({
     "type": "record",
     "name": "myrecord",
     "fields": [
@@ -392,13 +388,9 @@ const auto schema_old = pps::sanitize_avro_schema_definition(
             }
         }
     ]
-})",
-                            pps::schema_type::avro})
-                          .value();
+})";
 
-const auto schema_new = pps::sanitize_avro_schema_definition(
-                          {
-                            R"({
+const auto schema_new = R"({
     "type": "record",
     "name": "myrecord",
     "fields": [
@@ -464,9 +456,7 @@ const auto schema_new = pps::sanitize_avro_schema_definition(
             }
         }
     ]
-})",
-                            pps::schema_type::avro})
-                          .value();
+})";
 
 using incompatibility = pps::avro_incompatibility;
 
@@ -534,16 +524,150 @@ const absl::flat_hash_set<incompatibility> backward_expected{
    "expected: someEnum1 (alias resolution is not yet fully supported)"},
 };
 
-const auto compat_data = std::to_array<compat_test_data<incompatibility>>({
+struct compat_test_case {
+    std::string reader;
+    std::string writer;
+    absl::flat_hash_set<incompatibility> expected;
+};
+
+const auto compat_data = std::to_array<compat_test_case>({
   {
-    schema_old.share(),
-    schema_new.share(),
-    forward_expected,
+    .reader=schema_old,
+    .writer=schema_new,
+    .expected=forward_expected,
   },
   {
-    schema_new.share(),
-    schema_old.share(),
-    backward_expected,
+    .reader=schema_new,
+    .writer=schema_old,
+    .expected=backward_expected,
+  },
+  {
+    .reader=R"({
+        "type": "record",
+        "name": "car",
+        "fields": [
+            {
+                "name": "color",
+                "type": ["null", "string"]
+            }
+        ]
+    })",
+    .writer=R"({
+        "type": "record",
+        "name": "car",
+        "fields": []
+    })",
+    .expected={
+      {"/fields/0",
+       incompatibility::Type::reader_field_missing_default_value,
+       "color"},
+    },
+  },
+  {
+    .reader=R"({
+        "type": "record",
+        "name": "car",
+        "fields": [
+            {
+                "name": "color",
+                "type": ["string", "null"]
+            }
+        ]
+    })",
+    .writer=R"({
+        "type": "record",
+        "name": "car",
+        "fields": []
+    })",
+    .expected={
+      {"/fields/0",
+       incompatibility::Type::reader_field_missing_default_value,
+       "color"},
+    },
+  },
+  {
+  .reader = R"({
+      "type": "record",
+      "name": "car",
+      "fields": [
+          {
+              "name": "color",
+              "type": ["null", "string"],
+              "default": null
+          }
+      ]
+  })",
+  .writer = R"({
+      "type": "record",
+      "name": "car",
+      "fields": []
+  })",
+  .expected = {},
+  },
+  {
+    .reader=R"({
+          "type": "record",
+          "name": "car",
+          "fields": [
+              {
+                  "name": "color",
+                  "type": "null"
+              }
+          ]
+      })",
+    .writer=R"({
+          "type": "record",
+          "name": "car",
+          "fields": []
+      })",
+  .expected={
+      {"/fields/0",
+       incompatibility::Type::reader_field_missing_default_value,
+       "color"},
+    },
+  },
+  {
+      .reader=R"({
+      "type": "record",
+      "name": "car",
+      "fields": [
+          {
+              "name": "color",
+              "type": "string",
+              "default": "somevalue"
+          }
+      ]
+  })",
+    .writer=R"({
+      "type": "record",
+      "name": "car",
+      "fields": []
+  })",
+  .expected={},
+  },{
+      .reader=R"({
+      "type": "record",
+      "name": "car",
+      "fields": [
+          {
+              "name": "color",
+              "type": "null",
+              "default": null
+          }
+      ]
+  })",
+    .writer=R"({
+      "type": "record",
+      "name": "car",
+      "fields": []
+  })",
+  .expected={
+      // Note: this is overly restrictive for null-type fields with null defaults.
+      // This is because the Avro API is not expressive enough to differentiate the two.
+      {"/fields/0",
+       incompatibility::Type::reader_field_missing_default_value,
+       "color"},
+    },
   },
 });
 
@@ -555,13 +679,26 @@ std::string format_set(const absl::flat_hash_set<ss::sstring>& d) {
 
 SEASTAR_THREAD_TEST_CASE(test_avro_compat_messages) {
     for (const auto& cd : compat_data) {
-        auto compat = check_compatible_verbose(cd.reader, cd.writer);
+        auto compat = check_compatible_verbose(
+          pps::sanitize_avro_schema_definition(
+            {cd.reader, pps::schema_type::avro})
+            .value(),
+          pps::sanitize_avro_schema_definition(
+            {cd.writer, pps::schema_type::avro})
+            .value());
+
+        pps::raw_compatibility_result raw;
+        absl::c_for_each(cd.expected, [&raw](auto e) {
+            raw.emplace<incompatibility>(std::move(e));
+        });
+        auto exp_compat = std::move(raw)(pps::verbose::yes);
+
         absl::flat_hash_set<ss::sstring> errs{
           compat.messages.begin(), compat.messages.end()};
         absl::flat_hash_set<ss::sstring> expected{
-          cd.expected.messages.begin(), cd.expected.messages.end()};
+          exp_compat.messages.begin(), exp_compat.messages.end()};
 
-        BOOST_CHECK(!compat.is_compat);
+        BOOST_CHECK_EQUAL(compat.is_compat, exp_compat.is_compat);
         BOOST_CHECK_EQUAL(errs.size(), expected.size());
         BOOST_REQUIRE_MESSAGE(
           errs == expected,

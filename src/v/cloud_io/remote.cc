@@ -10,10 +10,13 @@
 
 #include "cloud_io/remote.h"
 
+#include "base/unreachable.h"
 #include "bytes/iostream.h"
 #include "cloud_io/logger.h"
+#include "cloud_io/provider.h"
 #include "cloud_io/transfer_details.h"
 #include "cloud_storage_clients/client_pool.h"
+#include "cloud_storage_clients/configuration.h"
 #include "cloud_storage_clients/types.h"
 #include "cloud_storage_clients/util.h"
 #include "model/metadata.h"
@@ -25,6 +28,7 @@
 #include <seastar/core/loop.hh>
 #include <seastar/core/sleep.hh>
 #include <seastar/coroutine/as_future.hh>
+#include <seastar/util/variant_utils.hh>
 
 #include <boost/beast/http/field.hpp>
 #include <boost/lexical_cast.hpp>
@@ -55,6 +59,31 @@ size_t num_chunks(const R& r, size_t max_batch_size) {
     }
 }
 
+static constexpr auto gcs_scheme = "gs";
+static constexpr auto s3_scheme = "s3";
+
+cloud_io::provider infer_provider(
+  model::cloud_storage_backend backend,
+  const cloud_storage_clients::client_configuration& conf) {
+    switch (backend) {
+    case model::cloud_storage_backend::unknown:
+        // NOTE: treat unknown cloud storage backend as a valid case
+        // in which we're assuming S3 compatible storage.
+    case model::cloud_storage_backend::aws:
+    case model::cloud_storage_backend::minio:
+    case model::cloud_storage_backend::oracle_s3_compat:
+        return cloud_io::s3_compat_provider{s3_scheme};
+    case model::cloud_storage_backend::google_s3_compat:
+        return cloud_io::s3_compat_provider{gcs_scheme};
+    case model::cloud_storage_backend::azure: {
+        auto abs = std::get<cloud_storage_clients::abs_configuration>(conf);
+        return cloud_io::abs_provider{
+          .account_name = abs.storage_account_name(),
+        };
+    }
+    }
+}
+
 } // namespace
 
 namespace cloud_io {
@@ -70,9 +99,10 @@ remote::remote(
   , _resources(std::make_unique<io_resources>())
   , _azure_shared_key_binding(
       config::shard_local_cfg().cloud_storage_azure_shared_key.bind())
-  , _cloud_storage_backend{
-      cloud_storage_clients::infer_backend_from_configuration(
-        conf, cloud_credentials_source)} {
+  , _cloud_storage_backend{cloud_storage_clients::
+                             infer_backend_from_configuration(
+                               conf, cloud_credentials_source)}
+  , _provider(infer_provider(_cloud_storage_backend, conf)) {
     vlog(
       log.info, "remote initialized with backend {}", _cloud_storage_backend);
     // If the credentials source is from config file, bypass the background
@@ -159,6 +189,8 @@ size_t remote::concurrency() const { return _pool.local().max_size(); }
 model::cloud_storage_backend remote::backend() const {
     return _cloud_storage_backend;
 }
+
+const provider& remote::provider() const { return _provider; }
 
 bool remote::is_batch_delete_supported() const {
     return delete_objects_max_keys() > 1;
@@ -428,12 +460,18 @@ remote::download_object(download_request download_request) {
 
         if (resp) {
             vlog(ctxlog.debug, "Receive OK response from {}", path);
-            auto buffer
-              = co_await cloud_storage_clients::util::drain_response_stream(
-                resp.value());
-            download_request.payload.append_fragments(std::move(buffer));
-            transfer_details.on_success();
-            co_return download_result::success;
+            try {
+                auto buffer
+                  = co_await cloud_storage_clients::util::drain_response_stream(
+                    resp.value());
+                download_request.payload.append_fragments(std::move(buffer));
+                transfer_details.on_success();
+                co_return download_result::success;
+            } catch (...) {
+                resp
+                  = cloud_storage_clients::util::handle_client_transport_error(
+                    std::current_exception(), ctxlog);
+            }
         }
 
         lease.client->shutdown();
@@ -801,6 +839,13 @@ template ss::future<upload_result>
 remote::delete_objects<std::deque<cloud_storage_clients::object_key>>(
   const cloud_storage_clients::bucket_name& bucket,
   std::deque<cloud_storage_clients::object_key> keys,
+  retry_chain_node& parent,
+  std::function<void(size_t)>);
+
+template ss::future<upload_result>
+remote::delete_objects<chunked_vector<cloud_storage_clients::object_key>>(
+  const cloud_storage_clients::bucket_name& bucket,
+  chunked_vector<cloud_storage_clients::object_key> keys,
   retry_chain_node& parent,
   std::function<void(size_t)>);
 

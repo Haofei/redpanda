@@ -182,11 +182,6 @@ ss::future<log_recovery_result> partition_downloader::maybe_download_log() {
         vlog(_ctxlog.debug, "No overrides for {} found, skipping", _ntpc.ntp());
         co_return log_recovery_result{};
     }
-    // TODO (evgeny): maybe check the condition differently
-    bool exists = co_await ss::file_exists(_ntpc.work_directory());
-    if (exists) {
-        co_return log_recovery_result{};
-    }
     auto enabled = _ntpc.get_overrides().recovery_enabled;
     if (!enabled) {
         vlog(
@@ -210,7 +205,18 @@ ss::future<log_recovery_result> partition_downloader::maybe_download_log() {
         //
         // The only possible solution here is to discard the exception and
         // continue with normal partition creation process.
-        vlog(_ctxlog.error, "Error during log recovery: {}", err);
+        //
+        // This may or may not indicate a failed log recovery - if new
+        // partitions have been added to a topic post recovery, this warning can
+        // be safely ignored.
+        //
+        // TODO: add partition aware mechanism to avoid triggering this log line
+        // for partitions created post recovery that do not need to attempt
+        // download_log().
+        vlog(
+          _ctxlog.warn,
+          "Warning encountered for a partition with log recovery enabled: {}.",
+          err);
     } catch (...) {
         // We can get here in case of transient download error.
         // The controller will retry recovery after some time.
@@ -310,14 +316,10 @@ ss::future<log_recovery_result> partition_downloader::download_log() {
       _ntpc.get_revision(),
       retention);
     auto mat = co_await find_recovery_material();
-    if (cst_log.is_enabled(ss::log_level::debug)) {
-        std::stringstream ostr;
-        mat.partition_manifest.serialize_json(ostr);
-        vlog(
-          _ctxlog.debug,
-          "Partition manifest used for recovery: {}",
-          ostr.str());
-    }
+    vlog(
+      _ctxlog.debug,
+      "Partition manifest used for recovery: {}",
+      mat.partition_manifest);
     if (mat.partition_manifest.size() == 0) {
         // If the downloaded manifest doesn't have any segments
         log_recovery_result result{
@@ -705,7 +707,7 @@ partition_downloader::download_segment_file(
     auto stream_stats = cloud_storage::stream_stats{};
     auto remote_path = cloud_storage::remote_segment_path(
       _remote_path_provider.segment_path(
-        _ntpc.ntp(), _ntpc.get_initial_revision(), segm));
+        _ntpc.ntp(), _ntpc.get_remote_revision(), segm));
 
     auto stream = [this,
                    &stream_stats,

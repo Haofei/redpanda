@@ -4,6 +4,7 @@ go_library(
     name = "topic",
     srcs = [
         "add_partitions.go",
+        "analyze.go",
         "config.go",
         "consume.go",
         "create.go",
@@ -20,7 +21,6 @@ go_library(
     visibility = ["//visibility:public"],
     deps = [
         "//src/go/rpk/pkg/adminapi",
-        "//src/go/rpk/pkg/cli/cluster",
         "//src/go/rpk/pkg/config",
         "//src/go/rpk/pkg/kafka",
         "//src/go/rpk/pkg/out",
@@ -46,17 +46,22 @@ go_test(
     name = "topic_test",
     size = "small",
     srcs = [
+        "analyze_test.go",
         "consume_test.go",
         "describe_test.go",
+        "list_test.go",
         "trim_test.go",
         "utils_test.go",
     ],
     embed = [":topic"],
     deps = [
+        "//src/go/rpk/pkg/config",
         "@com_github_spf13_afero//:afero",
+        "@com_github_stretchr_testify//assert",
         "@com_github_stretchr_testify//require",
         "@com_github_twmb_franz_go//pkg/kerr",
         "@com_github_twmb_franz_go_pkg_kadm//:kadm",
         "@com_github_twmb_franz_go_pkg_kmsg//:kmsg",
+        "@in_gopkg_yaml_v3//:yaml_v3",
     ],
 )

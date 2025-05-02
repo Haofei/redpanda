@@ -46,12 +46,12 @@ public:
     template<typename... Args>
     controller_stm(
       limiter_configuration limiter_conf,
-      const ss::sharded<features::feature_table>& feature_table,
+      ss::sharded<features::feature_table>& feature_table,
       config::binding<std::chrono::seconds>&& snapshot_max_age,
       Args&&... stm_args)
       : mux_state_machine(std::forward<Args>(stm_args)...)
       , _limiter(std::move(limiter_conf))
-      , _feature_table(feature_table.local())
+      , _feature_table(feature_table)
       , _snapshot_max_age(std::move(snapshot_max_age))
       , _snapshot_debounce_timer([this] { snapshot_timer_callback(); }) {}
 
@@ -71,6 +71,7 @@ public:
         return _limiter.throttle<Cmd>();
     }
 
+    void shutdown_apply_loop();
     ss::future<> shutdown();
 
     virtual ss::future<> stop() final;
@@ -80,6 +81,12 @@ public:
     /// Compose a mini-snapshot for joining nodes: this is a specialized
     /// peer of the more general maybe_make_snapshot
     ss::future<std::optional<iobuf>> maybe_make_join_snapshot();
+
+    /**
+     * By calling this function caller may take a lock and prevent applying any
+     * new updates to the controller state machine even if they are available.
+     */
+    ss::future<ssx::semaphore_units> lock_apply();
 
 private:
     ss::future<> on_batch_applied() final;
@@ -91,7 +98,7 @@ private:
 
 private:
     controller_log_limiter _limiter;
-    const features::feature_table& _feature_table;
+    ss::sharded<features::feature_table>& _feature_table;
     config::binding<std::chrono::seconds> _snapshot_max_age;
 
     metrics_reporter_cluster_info _metrics_reporter_cluster_info;
@@ -99,6 +106,6 @@ private:
     ss::timer<ss::lowres_clock> _snapshot_debounce_timer;
 };
 
-static constexpr ss::shard_id controller_stm_shard = 0;
+inline constexpr ss::shard_id controller_stm_shard = 0;
 
 } // namespace cluster

@@ -1,11 +1,12 @@
-// Copyright 2024 Redpanda Data, Inc.
-//
-// Use of this software is governed by the Business Source License
-// included in the file licenses/BSL.md
-//
-// As of the Change Date specified in that file, in accordance with
-// the Business Source License, use of this software will be governed
-// by the Apache License, Version 2.0
+/*
+ * Copyright 2024 Redpanda Data, Inc.
+ *
+ * Licensed as a Redpanda Enterprise file under the Redpanda Community
+ * License (the "License"); you may not use this file except in compliance with
+ * the License. You may obtain a copy of the License at
+ *
+ * https://github.com/redpanda-data/redpanda/blob/master/licenses/rcl.md
+ */
 #include "iceberg/filesystem_catalog.h"
 
 #include "iceberg/manifest_entry.h"
@@ -24,6 +25,8 @@ catalog::errc to_catalog_errc(metadata_io::errc e) {
         return catalog::errc::timedout;
     case metadata_io::errc::failed:
         return catalog::errc::io_error;
+    case metadata_io::errc::invalid_uri:
+        return catalog::errc::unexpected_state;
     }
 }
 constexpr std::string_view vhint_filename = "version-hint.text";
@@ -66,7 +69,7 @@ filesystem_catalog::create_table(
     table_metadata tmeta{
       .format_version = format_version::v2,
       .table_uuid = uuid_t::create(),
-      .location = table_location(table_ident),
+      .location = table_location_uri(table_ident),
       .last_sequence_number = sequence_number{0},
       .last_updated_ms = model::timestamp::now(),
       .last_column_id = highest_column_id,
@@ -75,6 +78,7 @@ filesystem_catalog::create_table(
       .partition_specs = std::move(specs),
       .default_spec_id = partition_spec::id_t{0},
       .last_partition_id = highest_pid,
+      .snapshots = chunked_vector<snapshot>{},
       .sort_orders = std::move(sort_orders),
       .default_sort_order_id = sort_order::id_t{0},
     };
@@ -103,9 +107,38 @@ filesystem_catalog::load_table(const table_identifier& table_ident) {
     co_return std::move(table_res.value().tmeta);
 }
 
+ss::future<checked<void, catalog::errc>>
+filesystem_catalog::drop_table(const table_identifier& table_id, bool) {
+    // Check that the table exists.
+    auto current_tmeta = co_await read_table_meta(table_id);
+    if (current_tmeta.has_error()) {
+        co_return current_tmeta.error();
+    }
+
+    // delete metadata
+    auto delete_res = co_await table_io_.delete_all_metadata(
+      metadata_location_path{
+        fmt::format("{}/metadata/", table_location(table_id))});
+    if (delete_res.has_error()) {
+        vlog(log.warn, "dropping table {} failed", table_id);
+        co_return to_catalog_errc(delete_res.error());
+    }
+
+    // TODO: support purging data
+
+    co_return outcome::success();
+}
+
 ss::future<checked<std::nullopt_t, catalog::errc>>
 filesystem_catalog::commit_txn(
   const table_identifier& table_ident, transaction txn) {
+    if (txn.updates().updates.empty()) {
+        vlog(
+          log.debug,
+          "Transaction has no updates to table {}, returning early",
+          table_ident.table);
+        co_return std::nullopt;
+    }
     auto current_tmeta = co_await read_table_meta(table_ident);
     if (current_tmeta.has_error()) {
         co_return current_tmeta.error();
@@ -114,7 +147,20 @@ filesystem_catalog::commit_txn(
 
     // Apply the updates to the latest version of the table, since it may have
     // been updated since the transaction was constructed.
-    // TODO: also check the table requirements all pass.
+
+    for (const auto& req : txn.updates().requirements) {
+        auto check_res = table_requirement::check(req, &new_tmeta);
+        if (check_res.has_error()) {
+            vlog(
+              log.warn,
+              "Current version of table {} metadata doesn't satisfy tx "
+              "requirement: {}",
+              table_ident.table,
+              check_res.error());
+            co_return errc::unexpected_state;
+        }
+    }
+
     for (const auto& update : txn.updates().updates) {
         auto res = table_update::apply(update, new_tmeta);
         if (res != table_update::outcome::success) {
@@ -136,6 +182,12 @@ filesystem_catalog::table_location(const table_identifier& id) const {
     return fmt::format(
       "{}/{}/{}", base_location_, fmt::join(id.ns, "/"), id.table);
 }
+
+uri filesystem_catalog::table_location_uri(const table_identifier& id) const {
+    return table_io_.to_uri(
+      fmt::format("{}/{}/{}", base_location_, fmt::join(id.ns, "/"), id.table));
+}
+
 version_hint_path
 filesystem_catalog::vhint_path(const table_identifier& id) const {
     return version_hint_path{
@@ -177,6 +229,17 @@ filesystem_catalog::check_expected_version_hint(
         co_return errc::already_exists;
     }
     co_return std::nullopt;
+}
+
+ss::future<checked<std::nullopt_t, catalog::errc>>
+filesystem_catalog::rewrite_table_meta_for_tests(
+  const table_identifier& table_ident, const table_metadata& tmeta) {
+    auto read_res = co_await read_table_meta(table_ident);
+    if (read_res.has_error()) {
+        co_return read_res.error();
+    }
+    auto cur_version = read_res.value().version;
+    co_return co_await write_table_meta(table_ident, tmeta, cur_version);
 }
 
 ss::future<checked<std::nullopt_t, catalog::errc>>

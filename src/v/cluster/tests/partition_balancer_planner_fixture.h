@@ -24,6 +24,7 @@
 #include "cluster/tests/utils.h"
 #include "cluster/topic_updates_dispatcher.h"
 #include "cluster/types.h"
+#include "config/configuration.h"
 #include "container/fragmented_vector.h"
 #include "features/feature_table.h"
 #include "model/metadata.h"
@@ -78,7 +79,6 @@ public:
           .start_single(
             std::ref(members),
             std::ref(features),
-            config::mock_binding<std::optional<size_t>>(std::nullopt),
             config::mock_binding<std::optional<int32_t>>(std::nullopt),
             config::mock_binding<uint32_t>(uint32_t{partitions_per_shard}),
             config::mock_binding<uint32_t>(uint32_t{partitions_reserve_shard0}),
@@ -89,6 +89,8 @@ public:
                  "_schemas"}}),
             config::mock_binding<bool>(true))
           .get();
+        config::shard_local_cfg().topic_memory_per_partition.set_value(
+          std::nullopt);
         // use node status that is not used in test as self is always available
         node_status_table.start_single(model::node_id{123}).get();
         state
@@ -219,7 +221,9 @@ struct partition_balancer_planner_fixture {
           replication_factor);
 
         ss::chunked_fifo<cluster::partition_assignment> assignments;
-        for (model::partition_id::type i = 0; i < partition_nodes.size(); ++i) {
+        for (model::partition_id::type i = 0;
+             i < static_cast<int>(partition_nodes.size());
+             ++i) {
             const auto& nodes = partition_nodes[i];
             BOOST_REQUIRE_EQUAL(nodes.size(), replication_factor);
             std::vector<model::broker_shard> replicas;
@@ -332,7 +336,7 @@ struct partition_balancer_planner_fixture {
     populate_node_status_table(std::set<size_t> unavailable_nodes = {}) {
         std::vector<cluster::node_status> status_updates;
         status_updates.reserve(last_node_idx + 1);
-        for (size_t i = 0; i < last_node_idx; ++i) {
+        for (int i = 0; i < last_node_idx; ++i) {
             auto last_seen = raft::clock_type::now();
             if (unavailable_nodes.contains(i)) {
                 last_seen = last_seen - node_unavailable_timeout;
@@ -358,7 +362,7 @@ struct partition_balancer_planner_fixture {
         for (const auto& topic : workers.table.local().topics_map()) {
             cluster::topic_status ts;
             ts.tp_ns = topic.second.get_configuration().tp_ns;
-            for (size_t i = 0;
+            for (int i = 0;
                  i < topic.second.get_configuration().partition_count;
                  ++i) {
                 cluster::partition_status ps;

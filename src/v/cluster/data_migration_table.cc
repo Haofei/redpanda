@@ -18,11 +18,31 @@
 #include "cluster/topic_table.h"
 #include "container/fragmented_vector.h"
 
+#include <seastar/core/sstring.hh>
 #include <seastar/util/variant_utils.hh>
 
+#include <optional>
 #include <ranges>
 
+fmt::appender
+fmt::formatter<cluster::data_migrations::migrations_table::validation_error>::
+  format(
+    const cluster::data_migrations::migrations_table::validation_error& e,
+    fmt::format_context& ctx) const {
+    auto str = fmt::format("{{}}", e._message);
+    return fmt::formatter<std::string_view>::format(str, ctx);
+};
+
 namespace cluster::data_migrations {
+
+migrations_table::validation_error::validation_error(
+  errc ec, ss::sstring details)
+  : _ec(ec)
+  , _message(std::move(details)) {};
+
+std::error_code migrations_table::validation_error::ec() const {
+    return make_error_code(_ec);
+}
 
 migrations_table::migrations_table(
   ss::sharded<migrated_resources>& resources,
@@ -31,6 +51,8 @@ migrations_table::migrations_table(
   : _resources(resources)
   , _topics(topics)
   , _enabled(enabled) {}
+
+ss::future<> migrations_table::stop() { return ss::now(); }
 
 bool migrations_table::is_valid_state_transition(state current, state target) {
     switch (current) {
@@ -116,6 +138,7 @@ ss::future<> migrations_table::apply_snapshot(
                 continue;
             }
             it->second.state = migration.state;
+            it->second.completed_timestamp = migration.completed_timestamp;
         }
         affected_ids.push_back(id);
         updated.emplace_back(it->second);
@@ -158,11 +181,7 @@ ss::future<std::error_code>
 migrations_table::apply(create_data_migration_cmd cmd) {
     auto migration = std::move(cmd.value.migration);
     const auto id = cmd.value.id;
-    vlog(
-      dm_log.debug,
-      "applying create data migration: {} with id: {}",
-      migration,
-      id);
+    vlog(dm_log.debug, "applying create data migration: {}", cmd.value);
     if (id <= _last_applied) {
         co_return errc::data_migration_already_exists;
     }
@@ -170,17 +189,21 @@ migrations_table::apply(create_data_migration_cmd cmd) {
      * We do not allow to create empty data migrations
      */
     if (is_empty_migration(migration)) {
-        co_return errc::data_migration_invalid_resources;
+        co_return errc::data_migration_invalid_definition;
     }
 
     auto err = validate_migrated_resources(migration);
     if (err) {
         vlog(dm_log.info, "migration validation error: {}", err.value());
-        co_return errc::data_migration_invalid_resources;
+        co_return err->ec();
     }
 
     auto [it, success] = _migrations.try_emplace(
-      id, migration_metadata{.id = id, .migration = std::move(migration)});
+      id,
+      migration_metadata{
+        .id = id,
+        .migration = std::move(migration),
+        .created_timestamp = cmd.value.op_timestamp});
 
     if (!success) {
         // TODO: consider explaining to the client that we had an internal race
@@ -206,7 +229,7 @@ migrations_table::validate_migrated_resources(
   const data_migration& migration) const {
     // cloud_storage_api is checked on startup
     if (!_enabled) {
-        return validation_error{"cloud storage disabled"};
+        return {{errc::data_migrations_disabled, "cloud storage disabled"}};
     }
 
     return ss::visit(migration, [this](const auto& migration) {
@@ -219,22 +242,29 @@ migrations_table::validate_migrated_resources(
   const inbound_migration& idm) const {
     for (const auto& t : idm.topics) {
         if (_topics.local().contains(t.effective_topic_name())) {
-            return validation_error{ssx::sformat(
-              "topic with name {} already exists in this cluster",
-              t.effective_topic_name())};
+            return {
+              {errc::topic_already_exists,
+               ssx::sformat(
+                 "topic with name {} already exists in this cluster",
+                 t.effective_topic_name())}};
         }
 
         if (_resources.local().is_already_migrated(t.effective_topic_name())) {
-            return validation_error{ssx::sformat(
-              "topic with name {} is already part of active migration",
-              t.effective_topic_name())};
+            return {
+              {errc::resource_is_being_migrated,
+               ssx::sformat(
+                 "topic with name {} is already part of active migration",
+                 t.effective_topic_name())}};
         }
     }
 
     for (const auto& group : idm.groups) {
         if (_resources.local().is_already_migrated(group)) {
-            return validation_error{ssx::sformat(
-              "group with name {} is already part of active migration", group)};
+            return {
+              {errc::resource_is_being_migrated,
+               ssx::sformat(
+                 "group with name {} is already part of active migration",
+                 group)}};
         }
     }
 
@@ -246,35 +276,46 @@ migrations_table::validate_migrated_resources(
   const outbound_migration& odm) const {
     for (const auto& t : odm.topics) {
         if (t.ns != model::kafka_namespace) {
-            return validation_error{ssx::sformat(
-              "topic with name {} is not in default namespace, so probably it "
-              "has archiver disabled",
-              t)};
+            return {
+              {errc::data_migration_invalid_resources,
+               ssx::sformat(
+                 "topic with name {} is not in default namespace, so probably "
+                 "it has archiver disabled",
+                 t)}};
         }
 
         auto maybe_topic_cfg = _topics.local().get_topic_cfg(t);
         if (!maybe_topic_cfg) {
-            return validation_error{ssx::sformat(
-              "topic with name {} does not exists in current cluster", t)};
+            return {
+              {errc::topic_not_exists,
+               ssx::sformat(
+                 "topic with name {} does not exists in current cluster", t)}};
         }
 
         if (!model::is_archival_enabled(
               maybe_topic_cfg->properties.shadow_indexing.value_or(
                 model::shadow_indexing_mode::disabled))) {
-            return validation_error{ssx::sformat(
-              "topic with name {} does not have archiving enabled", t)};
+            return {
+              {errc::data_migration_invalid_resources,
+               ssx::sformat(
+                 "topic with name {} does not have archiving enabled", t)}};
         }
 
         if (_resources.local().is_already_migrated(t)) {
-            return validation_error{ssx::sformat(
-              "topic with name {} is already part of active migration", t)};
+            return {
+              {errc::resource_is_being_migrated,
+               ssx::sformat(
+                 "topic with name {} is already part of active migration", t)}};
         }
     }
 
     for (const auto& group : odm.groups) {
         if (_resources.local().is_already_migrated(group)) {
-            return validation_error{ssx::sformat(
-              "group with name {} is already part of active migration", group)};
+            return {
+              {errc::resource_is_being_migrated,
+               ssx::sformat(
+                 "group with name {} is already part of active migration",
+                 group)}};
         }
     }
 
@@ -285,11 +326,7 @@ ss::future<std::error_code>
 migrations_table::apply(update_data_migration_state_cmd cmd) {
     const auto id = cmd.value.id;
     const auto requested_state = cmd.value.requested_state;
-    vlog(
-      dm_log.debug,
-      "applying update data migration {} state to {}",
-      id,
-      requested_state);
+    vlog(dm_log.debug, "applying update data migration state {}", cmd.value);
     auto it = _migrations.find(id);
     if (it == _migrations.end()) {
         vlog(
@@ -314,6 +351,11 @@ migrations_table::apply(update_data_migration_state_cmd cmd) {
         co_return errc::invalid_data_migration_state;
     }
     it->second.state = requested_state;
+    if (
+      requested_state == state::finished
+      || requested_state == state::cancelled) {
+        it->second.completed_timestamp = cmd.value.op_timestamp;
+    }
     // notify callbacks after resources, see comment in migrations_table::apply
     co_await _resources.invoke_on_all(
       [&meta = it->second](migrated_resources& resources) {

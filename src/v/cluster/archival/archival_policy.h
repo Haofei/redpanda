@@ -34,6 +34,7 @@ enum class candidate_creation_error {
     missing_ntp_config,
     failed_to_get_file_range,
     zero_content_length,
+    concurrency_error,
 };
 
 std::ostream& operator<<(std::ostream&, candidate_creation_error);
@@ -135,5 +136,16 @@ private:
     std::optional<ss::lowres_clock::time_point> _upload_deadline;
     ss::io_priority_class _io_priority;
 };
+
+/// This function computes offsets for the upload (inc. file offets)
+/// If the full segment is uploaded the segment is not scanned.
+/// If the upload is partial, the partial scan will be performed if
+/// the segment has the index and full scan otherwise.
+ss::future<std::optional<std::error_code>> get_file_range(
+  model::offset begin_inclusive,
+  std::optional<model::offset> end_inclusive,
+  ss::lw_shared_ptr<storage::segment> segment,
+  ss::lw_shared_ptr<upload_candidate> upl,
+  ss::io_priority_class io_priority);
 
 } // namespace archival

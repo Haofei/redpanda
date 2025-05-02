@@ -21,12 +21,27 @@
 
 namespace storage {
 
-model::offset stm_manager::max_collectible_offset() {
+model::offset stm_manager::max_removable_local_log_offset() {
     model::offset result = model::offset::max();
     for (const auto& stm : _stms) {
-        auto mco = stm->max_collectible_offset();
+        auto mco = stm->max_removable_local_log_offset();
         result = std::min(result, mco);
-        vlog(stlog.trace, "max_collectible_offset[{}] = {}", stm->name(), mco);
+        vlog(
+          stlog.trace,
+          "max_removable_local_log_offset[{}] = {}",
+          stm->name(),
+          mco);
+    }
+    return result;
+}
+
+std::optional<kafka::offset> stm_manager::lowest_pinned_data_offset() const {
+    std::optional<kafka::offset> result;
+    for (const auto& stm : _stms) {
+        auto pinned = stm->lowest_pinned_data_offset();
+        if (pinned) {
+            result = std::min(*pinned, result.value_or(kafka::offset::max()));
+        }
     }
     return result;
 }
@@ -114,7 +129,7 @@ operator<<(std::ostream& o, const ntp_config::default_overrides& v) {
       "remote_delete: {}, segment_ms: {}, "
       "initial_retention_local_target_bytes: {}, "
       "initial_retention_local_target_ms: {}, write_caching: {}, flush_ms: {}, "
-      "flush_bytes: {} iceberg_enabled: {}",
+      "flush_bytes: {} iceberg_mode: {}, remote_allow_gaps: {} }}",
       v.compaction_strategy,
       v.cleanup_policy_bitflags,
       v.segment_size,
@@ -130,7 +145,8 @@ operator<<(std::ostream& o, const ntp_config::default_overrides& v) {
       v.write_caching,
       v.flush_ms,
       v.flush_bytes,
-      v.iceberg_enabled);
+      v.iceberg_mode,
+      v.remote_allow_gaps);
 
     if (config::shard_local_cfg().development_enable_cloud_topics()) {
         fmt::print(o, ", cloud_topic_enabled: {}", v.cloud_topic_enabled);
@@ -146,21 +162,23 @@ std::ostream& operator<<(std::ostream& o, const ntp_config& v) {
         fmt::print(
           o,
           "{{ntp: {}, base_dir: {}, overrides: {}, revision: {}, "
-          "initial_revision: {}}}",
+          "topic_revision: {}, remote_revision: {}}}",
           v.ntp(),
           v.base_directory(),
           v.get_overrides(),
           v.get_revision(),
-          v.get_initial_revision());
+          v.get_topic_revision(),
+          v.get_remote_revision());
     } else {
         fmt::print(
           o,
           "{{ntp: {}, base_dir: {}, overrides: nullptr, revision: {}, "
-          "initial_revision: {}}}",
+          "topic_revision: {}, remote_revision: {}}}",
           v.ntp(),
           v.base_directory(),
           v.get_revision(),
-          v.get_initial_revision());
+          v.get_topic_revision(),
+          v.get_remote_revision());
     }
     return o;
 }
@@ -203,10 +221,10 @@ std::ostream& operator<<(std::ostream& os, const gc_config& cfg) {
 std::ostream& operator<<(std::ostream& o, const compaction_config& c) {
     fmt::print(
       o,
-      "{{max_collectible_offset:{}, "
+      "{{max_removable_local_log_offset:{}, "
       "should_sanitize:{}, "
       "tombstone_retention_ms:{}}}",
-      c.max_collectible_offset,
+      c.max_removable_local_log_offset,
       c.sanitizer_config,
       c.tombstone_retention_ms);
     return o;

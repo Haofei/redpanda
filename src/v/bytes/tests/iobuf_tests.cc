@@ -12,9 +12,9 @@
 #include "bytes/iobuf.h"
 #include "bytes/iobuf_parser.h"
 #include "bytes/iostream.h"
-#include "bytes/random.h"
 #include "bytes/scattered_message.h"
 #include "bytes/streambuf.h"
+#include "test_utils/random_bytes.h"
 #include "utils.h"
 
 #include <seastar/core/memory.hh>
@@ -26,6 +26,7 @@
 #include <boost/test/unit_test.hpp>
 #include <fmt/format.h>
 
+#include <compare>
 #include <cstdint>
 #include <iterator>
 #include <span>
@@ -50,6 +51,22 @@ SEASTAR_THREAD_TEST_CASE(test_lt) {
     BOOST_CHECK_LT(iobuf::from("cat"), iobuf::from("catastrophe"));
     BOOST_CHECK_EQUAL(false, iobuf::from("cat") < iobuf::from("cat"));
     BOOST_CHECK_EQUAL(false, iobuf{} < iobuf{});
+    BOOST_CHECK(std::strong_ordering::equal == (iobuf{} <=> iobuf{}));
+    BOOST_CHECK(
+      (std::string_view("cat") <=> "catastrophe")
+      == (iobuf::from("cat") <=> iobuf::from("catastrophe")));
+    BOOST_CHECK(
+      (std::string_view("catastrophe") <=> "cat")
+      == (iobuf::from("catastrophe") <=> iobuf::from("cat")));
+    BOOST_CHECK(
+      (std::string_view("catastrophe") <=> "dog")
+      == (iobuf::from("catastrophe") <=> iobuf::from("dog")));
+    BOOST_CHECK(
+      (std::string_view("dog") <=> "cat")
+      == (iobuf::from("dog") <=> iobuf::from("cat")));
+    BOOST_CHECK(
+      (std::string_view("dog") <=> "cat")
+      == (iobuf::from("dog") <=> iobuf::from("cat")));
 }
 
 SEASTAR_THREAD_TEST_CASE(test_appended_data_is_retained) {
@@ -221,7 +238,7 @@ SEASTAR_THREAD_TEST_CASE(copy_iobuf_equality_comparator) {
 }
 SEASTAR_THREAD_TEST_CASE(gen_bytes_view) {
     auto fbuf = iobuf();
-    auto b = random_generators::get_bytes();
+    auto b = tests::random_bytes();
     auto bv = bytes_view(b);
     int32_t x = 42;
     fbuf.append(reinterpret_cast<const char*>(&x), sizeof(x));
@@ -379,38 +396,36 @@ SEASTAR_THREAD_TEST_CASE(iobuf_as_ostream) {
 }
 
 SEASTAR_THREAD_TEST_CASE(alloctor_forward_progress) {
-    static constexpr std::array<uint32_t, 14> src = {{
+    static constexpr auto src = std::to_array<uint32_t>({
       512,
       768,
-      1152,
-      1728,
-      2592,
-      3888,
-      5832,
-      8748,
-      13122,
-      19683,
-      29525,
-      44288,
-      66432,
-      99648,
-    }};
-    static constexpr std::array<uint32_t, 14> expected = {{
-      768,
-      1152,
-      1728,
-      2592,
-      3888,
-      5832,
-      8748,
-      13122,
-      19683,
-      29525,
-      44288,
-      66432,
-      99648,
+      1280,
+      1792,
+      2560,
+      3584,
+      6144,
+      8192,
+      12288,
+      16384,
+      32768,
+      65536,
       131072,
-    }};
+    });
+    static constexpr auto expected = std::to_array<uint32_t>({
+      768,
+      1280,
+      1792,
+      2560,
+      3584,
+      6144,
+      8192,
+      12288,
+      16384,
+      32768,
+      65536,
+      131072,
+      131072,
+    });
     BOOST_REQUIRE_EQUAL(src.size(), expected.size());
     for (size_t i = 0; i < src.size(); ++i) {
         BOOST_REQUIRE_EQUAL(
@@ -429,7 +444,7 @@ SEASTAR_THREAD_TEST_CASE(test_next_chunk_allocation_append_temp_buf) {
     }
     // slow but tha'ts life.
     auto distance = std::distance(buf.begin(), buf.end());
-    BOOST_REQUIRE_EQUAL(distance, 324);
+    BOOST_REQUIRE_EQUAL(distance, 323);
     constexpr size_t sz = 40000 * 1024;
     auto msg = iobuf_as_scattered(std::move(buf));
     BOOST_REQUIRE_EQUAL(msg.size(), sz);
@@ -445,7 +460,7 @@ SEASTAR_THREAD_TEST_CASE(test_next_chunk_allocation_append_iobuf) {
     }
     // slow but tha'ts life.
     auto distance = std::distance(buf.begin(), buf.end());
-    BOOST_REQUIRE_EQUAL(distance, 324);
+    BOOST_REQUIRE_EQUAL(distance, 322);
     constexpr size_t sz = 40000 * 1024;
     auto msg = iobuf_as_scattered(std::move(buf));
     BOOST_REQUIRE_EQUAL(msg.size(), sz);
@@ -456,7 +471,7 @@ SEASTAR_THREAD_TEST_CASE(test_appending_frament_takes_ownership) {
     const auto b = random_generators::gen_alphanum_string(1024);
     target.append(b.c_str(), b.size());
     auto target_frags_cnt = std::distance(target.begin(), target.end());
-    iobuf other = bytes_to_iobuf(random_generators::get_bytes(256));
+    iobuf other = bytes_to_iobuf(tests::random_bytes(256));
     auto other_frags_cnt = std::distance(other.begin(), other.end());
     target.append_fragments(std::move(other));
 

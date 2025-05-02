@@ -49,6 +49,11 @@ public:
     ss::future<stm_allocation_result>
     reset_next_id(int64_t, model::timeout_clock::duration timeout);
 
+    raft::stm_initial_recovery_policy
+    get_initial_recovery_policy() const final {
+        return raft::stm_initial_recovery_policy::read_everything;
+    }
+
 private:
     // legacy structs left for backward compatibility with the "old"
     // on-disk log format
@@ -106,7 +111,7 @@ private:
       advance_state(int64_t, model::timeout_clock::duration);
 
     ss::future<> write_snapshot();
-    ss::future<>
+    ss::future<raft::local_snapshot_applied>
     apply_local_snapshot(raft::stm_snapshot_header, iobuf&&) override;
     ss::future<raft::stm_snapshot>
     take_local_snapshot(ssx::semaphore_units apply_units) override;
@@ -147,7 +152,8 @@ public:
 
     void create(
       raft::state_machine_manager_builder& builder,
-      raft::consensus* raft) final;
+      raft::consensus* raft,
+      const cluster::stm_instance_config& cfg) final;
 };
 
 } // namespace cluster

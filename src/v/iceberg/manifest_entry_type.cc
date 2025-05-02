@@ -1,11 +1,12 @@
-// Copyright 2024 Redpanda Data, Inc.
-//
-// Use of this software is governed by the Business Source License
-// included in the file licenses/BSL.md
-//
-// As of the Change Date specified in that file, in accordance with
-// the Business Source License, use of this software will be governed
-// by the Apache License, Version 2.0
+/*
+ * Copyright 2024 Redpanda Data, Inc.
+ *
+ * Licensed as a Redpanda Enterprise file under the Redpanda Community
+ * License (the "License"); you may not use this file except in compliance with
+ * the License. You may obtain a copy of the License at
+ *
+ * https://github.com/redpanda-data/redpanda/blob/master/licenses/rcl.md
+ */
 #include "iceberg/manifest_entry_type.h"
 
 namespace iceberg {
@@ -46,12 +47,6 @@ struct_type data_file_type(partition_key_type partition_type) {
       field_required::no,
       map_type::create(
         121, int_type(), 122, field_required::yes, long_type())));
-    r2_type.fields.emplace_back(nested_field::create(
-      111,
-      "distinct_counts",
-      field_required::no,
-      map_type::create(
-        123, int_type(), 124, field_required::yes, long_type())));
     r2_type.fields.emplace_back(nested_field::create(
       137,
       "nan_value_counts",

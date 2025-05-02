@@ -51,7 +51,7 @@ using namespace std::chrono_literals;
 namespace cluster::data_migrations {
 namespace {
 template<class TryFunc>
-ss::future<errc> retry_loop(retry_chain_node& rcn, TryFunc&& try_func) {
+ss::future<errc> retry_loop(retry_chain_node& rcn, TryFunc try_func) {
     while (true) {
         errc ec;
         try {
@@ -88,6 +88,8 @@ backend::backend(
   shard_table& shard_table,
   std::optional<std::reference_wrapper<cloud_storage::remote>>
     cloud_storage_api,
+  std::optional<std::reference_wrapper<cloud_storage::topic_mount_handler>>
+    topic_mount_handler,
   ss::abort_source& as)
   : _self(*config::node().node_id())
   , _table(table)
@@ -98,6 +100,7 @@ backend::backend(
   , _topic_table(topic_table)
   , _shard_table(shard_table)
   , _cloud_storage_api(cloud_storage_api)
+  , _topic_mount_handler(topic_mount_handler)
   , _as(as) {}
 
 ss::future<> backend::start() {
@@ -137,14 +140,6 @@ ss::future<> backend::start() {
       });
 
     if (_cloud_storage_api) {
-        auto maybe_bucket = cloud_storage::configuration::get_bucket_config()();
-        vassert(
-          maybe_bucket, "cloud_storage_api active but no bucket configured");
-        cloud_storage_clients::bucket_name bucket{*maybe_bucket};
-        _topic_mount_handler
-          = std::make_unique<cloud_storage::topic_mount_handler>(
-            bucket, *_cloud_storage_api);
-
         _table_notification_id = _table.register_notification([this](id id) {
             ssx::spawn_with_gate(
               _gate, [this, id]() { return handle_migration_update(id); });
@@ -455,30 +450,21 @@ backend::do_topic_work(model::topic_namespace nt, topic_work tw) noexcept {
         // waiting for existing work to complete and delete its entry
         vlog(
           dm_log.info,
-          "waiting for older topic work on migration {} nt {} towards state "
-          "{} to complete",
-          tw.migration_id,
-          nt,
-          tw.sought_state);
+          "waiting for older topic work {} on nt={} to complete",
+          tw,
+          nt);
         auto old_ec = co_await tsws->future();
         vlog(
           dm_log.info,
-          "older topic work on migration {} nt {} towards state {} completed "
-          "with {}",
-          tw.migration_id,
+          "older topic work {} on nt {} completed with {}",
+          tw,
           nt,
-          tw.sought_state,
           old_ec);
     }
 
     errc ec;
     try {
-        vlog(
-          dm_log.debug,
-          "doing topic work on migration {} nt {} towards state: {}",
-          tw.migration_id,
-          nt,
-          tw.sought_state);
+        vlog(dm_log.debug, "doing topic work {} on nt={}", tw, nt);
         ec = co_await std::visit(
           [this, &nt, &tw, tsws = std::move(tsws)](const auto& info) mutable {
               return do_topic_work(nt, tw.sought_state, info, std::move(tsws));
@@ -486,20 +472,16 @@ backend::do_topic_work(model::topic_namespace nt, topic_work tw) noexcept {
           tw.info);
         vlog(
           dm_log.debug,
-          "completed topic work on migration {} nt {} towards state: {}, "
-          "result={}",
-          tw.migration_id,
+          "completed topic work {} on nt={}, result={}",
+          tw,
           nt,
-          tw.sought_state,
           ec);
     } catch (...) {
         vlog(
           dm_log.warn,
-          "exception occured during topic work on migration {} nt {} "
-          "towards state: {}",
-          tw.migration_id,
+          "exception occured during topic work {} on nt={}",
+          tw,
           nt,
-          tw.sought_state,
           std::current_exception());
         ec = errc::topic_operation_error;
     }
@@ -636,8 +618,9 @@ ss::future<errc> backend::create_topic(
            != cloud_storage::find_topic_manifest_outcome::success) {
         vlog(
           dm_log.warn,
-          "failed to download manifest for topic {}: {}",
+          "failed to download manifest for topic {} (storage_location {}): {}",
           original_nt.value_or(local_nt),
+          storage_location,
           download_res);
         co_return errc::topic_operation_error;
     }
@@ -645,36 +628,29 @@ ss::future<errc> backend::create_topic(
     if (!maybe_cfg) {
         co_return errc::topic_invalid_config;
     }
+
     cluster::topic_configuration topic_to_create_cfg(
       local_nt.ns,
       local_nt.tp,
       maybe_cfg->partition_count,
       maybe_cfg->replication_factor);
     auto& topic_properties = topic_to_create_cfg.properties;
-    auto manifest_props = maybe_cfg->properties;
 
-    topic_properties.compression = manifest_props.compression;
-    topic_properties.cleanup_policy_bitflags
-      = manifest_props.cleanup_policy_bitflags;
-    topic_properties.compaction_strategy = manifest_props.compaction_strategy;
+    // copy all properties
+    topic_properties = maybe_cfg->properties;
 
-    topic_properties.retention_bytes = manifest_props.retention_bytes;
-    topic_properties.retention_duration = manifest_props.retention_duration;
-    topic_properties.retention_local_target_bytes
-      = manifest_props.retention_local_target_bytes;
-
-    topic_properties.remote_topic_namespace_override
-      = manifest_props.remote_topic_namespace_override
-          ? manifest_props.remote_topic_namespace_override
-          : original_nt;
-
+    // override specific ones
+    topic_to_create_cfg.is_migrated = true;
+    if (!topic_properties.remote_topic_namespace_override) {
+        topic_properties.remote_topic_namespace_override = original_nt;
+    }
     topic_properties.remote_topic_properties.emplace(
       tm.get_revision(), maybe_cfg->partition_count);
-    topic_properties.shadow_indexing = {model::shadow_indexing_mode::full};
+    topic_properties.shadow_indexing = model::shadow_indexing_mode::full;
     topic_properties.recovery = true;
-    topic_properties.remote_label = manifest_props.remote_label;
+    topic_properties.read_replica = {};
+    topic_properties.read_replica_bucket = {};
 
-    topic_to_create_cfg.is_migrated = true;
     custom_assignable_topic_configuration_vector cfg_vector;
     cfg_vector.push_back(
       custom_assignable_topic_configuration(std::move(topic_to_create_cfg)));
@@ -698,9 +674,19 @@ ss::future<errc> backend::prepare_mount_topic(
     if (!cfg) {
         co_return errc::topic_not_exists;
     }
-    vlog(dm_log.info, "trying to prepare mount topic, cfg={}", *cfg);
-    auto mnt_res = co_await _topic_mount_handler->prepare_mount_topic(
-      *cfg, rcn);
+
+    auto rev_id = _topic_table.get_initial_revision(nt);
+    if (!rev_id) {
+        co_return errc::topic_not_exists;
+    }
+
+    vlog(
+      dm_log.info,
+      "trying to prepare mount topic, cfg={}, rev_id={}",
+      *cfg,
+      *rev_id);
+    auto mnt_res = co_await _topic_mount_handler->get().prepare_mount_topic(
+      *cfg, *rev_id, rcn);
     if (mnt_res == cloud_storage::topic_mount_result::mount_manifest_exists) {
         co_return errc::success;
     }
@@ -714,9 +700,19 @@ ss::future<errc> backend::confirm_mount_topic(
     if (!cfg) {
         co_return errc::topic_not_exists;
     }
-    vlog(dm_log.info, "trying to confirm mount topic, cfg={}", *cfg);
-    auto mnt_res = co_await _topic_mount_handler->confirm_mount_topic(
-      *cfg, rcn);
+
+    auto rev_id = _topic_table.get_initial_revision(nt);
+    if (!rev_id) {
+        co_return errc::topic_not_exists;
+    }
+
+    vlog(
+      dm_log.info,
+      "trying to confirm mount topic, cfg={}, rev_id={}",
+      *cfg,
+      *rev_id);
+    auto mnt_res = co_await _topic_mount_handler->get().confirm_mount_topic(
+      *cfg, *rev_id, rcn);
     if (
       mnt_res
       != cloud_storage::topic_mount_result::mount_manifest_not_deleted) {
@@ -754,7 +750,15 @@ ss::future<errc> backend::do_unmount_topic(
         vlog(dm_log.warn, "topic {} missing, ignoring", nt);
         co_return errc::success;
     }
-    auto umnt_res = co_await _topic_mount_handler->unmount_topic(*cfg, rcn);
+
+    auto rev_id = _topic_table.get_initial_revision(nt);
+    if (!rev_id) {
+        vlog(dm_log.warn, "topic {} missing, ignoring", nt);
+        co_return errc::success;
+    }
+
+    auto umnt_res = co_await _topic_mount_handler->get().unmount_topic(
+      *cfg, *rev_id, rcn);
     if (umnt_res == cloud_storage::topic_unmount_result::success) {
         co_return errc::success;
     }

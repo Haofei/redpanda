@@ -31,6 +31,7 @@ import pathlib
 import shlex
 from enum import Enum, IntEnum
 from typing import Callable, List, Generator, Literal, Mapping, Optional, Protocol, Set, Tuple, Any, Type, cast
+from urllib3.exceptions import MaxRetryError
 
 import yaml
 from ducktape.services.service import Service
@@ -58,6 +59,7 @@ from rptest.clients.rpk_remote import RpkRemoteTool
 from rptest.clients.python_librdkafka import PythonLibrdkafka
 from rptest.clients.installpack import InstallPackClient
 from rptest.clients.rp_storage_tool import RpStorageTool
+from rptest.context.cloud_storage import CloudStorageType  # noqa: F401 # Re-exported for backwards compatibility.
 from rptest.services import redpanda_types, tls
 from rptest.services.redpanda_types import KafkaClientSecurity, LogAllowListElem
 from rptest.services.admin import Admin
@@ -70,6 +72,7 @@ from rptest.services.storage_failure_injection import FailureInjectionConfig
 from rptest.services.utils import NodeCrash, LogSearchLocal, LogSearchCloud, Stopwatch
 from rptest.util import inject_remote_script, ssh_output_stderr, wait_until_result
 from rptest.utils.allow_logs_on_predicate import AllowLogsOnPredicate
+from rptest.utils.expiring_value import ExpiringValue
 from rptest.utils.mode_checks import in_fips_environment
 from rptest.utils.rpenv import sample_license
 import enum
@@ -93,6 +96,9 @@ SaslCredentials = redpanda_types.SaslCredentials
 
 # Map of path -> (checksum, size)
 FileToChecksumSize = dict[str, Tuple[str, int]]
+
+# Map of node -> (path -> (arbitrary dictionary))
+NodeConfigOverridesT = dict[ClusterNode, dict]
 
 # The endpoint info for the azurite (Azure ABS emulator )container that
 # is used when running tests in a docker environment.
@@ -123,6 +129,11 @@ DEFAULT_LOG_ALLOW_LIST = [
     # which is not present in typical CI runs, which results in the following
     # error message from the debug bundle service
     re.compile(r"Current specified RPK location"),
+
+    # Tests that use Iceberg REST catalogs may log error messages coming from
+    # the catalog that have "Assert" in them. These are typically benign and
+    # just indicate a race in committing to Iceberg.
+    re.compile(r"UpdateRequirement.*Assert"),
 ]
 
 # Log errors that are expected in tests that restart nodes mid-test
@@ -207,8 +218,14 @@ FAILURE_INJECTION_LOG_ALLOW_LIST = [
     re.compile(
         "Assert failure: .* filesystem error: Injected Failure: Input/output error"
     ),
-    re.compile("assert - Backtrace below:"),
+    re.compile("assert - Backtrace:"),
     re.compile("finject - .* flush called concurrently with other operations")
+]
+
+# Log errors that are acceptable for tests that hit the OIDC endpoint but don't
+# necessarily test OIDC functionality
+OIDC_ALLOW_LIST = [
+    re.compile("security - .* - Error updating"),
 ]
 
 
@@ -224,7 +241,7 @@ class MetricSamples:
     def __init__(self, samples: list[MetricSample]):
         self.samples = samples
 
-    def label_filter(self, labels: Mapping[str, float]):
+    def label_filter(self, labels: Mapping[str, str]):
         def f(sample):
             for key, value in labels.items():
                 assert key in sample.labels
@@ -236,13 +253,6 @@ class MetricSamples:
 class MetricsEndpoint(Enum):
     METRICS = 'metrics'
     PUBLIC_METRICS = 'public_metrics'
-
-
-class CloudStorageType(IntEnum):
-    # Use (AWS, GCP) S3 compatible API on dedicated nodes, or minio in docker
-    S3 = 1
-    # Use Azure ABS on dedicated nodes, or azurite in docker
-    ABS = 2
 
 
 CloudStorageTypeAndUrlStyle = Tuple[CloudStorageType, Literal['virtual_host',
@@ -383,7 +393,6 @@ class ResourceSettings:
     """
 
     DEFAULT_NUM_CPUS = 2
-    # Redpanda's default limit on memory per shard is 1GB
     DEFAULT_MEMORY_MB = 2048
 
     def __init__(self,
@@ -392,7 +401,8 @@ class ResourceSettings:
                  memory_mb: Optional[int] = None,
                  bypass_fsync: Optional[bool] = None,
                  nfiles: Optional[int] = None,
-                 reactor_stall_threshold: Optional[int] = None):
+                 reactor_stall_threshold: Optional[int] = None,
+                 core_dump_limit: Optional[str] = "unlimited"):
         self._num_cpus = num_cpus
         self._memory_mb = memory_mb
 
@@ -403,6 +413,7 @@ class ResourceSettings:
 
         self._nfiles = nfiles
         self._reactor_stall_threshold = reactor_stall_threshold
+        self._core_dump_limit = core_dump_limit
 
     @property
     def memory_mb(self):
@@ -412,7 +423,7 @@ class ResourceSettings:
     def num_cpus(self):
         return self._num_cpus
 
-    def to_cli(self, *, dedicated_node):
+    def to_cli(self, *, dedicated_node: bool):
         """
 
         Generate Redpanda CLI flags based on the settings passed in at construction
@@ -420,7 +431,7 @@ class ResourceSettings:
 
         :return: 2 tuple of strings, first goes before the binary, second goes after it
         """
-        preamble = "ulimit -Sc unlimited"
+        preamble = f"ulimit -Sc {self._core_dump_limit}"
         preamble += f" -Sn {self._nfiles}; " if self._nfiles else "; "
 
         if self._num_cpus is None and not dedicated_node:
@@ -433,12 +444,7 @@ class ResourceSettings:
         else:
             memory_mb = self._memory_mb
 
-        if self._bypass_fsync is None and not dedicated_node:
-            bypass_fsync = True
-        else:
-            bypass_fsync = self._bypass_fsync
-
-        args = []
+        args: list[str] = []
         if not dedicated_node:
             args.extend([
                 "--kernel-page-cache=true", "--overprovisioned ",
@@ -453,9 +459,9 @@ class ResourceSettings:
             args.append(f"--smp={num_cpus}")
         if memory_mb is not None:
             args.append(f"--memory={memory_mb}M")
-        if bypass_fsync is not None:
-            args.append(
-                f"--unsafe-bypass-fsync={'1' if bypass_fsync else '0'}")
+
+        args.append(
+            f"--unsafe-bypass-fsync={'1' if self._bypass_fsync else '0'}")
 
         return preamble, " ".join(args)
 
@@ -470,6 +476,7 @@ class SISettings:
     These settings are altered in RedpandaTest if running on AWS.
     """
     GLOBAL_CLOUD_STORAGE_CRED_SOURCE_KEY = "cloud_store_cred_source"
+    GLOBAL_S3_BUCKET = "s3_bucket"
     GLOBAL_S3_ACCESS_KEY = "s3_access_key"
     GLOBAL_S3_SECRET_KEY = "s3_secret_key"
     GLOBAL_S3_REGION_KEY = "s3_region"
@@ -524,7 +531,8 @@ class SISettings:
                  retention_local_strict=True,
                  cloud_storage_max_throughput_per_shard: Optional[int] = None,
                  cloud_storage_signature_version: str = "s3v4",
-                 before_call_headers: Optional[dict[str, Any]] = None,
+                 before_call_headers: Optional[Callable[[], dict[str,
+                                                                 str]]] = None,
                  skip_end_of_test_scrubbing: bool = False,
                  addressing_style: S3AddressingStyle = S3AddressingStyle.PATH):
         """
@@ -627,6 +635,8 @@ class SISettings:
 
         self._expected_damage_types = set()
 
+        self._gcp_token_cache = ExpiringValue[str]()
+
     def get_use_fips_s3_endpoint(self) -> bool:
         use_fips_option = self._context.globals.get(
             self.GLOBAL_USE_FIPS_S3_ENDPOINT,
@@ -688,6 +698,8 @@ class SISettings:
             return
         cloud_storage_credentials_source = test_context.globals.get(
             self.GLOBAL_CLOUD_STORAGE_CRED_SOURCE_KEY, 'config_file')
+        cloud_storage_bucket = test_context.globals.get(
+            self.GLOBAL_S3_BUCKET, None)
         cloud_storage_access_key = test_context.globals.get(
             self.GLOBAL_S3_ACCESS_KEY, None)
         cloud_storage_secret_key = test_context.globals.get(
@@ -708,9 +720,9 @@ class SISettings:
                                         'aws') == 'gcp':
                 self.endpoint_url = 'https://storage.googleapis.com'
                 self.cloud_storage_signature_version = "unsigned"
-                self.before_call_headers = {
+                self.before_call_headers = lambda: {
                     "Authorization": f"Bearer {self.gcp_iam_token(logger)}",
-                    "x-goog-project-id": cloud_storage_gcp_project_id
+                    "x-goog-project-id": str(cloud_storage_gcp_project_id)
                 }
             self.cloud_storage_disable_tls = False  # SI will fail to create archivers if tls is disabled
             self.cloud_storage_region = cloud_storage_region
@@ -730,6 +742,12 @@ class SISettings:
             self.cloud_storage_region = cloud_storage_region
             self.cloud_storage_api_endpoint_port = 443
             self.addressing_style = S3AddressingStyle.VIRTUAL
+
+            if cloud_storage_bucket:
+                logger.info(
+                    f"Using bucket name from globals: {cloud_storage_bucket}")
+                self.bypass_bucket_creation = True
+                self._cloud_storage_bucket = cloud_storage_bucket
         else:
             logger.info('No AWS credentials supplied, assuming minio defaults')
 
@@ -748,7 +766,11 @@ class SISettings:
         elif self.cloud_storage_type == CloudStorageType.ABS:
             self._cloud_storage_azure_container = new_bucket_name
 
-    def gcp_iam_token(self, logger):
+    def gcp_iam_token(self, logger) -> str:
+        token = self._gcp_token_cache.value()
+        if token is not None:
+            return token
+
         logger.info('Getting gcp iam token')
         s = requests.Session()
         s.mount('http://169.254.169.254', HTTPAdapter(max_retries=5))
@@ -757,6 +779,14 @@ class SISettings:
             "http://169.254.169.254/computeMetadata/v1/instance/service-accounts/default/token",
             headers={"Metadata-Flavor": "Google"})
         res.raise_for_status()
+        logger.info(
+            f"Got gcp iam token expiring in {res.json()['expires_in']} seconds"
+        )
+        # GCP guarantees that tokens are valid for at least 5 minutes so it is
+        # safe to subtract 60 seconds and still assume a valid token.
+        self._gcp_token_cache.update(res.json()["access_token"],
+                                     expire_at=time.time() +
+                                     res.json()["expires_in"] - 60)
         return res.json()["access_token"]
 
     # Call this to update the extra_rp_conf
@@ -948,6 +978,13 @@ class SecurityConfig:
 
 
 class LoggingConfig:
+    # A dictionary that maps logger names to the Redpanda version in which they
+    # were introduced. If a logger is not present in this dictionary, it is
+    # assumed it was always supported/does not require special handling.
+    LOGGER_GENESIS: dict[str, RedpandaVersionTriple] = {
+        "datalake": (24, 3, 1),
+    }
+
     def __init__(self, default_level: str, logger_levels={}):
         self.default_level = default_level
         self.logger_levels = logger_levels
@@ -955,15 +992,31 @@ class LoggingConfig:
     def enable_finject_logging(self):
         self.logger_levels["finject"] = "trace"
 
-    def to_args(self) -> str:
+    def to_args(
+            self,
+            redpanda_version: Optional[RedpandaVersionTriple] = None) -> str:
         """
         Generate redpanda CLI arguments for this logging config
+
+        To support running tests with mixed versions of redpanda, we need to
+        be able to generate the correct CLI arguments for the version of
+        redpanda we are running against.
+
+        If no version information is provided, we assume that we run against
+        dev and all loggers are supported.
+
+        If a logger is not present in the `LOGGER_GENESIS` dictionary, it
+        is assumed it was always supported/does not require special handling.
+
         :return: string
         """
         args = f"--default-log-level {self.default_level}"
         if self.logger_levels:
-            levels_arg = ":".join(
-                [f"{k}={v}" for k, v in self.logger_levels.items()])
+            levels_arg = ":".join([
+                f"{k}={v}" for k, v in self.logger_levels.items()
+                if not redpanda_version
+                or redpanda_version >= self.LOGGER_GENESIS.get(k, (0, 0, 0))
+            ])
             args += f" --logger-log-level={levels_arg}"
 
         return args
@@ -1034,6 +1087,11 @@ class AuditLogConfig(TlsConfig):
         self.listener_authn_method = listener_authn_method
 
 
+class RpkNodeConfig:
+    def __init__(self):
+        self.ca_file = None
+
+
 class RedpandaServiceConstants:
     SUPERUSER_CREDENTIALS: SaslCredentials = SaslCredentials(
         "admin", "admin", "SCRAM-SHA-256")
@@ -1093,8 +1151,9 @@ class RedpandaServiceABC(ABC, RedpandaServiceConstants):
             r = fn()
             if not r and time.time() > t_initial + grace_period:
                 # Check the cluster is up before waiting + retrying
-                assert self.all_up() or getattr(self, '_tolerate_crashes',
-                                                False)
+                assert self.all_up() or getattr(
+                    self, '_tolerate_crashes', False) or getattr(
+                        self, 'tolerate_not_running', 0) > 0
             return r
 
         wait_until(wrapped,
@@ -1247,11 +1306,13 @@ class RedpandaServiceABC(ABC, RedpandaServiceConstants):
             ns: Any,
             metrics_endpoint: MetricsEndpoint = MetricsEndpoint.METRICS,
             namespace: str | None = None,
-            topic: str | None = None):
+            topic: str | None = None,
+            expect_metric: bool = False):
         '''Does the main work of the metric_sum() implementation given a list of ns to iterate over.
         '''
 
         count = 0
+        metric_seen = False
         for n in ns:
             metrics = self.metrics(n, metrics_endpoint=metrics_endpoint)
             for family in metrics:
@@ -1269,7 +1330,10 @@ class RedpandaServiceABC(ABC, RedpandaServiceConstants):
                         if labels.get("redpanda_topic",
                                       labels.get("topic")) != topic:
                             continue
+                    metric_seen = True
                     count += int(sample.value)
+        if expect_metric:
+            assert metric_seen, f"Metric {metric_name} was not observed"
         return count
 
 
@@ -1291,7 +1355,7 @@ class RedpandaServiceBase(RedpandaServiceABC, Service):
     COVERAGE_PROFRAW_CAPTURE = os.path.join(PERSISTENT_ROOT,
                                             "redpanda.profraw")
     TEMP_OSSL_CONFIG_FILE = "/etc/openssl.cnf"
-    DEFAULT_NODE_READY_TIMEOUT_SEC = 30
+    DEFAULT_NODE_READY_TIMEOUT_SEC = 40
     NODE_READY_TIMEOUT_MIN_SEC_KEY = "node_ready_timeout_min_sec"
     DEFAULT_CLOUD_STORAGE_SCRUB_TIMEOUT_SEC = 60
     DEDICATED_NODE_KEY = "dedicated_nodes"
@@ -1314,6 +1378,15 @@ class RedpandaServiceBase(RedpandaServiceABC, Service):
     KAFKA_ALTERNATE_PORT = 9093
     KAFKA_KERBEROS_PORT = 9094
     ADMIN_ALTERNATE_PORT = 9647
+
+    GLOBAL_USE_STRESS_FIBER = 'enable_stress_fiber'
+    GLOBAL_NUM_STRESS_FIBERS = 'num_stress_fibers'
+    GLOBAL_STRESS_FIBER_MIN_MS = 'stress_fiber_min_ms'
+    GLOBAL_STRESS_FIBER_MAX_MS = 'stress_fiber_max_ms'
+    DEFAULT_USE_STRESS_FIBER = 'OFF'
+    DEFAULT_NUM_STRESS_FIBERS = 1
+    DEFAULT_STRESS_FIBER_MIN_MS = 100
+    DEFAULT_STRESS_FIBER_MAX_MS = 200
 
     CLUSTER_CONFIG_DEFAULTS = {
         'join_retry_timeout_ms': 200,
@@ -1351,6 +1424,10 @@ class RedpandaServiceBase(RedpandaServiceABC, Service):
             "collect_default": True
         }
     }
+
+    # Thread name of shards to be used with redpanda_tid()
+    SHARD_0_THREAD_NAME = "redpanda"
+    SHARD_1_THREAD_NAME = "reactor-1"
 
     class FIPSMode(Enum):
         disabled = 0
@@ -1455,6 +1532,31 @@ class RedpandaServiceBase(RedpandaServiceABC, Service):
         self._extra_rp_conf = self._si_settings.update_rp_conf(
             self._extra_rp_conf)
 
+    def use_stress_fiber(self) -> bool:
+        """Return true if the test should run with the stress fiber."""
+        use_stress_fiber = self._context.globals.get(
+            self.GLOBAL_USE_STRESS_FIBER, self.DEFAULT_USE_STRESS_FIBER)
+        if use_stress_fiber == "ON":
+            return True
+        elif use_stress_fiber == "OFF":
+            return False
+
+        self.logger.warn(
+            f"{self.GLOBAL_USE_STRESS_FIBER} should be 'ON', or 'OFF'")
+        return False
+
+    def get_stress_fiber_params(self) -> Tuple[int, int, int]:
+        fibers = int(
+            self._context.globals.get(self.GLOBAL_NUM_STRESS_FIBERS,
+                                      self.DEFAULT_NUM_STRESS_FIBERS))
+        min_ms = int(
+            self._context.globals.get(self.GLOBAL_STRESS_FIBER_MIN_MS,
+                                      self.DEFAULT_STRESS_FIBER_MIN_MS))
+        max_ms = int(
+            self._context.globals.get(self.GLOBAL_STRESS_FIBER_MAX_MS,
+                                      self.DEFAULT_STRESS_FIBER_MAX_MS))
+        return (fibers, min_ms, max_ms)
+
     def add_extra_rp_conf(self, conf):
         self._extra_rp_conf = {**self._extra_rp_conf, **conf}
 
@@ -1463,7 +1565,8 @@ class RedpandaServiceBase(RedpandaServiceABC, Service):
                    metrics_endpoint: MetricsEndpoint = MetricsEndpoint.METRICS,
                    namespace: str | None = None,
                    topic: str | None = None,
-                   nodes: Any = None):
+                   nodes: Any = None,
+                   expect_metric: bool = False):
         '''
         Pings the 'metrics_endpoint' of each node and returns the summed values
         of the given metric, optionally filtering by namespace and topic.
@@ -1472,8 +1575,12 @@ class RedpandaServiceBase(RedpandaServiceABC, Service):
         if nodes is None:
             nodes = self.nodes
 
-        return self._metric_sum(metric_name, nodes, metrics_endpoint,
-                                namespace, topic)
+        return self._metric_sum(metric_name,
+                                nodes,
+                                metrics_endpoint,
+                                namespace,
+                                topic,
+                                expect_metric=expect_metric)
 
     def healthy(self):
         """
@@ -2096,8 +2203,10 @@ class RedpandaServiceCloud(KubeServiceMixin, RedpandaServiceABC):
         if metrics_endpoint == MetricsEndpoint.PUBLIC_METRICS:
             text = self._cloud_cluster.get_public_metrics()
         else:
+            # operator V2 clusters use HTTPS for all the things
+            p = '-k https' if self.is_operator_v2_cluster() else 'http'
             text = self.kubectl.exec(
-                'curl -f -s -S http://localhost:9644/metrics', pod.name)
+                f'curl -f -s -S {p}://localhost:9644/metrics', pod.name)
         return text_string_to_metric_families(text)
 
     def metrics_sample(
@@ -2170,13 +2279,13 @@ class RedpandaServiceCloud(KubeServiceMixin, RedpandaServiceABC):
             _config = globals[RedpandaServiceCloud.GLOBAL_CLOUD_CLUSTER_CONFIG]
         return _config
 
-    def get_product(self):
+    def get_tier(self):
         """ Get product information.
 
         Returns dict with info of product, including advertised limits.
         Returns none if product info for the tier is not found.
         """
-        return self._cloud_cluster.get_product()
+        return self._cloud_cluster.get_tier()
 
     def get_install_pack(self):
         install_pack_client = InstallPackClient(
@@ -2199,6 +2308,14 @@ class RedpandaServiceCloud(KubeServiceMixin, RedpandaServiceABC):
         """Scale out/in cluster to specified number of nodes.
         """
         return self._cloud_cluster.scale_cluster(nodes_count)
+
+    def set_cluster_config_overrides(self, cluster_id, config_values):
+        """
+        Set configuration overrides for a specific
+        Redpanda cloud cluster using Admin API
+        """
+        return self._cloud_cluster.set_cluster_config_overrides(
+            cluster_id, config_values)
 
     def clean_cluster(self):
         """Cleans state from a running cluster to make it seem like it was newly provisioned.
@@ -2435,6 +2552,8 @@ class RedpandaServiceCloud(KubeServiceMixin, RedpandaServiceABC):
 
 class RedpandaService(RedpandaServiceBase):
 
+    ENTERPRISE_LICENSE_NAG = "A Redpanda Enterprise Edition license is required"
+
     nodes: list[ClusterNode]
 
     def __init__(self,
@@ -2456,7 +2575,8 @@ class RedpandaService(RedpandaServiceBase):
                  schema_registry_config: Optional[SchemaRegistryConfig] = None,
                  audit_log_config: Optional[AuditLogConfig] = None,
                  disable_cloud_storage_diagnostics=False,
-                 cloud_storage_scrub_timeout_s=None):
+                 cloud_storage_scrub_timeout_s=None,
+                 rpk_node_config: Optional[RpkNodeConfig] = None):
         super(RedpandaService, self).__init__(
             context,
             num_brokers,
@@ -2473,7 +2593,13 @@ class RedpandaService(RedpandaServiceBase):
         self._schema_registry_config = schema_registry_config
         self._audit_log_config = audit_log_config
         self._failure_injection_enabled = False
+        # Tolerate redpanda nodes not running during health checks. This is
+        # useful when running i.e. with node_operations.FailureInjectorBackgroundThread
+        # which can kill redpanda nodes.
+        # This is a number to allow multiple callers to set it.
+        self.tolerate_not_running = 0
         self._tolerate_crashes = False
+        self._rpk_node_config = rpk_node_config
 
         if node_ready_timeout_s is None:
             node_ready_timeout_s = RedpandaService.DEFAULT_NODE_READY_TIMEOUT_SEC
@@ -2577,6 +2703,10 @@ class RedpandaService(RedpandaServiceBase):
         assert node in self.nodes, f"Node {node.account.hostname} is not started"
         self._extra_node_conf[node] = conf
 
+    def add_extra_node_conf(self, node, conf):
+        assert node in self.nodes, f"Node {node.account.hostname} is not started"
+        self._extra_node_conf[node] = {**self._extra_node_conf[node], **conf}
+
     def set_security_settings(self, settings):
         self._security = settings
         self._init_tls()
@@ -2630,7 +2760,7 @@ class RedpandaService(RedpandaServiceBase):
             memory_kb = int(line.strip().split()[1])
             return memory_kb / 1024
 
-    def get_node_cpu_count(self):
+    def get_node_cpu_count(self) -> int:
         if self._resource_settings.num_cpus is not None:
             self.logger.info(f"get_node_cpu_count: got from ResourceSettings")
             return self._resource_settings.num_cpus
@@ -2746,13 +2876,20 @@ class RedpandaService(RedpandaServiceBase):
               expect_fail: bool = False,
               auto_assign_node_id: bool = False,
               omit_seeds_on_idx_one: bool = True,
-              node_config_overrides={}):
+              node_config_overrides: NodeConfigOverridesT = {}):
         """
         Start the service on all nodes.
 
         :param expect_fail: if true, expect redpanda nodes to terminate shortly
                             after starting.  Raise exception if they don't.
         """
+
+        # Callers sometimes forget that this must be keyed by ClusterNode.
+        for k in node_config_overrides:
+            assert type(
+                k
+            ) is ClusterNode, f"Expected ClusterNode as key in node_config_overrides, got {type(k)}"
+
         to_start = nodes if nodes is not None else self.nodes
         assert all((node in self.nodes for node in to_start))
         self.logger.info("%s: starting service" % self.who_am_i())
@@ -2867,6 +3004,22 @@ class RedpandaService(RedpandaServiceBase):
                                          request_timeout_ms=30000,
                                          api_version_auto_timeout_ms=3000)
 
+        # Start stress fiber if requested
+        if self.use_stress_fiber():
+
+            def start_stress_fiber(node):
+                count, min_ms, max_ms = self.get_stress_fiber_params()
+                self.start_stress_fiber(node, count, min_ms, max_ms)
+
+            if first_start:
+                self.logger.info(
+                    f"Starting stress fiber for {len(to_start)} nodes")
+                self.for_nodes(to_start, start_stress_fiber)
+            else:
+                self.logger.info(
+                    f"Starting stress fiber for {len(self.nodes)} nodes")
+                self.for_nodes(self.nodes, start_stress_fiber)
+
     def write_crl_file(self, node: ClusterNode, ca: tls.CertificateAuthority):
         self.logger.info(
             f"Writing Redpanda node tls ca CRL file: {RedpandaService.TLS_CA_CRL_FILE}"
@@ -2969,10 +3122,16 @@ class RedpandaService(RedpandaServiceBase):
 
         env_preamble = self.redpanda_env_preamble()
 
+        cur_ver: Optional[RedpandaVersionTriple] = None
+        try:
+            cur_ver = self.get_version_int_tuple(node)
+        except:  # noqa
+            pass
+
         cmd = (
             f"{preamble} {env_preamble} nohup {self.find_binary('redpanda')}"
             f" --redpanda-cfg {RedpandaService.NODE_CONFIG_FILE}"
-            f" {self._log_config.to_args()} "
+            f" {self._log_config.to_args(cur_ver)} "
             " --abort-on-seastar-bad-alloc "
             " --dump-memory-diagnostics-on-alloc-failure-kind=all "
             f" {res_args} "
@@ -2994,6 +3153,14 @@ class RedpandaService(RedpandaServiceBase):
         # fall through
         return True
 
+    def start_stress_fiber(self, node, count, min_ms, max_ms):
+        """Start stress fiber"""
+        admin = Admin(self)
+        admin.stress_fiber_start(node=node,
+                                 num_fibers=count,
+                                 min_ms_per_scheduling_point=min_ms,
+                                 max_ms_per_scheduling_point=max_ms)
+
     def all_up(self):
         def check_node(node):
             pid = self.redpanda_pid(node)
@@ -3010,21 +3177,37 @@ class RedpandaService(RedpandaServiceBase):
 
         return all(self.for_nodes(self._started, check_node))
 
-    def signal_redpanda(self, node, signal=signal.SIGKILL, idempotent=False):
+    def signal_redpanda(self,
+                        node,
+                        signal=signal.SIGKILL,
+                        idempotent=False,
+                        thread=None):
         """
         :param idempotent: if true, then kill-like signals are ignored if
                            the process is already gone.
+        :param thread: if set, then the signal is sent to the given thread
         """
-        pid = self.redpanda_pid(node)
-        if pid is None:
-            if idempotent and signal in {signal.SIGKILL, signal.SIGTERM}:
-                return
-            else:
-                raise RuntimeError(
-                    f"Can't signal redpanda on node {node.name}, it isn't running"
-                )
+        if thread is None:
+            pid = self.redpanda_pid(node)
+            if pid is None:
+                if idempotent and signal in {signal.SIGKILL, signal.SIGTERM}:
+                    return
+                else:
+                    raise RuntimeError(
+                        f"Can't signal redpanda on node {node.name}, it isn't running"
+                    )
 
-        node.account.signal(pid, signal, allow_fail=False)
+            node.account.signal(pid, signal, allow_fail=False)
+        else:
+            tgid, tid = self.redpanda_tid(node, thread)
+            script_path = inject_remote_script(node, "tgkill.py")
+            cmd = shlex.join([
+                "python3", script_path,
+                str(tgid),
+                str(tid),
+                str(signal.value)
+            ])
+            node.account.ssh(cmd, allow_fail=False)
 
     def sockets_clear(self, node: RemoteClusterNode):
         """
@@ -3155,10 +3338,10 @@ class RedpandaService(RedpandaServiceBase):
             if expect_fail:
                 wait_until(
                     lambda: self.redpanda_pid(node) == None,
-                    timeout_sec=10,
+                    timeout_sec=timeout,
                     backoff_sec=0.2,
                     err_msg=
-                    f"Redpanda processes did not terminate on {node.name} during startup as expected"
+                    f"Redpanda processes did not terminate on {node.name} during startup as expected in {timeout} sec"
                 )
             elif not skip_readiness_check:
                 wait_until(
@@ -3231,8 +3414,7 @@ class RedpandaService(RedpandaServiceBase):
     def _log_node_process_state(self, node):
         """
         For debugging issues around starting and stopping processes: log
-        which processes are running and which ports are in use. Additionally,
-        capture detailed memory usage for the top 3 memory-consuming processes.
+        which processes are running and which ports are in use.
         """
 
         self.logger.debug(
@@ -3249,22 +3431,6 @@ class RedpandaService(RedpandaServiceBase):
         for line in node.account.ssh_capture("netstat -panelot",
                                              timeout_sec=30):
             self.logger.debug(line.strip())
-
-        # Analyze memory usage in detail for the top 3 processes
-        self.logger.debug(
-            "Gathering detailed memory usage for the top 3 memory-consuming processes..."
-        )
-        for process_line in process_lines[
-                1:4]:  # Skip header, get top 3 processes
-            fields = process_line.split()
-            pid = fields[1]
-            mem_usage = fields[3]
-            self.logger.debug(
-                f"Process PID: {pid}, Memory Usage: {mem_usage}%")
-            self.logger.debug(f"Memory map for PID {pid}:")
-            for pmap_line in node.account.ssh_capture(f"pmap {pid}",
-                                                      timeout_sec=30):
-                self.logger.debug(pmap_line.strip())
 
     def start_service(self, node, start):
         # Maybe the service collides with something that wasn't cleaned up
@@ -3299,9 +3465,9 @@ class RedpandaService(RedpandaServiceBase):
             self.logger.debug(
                 f"Creating S3 bucket: {self.si_settings.cloud_storage_bucket}")
         elif self.si_settings.cloud_storage_type == CloudStorageType.ABS:
-            # Make sure that use_bucket_cleanup_policy if False for ABS
-            self.logger.warning("Turning off use_bucket_cleanup_policy "
-                                "as it is not implemented for Azure/ABS")
+            # Make sure that use_bucket_cleanup_policy if False for ABS:
+            # 1) We don't implement it.
+            # 2) It's not needed because ABS buckets can be deleted without emptying.
             self.si_settings.use_bucket_cleanup_policy = False
             self._cloud_storage_client = ABSClient(
                 logger=self.logger,
@@ -3314,7 +3480,7 @@ class RedpandaService(RedpandaServiceBase):
             )
         else:
             raise RuntimeError(
-                f"Unsuported cloud_storage_type: {self.si_settings.cloud_storage_type}"
+                f"Unsupported cloud_storage_type: {self.si_settings.cloud_storage_type}"
             )
 
         if not self.si_settings.bypass_bucket_creation:
@@ -3342,30 +3508,38 @@ class RedpandaService(RedpandaServiceBase):
         )
 
         if self.si_settings.cloud_storage_cleanup_strategy == CloudStorageCleanupStrategy.ALWAYS_SMALL_BUCKETS_ONLY:
-            bucket_is_small = True
-            max_object_count = 3000
-
-            # See if the bucket is small enough
-            t = time.time()
-            for i, m in enumerate(
-                    self.cloud_storage_client.list_objects(
-                        self.si_settings.cloud_storage_bucket)):
-                if i >= max_object_count:
-                    bucket_is_small = False
-                    break
-            self.logger.info(
-                f"Determining bucket count for {self.si_settings.cloud_storage_bucket} up to {max_object_count} objects took {time.time() - t}s"
-            )
-            if bucket_is_small:
-                # Log grep hint: "a small bucket"
+            if self.si_settings.cloud_storage_type == CloudStorageType.ABS:
+                # ABS buckets can be deleted without emptying so no need to check size.
+                # Also leaving buckets around when using local instance of Azurite causes
+                # performance issues and test flakiness.
                 self.logger.info(
-                    f"Bucket {self.si_settings.cloud_storage_bucket} is a small bucket (deleting it)"
+                    "Always deleting ABS buckets as they don't have to be emptied first."
                 )
             else:
+                bucket_is_small = True
+                max_object_count = 3000
+
+                # See if the bucket is small enough
+                t = time.time()
+                for i, m in enumerate(
+                        self.cloud_storage_client.list_objects(
+                            self.si_settings.cloud_storage_bucket)):
+                    if i >= max_object_count:
+                        bucket_is_small = False
+                        break
                 self.logger.info(
-                    f"Bucket {self.si_settings.cloud_storage_bucket} is NOT a small bucket (NOT deleting it)"
+                    f"Determining bucket count for {self.si_settings.cloud_storage_bucket} up to {max_object_count} objects took {time.time() - t}s"
                 )
-                return
+                if bucket_is_small:
+                    # Log grep hint: "a small bucket"
+                    self.logger.info(
+                        f"Bucket {self.si_settings.cloud_storage_bucket} is a small bucket (deleting it)"
+                    )
+                else:
+                    self.logger.info(
+                        f"Bucket {self.si_settings.cloud_storage_bucket} is NOT a small bucket (NOT deleting it)"
+                    )
+                    return
 
         elif self.si_settings.cloud_storage_cleanup_strategy == CloudStorageCleanupStrategy.IF_NOT_USING_LIFECYCLE_RULE:
             if self.si_settings.use_bucket_cleanup_policy:
@@ -3423,14 +3597,8 @@ class RedpandaService(RedpandaServiceBase):
 
         return result
 
-    def set_cluster_config_to_null(self,
-                                   name: str,
-                                   expect_restart: bool = False,
-                                   admin_client: Optional[Admin] = None,
-                                   timeout: int = 10,
-                                   tolerate_stopped_nodes=False):
-        def set_cluster_config_to_null(self, *args, **kwargs):
-            self.set_cluster_config(*args, values={name: None}, *kwargs)
+    def set_cluster_config_to_null(self, name: str, **kwargs):
+        self.set_cluster_config(values={name: None}, **kwargs)
 
     def set_cluster_config(self,
                            values: dict,
@@ -3610,14 +3778,14 @@ class RedpandaService(RedpandaServiceBase):
 
             crash_log = None
             for line in node.account.ssh_capture(
-                    f"grep -e SEGV -e Segmentation\\ fault -e [Aa]ssert -e Sanitizer {RedpandaService.STDOUT_STDERR_CAPTURE} || true",
+                    f"grep -e SEGV -e Segmentation\\ fault -e [Aa]ssert -e Sanitizer -e 'Aborting on shard' {RedpandaService.STDOUT_STDERR_CAPTURE} || true",
                     timeout_sec=30):
                 if 'SEGV' in line and any(
                     [h in line.lower() for h in cloud_header_strings]):
                     continue
 
                 if is_allowed_log_line(line):
-                    self.logger.warn(
+                    self.logger.info(
                         f"Ignoring allow-listed log line '{line}'")
                     continue
 
@@ -3638,7 +3806,7 @@ class RedpandaService(RedpandaServiceBase):
 
         if crashes:
             if self._tolerate_crashes:
-                self.logger.warn(
+                self.logger.info(
                     f"Detected crashes, but RedpandaService is configured to allow them: {crashes}"
                 )
             else:
@@ -3712,10 +3880,16 @@ class RedpandaService(RedpandaServiceBase):
             if manifest_dump_limit == 0 and key_dump_limit == 0:
                 break
 
-        archive_basename = "cloud_diagnostics.zip"
-        archive_path = os.path.join(
+        service_dir = os.path.join(
             TestContext.results_dir(self._context, self._context.test_index),
-            archive_basename)
+            self.service_id)
+
+        if not os.path.isdir(service_dir):
+            mkdir_p(service_dir)
+
+        archive_basename = "cloud_diagnostics.zip"
+        archive_path = os.path.join(service_dir, archive_basename)
+
         with zipfile.ZipFile(archive_path, mode='w') as archive:
             for m in manifests_to_dump:
                 self.logger.info(f"Fetching manifest {m}")
@@ -3953,6 +4127,14 @@ class RedpandaService(RedpandaServiceBase):
             self.logger.warn(f"Error setting trace loggers: {e}")
 
     def stop_node(self, node, timeout=None, forced=False):
+        # Assume node is stopped once we enter this path. If stopping succeeds
+        # it is the obvious thing to do. If stopping fails we can't differentiate
+        # between a node that stopped or will eventually stop so for all intents
+        # and purposes we consider it stopped not to trip other logic that expects
+        # started to contain nodes that _must_ be running. E.g. crash detection
+        # at end of test which iterates through "started nodes".
+        self.remove_from_started_nodes(node)
+
         pid = self.redpanda_pid(node)
         if pid is not None:
             node.account.signal(pid,
@@ -3977,9 +4159,12 @@ class RedpandaService(RedpandaServiceBase):
             self._set_trace_loggers_and_sleep(node, time_sec=sleep_sec)
             self.logger.warn(f"Node {node.name} status:")
             self._log_node_process_state(node)
+            # Kill the process if it's still running. If redpanda still runs we
+            # might fail to collect logs as the file will be modified while we
+            # (ducktape) are reading/compressing it.
+            # I.e. `tar: redpanda.log: file changed as we read it`
+            node.account.signal(pid, signal.SIGKILL, allow_fail=True)
             raise
-
-        self.remove_from_started_nodes(node)
 
     def remove_from_started_nodes(self, node):
         if node in self._started:
@@ -4082,6 +4267,20 @@ class RedpandaService(RedpandaServiceBase):
 
             raise e
 
+    def redpanda_tid(self, node, thread):
+        """Return the thread group ID and thread ID of the given thread"""
+        cmd = "ps -C redpanda -T"
+        for line in node.account.ssh_capture(cmd, timeout_sec=10):
+            # Example line:
+            #     PID    SPID TTY          TIME CMD
+            # 2662879 2662879 pts/16   00:00:02 redpanda
+            self.logger.debug(f"ps output: {line}")
+            parts = line.split()
+            thread_name = parts[4]
+            if thread == thread_name:
+                return int(parts[0]), int(parts[1])
+        return None
+
     def started_nodes(self) -> List[ClusterNode]:
         return list(self._started)
 
@@ -4171,6 +4370,9 @@ class RedpandaService(RedpandaServiceBase):
         except:
             cur_ver = None
 
+        if self._security.tls_provider and self._rpk_node_config is not None:
+            self._rpk_node_config.ca_file = RedpandaService.TLS_CA_CRT_FILE
+
         conf = self.render("redpanda.yaml",
                            node=node,
                            data_dir=RedpandaService.DATA_DIR,
@@ -4189,7 +4391,8 @@ class RedpandaService(RedpandaServiceBase):
                            superuser=self._superuser,
                            sasl_enabled=self.sasl_enabled(),
                            endpoint_authn_method=self.endpoint_authn_method(),
-                           auto_auth=self._security.auto_auth)
+                           auto_auth=self._security.auto_auth,
+                           rpk_node_config=self._rpk_node_config)
 
         def is_fips_capable(node) -> bool:
             cur_ver = self._installer.installed_version(node)
@@ -4250,6 +4453,9 @@ class RedpandaService(RedpandaServiceBase):
 
         self._node_configs[node] = yaml.full_load(conf)
 
+    def find_path_to_rpk(self) -> str:
+        return f'{self._context.globals.get("rp_install_path_root", None)}/bin/rpk'
+
     def write_bootstrap_cluster_config(self):
         conf = copy.deepcopy(self.CLUSTER_CONFIG_DEFAULTS)
 
@@ -4285,6 +4491,9 @@ class RedpandaService(RedpandaServiceBase):
             # it doesn't appear in older configurations
             conf.pop('cloud_storage_credentials_source', None)
 
+        if cur_ver != RedpandaInstaller.HEAD and cur_ver < (25, 1, 1):
+            conf.pop('iceberg_target_lag_ms', None)
+
         if self._security.enable_sasl:
             self.logger.debug("Enabling SASL in cluster configuration")
             conf.update(dict(enable_sasl=True))
@@ -4312,7 +4521,7 @@ class RedpandaService(RedpandaServiceBase):
         if (cur_ver == RedpandaInstaller.HEAD
                 or cur_ver >= (24, 3, 1)) and 'rpk_path' not in conf:
             # Introduced rpk_path to v24.3
-            rpk_path = f'{self._context.globals.get("rp_install_path_root", None)}/bin/rpk'
+            rpk_path = self.find_path_to_rpk()
             conf.update(dict(rpk_path=rpk_path))
 
         conf_yaml = yaml.dump(conf)
@@ -4438,7 +4647,8 @@ class RedpandaService(RedpandaServiceBase):
     def node_storage(self,
                      node,
                      sizes: bool = False,
-                     scan_cache: bool = True) -> NodeStorage:
+                     scan_cache: bool = True,
+                     compaction_footers: bool = False) -> NodeStorage:
         """
         Retrieve a summary of storage on a node.
 
@@ -4458,6 +4668,8 @@ class RedpandaService(RedpandaServiceBase):
         ]
         if sizes:
             cmd.append("--sizes")
+        if compaction_footers:
+            cmd.append("--compaction-footers")
         output = node.account.ssh_output(shlex.join(cmd),
                                          combine_stderr=False,
                                          timeout_sec=10)
@@ -4472,10 +4684,12 @@ class RedpandaService(RedpandaServiceBase):
                     partition_path = os.path.join(topic_path, part)
                     partition = topic.add_partition(part, node, partition_path)
                     partition.add_files(list(segments.keys()))
-                    if not sizes:
-                        continue
                     for segment, data in segments.items():
-                        partition.set_segment_size(segment, data["size"])
+                        if "size" in data:
+                            partition.set_segment_size(segment, data["size"])
+                        if "compaction_footer" in data:
+                            partition.set_segment_compaction_footer(
+                                segment, data["compaction_footer"])
 
         if scan_cache and self._si_settings is not None and node.account.exists(
                 store.cache_dir):
@@ -5018,6 +5232,11 @@ class RedpandaService(RedpandaServiceBase):
                 try:
                     status = self._admin.get_partition_cloud_storage_status(
                         p.topic, p.index, node=p.leader)
+                except MaxRetryError as e:
+                    self.logger.info(
+                        f"Max retries exceeded while fetching cloud partition status: {e}"
+                    )
+                    return False
                 except HTTPError as he:
                     if he.response.status_code == 404:
                         # Old redpanda, doesn't have this endpoint.  We can't
@@ -5224,6 +5443,13 @@ class RedpandaService(RedpandaServiceBase):
 
         self.logger.info(f"Set up failure injection config for nodes: {nodes}")
 
+    def set_tolerate_crashes(self, tolerate_crashes: bool):
+        """
+        Do not fail test on crashes including asserts. This is useful when
+        running with redpanda's fault injection enabled.
+        """
+        self._tolerate_crashes = tolerate_crashes
+
     def validate_controller_log(self):
         """
         This method is for use at end of tests, to detect issues that might
@@ -5276,11 +5502,27 @@ class RedpandaService(RedpandaServiceBase):
         else:
             return None
 
+    def estimate_total_disk_bytes_read(self):
+        try:
+            samples = self.metrics_sample(
+                "vectorized_io_queue_total_read_bytes_total",
+                nodes=self.started_nodes())
+        except Exception as e:
+            self.logger.warn(
+                f"Cannot check metrics, did a test finish with all nodes down? ({e})"
+            )
+            return None
+
+        if samples is not None and samples.samples:
+            return sum(s.value for s in samples.samples)
+        else:
+            return None
+
     def wait_node_add_rebalance_finished(self,
                                          new_nodes,
                                          admin=None,
                                          min_partitions=5,
-                                         progress_timeout=30,
+                                         progress_timeout=60,
                                          timeout=300,
                                          backoff=2):
         """Waits until the rebalance triggered by adding new nodes is finished."""
@@ -5342,7 +5584,7 @@ class RedpandaService(RedpandaServiceBase):
         def license_observable():
             for node in self.started_nodes():
                 license = self._admin.get_license(node)
-                if license is None or license['loaded'] is not True:
+                if not self._admin.is_sample_license(license):
                     return False
             return True
 
@@ -5354,6 +5596,9 @@ class RedpandaService(RedpandaServiceBase):
                    backoff_sec=1,
                    err_msg="Inserted license not observable in time")
         self.logger.debug("Enterprise License installed successfully")
+
+    def has_license_nag(self):
+        return self.search_log_any(self.ENTERPRISE_LICENSE_NAG)
 
 
 def make_redpanda_service(context: TestContext,

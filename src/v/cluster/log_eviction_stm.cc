@@ -71,7 +71,7 @@ ss::future<> log_eviction_stm::handle_log_eviction_events() {
                 co_await _has_pending_truncation.wait();
             } else {
                 // Previous iter didn't get everything (e.g. because max
-                // collectible offset prevented use from truncating). Be sure
+                // removable offset prevented use from truncating). Be sure
                 // to try again soon even if no other notifications come in.
                 co_await _has_pending_truncation.wait(retry_backoff_time);
             }
@@ -172,10 +172,10 @@ log_eviction_stm::do_write_raft_snapshot(model::offset truncation_point) {
     co_await _raft->refresh_commit_index();
     co_await _raft->log()->stm_manager()->ensure_snapshot_exists(
       truncation_point);
-    const auto max_collectible_offset
-      = _raft->log()->stm_manager()->max_collectible_offset();
-    if (truncation_point > max_collectible_offset) {
-        truncation_point = max_collectible_offset;
+    const auto max_removable_local_log_offset
+      = _raft->log()->stm_manager()->max_removable_local_log_offset();
+    if (truncation_point > max_removable_local_log_offset) {
+        truncation_point = max_removable_local_log_offset;
         if (truncation_point <= _raft->last_snapshot_index()) {
             /// Cannot truncate, have already reached maximum allowable
             co_return;
@@ -183,7 +183,7 @@ log_eviction_stm::do_write_raft_snapshot(model::offset truncation_point) {
         vlog(
           _log.trace,
           "Can only evict up to offset: {}, asked to evict to: {} ",
-          max_collectible_offset,
+          max_removable_local_log_offset,
           truncation_point);
     }
     if (truncation_point <= _raft->last_snapshot_index()) {
@@ -330,10 +330,7 @@ ss::future<log_eviction_stm::offset_result> log_eviction_stm::replicate_command(
   std::optional<std::reference_wrapper<ss::abort_source>> as) {
     auto opts = raft::replicate_options(raft::consistency_level::quorum_ack);
     opts.set_force_flush();
-    auto fut = _raft->replicate(
-      _raft->term(),
-      model::make_memory_record_batch_reader(std::move(batch)),
-      opts);
+    auto fut = _raft->replicate(_raft->term(), std::move(batch), opts);
 
     /// Execute the replicate command bound by timeout and cancellable via
     /// abort_source mechanism
@@ -441,14 +438,14 @@ ss::future<> log_eviction_stm::apply_raft_snapshot(const iobuf&) {
     co_return;
 }
 
-ss::future<> log_eviction_stm::apply_local_snapshot(
+ss::future<raft::local_snapshot_applied> log_eviction_stm::apply_local_snapshot(
   raft::stm_snapshot_header header, iobuf&& data) {
     auto snapshot = serde::from_iobuf<snapshot_data>(std::move(data));
     vlog(
       _log.info, "Applying snapshot {} at offset: {}", snapshot, header.offset);
 
     _delete_records_eviction_offset = snapshot.effective_start_offset;
-    return ss::now();
+    co_return raft::local_snapshot_applied::yes;
 }
 
 ss::future<raft::stm_snapshot>
@@ -476,7 +473,9 @@ bool log_eviction_stm_factory::is_applicable_for(
 }
 
 void log_eviction_stm_factory::create(
-  raft::state_machine_manager_builder& builder, raft::consensus* raft) {
+  raft::state_machine_manager_builder& builder,
+  raft::consensus* raft,
+  const cluster::stm_instance_config&) {
     auto stm = builder.create_stm<log_eviction_stm>(raft, clusterlog, _kvstore);
     raft->log()->stm_manager()->add_stm(stm);
 }

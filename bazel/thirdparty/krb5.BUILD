@@ -1,4 +1,4 @@
-load("@bazel_skylib//rules:common_settings.bzl", "int_flag")
+load("@bazel_skylib//rules:common_settings.bzl", "int_flag", "string_flag")
 load("@rules_foreign_cc//foreign_cc:defs.bzl", "configure_make")
 
 # Make this build faster by setting `build --@krb5//:build_jobs=8` in user.bazelrc
@@ -7,6 +7,18 @@ int_flag(
     name = "build_jobs",
     build_setting_default = 4,
     make_variable = "BUILD_JOBS",
+)
+
+string_flag(
+    name = "sanitizers",
+    build_setting_default = "no",
+    make_variable = "SANITIZERS",
+)
+
+string_flag(
+    name = "linker",
+    build_setting_default = "lld",
+    make_variable = "LINKER",
 )
 
 filegroup(
@@ -40,10 +52,15 @@ configure_make(
         # duplicate symbol error
         "--enable-shared",
         "--disable-static",
-        # "--enable-asan=undefined,address",
+        "--enable-asan=$(SANITIZERS)",
+    ],
+    copts = [
+        "-fuse-ld=$LINKER",
     ],
     env = {
+        # Need to pass this additionally here because of a bug in the kerberos build where it doesn't properly pass the linker flag down
         "KRB5_BUILD_JOBS": "$(BUILD_JOBS)",
+        "LINKER": "$(LINKER)",
     },
     lib_source = ":srcs",
     out_shared_libs = [
@@ -53,7 +70,11 @@ configure_make(
         "libkrb5.so.3",
         "libkrb5support.so.0",
     ],
-    toolchains = [":build_jobs"],
+    toolchains = [
+        ":build_jobs",
+        ":sanitizers",
+        ":linker",
+    ],
     visibility = [
         "//visibility:public",
     ],

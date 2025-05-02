@@ -25,6 +25,7 @@
 #include "config/configuration.h"
 #include "config/validators.h"
 #include "features/enterprise_features.h"
+#include "features/feature_table.h"
 #include "hashing/secure.h"
 #include "json/stringbuffer.h"
 #include "json/writer.h"
@@ -40,10 +41,13 @@
 #include "utils/unresolved_address.h"
 
 #include <seastar/core/abort_source.hh>
+#include <seastar/core/condition-variable.hh>
 #include <seastar/core/coroutine.hh>
 #include <seastar/core/lowres_clock.hh>
 #include <seastar/core/shared_ptr.hh>
+#include <seastar/net/dns.hh>
 #include <seastar/net/tls.hh>
+#include <seastar/util/defer.hh>
 
 #include <absl/algorithm/container.h>
 #include <absl/container/node_hash_map.h>
@@ -53,8 +57,37 @@
 #include <boost/uuid/uuid_generators.hpp>
 #include <boost/uuid/uuid_io.hpp>
 #include <fmt/core.h>
+#include <sys/socket.h>
 
+#include <climits>
+#include <netdb.h>
 #include <stdexcept>
+
+namespace {
+ss::sstring get_hostname() {
+    std::array<char, HOST_NAME_MAX> hostname{};
+    if (::gethostname(hostname.data(), hostname.size()) != 0) {
+        return {};
+    }
+
+    return hostname.data();
+}
+
+ss::sstring get_domainname() {
+    std::array<char, HOST_NAME_MAX> domainname{};
+    if (::getdomainname(domainname.data(), domainname.size()) != 0) {
+        return {};
+    }
+
+    return domainname.data();
+}
+
+ss::future<std::vector<ss::sstring>> get_fqdns(std::string_view hostname) {
+    ss::net::dns_resolver resolver;
+    auto hostent = co_await resolver.get_host_by_name(hostname.data());
+    co_return hostent.names;
+}
+} // namespace
 
 namespace cluster {
 
@@ -115,6 +148,7 @@ metrics_reporter::metrics_reporter(
   ss::sharded<security::role_store>& role_store,
   ss::sharded<plugin_table>* pt,
   ss::sharded<feature_manager>* fm,
+  ss::sharded<storage::api>* storage,
   ss::sharded<ss::abort_source>& as)
   : _raft0(std::move(raft0))
   , _cluster_info(controller_stm.local().get_metrics_reporter_cluster_info())
@@ -127,6 +161,7 @@ metrics_reporter::metrics_reporter(
   , _role_store(role_store)
   , _plugin_table(pt)
   , _feature_manager(fm)
+  , _storage(storage)
   , _as(as)
   , _logger(logger, "metrics-reporter") {}
 
@@ -153,7 +188,20 @@ ss::future<> metrics_reporter::start() {
 ss::future<> metrics_reporter::stop() {
     vlog(clusterlog.info, "Stopping Metrics Reporter...");
     _tick_timer.cancel();
+    _cluster_info_initialized_cvar.broken();
     co_await _gate.close();
+}
+
+ss::future<>
+metrics_reporter::wait_cluster_info_initialized(ss::abort_source& as) {
+    constexpr auto retry_period = 5s;
+    while (!as.abort_requested() && !_cluster_info.is_initialized()) {
+        co_await _cluster_info_initialized_cvar
+          .wait(retry_period, [this] { return _cluster_info.is_initialized(); })
+          .handle_exception_type([](const ss::condition_variable_timed_out&) {
+              // Noop, check if abort requested and wait again
+          });
+    }
 }
 
 void metrics_reporter::report_metrics() {
@@ -175,6 +223,10 @@ metrics_reporter::build_metrics_snapshot() {
     metrics_snapshot snapshot;
 
     snapshot.cluster_uuid = _cluster_info.uuid;
+    const auto& uuid = _storage->local().get_cluster_uuid();
+    if (uuid.has_value()) {
+        snapshot.storage_uuid = fmt::to_string(uuid.value());
+    }
     snapshot.cluster_creation_epoch = _cluster_info.creation_timestamp.value();
 
     absl::node_hash_map<model::node_id, node_metrics> metrics_map;
@@ -217,6 +269,14 @@ metrics_reporter::build_metrics_snapshot() {
         }
 
         metrics.uptime_ms = report->local_state.uptime / 1ms;
+        auto& advertised_listeners
+          = nm->get().broker.kafka_advertised_listeners();
+        metrics.advertised_listeners.reserve(advertised_listeners.size());
+        std::transform(
+          advertised_listeners.begin(),
+          advertised_listeners.end(),
+          std::back_inserter(metrics.advertised_listeners),
+          [](const model::broker_endpoint& ep) { return ep.address; });
     }
     auto& topics = _topics.local().topics_map();
     snapshot.topic_count = 0;
@@ -231,6 +291,19 @@ metrics_reporter::build_metrics_snapshot() {
 
         snapshot.topic_count++;
         snapshot.partition_count += md.get_configuration().partition_count;
+        switch (md.get_configuration().properties.iceberg_mode.kind()) {
+        case model::iceberg_mode::variant::disabled:
+            break;
+        case model::iceberg_mode::variant::key_value:
+            ++snapshot.topics_with_iceberg_kv;
+            break;
+        case model::iceberg_mode::variant::value_schema_id_prefix:
+            ++snapshot.topics_with_iceberg_sr;
+            break;
+        case model::iceberg_mode::variant::value_schema_latest:
+            ++snapshot.topics_with_iceberg_pb;
+            break;
+        }
     }
 
     snapshot.nodes.reserve(metrics_map.size());
@@ -274,6 +347,12 @@ metrics_reporter::build_metrics_snapshot() {
                                  && !license.value().is_expired();
     snapshot.has_enterprise_features = feature_report.any();
 
+    snapshot.enterprise_features.emplace(std::move(feature_report));
+
+    snapshot.host_name = get_hostname();
+    snapshot.domain_name = get_domainname();
+    snapshot.fqdns = co_await get_fqdns(snapshot.host_name);
+
     co_return snapshot;
 }
 
@@ -312,10 +391,14 @@ ss::future<> metrics_reporter::try_initialize_cluster_info() {
 
     auto& first_cfg = batches.front();
 
+    _cluster_info.creation_timestamp = first_cfg.header().first_timestamp;
+    co_await _feature_table.invoke_on_all([&](features::feature_table& ft) {
+        ft.set_builtin_trial_license(_cluster_info.creation_timestamp);
+    });
+
     auto data_bytes = iobuf_to_bytes(first_cfg.data());
     hash_sha256 sha256;
     sha256.update(data_bytes);
-    _cluster_info.creation_timestamp = first_cfg.header().first_timestamp;
     // use timestamps of first two batches in raft-0 log.
     for (int i = 0; i < 2; ++i) {
         sha256.update(iobuf_to_bytes(
@@ -332,6 +415,7 @@ ss::future<> metrics_reporter::try_initialize_cluster_info() {
     _cluster_info.uuid = fmt::format("{}", uuid_gen());
     vlog(
       clusterlog.info, "Generated cluster metrics ID {}", _cluster_info.uuid);
+    _cluster_info_initialized_cvar.signal();
 }
 
 /**
@@ -376,14 +460,15 @@ iobuf serialize_metrics_snapshot(
 
     return out;
 }
-ss::future<http::client> metrics_reporter::make_http_client() {
+
+ss::future<http::client> details::metrics_http_client::make_http_client() {
     net::base_transport::configuration client_configuration;
     client_configuration.server_addr = net::unresolved_address(
-      ss::sstring(_address.host), _address.port);
+      ss::sstring(_conf.addr.host), _conf.addr.port);
 
     client_configuration.disable_metrics = net::metrics_disabled::yes;
 
-    if (_address.protocol == "https") {
+    if (_conf.addr.protocol == "https") {
         ss::tls::credentials_builder builder;
         builder.set_client_auth(ss::tls::client_auth::NONE);
         builder.set_minimum_tls_version(
@@ -391,12 +476,14 @@ ss::future<http::client> metrics_reporter::make_http_client() {
         auto ca_file = co_await net::find_ca_file();
         if (ca_file) {
             vlog(
-              _logger.trace, "using {} as metrics reporter CA store", ca_file);
+              _conf.logger.trace,
+              "using {} as metrics reporter CA store",
+              ca_file);
             co_await builder.set_x509_trust_file(
               ca_file.value(), ss::tls::x509_crt_format::PEM);
         } else {
             vlog(
-              _logger.trace,
+              _conf.logger.trace,
               "ca file not found, defaulting to system trust store");
             co_await builder.set_system_trust();
         }
@@ -405,24 +492,35 @@ ss::future<http::client> metrics_reporter::make_http_client() {
           = co_await net::build_reloadable_credentials_with_probe<
             ss::tls::certificate_credentials>(
             std::move(builder), "metrics_reporter", "httpclient");
-        client_configuration.tls_sni_hostname = _address.host;
+        client_configuration.tls_sni_hostname = _conf.addr.host;
     }
-    co_return http::client(client_configuration, _as.local());
+    co_return http::client(client_configuration, _conf.as);
 }
 
 ss::future<>
-metrics_reporter::do_send_metrics(http::client& client, iobuf body) {
+details::metrics_http_client::do_send_metrics(http::client& client) {
     auto timeout = config::shard_local_cfg().metrics_reporter_tick_interval();
-    auto res = co_await client.get_connected(timeout, _logger);
+    auto res = co_await client.get_connected(timeout, _conf.logger);
     // skip sending metrics, unable to connect
     if (res != http::reconnect_result_t::connected) {
         vlog(
-          _logger.trace, "unable to send metrics report, connection timeout");
+          _conf.logger.trace,
+          "unable to send metrics report, connection timeout");
         co_return;
     }
     auto resp_stream = co_await client.post(
-      _address.path, std::move(body), http::content_type::json, timeout);
+      _conf.addr.path, std::move(_out), http::content_type::json, timeout);
     co_await resp_stream->prefetch_headers();
+}
+
+ss::future<>
+details::metrics_http_client::send_metrics(configs conf, iobuf out) {
+    metrics_http_client metrics_client{conf, std::move(out)};
+    co_await http::with_client(
+      co_await metrics_client.make_http_client(),
+      [&metrics_client](http::client& client) {
+          return metrics_client.do_send_metrics(client);
+      });
 }
 
 ss::future<> metrics_reporter::do_report_metrics() {
@@ -480,10 +578,10 @@ ss::future<> metrics_reporter::do_report_metrics() {
     }
     auto out = serialize_metrics_snapshot(snapshot.value());
     try {
-        co_await http::with_client(
-          co_await make_http_client(), [this, &out](http::client& client) {
-              return do_send_metrics(client, std::move(out));
-          });
+        details::metrics_http_client::configs conf(
+          _address, _logger, _as.local());
+        co_await details::metrics_http_client::send_metrics(
+          conf, std::move(out));
         _last_success = ss::lowres_clock::now();
     } catch (...) {
         vlog(
@@ -503,19 +601,27 @@ void rjson_serialize(
 
     w.Key("cluster_uuid");
     w.String(snapshot.cluster_uuid);
+    w.Key("storage_uuid");
+    w.String(snapshot.storage_uuid);
     w.Key("cluster_created_ts");
     w.Uint64(snapshot.cluster_creation_epoch);
     w.Key("topic_count");
-    w.Int(snapshot.topic_count);
+    w.Uint64(snapshot.topic_count);
+    w.Key("topics_with_iceberg_key_value");
+    w.Uint64(snapshot.topics_with_iceberg_kv);
+    w.Key("topics_with_iceberg_value_schema_id_prefix");
+    w.Uint64(snapshot.topics_with_iceberg_sr);
+    w.Key("topics_with_iceberg_latest_protobuf_value");
+    w.Uint64(snapshot.topics_with_iceberg_pb);
 
     w.Key("partition_count");
-    w.Int(snapshot.partition_count);
+    w.Uint64(snapshot.partition_count);
 
     w.Key("active_logical_version");
-    w.Int(snapshot.active_logical_version);
+    w.Int64(snapshot.active_logical_version);
 
     w.Key("original_logical_version");
-    w.Int(snapshot.original_logical_version);
+    w.Int64(snapshot.original_logical_version);
 
     w.Key("nodes");
     w.StartArray();
@@ -530,7 +636,7 @@ void rjson_serialize(
     w.Bool(snapshot.has_oidc);
 
     w.Key("rbac_role_count");
-    w.Int(snapshot.rbac_role_count);
+    w.Int64(snapshot.rbac_role_count);
 
     w.Key("data_transforms_count");
     w.Uint(snapshot.data_transforms_count);
@@ -549,6 +655,24 @@ void rjson_serialize(
 
     w.Key("has_enterprise_features");
     w.Bool(snapshot.has_enterprise_features);
+
+    if (snapshot.enterprise_features.has_value()) {
+        w.Key("enterprise_features");
+        w.StartArray();
+        for (const auto& f : snapshot.enterprise_features.value().enabled()) {
+            w.String(fmt::format("{}", f));
+        }
+        w.EndArray();
+    }
+
+    w.Key("hostname");
+    w.String(snapshot.host_name);
+
+    w.Key("domainname");
+    w.String(snapshot.domain_name);
+
+    w.Key("fqdns");
+    rjson_serialize(w, snapshot.fqdns);
 
     w.EndObject();
 }
@@ -586,6 +710,8 @@ void rjson_serialize(
         rjson_serialize(w, d);
     }
     w.EndArray();
+    w.Key("kafka_advertised_listeners");
+    rjson_serialize(w, nm.advertised_listeners);
 
     w.EndObject();
 }

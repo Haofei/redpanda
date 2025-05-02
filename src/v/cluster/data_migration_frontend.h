@@ -11,12 +11,19 @@
 #pragma once
 
 #include "base/outcome.h"
+#include "cloud_storage/remote_label.h"
+#include "cloud_storage/topic_mount_manifest_path.h"
 #include "cluster/data_migration_types.h"
 #include "cluster/fwd.h"
 #include "features/fwd.h"
 #include "rpc/fwd.h"
+#include "ssx/single_sharded.h"
 
 #include <seastar/core/sharded.hh>
+
+namespace cloud_storage {
+class topic_mount_handler;
+}
 
 namespace cluster::data_migrations {
 
@@ -27,11 +34,12 @@ public:
     frontend(
       model::node_id,
       bool,
-      migrations_table&,
+      ssx::single_sharded<migrations_table>&,
       ss::sharded<features::feature_table>&,
       ss::sharded<controller_stm>&,
       ss::sharded<partition_leaders_table>&,
       ss::sharded<rpc::connection_cache>&,
+      std::optional<std::reference_wrapper<cloud_storage::topic_mount_handler>>,
       ss::sharded<ss::abort_source>&);
 
     ss::future<result<id>> create_migration(
@@ -49,6 +57,10 @@ public:
 
     ss::future<result<migration_metadata>> get_migration(id);
     ss::future<chunked_vector<migration_metadata>> list_migrations();
+
+    using list_mountable_topics_result
+      = result<chunked_vector<cloud_storage::topic_mount_manifest_path>>;
+    ss::future<list_mountable_topics_result> list_mountable_topics();
 
 private:
     /**
@@ -80,16 +92,18 @@ private:
           "This method can only be called on data migration shard");
     }
 
-    bool data_migrations_active() const;
+    bool data_migrations_active(bool check_license) const;
 
 private:
     model::node_id _self;
     bool _cloud_storage_api_initialized;
-    migrations_table& _table;
-    ss::sharded<features::feature_table>& _features;
+    ssx::single_sharded<migrations_table>& _table;
+    features::feature_table& _features;
     ss::sharded<controller_stm>& _controller;
-    ss::sharded<partition_leaders_table>& _leaders_table;
-    ss::sharded<rpc::connection_cache>& _connections;
+    partition_leaders_table& _leaders_table;
+    rpc::connection_cache& _connections;
+    std::optional<std::reference_wrapper<cloud_storage::topic_mount_handler>>
+      _topic_mount_handler;
     ss::sharded<ss::abort_source>& _as;
     std::chrono::milliseconds _operation_timeout;
 };

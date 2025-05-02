@@ -1,11 +1,12 @@
-// Copyright 2024 Redpanda Data, Inc.
-//
-// Use of this software is governed by the Business Source License
-// included in the file licenses/BSL.md
-//
-// As of the Change Date specified in that file, in accordance with
-// the Business Source License, use of this software will be governed
-// by the Apache License, Version 2.0
+/*
+ * Copyright 2024 Redpanda Data, Inc.
+ *
+ * Licensed as a Redpanda Enterprise file under the Redpanda Community
+ * License (the "License"); you may not use this file except in compliance with
+ * the License. You may obtain a copy of the License at
+ *
+ * https://github.com/redpanda-data/redpanda/blob/master/licenses/rcl.md
+ */
 #include "iceberg/values.h"
 
 #include "bytes/hash.h"
@@ -158,11 +159,59 @@ struct primitive_value_lt_visitor {
     }
 };
 
+struct copying_visitor {
+    value operator()(const primitive_value& v) const {
+        return std::visit(primitive_copying_visitor{}, v);
+    }
+
+    value operator()(const std::unique_ptr<struct_value>& v) const {
+        auto ret = std::make_unique<struct_value>();
+        ret->fields.reserve(v->fields.size());
+        for (const auto& f : v->fields) {
+            if (!f) {
+                ret->fields.push_back(std::nullopt);
+                continue;
+            }
+            ret->fields.push_back(make_copy(*f));
+        }
+        return ret;
+    }
+    value operator()(const std::unique_ptr<list_value>& v) const {
+        auto ret = std::make_unique<list_value>();
+        ret->elements.reserve(v->elements.size());
+        for (const auto& e : v->elements) {
+            if (!e) {
+                ret->elements.push_back(std::nullopt);
+                continue;
+            }
+            ret->elements.push_back(make_copy(*e));
+        }
+        return ret;
+    }
+    value operator()(const std::unique_ptr<map_value>& v) const {
+        auto ret = std::make_unique<map_value>();
+        ret->kvs.reserve(v->kvs.size());
+        for (const auto& kv : v->kvs) {
+            iceberg::kv_value kv_copy;
+            kv_copy.key = make_copy(kv.key);
+            if (!kv.val) {
+                kv_copy.val = std::nullopt;
+            } else {
+                kv_copy.val = make_copy(*kv.val);
+            }
+            ret->kvs.push_back(std::move(kv_copy));
+        }
+        return ret;
+    }
+};
+
 } // namespace
 
 primitive_value make_copy(const primitive_value& v) {
     return std::visit(primitive_copying_visitor{}, v);
 }
+
+value make_copy(const value& v) { return std::visit(copying_visitor{}, v); }
 
 bool operator==(const primitive_value& lhs, const primitive_value& rhs) {
     return std::visit(primitive_value_comparison_visitor{}, lhs, rhs);

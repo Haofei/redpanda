@@ -29,11 +29,6 @@ using data_t = record_batch_reader::data_t;
 using foreign_data_t = record_batch_reader::foreign_data_t;
 using storage_t = record_batch_reader::storage_t;
 
-std::optional<reader_data_layout>
-maybe_get_data_layout(const model::record_batch_reader& reader) {
-    return reader._impl->maybe_get_data_layout();
-}
-
 /// \brief wraps a reader into a foreign_ptr<unique_ptr>
 record_batch_reader make_foreign_record_batch_reader(record_batch_reader&& r) {
     class foreign_reader final : public record_batch_reader::impl {
@@ -66,22 +61,9 @@ record_batch_reader make_foreign_record_batch_reader(record_batch_reader&& r) {
             }
             // TODO: this function should take an SMP group
             return ss::smp::submit_to(shard, [this, t] {
-                return _ptr->do_load_slice(t).then([](storage_t recs) {
-                    if (likely(std::holds_alternative<data_t>(recs))) {
-                        auto& d = std::get<data_t>(recs);
-                        auto p = std::make_unique<data_t>(std::move(d));
-                        return storage_t(foreign_data_t{
-                          .buffer = ss::make_foreign(std::move(p)),
-                          .index = 0});
-                    }
-                    return recs;
-                });
+                return _ptr->do_load_slice(t).then(
+                  [](storage_t recs) { return recs; });
             });
-        }
-
-        std::optional<reader_data_layout>
-        maybe_get_data_layout() const override {
-            return _ptr->maybe_get_data_layout();
         }
 
     private:
@@ -89,32 +71,6 @@ record_batch_reader make_foreign_record_batch_reader(record_batch_reader&& r) {
     };
     auto frn = std::make_unique<foreign_reader>(std::move(r).release());
     return record_batch_reader(std::move(frn));
-}
-
-inline reader_data_layout make_data_layout(const storage_t& data) {
-    auto layout = ss::visit(
-      data,
-      [](const data_t& d) {
-          reader_data_layout layout{
-            .total_payload_size = 0,
-            .num_headers = d.size(),
-          };
-          for (const auto& b : d) {
-              layout.total_payload_size += b.data().size_bytes();
-          }
-          return layout;
-      },
-      [](const foreign_data_t& d) {
-          reader_data_layout layout{
-            .total_payload_size = 0,
-            .num_headers = d.buffer->size(),
-          };
-          for (const auto& b : *d.buffer) {
-              layout.total_payload_size += b.data().size_bytes();
-          }
-          return layout;
-      });
-    return layout;
 }
 
 record_batch_reader make_memory_record_batch_reader(storage_t batches) {
@@ -140,11 +96,6 @@ record_batch_reader make_memory_record_batch_reader(storage_t batches) {
             fmt::print(os, "memory reader {} batches", size);
         }
 
-        std::optional<reader_data_layout>
-        maybe_get_data_layout() const override {
-            return make_data_layout(_batches);
-        }
-
     protected:
         ss::future<record_batch_reader::storage_t>
         do_load_slice(timeout_clock::time_point) final {
@@ -161,12 +112,7 @@ record_batch_reader make_memory_record_batch_reader(storage_t batches) {
 
 record_batch_reader
 make_foreign_memory_record_batch_reader(record_batch_reader::data_t data) {
-    auto batches = std::make_unique<record_batch_reader::data_t>(
-      std::move(data));
-    return make_memory_record_batch_reader(record_batch_reader::foreign_data_t{
-      .buffer = ss::make_foreign(std::move(batches)),
-      .index = 0,
-    });
+    return make_memory_record_batch_reader(std::move(data));
 }
 
 record_batch_reader make_foreign_memory_record_batch_reader(record_batch b) {
@@ -245,17 +191,6 @@ record_batch_reader make_fragmented_memory_record_batch_reader(
               _data.size());
         }
 
-        std::optional<reader_data_layout>
-        maybe_get_data_layout() const override {
-            reader_data_layout layout{};
-            for (const auto& d : _data) {
-                auto l = make_data_layout(d);
-                layout.num_headers += l.num_headers;
-                layout.total_payload_size += l.total_payload_size;
-            }
-            return layout;
-        }
-
     protected:
         ss::future<storage_t> do_load_slice(timeout_clock::time_point) final {
             if (is_end_of_stream()) {
@@ -271,7 +206,7 @@ record_batch_reader make_fragmented_memory_record_batch_reader(
     return make_record_batch_reader<reader>(std::move(data));
 }
 
-template<bool is_foreign, typename Container>
+template<typename Container>
 std::vector<record_batch_reader::storage_t>
 make_fragmented_memory_storage_batches(Container batches) {
     std::vector<record_batch_reader::storage_t> data;
@@ -283,15 +218,7 @@ make_fragmented_memory_storage_batches(Container batches) {
     size_t i = 0;
     for (auto it = batches.begin(); it != batches.end(); ++i, ++it) {
         if (!data_chunk.empty() && i % elements_per_fragment == 0) {
-            if (is_foreign) {
-                data.emplace_back(record_batch_reader::foreign_data_t{
-                  .buffer = ss::make_foreign(
-                    std::make_unique<record_batch_reader::data_t>(
-                      std::exchange(data_chunk, {}))),
-                  .index = 0});
-            } else {
-                data.emplace_back(std::exchange(data_chunk, {}));
-            }
+            data.emplace_back(std::exchange(data_chunk, {}));
             data_chunk.reserve(
               std::min(elements_per_fragment, batches.size() - i));
         }
@@ -299,15 +226,7 @@ make_fragmented_memory_storage_batches(Container batches) {
         data_chunk.push_back(std::move(b));
     }
     if (!data_chunk.empty()) {
-        if (is_foreign) {
-            data.emplace_back(record_batch_reader::foreign_data_t{
-              .buffer = ss::make_foreign(
-                std::make_unique<record_batch_reader::data_t>(
-                  std::exchange(data_chunk, {}))),
-              .index = 0});
-        } else {
-            data.emplace_back(std::move(data_chunk));
-        }
+        data.emplace_back(std::move(data_chunk));
     }
     return data;
 }
@@ -336,7 +255,6 @@ record_batch_reader make_fragmented_memory_record_batch_reader(
   fragmented_vector<model::record_batch> batches) {
     return make_fragmented_memory_record_batch_reader(
       make_fragmented_memory_storage_batches<
-        false,
         fragmented_vector<model::record_batch>>(std::move(batches)));
 }
 
@@ -344,7 +262,6 @@ record_batch_reader make_fragmented_memory_record_batch_reader(
   chunked_vector<model::record_batch> batches) {
     return make_fragmented_memory_record_batch_reader(
       make_fragmented_memory_storage_batches<
-        false,
         chunked_vector<model::record_batch>>(std::move(batches)));
 }
 
@@ -352,7 +269,6 @@ record_batch_reader make_foreign_fragmented_memory_record_batch_reader(
   fragmented_vector<model::record_batch> batches) {
     return make_fragmented_memory_record_batch_reader(
       make_fragmented_memory_storage_batches<
-        true,
         fragmented_vector<model::record_batch>>(std::move(batches)));
 }
 
@@ -360,7 +276,6 @@ record_batch_reader make_foreign_fragmented_memory_record_batch_reader(
   chunked_vector<model::record_batch> batches) {
     return make_fragmented_memory_record_batch_reader(
       make_fragmented_memory_storage_batches<
-        true,
         chunked_vector<model::record_batch>>(std::move(batches)));
 }
 
@@ -368,7 +283,6 @@ record_batch_reader make_foreign_fragmented_memory_record_batch_reader(
   ss::chunked_fifo<model::record_batch> batches) {
     return make_fragmented_memory_record_batch_reader(
       make_fragmented_memory_storage_batches<
-        true,
         ss::chunked_fifo<model::record_batch>>(std::move(batches)));
 }
 
@@ -376,7 +290,6 @@ record_batch_reader make_fragmented_memory_record_batch_reader(
   ss::chunked_fifo<model::record_batch> batches) {
     return make_fragmented_memory_record_batch_reader(
       make_fragmented_memory_storage_batches<
-        false,
         ss::chunked_fifo<model::record_batch>>(std::move(batches)));
 }
 

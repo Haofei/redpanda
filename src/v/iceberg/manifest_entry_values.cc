@@ -1,11 +1,12 @@
-// Copyright 2024 Redpanda Data, Inc.
-//
-// Use of this software is governed by the Business Source License
-// included in the file licenses/BSL.md
-//
-// As of the Change Date specified in that file, in accordance with
-// the Business Source License, use of this software will be governed
-// by the Apache License, Version 2.0
+/*
+ * Copyright 2024 Redpanda Data, Inc.
+ *
+ * Licensed as a Redpanda Enterprise file under the Redpanda Community
+ * License (the "License"); you may not use this file except in compliance with
+ * the License. You may obtain a copy of the License at
+ *
+ * https://github.com/redpanda-data/redpanda/blob/master/licenses/rcl.md
+ */
 #include "iceberg/manifest_entry_values.h"
 
 #include "bytes/iobuf_parser.h"
@@ -143,11 +144,11 @@ data_file_content_type content_from_int(int c) {
 iobuf format_to_str(data_file_format f) {
     switch (f) {
     case data_file_format::avro:
-        return iobuf::from("avro");
+        return iobuf::from("AVRO");
     case data_file_format::orc:
-        return iobuf::from("orc");
+        return iobuf::from("ORC");
     case data_file_format::parquet:
-        return iobuf::from("parquet");
+        return iobuf::from("PARQUET");
     }
 }
 
@@ -165,7 +166,7 @@ data_file_format format_from_str(std::string_view s) {
 std::unique_ptr<struct_value> data_file_to_value(const data_file& file) {
     auto ret = std::make_unique<struct_value>();
     ret->fields.emplace_back(int_value(content_to_int(file.content_type)));
-    ret->fields.emplace_back(string_value(iobuf::from(file.file_path)));
+    ret->fields.emplace_back(string_value(iobuf::from(file.file_path())));
     ret->fields.emplace_back(string_value(format_to_str(file.file_format)));
     ret->fields.emplace_back(std::move(file.partition.copy().val));
     ret->fields.emplace_back(
@@ -174,16 +175,25 @@ std::unique_ptr<struct_value> data_file_to_value(const data_file& file) {
       long_value(static_cast<int64_t>(file.file_size_bytes)));
 
     // TODO: serialize the rest of the optional fields.
+    // column_sizes
     ret->fields.emplace_back(std::nullopt);
+    // value_counts
     ret->fields.emplace_back(std::nullopt);
+    // null_value_counts
     ret->fields.emplace_back(std::nullopt);
+    // nan_value_counts
     ret->fields.emplace_back(std::nullopt);
+    // lower_bounds
     ret->fields.emplace_back(std::nullopt);
+    // upper_bounds
     ret->fields.emplace_back(std::nullopt);
+    // key_metadata
     ret->fields.emplace_back(std::nullopt);
+    // split_offsets
     ret->fields.emplace_back(std::nullopt);
+    // equality_ids
     ret->fields.emplace_back(std::nullopt);
-    ret->fields.emplace_back(std::nullopt);
+    // sort_order_id
     ret->fields.emplace_back(std::nullopt);
     return ret;
 }
@@ -196,8 +206,8 @@ data_file data_file_from_value(struct_value v) {
     }
     file.content_type = content_from_int(
       get_required_primitive<int_value>(std::move(fs[0])));
-    file.file_path = from_iobuf(
-      get_required_primitive<string_value>(std::move(fs[1])));
+    file.file_path = uri(
+      from_iobuf(get_required_primitive<string_value>(std::move(fs[1]))));
     file.file_format = format_from_str(
       from_iobuf(get_required_primitive<string_value>(std::move(fs[2]))));
     file.partition = {get_required_struct(std::move(fs[3]))};

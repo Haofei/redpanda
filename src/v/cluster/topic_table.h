@@ -263,6 +263,12 @@ public:
       model::topic_namespace_hash,
       model::topic_namespace_eq>;
 
+    using iceberg_tombstones_t = chunked_hash_map<
+      model::topic_namespace,
+      nt_iceberg_tombstone,
+      model::topic_namespace_hash,
+      model::topic_namespace_eq>;
+
     using topic_delta = topic_table_topic_delta;
 
     using topic_delta_cb_t
@@ -532,19 +538,19 @@ public:
     /**
      * Lists all NTPs that replicas are being move to a node
      */
-    std::vector<model::ntp> ntps_moving_to_node(model::node_id) const;
+    chunked_vector<model::ntp> ntps_moving_to_node(model::node_id) const;
 
     /**
      * Lists all NTPs that replicas are being move from a node
      */
-    std::vector<model::ntp> ntps_moving_from_node(model::node_id) const;
+    chunked_vector<model::ntp> ntps_moving_from_node(model::node_id) const;
 
     /**
      * Lists all ntps moving either from or to a node
      */
-    std::vector<model::ntp> all_ntps_moving_per_node(model::node_id) const;
+    chunked_vector<model::ntp> all_ntps_moving_per_node(model::node_id) const;
 
-    std::vector<model::ntp> all_updates_in_progress() const;
+    chunked_vector<model::ntp> all_updates_in_progress() const;
 
     model::revision_id last_applied_revision() const {
         return _last_applied_revision_id;
@@ -559,7 +565,7 @@ public:
     size_t get_node_partition_count(model::node_id) const;
 
     /**
-     * See which topics have pending deletion work
+     * See which topics have pending cloud storage deletion work
      */
     const lifecycle_markers_t& get_lifecycle_markers() const {
         return _lifecycle_markers;
@@ -607,6 +613,11 @@ public:
         return is_disabled(model::topic_namespace_view{ntp}, ntp.tp.partition);
     }
 
+    // Get a set of topics with pending iceberg deletion work.
+    const iceberg_tombstones_t& get_iceberg_tombstones() const {
+        return _iceberg_tombstones;
+    }
+
     auto topics_iterator_begin() const {
         return stable_iterator<
           underlying_t::const_iterator,
@@ -644,6 +655,12 @@ public:
           _partitions_to_force_reconfigure.end());
     }
 
+    /**
+     * Return the result of applying the update to the topic properties.
+     */
+    static topic_properties update_topic_properties(
+      topic_properties updated_properties, update_topic_properties_cmd cmd);
+
 private:
     friend topic_table_probe;
 
@@ -655,7 +672,7 @@ private:
         uint64_t id;
     };
 
-    void notify_waiters();
+    ss::future<> notify_waiters();
 
     void change_partition_replicas(
       model::ntp ntp,
@@ -667,7 +684,7 @@ private:
 
     class snapshot_applier;
 
-    std::error_code do_local_delete(
+    ss::future<std::error_code> do_local_delete(
       model::topic_namespace nt, model::offset offset, bool ignore_migration);
     ss::future<std::error_code>
       do_apply(update_partition_replicas_cmd_data, model::offset);
@@ -682,9 +699,19 @@ private:
     std::error_code validate_force_reconfigurable_partition(
       const ntp_with_majority_loss&) const;
 
+    // Validation for the final property configuration from a
+    // update_topic_properties_cmd application. Allows user to perform
+    // validations that depend on more than one topic property.
+    //
+    // Returns true if the configured topic_properties is valid, and false
+    // otherwise.
+    bool
+    topic_multi_property_validation(const topic_properties& properties) const;
+
     underlying_t _topics;
     lifecycle_markers_t _lifecycle_markers;
     disabled_partitions_t _disabled_partitions;
+    iceberg_tombstones_t _iceberg_tombstones;
     size_t _partition_count{0};
 
     updates_t _updates_in_progress;

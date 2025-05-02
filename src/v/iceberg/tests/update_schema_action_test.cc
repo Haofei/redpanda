@@ -1,14 +1,15 @@
-// Copyright 2024 Redpanda Data, Inc.
-//
-// Use of this software is governed by the Business Source License
-// included in the file licenses/BSL.md
-//
-// As of the Change Date specified in that file, in accordance with
-// the Business Source License, use of this software will be governed
-// by the Apache License, Version 2.0
+/*
+ * Copyright 2024 Redpanda Data, Inc.
+ *
+ * Licensed as a Redpanda Enterprise file under the Redpanda Community
+ * License (the "License"); you may not use this file except in compliance with
+ * the License. You may obtain a copy of the License at
+ *
+ * https://github.com/redpanda-data/redpanda/blob/master/licenses/rcl.md
+ */
 
-#include "cloud_io/tests/scoped_remote.h"
-#include "cloud_storage/tests/s3_imposter.h"
+#include "iceberg/compatibility_utils.h"
+#include "iceberg/datatypes.h"
 #include "iceberg/tests/test_schemas.h"
 #include "iceberg/transaction.h"
 
@@ -18,15 +19,8 @@ using namespace iceberg;
 using namespace iceberg::table_update;
 using namespace iceberg::table_requirement;
 
-class UpdateSchemaActionTest
-  : public s3_imposter_fixture
-  , public ::testing::Test {
+class UpdateSchemaActionTest : public ::testing::Test {
 public:
-    UpdateSchemaActionTest()
-      : sr(cloud_io::scoped_remote::create(10, conf))
-      , io(sr->remote.local(), bucket_name) {
-        set_expectations_and_listen({});
-    }
     // Create a nested schema, adding columns as requested.
     schema make_schema(int32_t id, size_t extra_cols = 0) {
         constexpr nested_field::id_t base_field_id{50};
@@ -52,7 +46,7 @@ public:
         return table_metadata{
           .format_version = format_version::v2,
           .table_uuid = uuid_t::create(),
-          .location = "foo/bar",
+          .location = uri("s3://foo/bar"),
           .last_sequence_number = sequence_number{0},
           .last_updated_ms = model::timestamp::now(),
           .last_column_id = s.highest_field_id().value(),
@@ -63,14 +57,10 @@ public:
           .last_partition_id = partition_field::id_t{-1},
         };
     }
-
-    // These tests don't do IO, but this is to begin a transaction.
-    std::unique_ptr<cloud_io::scoped_remote> sr;
-    manifest_io io;
 };
 
 TEST_F(UpdateSchemaActionTest, TestExistingCurrentSchema) {
-    transaction tx(io, create_table());
+    transaction tx(create_table());
 
     // Point to a new schema id that has the same type. The id is ignored and
     // the type is used to identify the schema.
@@ -89,7 +79,7 @@ TEST_F(UpdateSchemaActionTest, TestExistingSchema) {
     table.current_schema_id = schema::id_t{1};
 
     // Update to the same schema as schema_id 0.
-    transaction tx(io, std::move(table));
+    transaction tx(std::move(table));
     ASSERT_EQ(tx.table().schemas.size(), 2);
     auto res = tx.set_schema(make_schema(12345)).get();
 
@@ -116,7 +106,7 @@ TEST_F(UpdateSchemaActionTest, TestExistingSchema) {
 }
 
 TEST_F(UpdateSchemaActionTest, TestNewSchema) {
-    transaction tx(io, create_table());
+    transaction tx(create_table());
     auto new_schema = make_schema(12345, 1);
     auto new_schema_len = new_schema.schema_struct.fields.size();
     auto res = tx.set_schema(std::move(new_schema)).get();
@@ -164,7 +154,7 @@ TEST_F(UpdateSchemaActionTest, TestNewSchema) {
 }
 
 TEST_F(UpdateSchemaActionTest, TestNewMultipleSchemas) {
-    transaction tx(io, create_table());
+    transaction tx(create_table());
     auto new_schema = make_schema(12345, 1);
     auto new_schema_len = new_schema.schema_struct.fields.size();
     auto res = tx.set_schema(std::move(new_schema)).get();
@@ -196,19 +186,55 @@ TEST_F(UpdateSchemaActionTest, TestNewMultipleSchemas) {
       0);
 }
 
-TEST_F(UpdateSchemaActionTest, TestInvalidSchema) {
-    // Removing columns is not yet supported.
-    transaction tx(io, create_table());
+TEST_F(UpdateSchemaActionTest, TestErroredTransaction) {
+    auto tx = transaction::make_with_error(
+      create_table(), action::errc::unexpected_state);
+
+    // Adding a new schema on an already errored transaction will fail
+    auto res = tx.set_schema(make_schema(12345)).get();
+    ASSERT_TRUE(res.has_error());
+    ASSERT_TRUE(tx.error().has_value());
+}
+
+TEST_F(UpdateSchemaActionTest, TestRemoveColumn) {
+    // Removing columns is allowed
+    transaction tx(create_table());
+    auto initial_last_col_id = tx.table().last_column_id;
+
+    // generate an identical schema to the one created with the table and drop
+    // the last field
     auto new_schema = make_schema(12345);
     new_schema.schema_struct.fields.pop_back();
+    auto new_schema_highest_id = new_schema.highest_field_id();
+    EXPECT_TRUE(new_schema_highest_id.has_value());
+    EXPECT_LT(new_schema_highest_id, initial_last_col_id);
+
+    std::ignore = for_each_field(new_schema.schema_struct, [](nested_field* f) {
+        f->set_evolution_metadata(
+          nested_field::src_info{.id = f->id, .required = f->required});
+    });
 
     auto res = tx.set_schema(std::move(new_schema)).get();
-    ASSERT_TRUE(res.has_error());
-    ASSERT_TRUE(tx.error().has_value());
+    ASSERT_FALSE(res.has_error());
+    ASSERT_FALSE(tx.error().has_value());
+    EXPECT_EQ(tx.table().last_column_id, initial_last_col_id);
+}
 
-    // Adding a new schema after attempting a bad update also fails.
-    auto new_new_schema = make_schema(12345, 1);
-    res = tx.set_schema(std::move(new_new_schema)).get();
-    ASSERT_TRUE(res.has_error());
-    ASSERT_TRUE(tx.error().has_value());
+TEST_F(UpdateSchemaActionTest, TestAssignFieldIds) {
+    auto t = create_table();
+    auto old_last_col = t.last_column_id;
+    transaction tx(std::move(t));
+    auto new_schema = make_schema(12345, 10);
+    auto new_schema_len = new_schema.schema_struct.fields.size();
+    auto res = tx.set_schema(std::move(new_schema)).get();
+    ASSERT_FALSE(res.has_error());
+
+    const auto& add_update = std::get<add_schema>(tx.updates().updates[0]);
+    ASSERT_EQ(add_update.schema.schema_struct.fields.size(), new_schema_len);
+
+    auto highest_field = add_update.schema.highest_field_id();
+    ASSERT_TRUE(highest_field.has_value());
+    // Check that the IDs assigned to the new schema increase from the last
+    // assigned to the original schema
+    ASSERT_EQ(old_last_col + 27, highest_field.value()());
 }

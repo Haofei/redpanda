@@ -21,6 +21,7 @@
 #include <seastar/core/coroutine.hh>
 #include <seastar/core/future.hh>
 
+#include <exception>
 #include <filesystem>
 namespace raft {
 namespace {
@@ -67,13 +68,18 @@ persisted_stm_base<BaseT, T>::persisted_stm_base(
 }
 
 template<typename BaseT, supported_stm_snapshot T>
+ss::future<> persisted_stm_base<BaseT, T>::apply(
+  const model::record_batch& b, const ssx::semaphore_units&) {
+    return do_apply(b);
+}
+
+template<typename BaseT, supported_stm_snapshot T>
 ss::future<std::optional<stm_snapshot>>
 persisted_stm_base<BaseT, T>::load_local_snapshot() {
     return _snapshot_backend.load_snapshot();
 }
 template<typename BaseT, supported_stm_snapshot T>
 ss::future<> persisted_stm_base<BaseT, T>::stop() {
-    _apply_lock.broken();
     co_await raft::state_machine_base::stop();
     co_await _gate.close();
 }
@@ -114,24 +120,40 @@ file_backed_stm_snapshot::load_snapshot() {
     }
 
     storage::snapshot_reader& reader = *maybe_reader;
-    iobuf meta_buf = co_await reader.read_metadata();
-    iobuf_parser meta_parser(std::move(meta_buf));
-    auto header = read_snapshot_header(meta_parser, _ntp, name());
-    if (!header) {
-        vlog(_log.warn, "Skipping snapshot {} due to old format", store_path());
-
-        // can't load old format of the snapshot, since snapshot is missing
-        // it will be reconstructed by replaying the log
-        co_await reader.close();
-        co_return std::nullopt;
-    }
     stm_snapshot snapshot;
-    snapshot.header = *header;
-    snapshot.data = co_await read_iobuf_exactly(
-      reader.input(), snapshot.header.snapshot_size);
+    std::exception_ptr ex{nullptr};
+    try {
+        iobuf meta_buf = co_await reader.read_metadata();
+        iobuf_parser meta_parser(std::move(meta_buf));
+        auto header = read_snapshot_header(meta_parser, _ntp, name());
+        if (!header) {
+            vlog(
+              _log.warn,
+              "Skipping snapshot {} due to old format",
+              store_path());
 
-    _snapshot_size = co_await reader.get_snapshot_size();
+            // can't load old format of the snapshot, since snapshot is missing
+            // it will be reconstructed by replaying the log
+            co_await reader.close();
+            co_return std::nullopt;
+        }
+        snapshot.header = *header;
+        snapshot.data = co_await read_iobuf_exactly(
+          reader.input(), snapshot.header.snapshot_size);
+
+        _snapshot_size = co_await reader.get_snapshot_size();
+    } catch (...) {
+        ex = std::current_exception();
+        vlog(
+          _log.warn,
+          "Exception thrown while reading local snapshot: {}, exception: {}",
+          store_path(),
+          ex);
+    }
     co_await reader.close();
+    if (ex != nullptr) {
+        std::rethrow_exception(ex);
+    }
     co_await _snapshot_mgr.remove_partial_snapshots();
 
     co_return snapshot;
@@ -290,7 +312,7 @@ ss::future<> persisted_stm_base<BaseT, T>::wait_for_snapshot_hydrated() {
 
 template<typename BaseT, supported_stm_snapshot T>
 ss::future<> persisted_stm_base<BaseT, T>::do_write_local_snapshot() {
-    auto u = co_await _apply_lock.get_units();
+    auto u = co_await BaseT::_apply_lock.get_units();
     auto snapshot = co_await take_local_snapshot(std::move(u));
     auto offset = snapshot.header.offset;
 
@@ -345,7 +367,7 @@ ss::future<> persisted_stm_base<BaseT, T>::ensure_local_snapshot_exists(
 }
 
 template<typename BaseT, supported_stm_snapshot T>
-model::offset persisted_stm_base<BaseT, T>::max_collectible_offset() {
+model::offset persisted_stm_base<BaseT, T>::max_removable_local_log_offset() {
     return model::offset::max();
 }
 
@@ -496,7 +518,7 @@ template<typename BaseT, supported_stm_snapshot T>
 ss::future<bool> persisted_stm_base<BaseT, T>::wait_no_throw(
   model::offset offset,
   model::timeout_clock::time_point deadline,
-  std::optional<std::reference_wrapper<ss::abort_source>> as) noexcept {
+  std::optional<std::reference_wrapper<ss::abort_source>> as) const noexcept {
     return BaseT::wait(offset, deadline, as)
       .then([] { return true; })
       .handle_exception_type([](const ss::abort_requested_exception&) {
@@ -540,17 +562,24 @@ ss::future<> persisted_stm_base<BaseT, T>::start() {
 
     if (maybe_snapshot) {
         stm_snapshot& snapshot = *maybe_snapshot;
-
         auto next_offset = model::next_offset(snapshot.header.offset);
         if (next_offset >= _raft->start_offset()) {
-            vlog(
-              _log.debug,
-              "start with applied snapshot, set_next {}",
-              next_offset);
-            co_await apply_local_snapshot(
+            auto snapshot_applied = co_await apply_local_snapshot(
               snapshot.header, std::move(snapshot.data));
-            BaseT::set_next(next_offset);
-            _last_snapshot_offset = snapshot.header.offset;
+            if (snapshot_applied == local_snapshot_applied::yes) {
+                vlog(
+                  _log.debug,
+                  "start with applied snapshot, set_next {}",
+                  next_offset);
+                _last_snapshot_offset = snapshot.header.offset;
+                BaseT::set_next(next_offset);
+            } else {
+                vlog(
+                  _log.warn,
+                  "local snapshot rejected by {}, will be recovered from the "
+                  "log",
+                  name());
+            }
         } else {
             // This can happen on an out-of-date replica that re-joins the group
             // after other replicas have already evicted logs to some offset

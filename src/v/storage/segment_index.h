@@ -113,12 +113,7 @@ struct time_based_retention_cfg {
 class segment_index {
 public:
     /// brief hydrated entry
-    struct entry {
-        model::offset offset;
-        model::timestamp timestamp;
-        size_t filepos;
-        friend std::ostream& operator<<(std::ostream&, const entry&);
-    };
+    using entry = index_state::entry;
 
     // 32KB - a well known number as a sweet spot for fetching data from disk
     static constexpr size_t default_data_buffer_step = 4096 * 8;
@@ -146,7 +141,7 @@ public:
     static uint64_t estimate_size(uint64_t log_size) {
         // Index entry every `step` bytes, each entry is 16 bytes
         // plus one entry that is with the first batch.
-        return 1 + 16 * log_size / default_data_buffer_step;
+        return 16 * (log_size / default_data_buffer_step + 1);
     }
 
     void maybe_track(
@@ -204,11 +199,15 @@ public:
     }
 
     // Set the compacted timestamp, if it doesn't already have a value.
-    void maybe_set_clean_compact_timestamp(model::timestamp t) {
+    // Returns a boolean indicating whether the clean compact timestamp was set
+    // or not.
+    bool maybe_set_clean_compact_timestamp(model::timestamp t) {
         if (!_state.clean_compact_timestamp.has_value()) {
             _state.clean_compact_timestamp = t;
             _needs_persistence = true;
+            return true;
         }
+        return false;
     }
 
     // Get the compacted timestamp.
@@ -253,6 +252,10 @@ public:
      */
     ss::future<size_t> disk_usage();
     void clear_cached_disk_usage() { _disk_usage_size.reset(); }
+    void set_step_for_tests(size_t step) { _step = step; }
+    void set_base_offset_for_tests(model::offset o) { _state.base_offset = o; }
+
+    const index_state& get_index_state() const { return _state; }
 
 private:
     ss::future<bool> materialize_index_from_file(ss::file);

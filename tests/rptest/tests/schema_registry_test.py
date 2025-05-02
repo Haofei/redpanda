@@ -21,7 +21,7 @@ import socket
 
 from confluent_kafka.schema_registry import SchemaRegistryClient, topic_subject_name_strategy, record_subject_name_strategy, topic_record_subject_name_strategy, Schema, SchemaRegistryError, SchemaReference
 from confluent_kafka.serialization import (MessageField, SerializationContext)
-from ducktape.mark import parametrize, matrix, ok_to_fail_fips
+from ducktape.mark import parametrize, matrix
 from ducktape.services.background_thread import BackgroundThreadService
 from ducktape.utils.util import wait_until
 
@@ -39,6 +39,8 @@ from rptest.tests.cluster_config_test import wait_for_version_status_sync
 from rptest.tests.pandaproxy_test import User, PandaProxyTLSProvider
 from rptest.tests.redpanda_test import RedpandaTest
 from rptest.util import expect_exception, inject_remote_script, search_logs_with_timeout
+from rptest.utils.log_utils import wait_until_nag_is_set
+from rptest.utils.mode_checks import skip_fips_mode
 
 
 class SchemaIdValidationMode(str, Enum):
@@ -99,6 +101,163 @@ import "simple";
 
 message Test2 {
   Simple id =  1;
+}"""
+
+schema_a_proto_def = """
+syntax = "proto3";
+
+message AType {
+  float f =  1;
+}"""
+
+schema_a_proto_sanitized_def = """
+syntax = "proto3";
+
+message AType {
+  float f = 1;
+}"""
+
+schema_b_proto_def = """
+syntax = "proto3";
+
+import "schema_a.proto";
+
+message BType {
+  AType at =  1;
+}"""
+
+schema_b_proto_sanitized_def = """
+syntax = "proto3";
+
+import "schema_a.proto";
+message BType {
+  .AType at = 1;
+}"""
+
+schema_c_proto_def = """
+syntax = "proto3";
+
+import "schema_b.proto";
+
+message CType {
+  BType bt =  1;
+}"""
+
+schema_c_proto_sanitized_def = """
+syntax = "proto3";
+
+import "schema_b.proto";
+message CType {
+  .BType bt = 1;
+}"""
+
+schema_d_proto_def = """
+syntax = "proto3";
+
+import "schema_e.proto";
+
+message DType {
+  EType bt =  1;
+}"""
+
+schema_d_proto_sanitized_def = """
+syntax = "proto3";
+
+import "schema_e.proto";
+message DType {
+  .EType bt = 1;
+}"""
+
+schema_e_proto_def = """
+syntax = "proto3";
+
+message EType {
+  string et =  1;
+}"""
+
+# Schemas f,g,i,j,k are already sanitized
+schema_f_v1_proto_def = """
+syntax = "proto3";
+
+message FType {
+  string ft1 = 1;
+}"""
+
+schema_f_v2_proto_def = """
+syntax = "proto3";
+
+message FType {
+  string ft1 = 1;
+  string ft2 = 2;
+}"""
+
+schema_f_v3_proto_def = """
+syntax = "proto3";
+
+message FType {
+  string ft1 = 1;
+  string ft2 = 2;
+  string ft3 = 3;
+}"""
+
+schema_f_v4_proto_def = """
+syntax = "proto3";
+
+message FType {
+  string ft1 = 1;
+  string ft2 = 2;
+  string ft3 = 3;
+  string ft4 = 4;
+}"""
+
+schema_f_v5_proto_def = """
+syntax = "proto3";
+
+message FType {
+  string ft1 = 1;
+  string ft2 = 2;
+  string ft3 = 3;
+  string ft4 = 4;
+  string ft5 = 5;
+}"""
+
+schema_g_proto_def = """
+syntax = "proto3";
+
+import "schema_f.proto";
+message GType {
+  .FType gt = 1;
+}"""
+
+schema_h_proto_def = """
+syntax = "proto3";
+
+message HType {
+  int32 ht = 1;
+}"""
+
+schema_i_proto_def = """
+syntax = "proto3";
+
+import "schema_h.proto";
+message IType {
+  .HType it = 1;
+}"""
+
+schema_j_proto_def = """
+syntax = "proto3";
+
+import "schema_i.proto";
+message JType {
+  .IType jt = 1;
+}"""
+
+schema_k_proto_def = """
+syntax = "proto3";
+
+import "schema_j.proto";
+message KType {
+  .JType kt = 1;
 }"""
 
 well_known_proto_def = """
@@ -203,10 +362,378 @@ message myrecord {
     json_incompat=r'{"type": "number", "multipleOf": 20}',
 )
 
+imported_schema_proto_def = """
+syntax = "proto3";
+message AType {
+  double d =   2;
+  float f =   1;
+}"""
+
+imported_schema_sanitized_proto_def = """
+syntax = "proto3";
+
+message AType {
+  double d = 2;
+  float f = 1;
+}"""
+
+imported_schema_normalized_proto_def = """
+syntax = "proto3";
+
+message AType {
+  float f = 1;
+  double d = 2;
+}"""
+
+imported_schema = {
+    "subject": "imported",
+    "version": 1,
+    "schema": imported_schema_proto_def,
+    "sanitized": imported_schema_sanitized_proto_def,
+    "normalized": imported_schema_normalized_proto_def,
+}
+
+import_schemas = {
+    "schema_a": {
+        "subject": "schema_a",
+        "version": 1,
+        "schema": schema_a_proto_def,
+        "sanitized": schema_a_proto_sanitized_def,
+    },
+    "schema_b": {
+        "subject":
+        "schema_b",
+        "version":
+        1,
+        "references": [{
+            "name": "schema_a.proto",
+            "subject": "schema_a",
+            "version": 1
+        }],
+        "schema":
+        schema_b_proto_def,
+        "sanitized":
+        schema_b_proto_sanitized_def,
+    },
+    "schema_c": {
+        "subject":
+        "schema_c",
+        "version":
+        1,
+        "references": [{
+            "name": "schema_b.proto",
+            "subject": "schema_b",
+            "version": 1
+        }],
+        "schema":
+        schema_c_proto_def,
+        "sanitized":
+        schema_c_proto_sanitized_def,
+    },
+    "schema_d": {
+        "subject":
+        "schema_d",
+        "version":
+        1,
+        "references": [{
+            "name": "schema_e.proto",
+            "subject": "schema_e",
+            "version": 1
+        }],
+        "schema":
+        schema_d_proto_def,
+        #schema d will be invalid during startup in the test it is used.
+        #that's why the 'sanitized' form is not the actual sanitized form but the input form.
+        "sanitized":
+        schema_d_proto_def,
+    },
+    "schema_e": {
+        "subject": "schema_e",
+        "version": 1,
+        "schema": schema_e_proto_def,
+    },
+    "schema_f_v1": {
+        "subject": "schema_f",
+        "version": 1,
+        "schema": schema_f_v1_proto_def,
+        "sanitized": schema_f_v1_proto_def,
+    },
+    "schema_f_v2": {
+        "subject": "schema_f",
+        "version": 2,
+        "schema": schema_f_v2_proto_def,
+        "sanitized": schema_f_v2_proto_def,
+    },
+    "schema_f_v3": {
+        "subject": "schema_f",
+        "version": 3,
+        "schema": schema_f_v3_proto_def,
+        "sanitized": schema_f_v3_proto_def,
+    },
+    "schema_f_v4": {
+        "subject": "schema_f",
+        "version": 4,
+        "schema": schema_f_v4_proto_def,
+        "sanitized": schema_f_v4_proto_def,
+    },
+    "schema_f_v5": {
+        "subject": "schema_f",
+        "version": 5,
+        "schema": schema_f_v5_proto_def,
+        "sanitized": schema_f_v5_proto_def,
+    },
+    "schema_g_v1": {
+        "subject":
+        "schema_g",
+        "version":
+        1,
+        "references": [{
+            "name": "schema_f.proto",
+            "subject": "schema_f",
+            "version": 1
+        }],
+        "schema":
+        schema_g_proto_def,
+        "sanitized":
+        schema_g_proto_def,
+    },
+    "schema_g_v2": {
+        "subject":
+        "schema_g",
+        "version":
+        2,
+        "references": [{
+            "name": "schema_f.proto",
+            "subject": "schema_f",
+            "version": 2
+        }],
+        "schema":
+        schema_g_proto_def,
+        "sanitized":
+        schema_g_proto_def,
+    },
+    "schema_g_v3": {
+        "subject":
+        "schema_g",
+        "version":
+        3,
+        "references": [{
+            "name": "schema_f.proto",
+            "subject": "schema_f",
+            "version": 3
+        }],
+        "schema":
+        schema_g_proto_def,
+        "sanitized":
+        schema_g_proto_def,
+    },
+    "schema_g_v4": {
+        "subject":
+        "schema_g",
+        "version":
+        4,
+        "references": [{
+            "name": "schema_f.proto",
+            "subject": "schema_f",
+            "version": 4
+        }],
+        "schema":
+        schema_g_proto_def,
+        "sanitized":
+        schema_g_proto_def,
+    },
+    "schema_g_v5": {
+        "subject":
+        "schema_g",
+        "version":
+        5,
+        "references": [{
+            "name": "schema_f.proto",
+            "subject": "schema_f",
+            "version": 5
+        }],
+        "schema":
+        schema_g_proto_def,
+        "sanitized":
+        schema_g_proto_def,
+    },
+    "schema_h": {
+        "subject": "schema_h",
+        "version": 1,
+        "schema": schema_h_proto_def,
+        "sanitized": schema_h_proto_def,
+    },
+    "schema_i": {
+        "subject":
+        "schema_i",
+        "version":
+        1,
+        "references": [{
+            "name": "schema_h.proto",
+            "subject": "schema_h",
+            "version": 1
+        }],
+        "schema":
+        schema_i_proto_def,
+        "sanitized":
+        schema_i_proto_def,
+    },
+    "schema_j": {
+        "subject":
+        "schema_j",
+        "version":
+        1,
+        "references": [{
+            "name": "schema_i.proto",
+            "subject": "schema_i",
+            "version": 1
+        }],
+        "schema":
+        schema_j_proto_def,
+        "sanitized":
+        schema_j_proto_def,
+    },
+    "schema_k": {
+        "subject":
+        "schema_k",
+        "version":
+        1,
+        "references": [{
+            "name": "schema_j.proto",
+            "subject": "schema_j",
+            "version": 1
+        }],
+        "schema":
+        schema_k_proto_def,
+        "sanitized":
+        schema_k_proto_def,
+    },
+}
+
+schema_proto_def = """
+syntax = "proto3";
+
+message ProtoType {
+  float f =  1;
+}"""
+
+schema_avro_def = """
+{
+    "type": "record",
+    "name": "myrecord",
+    "fields": [
+        {
+            "name": "f1",
+            "type": "string"
+        }
+    ]
+}"""
+
+schema_proto_dependee_def = """
+syntax = "proto3";
+
+import "schema_proto.proto";
+message Dependee {
+  ProtoType p =  1;
+}"""
+
+schema_avro_dependee_def = """
+{
+    "type": "record",
+    "name": "myotherrecord",
+    "fields": [
+        {
+            "name": "f2",
+            "type": "string"
+        }
+    ]
+}"""
+
+soft_deleted_schemas = {
+    "proto": {
+        "subject": "schema_proto",
+        "schema": schema_proto_def,
+        "type": "PROTOBUF",
+    },
+    "json": {
+        "subject": "schema_json",
+        "schema": json_number_schema_def,
+        "type": "JSON",
+    },
+    "avro": {
+        "subject": "schema_avro",
+        "schema": schema_avro_def,
+        "type": "AVRO",
+    }
+}
+
+not_dependent_schemas = {
+    "proto": {
+        "schema": schema_proto_def,
+        "type": "PROTOBUF",
+    },
+    "json": {
+        "schema": json_number_schema_def,
+        "type": "JSON",
+    },
+    "avro": {
+        "schema": schema_avro_def,
+        "type": "AVRO",
+    },
+}
+
+dependent_schemas = {
+    "proto": {
+        "subject":
+        "schema_proto_dependee_schema",
+        "schema":
+        schema_proto_dependee_def,
+        "references": [{
+            "name": "schema_proto.proto",
+            "subject": "schema_proto",
+            "version": 1
+        }],
+        "type":
+        "PROTOBUF",
+        "id":
+        4,
+    },
+    "json": {
+        "subject":
+        "schema_json_dependee_schema",
+        "schema":
+        json_number_schema_def,
+        "references": [{
+            "name": "schema_json.json",
+            "subject": "schema_json",
+            "version": 1
+        }],
+        "type":
+        "JSON",
+        "id":
+        5,
+    },
+    "avro": {
+        "subject":
+        "schema_avro_dependee_schema",
+        "schema":
+        schema_avro_dependee_def,
+        "references": [{
+            "name": "schema_avro.avro",
+            "subject": "schema_avro",
+            "version": 1
+        }],
+        "type":
+        "AVRO",
+        "id":
+        6,
+    },
+}
+
 log_config = LoggingConfig('info',
                            logger_levels={
                                'security': 'trace',
-                               'pandaproxy': 'trace',
+                               'schemaregistry': 'trace',
                                'kafka/client': 'trace'
                            })
 
@@ -469,6 +996,7 @@ class SchemaRegistryEndpoints(RedpandaTest):
             topic: str,
             count: int,
             skip_known_types: Optional[bool] = None,
+            use_latest_version: Optional[bool] = None,
             subject_name_strategy: Optional[str] = None,
             payload_class: Optional[str] = None,
             compression_type: Optional[TopicSpec.CompressionTypes] = None):
@@ -484,6 +1012,7 @@ class SchemaRegistryEndpoints(RedpandaTest):
                            topic=topic,
                            security_config=sec_cfg if sec_cfg else None,
                            skip_known_types=skip_known_types,
+                           use_latest_version=use_latest_version,
                            subject_name_strategy=subject_name_strategy,
                            payload_class=payload_class,
                            compression_type=compression_type)
@@ -797,6 +1326,36 @@ class SchemaRegistryTestMethods(SchemaRegistryEndpoints):
     """
     def __init__(self, context, **kwargs):
         super(SchemaRegistryTestMethods, self).__init__(context, **kwargs)
+
+    def _push_to_schemas_topic(self, schemas):
+
+        schema_topic = TopicSpec(name="_schemas",
+                                 partition_count=1,
+                                 replication_factor=1)
+        self.client().create_topic(schema_topic)
+
+        rpk = self._get_rpk_tools()
+
+        for i_schema, schema in enumerate(schemas):
+            key = {
+                "keytype": "SCHEMA",
+                "subject": schema["subject"],
+                "version": schema["version"],
+                "magic": 1,
+            }
+            value = {
+                "subject": schema["subject"],
+                "version": schema["version"],
+                "id": i_schema + 1,
+                "schemaType": "PROTOBUF",
+                "schema": schema["schema"],
+                "deleted": False,
+            }
+            if "references" in schema:
+                value["references"] = schema["references"]
+            rpk.produce(topic="_schemas",
+                        key=json.dumps(key),
+                        msg=json.dumps(value))
 
     @cluster(num_nodes=3)
     def test_schemas_types(self):
@@ -1389,25 +1948,37 @@ class SchemaRegistryTestMethods(SchemaRegistryEndpoints):
             data=base_schema,
             normalize=False)
         self.logger.debug(result_raw)
-        assert result_raw.status_code == requests.codes.ok
+        self.logger.debug(result_raw.content)
+        assert result_raw.status_code == requests.codes.ok, \
+                f"expected {requests.codes.ok} but got {result_raw.status_code}"
         v1_id = result_raw.json()["id"]
 
         self.logger.debug(f"Checking that the returned schema is canonical")
         result_raw = self._get_schemas_ids_id(id=v1_id)
-        assert result_raw.status_code == requests.codes.ok
-        assert result_raw.json()['schema'] == dataset.schema_canonical
+        self.logger.debug(result_raw)
+        self.logger.debug(result_raw.content)
+        assert result_raw.status_code == requests.codes.ok, \
+                f"expected {requests.codes.ok} but got {result_raw.status_code}"
+        assert result_raw.json()['schema'] == dataset.schema_canonical, \
+                f"expected:\n{dataset.schema_canonical}\ngot:\n{result_raw.json()['schema']}"
 
         self.logger.debug(f"Register a schema against a subject - normalized")
         result_raw = self._post_subjects_subject_versions(
             subject=f"{normalize_topic}-key", data=base_schema, normalize=True)
         self.logger.debug(result_raw)
-        assert result_raw.status_code == requests.codes.ok
+        self.logger.debug(result_raw.content)
+        assert result_raw.status_code == requests.codes.ok, \
+                f"expected {requests.codes.ok} but got {result_raw.status_code}"
         v1_id = result_raw.json()["id"]
 
         self.logger.debug(f"Checking that the returned schema is normalized")
         result_raw = self._get_schemas_ids_id(id=v1_id)
-        assert result_raw.status_code == requests.codes.ok
-        assert result_raw.json()['schema'] == dataset.schema_normalized
+        self.logger.debug(result_raw)
+        self.logger.debug(result_raw.content)
+        assert result_raw.status_code == requests.codes.ok, \
+                f"expected {requests.codes.ok} but got {result_raw.status_code}"
+        assert result_raw.json()['schema'] == dataset.schema_normalized, \
+                f"expected:\n{dataset.schema_normalized}\ngot:\n{result_raw.json()['schema']}"
 
     @cluster(num_nodes=3)
     @parametrize(dataset_type=SchemaType.AVRO)
@@ -2017,6 +2588,348 @@ class SchemaRegistryTestMethods(SchemaRegistryEndpoints):
         assert result_raw.json()["error_code"] == 40402
 
     @cluster(num_nodes=3)
+    def test_imported_schemas_with_dependencies_issues(self):
+        """
+        Verify SR behavior when importing schemas in the wrong order and missing dependencies
+        """
+        def assert_request_code(raw, expected, endpoint):
+            assert raw.status_code == expected, \
+                    f"Expected {expected} but got {raw.status_code}, "\
+                    f"for request '{endpoint}' with content: {raw.content}"
+
+        #Test setup: Simulate import of schemas by writting directly into the _schemas topic
+        #Note that trying to commit these schemas in this order, using POST subjects/{subject}/version
+        #would fail as schemas 'schema_b' and 'schema_d' have unmet dependencies
+        schemas = [
+            #schema_a has no dependencies
+            import_schemas["schema_a"],
+            #schema_c is dependent on schema_b, which is loaded later on
+            import_schemas["schema_c"],
+            #schema_b is dependent on schema_a, which is already loaded
+            import_schemas["schema_b"],
+            #schema_d is dependent on schema_e, which is not currently present
+            import_schemas["schema_d"],
+
+            #all schema_f are valid
+            import_schemas["schema_f_v1"],
+            import_schemas["schema_f_v3"],
+            import_schemas["schema_f_v5"],
+            #all schema_g depend on the equivalent schema f version
+            import_schemas["schema_g_v1"],
+            #Missing dependency - schema_f_v2
+            import_schemas["schema_g_v2"],
+            import_schemas["schema_g_v3"],
+            #Missing dependency - schema_f_v4
+            import_schemas["schema_g_v4"],
+
+            #dependency error deep in dep chain
+            #schema_i depends on schema_h which is missing
+            import_schemas["schema_i"],
+            #schema_j depends on schema_i
+            import_schemas["schema_j"],
+            #schema_k depends on schema_j
+            import_schemas["schema_k"],
+        ]
+
+        self._push_to_schemas_topic(schemas)
+
+        valid_entries = [
+            (1, "schema_a"),
+            (2, "schema_c"),
+            (3, "schema_b"),
+            (5, "schema_f_v1"),
+            (6, "schema_f_v3"),
+            (7, "schema_f_v5"),
+            (8, "schema_g_v1"),
+            (10, "schema_g_v3"),
+        ]
+        #These are schemas that having missing dependencies at startup
+        invalid_entries = [
+            (4, "schema_d"),
+            (9, "schema_g_v2"),
+            (11, "schema_g_v4"),
+            (12, "schema_i"),
+            (13, "schema_j"),
+            (14, "schema_k"),
+        ]
+
+        #Test /schemas/ids/{id}
+        def test_schemas_ids_id(id, expected_successful):
+            endpoint = f"GET schemas/ids/{id}"
+            result_raw = self._request("GET",
+                                       f"schemas/ids/{id}",
+                                       headers=HTTP_GET_HEADERS)
+            if expected_successful:
+                assert_request_code(result_raw, requests.codes.ok, endpoint)
+
+                result = result_raw.json()["schema"].strip()
+                expected_result = schemas[id - 1]["sanitized"].strip()
+                #Currently, schemas are not sanitized through this endpoint
+                assert result == expected_result, \
+                        f"Expected:\n{result}\nGot:\n{expected_result}\n"\
+                        f"for request 'GET schemas/ids/{id}"
+            else:
+                assert_request_code(result_raw, 422, endpoint)
+
+        #All schemas should be retrievable by id.
+        for id, _ in valid_entries + invalid_entries:
+            test_schemas_ids_id(id, expected_successful=True)
+
+        #Test /schemas/ids/{id}/versions
+        def test_schemas_ids_id_versions(id, expected_successful):
+            endpoint = f"GET schemas/ids/{id}/versions"
+            result_raw = self._request("GET",
+                                       f"schemas/ids/{id}/versions",
+                                       headers=HTTP_GET_HEADERS)
+            if expected_successful:
+                assert_request_code(result_raw, requests.codes.ok, endpoint)
+            else:
+                assert_request_code(result_raw, 422, endpoint)
+
+        #Versions should be retrievable for all ids.
+        for id, _ in valid_entries + invalid_entries:
+            test_schemas_ids_id_versions(id, expected_successful=True)
+
+        #Test /schemas/ids/{id}/subjects
+        def test_schemas_ids_id_subjects(id, expected_successful):
+            endpoint = f"GET schemas/ids/{id}/subjects",
+            result_raw = self._request("GET",
+                                       f"schemas/ids/{id}/subjects",
+                                       headers=HTTP_GET_HEADERS)
+            if expected_successful:
+                assert_request_code(result_raw, requests.codes.ok, endpoint)
+            else:
+                assert_request_code(result_raw, 422, endpoint)
+
+        #Subjects should be retrievable for all ids.
+        for id, _ in valid_entries + invalid_entries:
+            test_schemas_ids_id_subjects(id, expected_successful=True)
+
+        #Test /subjects
+        result_raw = self._request("GET",
+                                   f"subjects",
+                                   headers=HTTP_GET_HEADERS)
+        assert_request_code(result_raw, requests.codes.ok, "GET subjects")
+
+        #All subjects should be present, regardless if their schemas are valid or not
+        expected_subjects = set([
+            "schema_a", "schema_b", "schema_c", "schema_d", "schema_f",
+            "schema_g", "schema_i", "schema_j", "schema_k"
+        ])
+        subjects = set(result_raw.json())
+        assert subjects == expected_subjects, \
+            f"Expected {expected_subjects} but got {subjects}, "\
+            "for request 'GET subjects'"
+
+        def test_subjects_subject(entry, expected_code):
+            lookup_schema = import_schemas[entry]
+            subject = lookup_schema["subject"]
+            schema_def = lookup_schema["schema"]
+            version = lookup_schema["version"]
+            references = lookup_schema[
+                "references"] if "references" in lookup_schema else []
+            result_raw = self._post_subjects_subject(subject=subject,
+                                                     data=json.dumps({
+                                                         "schema":
+                                                         schema_def,
+                                                         "schemaType":
+                                                         "PROTOBUF",
+                                                         "references":
+                                                         references
+                                                     }))
+            endpoint = f"POST subjects/{subject}",
+            assert_request_code(result_raw, expected_code, endpoint)
+            if expected_code == requests.codes.ok:
+                result = result_raw.json()
+                assert result["version"] == version, \
+                        f"Expected version {version} but got {result['version']}, "\
+                        f"for request 'POST subjects/{subject}'"
+
+        #Test /subjects/{subject}
+        for _, s in valid_entries:
+            test_subjects_subject(s, expected_code=requests.codes.ok)
+
+        #These schemas should fail, as the *input* schema has an unsatisfied dependency
+        for _, s in invalid_entries:
+            test_subjects_subject(s, expected_code=422)
+
+        #Test /subjects/{subject}/versions/{version}
+        def test_subjects_subject_versions_version(entry, expected_successful):
+            lookup_schema = import_schemas[entry]
+            subject = lookup_schema["subject"]
+            version = lookup_schema["version"]
+            expected_schema = lookup_schema["sanitized"].strip()
+            #references = lookup_schema["references"] if "references" in lookup_schema else []
+            result_raw = self._get_subjects_subject_versions_version(
+                subject=subject, version=version)
+            endpoint = f"GET subjects/{subject}/versions/{version}"
+            if expected_successful:
+                assert_request_code(result_raw, requests.codes.ok, endpoint)
+
+                result = result_raw.json()["schema"].strip()
+                assert result == expected_schema, \
+                        f"Expected:\n{expected_schema}\nGot:\n{result}\nfor request "\
+                        f"'GET subjects/{subject}/versions/{version}'"
+            else:
+                assert_request_code(result_raw, 422, endpoint)
+
+        #All schemas should be retrievable through subject/version.
+        for _, s in valid_entries + invalid_entries:
+            test_subjects_subject_versions_version(s, expected_successful=True)
+
+        #Test /subjects/{subject}/versions/{version}/schema
+        def test_subjects_subject_versions_version_schema(
+                entry, expected_successful):
+            lookup_schema = import_schemas[entry]
+            subject = lookup_schema["subject"]
+            version = lookup_schema["version"]
+            schema_def = lookup_schema["sanitized"].strip()
+            result_raw = self._request(
+                "GET",
+                f"subjects/{subject}/versions/{version}/schema",
+                headers=HTTP_GET_HEADERS)
+
+            endpoint = f"GET subjects/{subject}/versions/{version}/schema"
+            if expected_successful:
+                assert_request_code(result_raw, requests.codes.ok, endpoint)
+
+                result = result_raw.content.decode().strip()
+                assert result == schema_def, \
+                        f"Expected:\n{schema_def}\nGot:\n{result}\n"\
+                        f"for request 'GET subjects/{subject}/versions/{version}/schema'"
+            else:
+                assert_request_code(result_raw, 422, endpoint)
+
+        #All schemas should be retrievable through subject/version.
+        for _, s in valid_entries + invalid_entries:
+            test_subjects_subject_versions_version_schema(
+                s, expected_successful=True)
+
+        #Test /subjects/{subject}/versions/{version}/referencedby
+        def test_referenced_by(entry, expected_result):
+            lookup_schema = import_schemas[entry]
+            subject = lookup_schema["subject"]
+            version = lookup_schema["version"]
+            result_raw = self._get_subjects_subject_versions_version_referenced_by(
+                subject, version)
+
+            endpoint = f"GET subjects/{subject}/versions/{version}/referencedby"
+            assert_request_code(result_raw, requests.codes.ok, endpoint)
+            result = result_raw.json()
+            assert result == expected_result, \
+                f"Expected {expected_result} but got {result}, " \
+                f"for request 'GET subjects/{subject}/versions/{version}/referencedby'"
+
+        test_referenced_by("schema_a", [3])
+        test_referenced_by("schema_b", [2])
+        test_referenced_by("schema_c", [])
+        test_referenced_by("schema_d", [])
+        test_referenced_by("schema_f_v1", [8])
+        test_referenced_by("schema_f_v3", [10])
+        test_referenced_by("schema_f_v5", [])
+        test_referenced_by("schema_g_v1", [])
+        test_referenced_by("schema_g_v2", [])
+        test_referenced_by("schema_g_v3", [])
+        test_referenced_by("schema_g_v4", [])
+
+        #This is the last of the endpoint to be checked, as it will change the state
+        #Test /subjects/{subject}/versions
+        def test_subjects_subject_versions(entry,
+                                           expected_successful,
+                                           expected_id=None):
+            lookup_schema = import_schemas[entry]
+            subject = lookup_schema["subject"]
+            schema_def = lookup_schema["schema"]
+            references = lookup_schema[
+                "references"] if "references" in lookup_schema else []
+            result_raw = self._post_subjects_subject_versions(
+                subject=subject,
+                data=json.dumps({
+                    "schema": schema_def,
+                    "schemaType": "PROTOBUF",
+                    "references": references,
+                    "version": lookup_schema["version"]
+                }))
+            endpoint = f"POST subjects/{subject}/versions"
+            if expected_successful:
+                assert_request_code(result_raw, requests.codes.ok, endpoint)
+                result = result_raw.json()
+                assert result["id"] == expected_id, \
+                        f"Expected id {expected_id} but got {result['id']}, "\
+                        f"for request 'POST subjects/{subject}/versions'"
+            else:
+                assert_request_code(result_raw, 422, endpoint)
+
+        for id, s in valid_entries:
+            test_subjects_subject_versions(s,
+                                           expected_id=id,
+                                           expected_successful=True)
+
+        #These schemas should fail, as the *input* schema has an unsatisfied dependencies
+        for id, s in invalid_entries:
+            test_subjects_subject_versions(s,
+                                           expected_id=id,
+                                           expected_successful=False)
+
+        #Insert missing dependency, schema_e, and retry the failed schema_d requests
+        result_raw = self._post_subjects_subject_versions(
+            subject="schema_e",
+            data=json.dumps({
+                "schema": schema_e_proto_def,
+                "schemaType": "PROTOBUF"
+            }))
+        assert_request_code(result_raw, requests.codes.ok,
+                            "POST subjects/schema_e/versions")
+
+        #Validate that schema_d is now accepted as a referee
+        test_referenced_by("schema_e", [4])
+
+        test_schemas_ids_id(4, expected_successful=True)
+        test_schemas_ids_id_versions(4, expected_successful=True)
+        test_schemas_ids_id_subjects(4, expected_successful=True)
+        #Lookup still fails cause schema_d is stored not in it's canonical form
+        test_subjects_subject("schema_d", expected_code=404)
+        #Validate that schema_d can now be posted anew.
+        #Note that a new version will be created, as the old one was invalid at
+        #startup and it was not in canonical form. Thus it cannot be found and a
+        #new version is created.
+        test_subjects_subject_versions("schema_d",
+                                       expected_id=16,
+                                       expected_successful=True)
+        #After pushing, schema_d is not stored by its canonical form
+        import_schemas["schema_d"]["sanitized"] = schema_d_proto_sanitized_def
+        test_subjects_subject_versions_version("schema_d",
+                                               expected_successful=True)
+        test_subjects_subject_versions_version_schema("schema_d",
+                                                      expected_successful=True)
+
+        #Add schema_g_v5. schema_g_v5 is valid, but schema_g_v4 and schema_g_v2 are not,
+        #so compatibility checks failed due to them.
+        test_subjects_subject_versions("schema_g_v5",
+                                       expected_successful=False)
+
+        #Fix problematic schemas by adding missing dependency for g_v2 and deleting g_v4.
+        test_subjects_subject_versions("schema_f_v2",
+                                       expected_id=17,
+                                       expected_successful=True)
+
+        result_raw = self._delete_subject_version("schema_g", version=4)
+        assert_request_code(result_raw, requests.codes.ok,
+                            "DELETE subjects/schema_g/versions/4")
+
+        test_subjects_subject_versions("schema_g_v5",
+                                       expected_id=18,
+                                       expected_successful=True)
+
+        #Fix problematic dependency chain by adding base schema.
+        test_subjects_subject_versions("schema_h",
+                                       expected_id=19,
+                                       expected_successful=True)
+        test_schemas_ids_id(12, expected_successful=True)
+        test_schemas_ids_id(13, expected_successful=True)
+        test_schemas_ids_id(14, expected_successful=True)
+
+    @cluster(num_nodes=3)
     def test_json(self):
         """
         Verify basic json functionality
@@ -2050,6 +2963,82 @@ class SchemaRegistryTestMethods(SchemaRegistryEndpoints):
         assert result["schemaType"] == "JSON"
         assert result["schema"].strip() == json_number_schema_def.strip()
 
+    @cluster(num_nodes=3)
+    def test_unsanitized_import(self):
+        """
+        Verify sanitization during startup
+        """
+        #Test setup: Simulate import of a schema by writting directly into the _schemas topic.
+        #This schema is neither sanitized nor normalized
+        self._push_to_schemas_topic([imported_schema])
+
+        schema_def = imported_schema["schema"]
+        #Normalization:off - /subjects/{subject}
+        result_raw = self._post_subjects_subject(subject="imported",
+                                                 data=json.dumps({
+                                                     "schema":
+                                                     schema_def,
+                                                     "schemaType":
+                                                     "PROTOBUF"
+                                                 }))
+        assert result_raw.status_code == requests.codes.ok, \
+            f"Expected {requests.codes.ok} but got {result_raw.status_code}, "\
+            f"for request 'POST subjects/imported'"
+        result = result_raw.json()["schema"].strip()
+        expected_result = imported_schema["sanitized"].strip()
+        assert result == expected_result, \
+            f"Expected:\n{expected_result}\nGot:\n{result}\n"\
+            "for request 'POST subjects/imported'"
+
+        #Normalization:on - /subjects/{subject}
+        #This should fail to find it, as the schema was not normalized when stored.
+        result_raw = self._post_subjects_subject(subject="imported",
+                                                 data=json.dumps({
+                                                     "schema":
+                                                     schema_def,
+                                                     "schemaType":
+                                                     "PROTOBUF"
+                                                 }),
+                                                 normalize=True)
+        assert result_raw.status_code == 404, \
+            f"Expected 404 but got {result_raw.status_code}, "\
+            f"for request 'POST subjects/imported?normalize=true'"
+
+        #Normalization:off - /subjects/{subject}/versions
+        result_raw = self._post_subjects_subject_versions(subject="imported",
+                                                          data=json.dumps({
+                                                              "schema":
+                                                              schema_def,
+                                                              "schemaType":
+                                                              "PROTOBUF"
+                                                          }))
+        assert result_raw.status_code == requests.codes.ok, \
+            f"Expected {requests.codes.ok} but got {result_raw.status_code}, "\
+            f"for request 'POST subjects/imported/versions'"
+        result_id = result_raw.json()["id"]
+        assert result_id == 1, \
+            f"Expected id 1 but got {result_id}, "\
+            "for request 'POST subjects/imported/versions'"
+
+        #Normalization:on - /subjects/{subject}/versions
+        #This should fail to find it and create a new one, as the schema was
+        #not normalized when stored.
+        result_raw = self._post_subjects_subject_versions(subject="imported",
+                                                          data=json.dumps({
+                                                              "schema":
+                                                              schema_def,
+                                                              "schemaType":
+                                                              "PROTOBUF"
+                                                          }),
+                                                          normalize=True)
+        assert result_raw.status_code == requests.codes.ok, \
+            f"Expected {requests.codes.ok} but got {result_raw.status_code}, "\
+            "for request 'POST subjects/imported/versions?normalize=true'"
+        result_id = result_raw.json()["id"]
+        assert result_id == 2, \
+            f"Expected id 2 but got {result_id}, "\
+            "for request 'POST subjects/imported/versions?normalize=true'"
+
     @cluster(num_nodes=4)
     @parametrize(protocol=SchemaType.AVRO, client_type=SerdeClientType.Python)
     @parametrize(protocol=SchemaType.AVRO, client_type=SerdeClientType.Java)
@@ -2067,11 +3056,15 @@ class SchemaRegistryTestMethods(SchemaRegistryEndpoints):
                  client_type=SerdeClientType.Java,
                  skip_known_types=True)
     @parametrize(protocol=SchemaType.PROTOBUF,
+                 client_type=SerdeClientType.Java,
+                 use_latest_version=True)
+    @parametrize(protocol=SchemaType.PROTOBUF,
                  client_type=SerdeClientType.Golang)
     def test_serde_client(self,
                           protocol: SchemaType,
                           client_type: SerdeClientType,
-                          skip_known_types: Optional[bool] = None):
+                          skip_known_types: Optional[bool] = None,
+                          use_latest_version: Optional[bool] = None):
         """
         Verify basic operation of Schema registry across a range of schema types and serde
         client types
@@ -2084,7 +3077,7 @@ class SchemaRegistryTestMethods(SchemaRegistryEndpoints):
             f"Connecting to redpanda: {self.redpanda.brokers()} schema_Reg: {schema_reg}"
         )
         client = self._get_serde_client(protocol, client_type, topic, 2,
-                                        skip_known_types)
+                                        skip_known_types, use_latest_version)
         self.logger.debug("Starting client")
         client.start()
         self.logger.debug("Waiting on client")
@@ -2387,6 +3380,181 @@ class SchemaRegistryTestMethods(SchemaRegistryEndpoints):
             check_each_schema(subject, subjects[subject]["schemas"],
                               subjects[subject]["schema_ids"],
                               subjects[subject]["subject_versions"])
+
+    @cluster(num_nodes=3)
+    def test_always_normalize_option(self):
+
+        # Post a schema with and without normalization
+        result_raw = self._post_subjects_subject_versions(
+            normalize=False,
+            subject="test_subject",
+            data=json.dumps({
+                "schema": imported_schema_proto_def,
+                "schemaType": "PROTOBUF"
+            }))
+        assert result_raw.status_code == requests.codes.ok, \
+            f"Expected {requests.codes.ok} but got {result_raw.status_code} during test setup"
+        result_id = result_raw.json()["id"]
+        assert result_id == 1, \
+            f"Expected id 1 but got {result_id} during test setup"
+
+        result_raw = self._post_subjects_subject_versions(
+            normalize=True,
+            subject="test_subject",
+            data=json.dumps({
+                "schema": imported_schema_proto_def,
+                "schemaType": "PROTOBUF"
+            }))
+        assert result_raw.status_code == requests.codes.ok, \
+            f"Expected {requests.codes.ok} but got {result_raw.status_code} during test setup"
+        result_id = result_raw.json()["id"]
+        assert result_id == 2, \
+            f"Expected id 2 but got {result_id} during test setup"
+
+        def test_schemas_ids_id(id, expected_schema):
+            result_raw = self._request("GET",
+                                       f"schemas/ids/{id}",
+                                       headers=HTTP_GET_HEADERS)
+            result = result_raw.json()["schema"].strip()
+            assert result_raw.status_code == requests.codes.ok, \
+                f"Expected {requests.codes.ok} but got {result_raw.status_code}, "\
+                f"with content {result_raw.content}"
+            assert result == expected_schema, \
+                    f"Expected:\n{expected_schema}\ngot:\n{result}"
+
+        def test_subjects_subject(schema, expected_version=None, norm=False):
+            result_raw = self._post_subjects_subject(subject="test_subject",
+                                                     data=json.dumps({
+                                                         "schema":
+                                                         schema,
+                                                         "schemaType":
+                                                         "PROTOBUF",
+                                                     }),
+                                                     normalize=norm)
+            if expected_version:
+                assert result_raw.status_code == requests.codes.ok, \
+                    f"Expected {requests.codes.ok} but got {result_raw.status_code}, "\
+                    f"with content {result_raw.content}"
+                result = result_raw.json()["version"]
+                assert result == expected_version, \
+                        f"Expected version {expected_version} but got {result}"
+            else:
+                assert result_raw.status_code == 404, \
+                    f"Expected 404 but got {result_raw.status_code}, "\
+                    f"with content {result_raw.content}"
+
+        sanitized = imported_schema_sanitized_proto_def.strip()
+        normalized = imported_schema_normalized_proto_def.strip()
+
+        test_schemas_ids_id(1, sanitized)
+        test_schemas_ids_id(2, normalized)
+        test_subjects_subject(sanitized, expected_version=1)
+        test_subjects_subject(sanitized, expected_version=2, norm=True)
+        test_subjects_subject(normalized, expected_version=2)
+        test_subjects_subject(normalized, expected_version=2, norm=True)
+
+        #Update always_normalize and re-run all tests
+        self.redpanda.set_cluster_config(
+            {'schema_registry_always_normalize': True})
+
+        #Verify that always_normalize doesn't affect lookup by id
+        test_schemas_ids_id(1, sanitized)
+        test_schemas_ids_id(2, normalized)
+        #Verify that always_normalize always treats normalization set to on
+        test_subjects_subject(sanitized, expected_version=2)
+        test_subjects_subject(sanitized, expected_version=2, norm=True)
+        #Sanity check on normalized input
+        test_subjects_subject(normalized, expected_version=2)
+        test_subjects_subject(normalized, expected_version=2, norm=True)
+
+    @cluster(num_nodes=3)
+    @matrix(stype=["json", "proto"])
+    def test_missing_references(self, stype):
+        """
+        Missing references should return an error message with details of the missing reference
+        """
+
+        self._set_config(data=json.dumps({"compatibility": "NONE"}))
+
+        base_schema = not_dependent_schemas[stype]
+        schema = dependent_schemas[stype]
+        subject = schema["subject"]
+        ref_subject = schema["references"][0]["subject"]
+        ref_version = schema["references"][0]["version"]
+
+        result_raw = self._post_subjects_subject_versions(
+            subject=subject,
+            data=json.dumps({
+                "schema": base_schema["schema"],
+                "schemaType": base_schema["type"],
+            }))
+        assert result_raw.status_code == requests.codes.ok, \
+                f"Expected {requests.codes.ok} but got {result_raw.status_code} during test setup. "\
+                f"Request content: {result_raw.content}. Processing {stype}."
+
+        for endpoint in [
+                self._post_subjects_subject_versions,
+                self._post_subjects_subject
+        ]:
+            result_raw = endpoint(subject=subject,
+                                  data=json.dumps({
+                                      "schema":
+                                      schema["schema"],
+                                      "schemaType":
+                                      schema["type"],
+                                      "references":
+                                      schema["references"],
+                                  }))
+            assert result_raw.status_code == requests.codes.unprocessable_entity, \
+                    f"Expected {requests.codes.unprocessable_entity} but got {result_raw.status_code}. "\
+                    f"Request content: {result_raw.content}. Processing {type}."
+            assert f"No schema reference found for subject \"{ref_subject}\" and version {ref_version}" in result_raw.json()["message"], \
+                f"Expected result to contain missing references, but got {result_raw.json()}."
+
+    @cluster(num_nodes=3)
+    def test_soft_deleted_references(self):
+        """
+        Soft-deleted references should be valid references and
+        schemas that reference a soft-deleted ref should be accepted
+        """
+
+        #Test setup. Insert and soft-delete schemas to be referencedby
+
+        for name in ["proto", "json", "avro"]:
+            schema = soft_deleted_schemas[name]
+            result_raw = self._post_subjects_subject_versions(
+                subject=schema["subject"],
+                data=json.dumps({
+                    "schema": schema["schema"],
+                    "schemaType": schema["type"]
+                }))
+            assert result_raw.status_code == requests.codes.ok, \
+                    f"Expected {requests.codes.ok} but got {result_raw.status_code} during test setup. "\
+                    f"Request content: {result_raw.content}. Processing {name}."
+
+            result_raw = self._delete_subject_version(
+                subject=schema["subject"], version=1)
+            assert result_raw.status_code == requests.codes.ok, \
+                    f"Expected {requests.codes.ok} but got {result_raw.status_code} during test setup. "\
+                    f"Request content: {result_raw.content}. Processing {name}."
+
+        #Register schemas that reference the soft-deleted schemas
+        for name in ["proto", "json", "avro"]:
+            schema = dependent_schemas[name]
+            result_raw = self._post_subjects_subject_versions(
+                subject=schema["subject"],
+                data=json.dumps({
+                    "schema": schema["schema"],
+                    "schemaType": schema["type"],
+                    "references": schema["references"],
+                }))
+            assert result_raw.status_code == requests.codes.ok, \
+                    f"Expected {requests.codes.ok} but got {result_raw.status_code}. "\
+                    f"Request content: {result_raw.content}. Processing {name}."
+            result_id = result_raw.json()["id"]
+            assert result_id == schema["id"], \
+                    f"Expected id {schema['id']} but got {result_id}. "\
+                    f"Request content: {result_raw.content}. Processing {name}."
 
 
 class SchemaRegistryModeNotMutableTest(SchemaRegistryEndpoints):
@@ -3838,39 +5006,39 @@ class SchemaRegistryLicenseTest(RedpandaTest):
                              schema_registry_config=SchemaRegistryConfig(),
                              **kwargs)
         self.redpanda.set_environment({
-            '__REDPANDA_LICENSE_CHECK_INTERVAL_SEC':
-            f'{self.LICENSE_CHECK_INTERVAL_SEC}'
+            '__REDPANDA_PERIODIC_REMINDER_INTERVAL_SEC':
+            f'{self.LICENSE_CHECK_INTERVAL_SEC}',
         })
 
-    def _has_license_nag(self):
-        return self.redpanda.search_log_any(
-            "license is required to use enterprise features")
-
-    def _license_nag_is_set(self):
-        return self.redpanda.search_log_all(
-            f"Overriding default license log annoy interval to: {self.LICENSE_CHECK_INTERVAL_SEC}s"
-        )
-
     @cluster(num_nodes=3)
-    @ok_to_fail_fips  # See NOTE below
+    @skip_fips_mode  # See NOTE below
     @parametrize(mode=SchemaIdValidationMode.REDPANDA)
     @parametrize(mode=SchemaIdValidationMode.COMPAT)
     def test_license_nag(self, mode):
-        wait_until(self._license_nag_is_set,
-                   timeout_sec=30,
-                   err_msg="Failed to set license nag internal")
+        wait_until_nag_is_set(
+            redpanda=self.redpanda,
+            check_interval_sec=self.LICENSE_CHECK_INTERVAL_SEC)
 
         self.logger.debug("Ensuring no license nag")
         time.sleep(self.LICENSE_CHECK_INTERVAL_SEC * 2)
         # NOTE: This assertion will FAIL if running in FIPS mode because
         # being in FIPS mode will trigger the license nag
-        assert not self._has_license_nag()
+        assert not self.redpanda.has_license_nag()
 
         self.logger.debug("Setting cluster config")
         self.redpanda.set_cluster_config({"enable_schema_id_validation": mode})
 
+        self.redpanda.set_environment(
+            {'__REDPANDA_DISABLE_BUILTIN_TRIAL_LICENSE': '1'})
+        self.redpanda.rolling_restart_nodes(self.redpanda.nodes,
+                                            use_maintenance_mode=False)
+
+        wait_until_nag_is_set(
+            redpanda=self.redpanda,
+            check_interval_sec=self.LICENSE_CHECK_INTERVAL_SEC)
+
         self.logger.debug("Waiting for license nag")
-        wait_until(self._has_license_nag,
+        wait_until(self.redpanda.has_license_nag,
                    timeout_sec=self.LICENSE_CHECK_INTERVAL_SEC * 2,
                    err_msg="License nag failed to appear")
 
@@ -3951,6 +5119,8 @@ class SchemaRegistryConfluentClient(SchemaRegistryEndpoints):
         result = self.sr_client.get_versions(test_subject)
         assert result == [1], f"Result: {result}"
 
+        # reinitialize client to drop the cache
+        self.sr_client = SchemaRegistryClient({'url': self._base_uri()})
         with expect_exception(SchemaRegistryError, lambda e: True):
             self.sr_client.get_version(test_subject, 2)
 

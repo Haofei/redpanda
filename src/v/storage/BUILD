@@ -120,6 +120,10 @@ redpanda_cc_library(
         "@fmt",
     ],
     include_prefix = "storage",
+    visibility = [
+        "//src/v/resource_mgmt/tests:__pkg__",
+        "//src/v/storage/tests:__pkg__",
+    ],
     deps = [
         "//src/v/base",
         "//src/v/container:intrusive",
@@ -187,6 +191,7 @@ redpanda_cc_library(
     deps = [
         "//src/v/base",
         "//src/v/container:intrusive",
+        "//src/v/metrics",
         "//src/v/ssx:semaphore",
         "//src/v/utils:named_type",
         "@seastar",
@@ -208,6 +213,7 @@ redpanda_cc_library(
     ],
     include_prefix = "storage",
     visibility = [
+        "//src/v/cluster/archival/tests:__pkg__",
         "//src/v/cluster/tests:__pkg__",
         "//src/v/debug_bundle/tests:__pkg__",
         "//src/v/storage/tests:__pkg__",
@@ -356,7 +362,7 @@ redpanda_cc_library(
         "version.h",
     ],
     implementation_deps = [
-        ":logger",
+        ":log_manager_probe",
         "//src/v/syschecks",
     ],
     include_prefix = "storage",
@@ -367,6 +373,7 @@ redpanda_cc_library(
         ":compaction",
         ":index_state",
         ":key_offset_map",
+        ":logger",
         ":parser_utils",
         ":record_batch_builder",
         ":record_batch_utils",
@@ -407,6 +414,8 @@ redpanda_cc_library(
         "//src/v/ssx:future_util",
         "//src/v/ssx:semaphore",
         "//src/v/ssx:sformat",
+        "//src/v/ssx:watchdog",
+        "//src/v/strings:static_str",
         "//src/v/strings:string_switch",
         "//src/v/utils:adjustable_semaphore",
         "//src/v/utils:directory_walker",
@@ -417,6 +426,7 @@ redpanda_cc_library(
         "//src/v/utils:mutex",
         "//src/v/utils:named_type",
         "//src/v/utils:notification_list",
+        "//src/v/utils:null_output_stream",
         "//src/v/utils:prefix_logger",
         "//src/v/utils:stream_provider",
         "//src/v/utils:to_string",
@@ -438,5 +448,23 @@ redpanda_cc_library(
         "@fmt",
         "@roaring",
         "@seastar",
+    ],
+)
+
+redpanda_cc_library(
+    name = "log_manager_probe",
+    srcs = [
+        "log_manager_probe.cc",
+    ],
+    hdrs = [
+        "log_manager_probe.h",
+    ],
+    implementation_deps = [
+        "//src/v/config",
+        "@seastar",
+    ],
+    include_prefix = "storage",
+    deps = [
+        "//src/v/metrics",
     ],
 )

@@ -355,11 +355,13 @@ ss::future<housekeeping_job::run_result> purger::run(run_quota_t quota) {
 
     const auto my_global_position = get_global_position();
 
-    vlog(
-      archival_log.info,
-      "Running with {} quota, {} topic lifecycle markers",
-      result.remaining,
-      markers.size());
+    if (markers.size() > 0) {
+        vlog(
+          archival_log.info,
+          "Running with {} quota, {} topic lifecycle markers",
+          result.remaining,
+          markers.size());
+    }
     for (auto& [nt_revision, marker] : markers) {
         // Double check the topic config is elegible for remote deletion
         if (!marker.config.properties.requires_remote_erase()) {
@@ -368,7 +370,8 @@ ss::future<housekeeping_job::run_result> purger::run(run_quota_t quota) {
               "Dropping lifecycle marker {}, is not suitable for remote purge",
               marker.config.tp_ns);
 
-            co_await _topics_frontend.local().purged_topic(nt_revision, 5s);
+            co_await _topics_frontend.local().purged_topic(
+              nt_revision, cluster::topic_purge_domain::cloud_storage, 5s);
             continue;
         }
 
@@ -548,10 +551,10 @@ ss::future<housekeeping_job::run_result> purger::run(run_quota_t quota) {
                 co_return result;
             }
 
-            // All topic-specific bucket contents are gone, we may erase
-            // our controller tombstone.
+            // All topic-specific bucket contents are gone, we may mark the
+            // topic as purged in the topic table.
             auto purge_result = co_await _topics_frontend.local().purged_topic(
-              nt_revision, 5s);
+              nt_revision, cluster::topic_purge_domain::cloud_storage, 5s);
             if (purge_result.ec != cluster::errc::success) {
                 auto errc = cluster::make_error_code(purge_result.ec);
                 // Just log: this will get retried next time the scrubber runs

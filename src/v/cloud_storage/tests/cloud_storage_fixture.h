@@ -11,10 +11,10 @@
 #pragma once
 
 #include "base/vlog.h"
+#include "cloud_io/tests/s3_imposter.h"
 #include "cloud_storage/cache_service.h"
 #include "cloud_storage/remote.h"
 #include "cloud_storage/tests/common_def.h"
-#include "cloud_storage/tests/s3_imposter.h"
 #include "cloud_storage/types.h"
 #include "test_utils/fixture.h"
 
@@ -104,6 +104,10 @@ struct cloud_storage_fixture : s3_imposter_fixture {
     cloud_storage_fixture operator=(const cloud_storage_fixture&) = delete;
     cloud_storage_fixture(cloud_storage_fixture&&) = delete;
     cloud_storage_fixture operator=(cloud_storage_fixture&&) = delete;
+
+    void mark_as_in_progress(remote_segment_path path) {
+        cache.local()._files_in_progress.insert(path);
+    }
 
     ss::tmp_dir tmp_directory;
     ss::sharded<cloud_storage::cache> cache;

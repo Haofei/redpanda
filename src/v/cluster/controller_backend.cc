@@ -65,60 +65,6 @@
 namespace cluster {
 namespace {
 
-model::broker
-get_node_metadata(const members_table& members, model::node_id id) {
-    auto nm = members.get_node_metadata_ref(id);
-    if (!nm) {
-        nm = members.get_removed_node_metadata_ref(id);
-    }
-    if (!nm) {
-        throw std::logic_error(
-          fmt::format("Replica node {} is not available", id));
-    }
-    return nm->get().broker;
-}
-
-std::vector<model::broker> create_brokers_set(
-  const replicas_t& replicas, cluster::members_table& members) {
-    std::vector<model::broker> brokers;
-    brokers.reserve(replicas.size());
-    std::transform(
-      std::cbegin(replicas),
-      std::cend(replicas),
-      std::back_inserter(brokers),
-      [&members](const model::broker_shard& bs) {
-          return get_node_metadata(members, bs.node_id);
-      });
-    return brokers;
-}
-
-std::vector<raft::broker_revision> create_brokers_set(
-  const replicas_t& replicas,
-  const absl::flat_hash_map<model::node_id, model::revision_id>&
-    replica_revisions,
-  model::revision_id cmd_revision,
-  cluster::members_table& members) {
-    std::vector<raft::broker_revision> brokers;
-    brokers.reserve(replicas.size());
-
-    std::transform(
-      std::cbegin(replicas),
-      std::cend(replicas),
-      std::back_inserter(brokers),
-      [&](const model::broker_shard& bs) {
-          auto broker = get_node_metadata(members, bs.node_id);
-          model::revision_id rev;
-          auto rev_it = replica_revisions.find(bs.node_id);
-          if (rev_it != replica_revisions.end()) {
-              rev = rev_it->second;
-          } else {
-              rev = cmd_revision;
-          }
-          return raft::broker_revision{.broker = std::move(broker), .rev = rev};
-      });
-    return brokers;
-}
-
 static std::vector<raft::vnode> create_vnode_set(
   const replicas_t& replicas,
   const absl::flat_hash_map<model::node_id, model::revision_id>&
@@ -319,7 +265,6 @@ controller_backend::controller_backend(
   ss::sharded<shard_placement_table>& shard_placement,
   ss::sharded<shard_table>& st,
   ss::sharded<partition_manager>& pm,
-  ss::sharded<members_table>& members,
   ss::sharded<partition_leaders_table>& leaders,
   ss::sharded<topics_frontend>& frontend,
   ss::sharded<storage::api>& storage,
@@ -336,7 +281,6 @@ controller_backend::controller_backend(
   , _shard_placement(shard_placement.local())
   , _shard_table(st)
   , _partition_manager(pm)
-  , _members_table(members)
   , _partition_leaders_table(leaders)
   , _topics_frontend(frontend)
   , _storage(storage)
@@ -362,11 +306,6 @@ controller_backend::controller_backend(
 }
 
 controller_backend::~controller_backend() = default;
-
-bool controller_backend::command_based_membership_active() const {
-    return _features.local().is_active(
-      features::feature::membership_change_controller_cmds);
-}
 
 ss::future<> controller_backend::stop() {
     vlog(clusterlog.info, "Stopping Controller Backend...");
@@ -502,55 +441,19 @@ ss::future<std::error_code> do_update_replica_set(
   const replicas_t& replicas,
   const replicas_revision_map& replica_revisions,
   model::revision_id cmd_revision,
-  members_table& members,
-  bool command_based_members_update,
   std::optional<model::offset> learner_initial_offset) {
     vlog(
       clusterlog.debug,
-      "[{}] updating partition replicas. revision: {}, replicas: {}, using "
-      "vnodes: {}, learner initial offset: {}",
+      "[{}] updating partition replicas. revision: {}, replicas: {}, "
+      "learner initial offset: {}",
       p->ntp(),
       cmd_revision,
       replicas,
-      command_based_members_update,
       learner_initial_offset);
 
-    // when cluster membership updates are driven by controller commands, use
-    // only vnodes to update raft replica set
-    if (likely(command_based_members_update)) {
-        auto nodes = create_vnode_set(
-          replicas, replica_revisions, cmd_revision);
-        co_return co_await p->update_replica_set(
-          std::move(nodes), cmd_revision, learner_initial_offset);
-    }
-
-    auto brokers = create_brokers_set(
-      replicas, replica_revisions, cmd_revision, members);
-    co_return co_await p->update_replica_set(std::move(brokers), cmd_revision);
-}
-
-ss::future<std::error_code> revert_configuration_update(
-  ss::lw_shared_ptr<partition> p,
-  const replicas_t& replicas,
-  const replicas_revision_map& replica_revisions,
-  model::revision_id cmd_revision,
-  members_table& members,
-  bool command_based_members_update) {
-    vlog(
-      clusterlog.debug,
-      "[{}] reverting already finished reconfiguration. Revision: {}, replica "
-      "set: {}",
-      p->ntp(),
-      cmd_revision,
-      replicas);
-    return do_update_replica_set(
-      std::move(p),
-      replicas,
-      replica_revisions,
-      cmd_revision,
-      members,
-      command_based_members_update,
-      std::nullopt);
+    auto nodes = create_vnode_set(replicas, replica_revisions, cmd_revision);
+    co_return co_await p->update_replica_set(
+      std::move(nodes), cmd_revision, learner_initial_offset);
 }
 
 /**
@@ -627,8 +530,7 @@ controller_backend::calculate_learner_initial_offset(
      *   initial retention settings and configured move policy.
      */
     const bool no_initial_retention_settings = !(
-      initial_retention_bytes.has_value()
-      || initial_retention_bytes.has_value());
+      initial_retention_bytes.has_value() || initial_retention_ms.has_value());
 
     bool full_move = policy == reconfiguration_policy::full_local_retention
                      || no_initial_retention_settings;
@@ -674,8 +576,8 @@ controller_backend::calculate_learner_initial_offset(
         return std::nullopt;
     }
 
-    const auto cloud_storage_safe_offset
-      = p->archival_meta_stm()->max_collectible_offset();
+    const auto max_removable_local_log_offset
+      = p->max_removable_local_log_offset();
     /**
      * Last offset uploaded to the cloud is target learner retention upper
      * bound. We can not start retention recover from the point which is not yet
@@ -684,15 +586,15 @@ controller_backend::calculate_learner_initial_offset(
     vlog(
       clusterlog.info,
       "[{}] calculated retention offset: {}, last uploaded to cloud: {}, "
-      "manifest clean offset: {}, max_collectible_offset: {}",
+      "manifest clean offset: {}, max_removable_local_log_offset: {}",
       p->ntp(),
       *retention_offset,
       p->archival_meta_stm()->manifest().get_last_offset(),
       p->archival_meta_stm()->get_last_clean_at(),
-      cloud_storage_safe_offset);
+      max_removable_local_log_offset);
 
     return model::next_offset(
-      std::min(cloud_storage_safe_offset, *retention_offset));
+      std::min(max_removable_local_log_offset, *retention_offset));
 }
 
 void controller_backend::process_delta(const topic_table::ntp_delta& d) {
@@ -773,10 +675,51 @@ controller_backend::force_replica_set_update(
         // will be cleaned up as a part of update_finished command.
         co_return ss::stop_iteration::yes;
     }
+    if (partition->cloud_data_available()) {
+        auto last_cloud_offset
+          = co_await partition->fetch_latest_cloud_offset_from_manifest(
+            model::timeout_clock::now()
+            + config::shard_local_cfg()
+                .cloud_storage_manifest_upload_timeout_ms());
+        if (last_cloud_offset.has_error()) {
+            vlog(
+              clusterlog.warn,
+              "[{}] force-update replica set - error getting latest cloud "
+              "offset: {}",
+              partition->ntp(),
+              last_cloud_offset.error());
+            co_return last_cloud_offset.error();
+        }
+        if (last_cloud_offset.value() > partition->dirty_offset()) {
+            vlog(
+              clusterlog.info,
+              "[{}] force-update replica set - last cloud offset {} is greater "
+              "than dirty offset: {}, removing local replica to force recovery",
+              partition->ntp(),
+              last_cloud_offset.value(),
+              partition->dirty_offset());
+
+            co_await remove_from_shard_table(
+              partition->ntp(),
+              partition->group(),
+              partition->get_log_revision_id());
+            co_await _partition_manager.local().remove(
+              partition->ntp(), partition_removal_mode::local_only);
+
+            // do not stop iteration as partition replica must be created again
+            // with recovered state
+            co_return ss::stop_iteration::no;
+        }
+    }
 
     auto [voters, learners] = split_voters_learners_for_force_reconfiguration(
       previous_replicas, new_replicas, initial_replicas_revisions, cmd_rev);
-
+    vlog(
+      clusterlog.debug,
+      "[{}] force updating replica set with: [voters: {}, learners: {}]",
+      partition->ntp(),
+      voters,
+      learners);
     // Force raft configuration update locally.
     co_return co_await partition->force_update_replica_set(
       std::move(voters), std::move(learners), cmd_rev);
@@ -1162,22 +1105,28 @@ ss::future<result<ss::stop_iteration>> controller_backend::reconcile_ntp_step(
             // Configuration will be replicate to the new replica
             initial_replicas = {};
         }
+        auto tt_revision_on_create = _topics.local().last_applied_revision();
+        auto topic_md = _topics.local().get_topic_metadata_ref(
+          model::topic_namespace_view(ntp));
+        vassert(topic_md, "topic metadata disappeared for {}", ntp);
         auto ec = co_await create_partition(
           ntp,
           group_id,
           expected_log_revision.value(),
           std::move(initial_replicas),
+          replicas_view.revisions(),
           force_reconfiguration{
             replicas_view.update
-            && replicas_view.update->is_force_reconfiguration()});
+            && replicas_view.update->is_force_reconfiguration()},
+          topic_md->get());
         if (ec) {
             co_return ec;
         }
 
         // The partition that we just created uses topic properties queried from
-        // topic_table at last_applied_revision(). Thus all properties updates
-        // with revisions <= last_applied_revision() are already reconciled.
-        rs.mark_properties_reconciled(_topics.local().last_applied_revision());
+        // topic_table at tt_revision_on_create. Thus all properties updates
+        // with revisions <= tt_revision_on_create are already reconciled.
+        rs.mark_properties_reconciled(tt_revision_on_create);
 
         co_return ss::stop_iteration::no;
     }
@@ -1189,6 +1138,7 @@ ss::future<result<ss::stop_iteration>> controller_backend::reconcile_ntp_step(
           *rs.properties_changed_at,
           partition_operation_type::update_properties);
 
+        auto tt_prop_revision = _topics.local().last_applied_revision();
         auto cfg = _topics.local().get_topic_cfg(
           model::topic_namespace_view{ntp});
         vassert(cfg, "[{}] expected topic cfg to be present", ntp);
@@ -1200,7 +1150,7 @@ ss::future<result<ss::stop_iteration>> controller_backend::reconcile_ntp_step(
         co_await partition->update_configuration(
           std::move(cfg).value().properties);
 
-        rs.mark_properties_reconciled(_topics.local().last_applied_revision());
+        rs.mark_properties_reconciled(tt_prop_revision);
         co_return ss::stop_iteration::no;
     }
 
@@ -1229,7 +1179,6 @@ ss::future<result<ss::stop_iteration>> controller_backend::reconcile_ntp_step(
           replicas_view.last_cmd_revision(), op_type, replicas_view.assignment);
 
         co_return co_await reconcile_partition_reconfiguration(
-          rs,
           std::move(partition),
           *replicas_view.update,
           replicas_view.revisions());
@@ -1240,7 +1189,6 @@ ss::future<result<ss::stop_iteration>> controller_backend::reconcile_ntp_step(
 
 ss::future<result<ss::stop_iteration>>
 controller_backend::reconcile_partition_reconfiguration(
-  ntp_reconciliation_state& rs,
   ss::lw_shared_ptr<partition> partition,
   const topic_table::in_progress_update& update,
   const replicas_revision_map& replicas_revisions) {
@@ -1264,19 +1212,14 @@ controller_backend::reconcile_partition_reconfiguration(
       _self, partition, update.get_resulting_replicas(), cmd_revision);
     if (!update_ec) {
         auto leader = partition->get_leader_id();
-        size_t retries = (rs.cur_operation ? rs.cur_operation->retries : 0);
         vlog(
           clusterlog.trace,
           "[{}] update complete, checking if our node can finish it "
-          "(leader: {}, retry: {})",
+          "(leader: {})",
           partition->ntp(),
-          leader,
-          retries);
+          leader);
         if (can_finish_update(
-              leader,
-              retries,
-              update.get_state(),
-              update.get_resulting_replicas())) {
+              leader, update.get_state(), update.get_resulting_replicas())) {
             auto ec = co_await dispatch_update_finished(
               partition->ntp(), update.get_resulting_replicas());
             if (ec) {
@@ -1331,7 +1274,6 @@ controller_backend::reconcile_partition_reconfiguration(
 
 bool controller_backend::can_finish_update(
   std::optional<model::node_id> current_leader,
-  uint64_t current_retry,
   reconfiguration_state state,
   const replicas_t& current_replicas) {
     if (
@@ -1341,23 +1283,9 @@ bool controller_backend::can_finish_update(
         return current_leader == _self;
     }
     /**
-     * If the revert feature is active we use current leader to dispatch
-     * partition move
+     * Use current leader to dispatch partition move
      */
-    if (_features.local().is_active(
-          features::feature::partition_move_revert_cancel)) {
-        return current_leader == _self
-               && contains_node(current_replicas, _self);
-    }
-    /**
-     * Use retry count to determine which node is eligible to dispatch update
-     * finished. Using modulo division allow us to round robin between
-     * candidates
-     */
-    const model::broker_shard& candidate
-      = current_replicas[current_retry % current_replicas.size()];
-
-    return candidate.node_id == _self;
+    return current_leader == _self && contains_node(current_replicas, _self);
 }
 
 ss::future<std::error_code> controller_backend::create_partition(
@@ -1365,7 +1293,9 @@ ss::future<std::error_code> controller_backend::create_partition(
   raft::group_id group_id,
   model::revision_id log_revision,
   replicas_t initial_replicas,
-  force_reconfiguration is_force_reconfigured) {
+  const replicas_revision_map& replica_revision_map,
+  force_reconfiguration is_force_reconfigured,
+  const topic_metadata& topic_md) {
     vlog(
       clusterlog.debug,
       "[{}] creating partition, log revision: {}, initial_replicas: {}",
@@ -1373,11 +1303,19 @@ ss::future<std::error_code> controller_backend::create_partition(
       log_revision,
       initial_replicas);
 
-    auto cfg = _topics.local().get_topic_cfg(model::topic_namespace_view(ntp));
-    if (!cfg) {
-        // partition was already removed, do nothing
-        co_return errc::success;
-    }
+    // References `topic_md` and `replica_revision_map` are only valid until the
+    // first scheduling point. Copy required data from them early even though we
+    // may not need them eventually.
+    topic_configuration cfg = topic_md.get_configuration();
+    model::revision_id topic_rev = topic_md.get_revision();
+    // Remote revision is used for cloud storage paths. If the topic was
+    // recovered, this is the value from the original manifest, and if topic
+    // is read replica, the value from remote topic manifest is used.
+    model::initial_revision_id remote_rev
+      = topic_md.get_remote_revision().value_or(
+        model::initial_revision_id{topic_rev});
+    std::vector<raft::vnode> initial_nodes = create_vnode_set(
+      initial_replicas, replica_revision_map, log_revision);
 
     auto ec = co_await _shard_placement.prepare_create(ntp, log_revision);
     if (ec) {
@@ -1387,32 +1325,26 @@ ss::future<std::error_code> controller_backend::create_partition(
     // handle partially created topic
     auto partition = _partition_manager.local().get(ntp);
 
-    // initial revision of the partition on the moment when it was created
-    // the value is used by shadow indexing
-    // if topic is read replica, the value from remote topic manifest is
-    // used
-    auto initial_rev = _topics.local().get_initial_revision(ntp);
-    if (!initial_rev) {
-        co_return errc::topic_not_exists;
-    }
     // no partition exists, create one
     if (likely(!partition)) {
-        std::vector<model::broker> initial_brokers = create_brokers_set(
-          initial_replicas, _members_table.local());
-
         std::optional<cloud_storage_clients::bucket_name> read_replica_bucket;
-        if (cfg->is_read_replica()) {
+        if (cfg.is_read_replica()) {
             read_replica_bucket = cloud_storage_clients::bucket_name(
-              cfg->properties.read_replica_bucket.value());
+              cfg.properties.read_replica_bucket.value());
         }
 
         std::optional<xshard_transfer_state> xst_state;
         if (auto it = _xst_states.find(ntp); it != _xst_states.end()) {
             xst_state = it->second;
         }
-        auto ntp_config = cfg->make_ntp_config(
-          _data_directory, ntp.tp.partition, log_revision, initial_rev.value());
-        auto rtp = cfg->properties.remote_topic_properties;
+
+        auto ntp_config = cfg.make_ntp_config(
+          _data_directory,
+          ntp.tp.partition,
+          log_revision,
+          topic_rev,
+          remote_rev);
+        auto rtp = cfg.properties.remote_topic_properties;
         const bool is_cloud_topic = ntp_config.is_archival_enabled()
                                     || ntp_config.is_remote_fetch_enabled();
         const bool is_internal = ntp.ns == model::kafka_internal_namespace;
@@ -1428,7 +1360,21 @@ ss::future<std::error_code> controller_backend::create_partition(
             // topic being cloud enabled implies existence of overrides
             ntp_config.get_overrides().recovery_enabled
               = storage::topic_recovery_enabled::yes;
-            rtp.emplace(*initial_rev, cfg->partition_count);
+            rtp.emplace(remote_rev, cfg.partition_count);
+        }
+        /**
+         * Reset remote topic properties if a topic is recovered from tiered
+         * storage and current node is joining replica set. A node is joining
+         * replica set if its initial nodes set is empty.
+         */
+        if (initial_nodes.empty() && rtp.has_value()) {
+            // reset remote topic properties
+            vlog(
+              clusterlog.info,
+              "[{}] Disabling remote recovery while creating partition "
+              "replica. Current node is added to the replica set as learner.",
+              ntp);
+            rtp.reset();
         }
         // we use offset as an rev as it is always increasing and it
         // increases while ntp is being created again
@@ -1436,14 +1382,13 @@ ss::future<std::error_code> controller_backend::create_partition(
             co_await _partition_manager.local().manage(
               std::move(ntp_config),
               group_id,
-              std::move(initial_brokers),
+              std::move(initial_nodes),
               raft::with_learner_recovery_throttle::yes,
               raft::keep_snapshotted_log::no,
               std::move(xst_state),
               rtp,
               read_replica_bucket,
-              cfg->properties.remote_label,
-              cfg->properties.remote_topic_namespace_override);
+              &cfg);
 
             _xst_states.erase(ntp);
 
@@ -1469,7 +1414,7 @@ ss::future<std::error_code> controller_backend::create_partition(
         auto partition = _partition_manager.local().get(ntp);
         if (partition) {
             partition->set_topic_config(
-              std::make_unique<topic_configuration>(std::move(*cfg)));
+              std::make_unique<topic_configuration>(std::move(cfg)));
         }
     }
 
@@ -1565,35 +1510,19 @@ controller_backend::cancel_replica_set_update(
                            replicas,
                            replicas_revisions,
                            cmd_revision,
-                           _members_table.local(),
-                           command_based_membership_active(),
                            std::nullopt)
                     .then([](std::error_code ec) {
                         return result<ss::stop_iteration>{ec};
                     });
               } else if (already_moved) {
-                  if (likely(_features.local().is_active(
-                        features::feature::partition_move_revert_cancel))) {
-                      return dispatch_revert_cancel_move(p->ntp()).then(
-                        [](std::error_code ec) -> result<ss::stop_iteration> {
-                            if (ec) {
-                                return ec;
-                            }
-                            // revert_cancel is dispatched, nothing else to do,
-                            // but wait for the topic table update.
-                            return ss::stop_iteration::yes;
-                        });
-                  }
-
-                  return revert_configuration_update(
-                           std::move(p),
-                           replicas,
-                           replicas_revisions,
-                           cmd_revision,
-                           _members_table.local(),
-                           command_based_membership_active())
-                    .then([](std::error_code ec) {
-                        return result<ss::stop_iteration>{ec};
+                  return dispatch_revert_cancel_move(p->ntp()).then(
+                    [](std::error_code ec) -> result<ss::stop_iteration> {
+                        if (ec) {
+                            return ec;
+                        }
+                        // revert_cancel is dispatched, nothing else to do,
+                        // but wait for the topic table update.
+                        return ss::stop_iteration::yes;
                     });
               }
               return ss::make_ready_future<result<ss::stop_iteration>>(
@@ -1663,29 +1592,12 @@ controller_backend::force_abort_replica_set_update(
               cmd_revision,
               reconfiguration_policy::full_local_retention);
         } else if (already_moved) {
-            if (likely(_features.local().is_active(
-                  features::feature::partition_move_revert_cancel))) {
-                std::error_code ec = co_await dispatch_revert_cancel_move(
-                  partition->ntp());
-                if (ec) {
-                    co_return ec;
-                }
-                co_return ss::stop_iteration::yes;
+            std::error_code ec = co_await dispatch_revert_cancel_move(
+              partition->ntp());
+            if (ec) {
+                co_return ec;
             }
-
-            co_return co_await apply_configuration_change_on_leader(
-              std::move(partition),
-              replicas,
-              cmd_revision,
-              [&](ss::lw_shared_ptr<cluster::partition> p) {
-                  return revert_configuration_update(
-                    std::move(p),
-                    replicas,
-                    replicas_revisions,
-                    cmd_revision,
-                    _members_table.local(),
-                    command_based_membership_active());
-              });
+            co_return ss::stop_iteration::yes;
         }
         co_return errc::waiting_for_recovery;
     } else {
@@ -1731,8 +1643,6 @@ controller_backend::update_partition_replica_set(
             replicas,
             replicas_revisions,
             cmd_revision,
-            _members_table.local(),
-            command_based_membership_active(),
             learner_initial_offset);
       });
 }
@@ -1945,10 +1855,17 @@ controller_backend::shutdown_partition(ss::lw_shared_ptr<partition> partition) {
           ntp, gr, partition->get_log_revision_id());
         // shutdown partition
         co_return co_await _partition_manager.local().shutdown(ntp);
+    } catch (const seastar::gate_closed_exception&) {
+        // let it bubble up and break reconciliation loop
+        vlog(
+          clusterlog.debug,
+          "error shutting down {} partition, app shutting down",
+          ntp);
+        throw;
     } catch (...) {
         /**
-         * If partition shutdown failed we should crash, this error is
-         * unrecoverable
+         * If partition shutdown failed with any other exception we should
+         * crash, this error is unrecoverable
          */
         vassert(
           false,

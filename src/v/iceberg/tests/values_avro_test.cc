@@ -1,17 +1,20 @@
-// Copyright 2024 Redpanda Data, Inc.
-//
-// Use of this software is governed by the Business Source License
-// included in the file licenses/BSL.md
-//
-// As of the Change Date specified in that file, in accordance with
-// the Business Source License, use of this software will be governed
-// by the Apache License, Version 2.0
+/*
+ * Copyright 2024 Redpanda Data, Inc.
+ *
+ * Licensed as a Redpanda Enterprise file under the Redpanda Community
+ * License (the "License"); you may not use this file except in compliance with
+ * the License. You may obtain a copy of the License at
+ *
+ * https://github.com/redpanda-data/redpanda/blob/master/licenses/rcl.md
+ */
 
+#include "iceberg/avro_decimal.h"
 #include "iceberg/schema_avro.h"
 #include "iceberg/tests/test_schemas.h"
 #include "iceberg/tests/value_generator.h"
 #include "iceberg/values.h"
 #include "iceberg/values_avro.h"
+#include "random/generators.h"
 
 #include <gtest/gtest.h>
 
@@ -87,4 +90,59 @@ TEST(ValuesAvroTest, TestDecimal) {
           std::move(*roundtrip_val));
         ASSERT_EQ(*roundtrip_struct, v);
     }
+}
+
+TEST(ValuesAvroTest, TestDecimalConversions) {
+    for (int i = 0; i < 10000; ++i) {
+        auto high_half = random_generators::get_int<int64_t>();
+        auto low_half = random_generators::get_int<uint64_t>();
+
+        auto decimal = absl::MakeInt128(high_half, low_half);
+
+        ASSERT_EQ(decimal, decode_avro_decimal(encode_avro_decimal(decimal)));
+        ASSERT_EQ(
+          decimal, iobuf_to_avro_decimal(avro_decimal_to_iobuf(decimal, 16)));
+    }
+}
+
+TEST(ValuesAvroTest, TestDecimalConversionsLimitedSize) {
+    auto high_half = 0;
+    auto low_half = random_generators::get_int<uint64_t>();
+
+    auto decimal = absl::MakeInt128(high_half, low_half);
+
+    ASSERT_EQ(
+      decimal, iobuf_to_avro_decimal(avro_decimal_to_iobuf(decimal, 8)));
+}
+
+TEST(ValuesAvroTest, TestDecimalConversionAgainstJavaBigInteger) {
+    // value of 65536
+    ASSERT_EQ(
+      encode_avro_decimal(absl::MakeInt128(0, 65536)),
+      bytes({0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1, 0, 0}));
+    // value of 35209893291843950283695459221
+    ASSERT_EQ(
+      encode_avro_decimal(absl::MakeInt128(1908732140, 89247320981)),
+      bytes({0, 0, 0, 0, 113, 196, 240, 236, 0, 0, 0, 20, 199, 142, 11, 149}));
+
+    // value of -18218949492341193300753118315
+    ASSERT_EQ(
+      encode_avro_decimal(absl::MakeInt128(-987651231, 89247320981)),
+      bytes(
+        {255,
+         255,
+         255,
+         255,
+         197,
+         33,
+         163,
+         97,
+         0,
+         0,
+         0,
+         20,
+         199,
+         142,
+         11,
+         149}));
 }

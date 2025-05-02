@@ -69,7 +69,7 @@ token and client ID is always synced.
 			out.MaybeDie(err, "rpk unable to load config: %v", err)
 
 			p := yAct.Profile(yAct.CurrentProfile)
-			authAct, authVir, clearedProfile, _, err := oauth.LoadFlow(cmd.Context(), fs, cfg, auth0.NewClient(cfg.DevOverrides()), noBrowser, true, cfg.DevOverrides().CloudAPIURL)
+			authAct, authVir, clearedProfile, _, err := oauth.LoadFlow(cmd.Context(), fs, cfg, auth0.NewClient(cfg.DevOverrides()), noBrowser, true)
 			if err != nil {
 				fmt.Printf("Unable to login to Redpanda Cloud (%v).\n", err)
 				if e := (*oauth.BadClientTokenError)(nil); errors.As(err, &e) && authVir != nil && authVir.HasClientCredentials() {
@@ -135,7 +135,7 @@ rpk will talk to a localhost:9092 cluster until you swap to a different profile.
 			if noProfile {
 				// The current profile is seemingly pointing to a container cluster.
 				if p.Name == common.ContainerProfileName {
-					fmt.Printf("You are talking to a localhost 'rpk container' cluster (rpk profile name: %q)", p.Name)
+					fmt.Printf("You are talking to a localhost 'rpk container' cluster (rpk profile name: %q)\n", p.Name)
 					fmt.Println("To talk to a cloud cluster, use 'rpk cloud cluster select'.")
 					return
 				}

@@ -22,6 +22,7 @@
 #include "model/namespace.h"
 #include "model/timestamp.h"
 #include "storage/types.h"
+#include "utils/tristate.h"
 
 #include <seastar/core/coroutine.hh>
 #include <seastar/core/sharded.hh>
@@ -148,7 +149,7 @@ std::vector<model::node_id> metadata_cache::node_ids() const {
 }
 
 bool metadata_cache::should_reject_writes() const {
-    return _health_monitor.local().get_cluster_disk_health()
+    return _health_monitor.local().get_cluster_data_disk_health()
            == storage::disk_space_alert::degraded;
 }
 
@@ -318,6 +319,21 @@ metadata_cache::get_default_record_value_subject_name_strategy() const {
     return pandaproxy::schema_registry::subject_name_strategy::topic_name;
 }
 
+std::optional<std::chrono::milliseconds>
+metadata_cache::get_default_delete_retention_ms() const {
+    return config::shard_local_cfg().tombstone_retention_ms();
+}
+
+std::chrono::milliseconds
+metadata_cache::get_default_iceberg_target_lag_ms() const {
+    return config::shard_local_cfg().iceberg_target_lag_ms();
+}
+
+std::optional<double>
+metadata_cache::get_default_min_cleanable_dirty_ratio() const {
+    return config::shard_local_cfg().min_cleanable_dirty_ratio();
+}
+
 topic_properties metadata_cache::get_default_properties() const {
     topic_properties tp;
     tp.compression = {get_default_compression()};
@@ -335,6 +351,10 @@ topic_properties metadata_cache::get_default_properties() const {
       get_default_retention_local_target_bytes()};
     tp.retention_local_target_ms = tristate<std::chrono::milliseconds>{
       get_default_retention_local_target_ms()};
+    tp.delete_retention_ms = tristate<std::chrono::milliseconds>{
+      get_default_delete_retention_ms()};
+    tp.min_cleanable_dirty_ratio = tristate<double>{
+      get_default_min_cleanable_dirty_ratio()};
 
     return tp;
 }

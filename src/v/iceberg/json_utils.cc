@@ -1,19 +1,45 @@
-// Copyright 2024 Redpanda Data, Inc.
-//
-// Use of this software is governed by the Business Source License
-// included in the file licenses/BSL.md
-//
-// As of the Change Date specified in that file, in accordance with
-// the Business Source License, use of this software will be governed
-// by the Apache License, Version 2.0
+/*
+ * Copyright 2024 Redpanda Data, Inc.
+ *
+ * Licensed as a Redpanda Enterprise file under the Redpanda Community
+ * License (the "License"); you may not use this file except in compliance with
+ * the License. You may obtain a copy of the License at
+ *
+ * https://github.com/redpanda-data/redpanda/blob/master/licenses/rcl.md
+ */
 
-#include "json/document.h"
+#include "iceberg/json_utils.h"
 
 #include <fmt/format.h>
 
 #include <stdexcept>
 
 namespace iceberg {
+
+namespace {
+chunked_hash_map<ss::sstring, ss::sstring>
+parse_string_map(const json::Value& map_json, std::string_view member_name) {
+    if (!map_json.IsObject()) {
+        throw std::invalid_argument(fmt::format(
+          "Expected map field '{}' to be an object type", member_name));
+    }
+    const auto& map_obj = map_json.GetObject();
+    chunked_hash_map<ss::sstring, ss::sstring> ret;
+    ret.reserve(map_obj.MemberCount());
+    for (const auto& property : map_obj) {
+        if (!property.name.IsString() || !property.value.IsString()) {
+            throw std::invalid_argument(fmt::format(
+              "Expected '{}' field to be a string map. Current type map<{},{}>",
+              member_name,
+              property.name.GetType(),
+              property.value.GetType()));
+        }
+
+        ret.emplace(property.name.GetString(), property.value.GetString());
+    }
+    return ret;
+}
+} // namespace
 
 std::optional<std::reference_wrapper<const json::Value>>
 parse_optional(const json::Value& v, std::string_view member_name) {
@@ -23,6 +49,9 @@ parse_optional(const json::Value& v, std::string_view member_name) {
     }
     auto iter = v.FindMember(member_name.data());
     if (iter == v.MemberEnd()) {
+        return std::nullopt;
+    }
+    if (iter->value.IsNull()) {
         return std::nullopt;
     }
     return iter->value;
@@ -148,6 +177,19 @@ parse_optional_i64(const json::Value& v, std::string_view member_name) {
     return json->get().GetInt64();
 }
 
+std::optional<ss::sstring>
+parse_optional_str(const json::Value& v, std::string_view member_name) {
+    const auto json = parse_optional(v, member_name);
+    if (!json.has_value()) {
+        return std::nullopt;
+    }
+    if (!json->get().IsString()) {
+        throw std::invalid_argument(
+          fmt::format("Expected string for field '{}'", member_name));
+    }
+    return json->get().GetString();
+}
+
 bool parse_required_bool(const json::Value& v, std::string_view member_name) {
     const auto& bool_json = parse_required(v, member_name);
     if (!bool_json.IsBool()) {
@@ -167,6 +209,22 @@ extract_between(char start_ch, char end_ch, std::string_view s) {
     }
     throw std::invalid_argument(
       fmt::format("Missing wrappers '{}' or '{}' in {}", start_ch, end_ch, s));
+}
+
+chunked_hash_map<ss::sstring, ss::sstring>
+parse_required_string_map(const json::Value& v, std::string_view member_name) {
+    const auto& map_json = parse_required(v, member_name);
+
+    return parse_string_map(map_json, member_name);
+}
+
+std::optional<chunked_hash_map<ss::sstring, ss::sstring>>
+parse_optional_string_map(const json::Value& v, std::string_view member_name) {
+    const auto& map_json = parse_optional(v, member_name);
+    if (!map_json) {
+        return std::nullopt;
+    }
+    return parse_string_map(*map_json, member_name);
 }
 
 } // namespace iceberg

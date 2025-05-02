@@ -10,16 +10,23 @@
 
 #include "cluster/archival/probe.h"
 
+#include "cluster/archival/archival_metadata_stm.h"
 #include "config/configuration.h"
 #include "metrics/prometheus_sanitize.h"
+#include "ssx/rate_limited_function.h"
 
 #include <seastar/core/metrics.hh>
 #include <seastar/core/smp.hh>
 
 namespace archival {
 
+static constexpr auto segments_pending_deletion_refresh_rate = 60s;
+
 ntp_level_probe::ntp_level_probe(
-  per_ntp_metrics_disabled disabled, const model::ntp& ntp) {
+  per_ntp_metrics_disabled disabled,
+  const model::ntp& ntp,
+  ss::shared_ptr<const cluster::archival_metadata_stm> stm)
+  : _stm(std::move(stm)) {
     if (!disabled) {
         setup_ntp_metrics(ntp);
     }
@@ -118,23 +125,45 @@ void ntp_level_probe::setup_public_metrics(const model::ntp& ntp) {
          .aggregate(aggregate_labels),
        sm::make_gauge(
          "segments",
-         [this] { return _segments_in_manifest; },
+         [this] { return _stm->manifest().size(); },
          sm::description(
            "Total number of accounted segments in the cloud for the topic"),
          labels)
          .aggregate(aggregate_labels),
        sm::make_gauge(
          "segments_pending_deletion",
-         [this] { return _segments_to_delete; },
+         // We want to avoid calling this function too often because it's
+         // relatively expensive to compute.
+         // The produced value changes rarely so it's safe to cache it for a
+         // while.
+         ssx::rate_limited_function<size_t()>(
+           [this] {
+               const auto first_addressable
+                 = _stm->manifest().first_addressable_segment();
+               const auto truncated_seg_count = first_addressable
+                                                    == _stm->manifest().end()
+                                                  ? 0
+                                                  : first_addressable.index();
+
+               return truncated_seg_count
+                      + _stm->manifest().replaced_segments_count();
+           },
+           segments_pending_deletion_refresh_rate),
          sm::description("Total number of segments pending deletion from the "
                          "cloud for the topic"),
          labels)
          .aggregate(aggregate_labels),
        sm::make_gauge(
          "cloud_log_size",
-         [this] { return _cloud_log_size; },
+         [this] { return _stm->manifest().cloud_log_size(); },
          sm::description(
            "Total size in bytes of the user-visible log for the topic"),
+         labels)
+         .aggregate(aggregate_labels),
+       sm::make_gauge(
+         "paused_archivers",
+         [this] { return _num_paused_archivers; },
+         sm::description("Number of paused archivers"),
          labels)
          .aggregate(aggregate_labels)});
 }

@@ -98,6 +98,7 @@ redpanda_cc_library(
         ":auth_refresh_bg_op",
         ":io_resources",
         ":io_result",
+        ":provider",
         ":transfer_details",
         "//src/v/base",
         "//src/v/cloud_roles",
@@ -127,4 +128,29 @@ redpanda_cc_library(
         "//src/v/utils:retry_chain_node",
         "@seastar",
     ],
+)
+
+redpanda_cc_library(
+    name = "basic_cache_service_api",
+    srcs = [
+        "basic_cache_service_api.cc",
+    ],
+    hdrs = [
+        "basic_cache_service_api.h",
+    ],
+    include_prefix = "cloud_io",
+    visibility = ["//visibility:public"],
+    deps = [
+        "//src/v/base",
+        "@seastar",
+    ],
+)
+
+redpanda_cc_library(
+    name = "provider",
+    hdrs = [
+        "provider.h",
+    ],
+    include_prefix = "cloud_io",
+    visibility = ["//visibility:public"],
 )

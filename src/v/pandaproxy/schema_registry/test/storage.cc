@@ -15,7 +15,6 @@
 #include "pandaproxy/schema_registry/types.h"
 #include "pandaproxy/schema_registry/util.h"
 
-#include <absl/algorithm/container.h>
 #include <boost/test/unit_test.hpp>
 #include <fmt/format.h>
 
@@ -49,10 +48,10 @@ constexpr std::string_view avro_schema_value_sv{
   "schema": "{\"type\":\"string\"}",
   "deleted": true
 })"};
-const pps::canonical_schema_value avro_schema_value{
+const pps::schema_value avro_schema_value{
   .schema{
     pps::subject{"my-kafka-value"},
-    pps::canonical_schema_definition{
+    pps::schema_definition{
       R"({"type":"string"})",
       pps::schema_type::avro,
       {{{"name"}, pps::subject{"subject"}, pps::schema_version{1}}}}},
@@ -137,7 +136,7 @@ BOOST_AUTO_TEST_CASE(test_storage_serde) {
 
     {
         auto val = ppj::impl::rjson_parse(
-          avro_schema_value_sv.data(), pps::canonical_schema_value_handler<>{});
+          avro_schema_value_sv.data(), pps::schema_value_handler{});
         BOOST_CHECK_EQUAL(avro_schema_value, val);
 
         auto str = ppj::rjson_serialize_str(avro_schema_value);

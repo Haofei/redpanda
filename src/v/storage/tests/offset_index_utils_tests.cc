@@ -7,11 +7,10 @@
 // the Business Source License, use of this software will be governed
 // by the Apache License, Version 2.0
 #include "random/generators.h"
-#include "serde/serde.h"
 #include "storage/segment_index.h"
 #include "test_utils/fixture.h"
+#include "test_utils/tmpbuf_file.h"
 #include "utils/file_io.h"
-#include "utils/tmpbuf_file.h"
 
 #include <seastar/core/seastar.hh>
 #include <seastar/core/shared_ptr.hh>
@@ -86,7 +85,7 @@ FIXTURE_TEST(index_round_trip, offset_index_utils_fixture) {
       data.share(0, data.size_bytes()));
     info("verifying tracking info: {}", raw_idx);
     BOOST_REQUIRE_EQUAL(raw_idx.max_offset(), 1023);
-    BOOST_REQUIRE_EQUAL(raw_idx.relative_offset_index.size(), 1024);
+    BOOST_REQUIRE_EQUAL(raw_idx.index.size(), 1024);
 }
 
 FIXTURE_TEST(bucket_bug1, offset_index_utils_fixture) {

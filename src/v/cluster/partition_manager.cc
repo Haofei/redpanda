@@ -13,7 +13,6 @@
 #include "cloud_storage/cache_service.h"
 #include "cloud_storage/partition_manifest.h"
 #include "cloud_storage/remote.h"
-#include "cloud_storage/remote_label.h"
 #include "cloud_storage/remote_partition.h"
 #include "cloud_storage/remote_path_provider.h"
 #include "cluster/archival/archival_metadata_stm.h"
@@ -23,6 +22,7 @@
 #include "cluster/logger.h"
 #include "cluster/partition.h"
 #include "cluster/partition_recovery_manager.h"
+#include "cluster/topic_configuration.h"
 #include "cluster/types.h"
 #include "config/configuration.h"
 #include "model/metadata.h"
@@ -47,6 +47,7 @@
 #include <algorithm>
 #include <exception>
 #include <iterator>
+#include <optional>
 #include <utility>
 
 namespace cluster {
@@ -115,14 +116,18 @@ ss::future<> partition_manager::start() {
 ss::future<consensus_ptr> partition_manager::manage(
   storage::ntp_config ntp_cfg,
   raft::group_id group,
-  std::vector<model::broker> initial_nodes,
+  std::vector<raft::vnode> initial_nodes,
   raft::with_learner_recovery_throttle enable_learner_recovery_throttle,
   raft::keep_snapshotted_log keep_snapshotted_log,
   std::optional<xshard_transfer_state> xst_state,
   std::optional<remote_topic_properties> rtp,
   std::optional<cloud_storage_clients::bucket_name> read_replica_bucket,
-  std::optional<cloud_storage::remote_label> remote_label,
-  std::optional<model::topic_namespace> topic_namespace_override) {
+  const topic_configuration* topic_cfg) {
+    auto remote_label = topic_cfg ? topic_cfg->properties.remote_label
+                                  : std::nullopt;
+    auto remote_topic_namespace_override
+      = topic_cfg ? topic_cfg->properties.remote_topic_namespace_override
+                  : std::nullopt;
     vlog(
       clusterlog.trace,
       "Creating partition with configuration: {}, raft group_id: {}, "
@@ -133,20 +138,20 @@ ss::future<consensus_ptr> partition_manager::manage(
       initial_nodes,
       rtp,
       remote_label,
-      topic_namespace_override);
+      remote_topic_namespace_override);
 
     auto guard = _gate.hold();
     // topic_namespace_override is used in case of a cluster migration.
     // The original ("source") topic name must be used in the tiered
     // storage/archival subsystems, while the alias ("destination") will be used
     // for local storage on the new cluster.
-    if (topic_namespace_override.has_value()) {
+    if (remote_topic_namespace_override.has_value()) {
         vlog(
           clusterlog.info,
           "Topic namespace override present for ntp {}: topic namespace {} "
           "used for remote path providing",
           ntp_cfg.ntp(),
-          topic_namespace_override.value());
+          remote_topic_namespace_override.value());
     }
 
     // NOTE: while the source cluster UUIDs of the path providers will
@@ -155,7 +160,7 @@ ss::future<consensus_ptr> partition_manager::manage(
     // metadata STM and its lifecycle is therefore tied to the partition, which
     // hasn't been constructed yet.
     cloud_storage::remote_path_provider path_provider(
-      remote_label, topic_namespace_override);
+      std::move(remote_label), std::move(remote_topic_namespace_override));
     auto dl_result = co_await maybe_download_log(ntp_cfg, rtp, path_provider);
 
     auto& [logs_recovered, clean_download, min_offset, max_offset, manifest, ot_state]
@@ -199,8 +204,7 @@ ss::future<consensus_ptr> partition_manager::manage(
                   ntp_cfg, manifest, max_offset);
             }
         } else {
-            // Manifest is not empty since we were able to recovery
-            // some data.
+            // Manifest is not empty since we were able to recover some data.
             auto last_segment = manifest.last_segment();
             vassert(last_segment.has_value(), "Manifest is empty");
             auto last_included_term = last_segment->archiver_term;
@@ -295,9 +299,17 @@ ss::future<consensus_ptr> partition_manager::manage(
         p->block_new_leadership();
     }
 
-    _manage_watchers.notify(p->ntp(), p);
+    auto stm_builder = _stm_registry.make_builder_for(c.get(), topic_cfg);
 
-    co_await p->start(_stm_registry, xst_state);
+    co_await p->start(std::move(stm_builder), std::move(xst_state));
+
+    // this is not done in partition::start itself because the purpose of this
+    // flag is to operate in an uninterruptible context with watcher
+    // notification below to avoid registration while this fiber is blocked,
+    // leading to double notifications.
+    p->mark_started();
+
+    _manage_watchers.notify(p->ntp(), p);
 
     co_return c;
 }
@@ -307,20 +319,29 @@ partition_manager::maybe_download_log(
   storage::ntp_config& ntp_cfg,
   std::optional<remote_topic_properties> rtp,
   cloud_storage::remote_path_provider& path_provider) {
-    if (rtp.has_value() && _partition_recovery_mgr.local_is_initialized()) {
-        auto res = co_await _partition_recovery_mgr.local().download_log(
-          ntp_cfg,
-          rtp->remote_revision,
-          rtp->remote_partition_count,
-          path_provider);
-        co_return res;
+    if (!rtp.has_value() || !_partition_recovery_mgr.local_is_initialized()) {
+        vlog(
+          clusterlog.debug,
+          "Logs can't be downloaded because cloud storage is not configured. "
+          "Continue creating {} without downloading the logs.",
+          ntp_cfg);
+        co_return cloud_storage::log_recovery_result{};
     }
-    vlog(
-      clusterlog.debug,
-      "Logs can't be downloaded because cloud storage is not configured. "
-      "Continue creating {} without downloading the logs.",
-      ntp_cfg);
-    co_return cloud_storage::log_recovery_result{};
+
+    if (co_await archival_metadata_stm::has_snapshot(ntp_cfg)) {
+        vlog(
+          clusterlog.debug,
+          "Skip logs download for {}, as archival_metadata_stm snapshot "
+          "already exists",
+          ntp_cfg.ntp());
+        co_return cloud_storage::log_recovery_result{};
+    }
+
+    co_return co_await _partition_recovery_mgr.local().download_log(
+      ntp_cfg,
+      rtp->remote_revision,
+      rtp->remote_partition_count,
+      path_provider);
 }
 
 ss::future<> partition_manager::stop_partitions() {
@@ -334,14 +355,14 @@ ss::future<> partition_manager::stop_partitions() {
     // prevent partitions from being accessed
     auto partitions = std::exchange(_ntp_table, {});
 
-    co_await ssx::async_clear(_raft_table)();
+    co_await ssx::async_clear(_raft_table);
 
     // shutdown all partitions
     co_await ss::max_concurrent_for_each(partitions, 1024, [this](auto& e) {
         return do_shutdown(e.second).discard_result();
     });
 
-    co_await ssx::async_clear(partitions)();
+    co_await ssx::async_clear(partitions);
 }
 
 ss::future<xshard_transfer_state>

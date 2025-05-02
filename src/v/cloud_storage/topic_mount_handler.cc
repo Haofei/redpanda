@@ -15,7 +15,10 @@
 #include "cloud_storage/remote.h"
 #include "cloud_storage/remote_path_provider.h"
 #include "cloud_storage/topic_mount_manifest.h"
+#include "cloud_storage/types.h"
+#include "model/fundamental.h"
 #include "model/metadata.h"
+#include "utils/retry_chain_node.h"
 
 namespace cloud_storage {
 
@@ -87,6 +90,7 @@ ss::future<topic_mount_result> topic_mount_handler::commit_mount(
 
 ss::future<topic_mount_result> topic_mount_handler::mount_topic(
   const cluster::topic_configuration& topic_cfg,
+  model::initial_revision_id rev,
   bool prepare_only,
   retry_chain_node& parent) {
     const auto remote_tp_ns = topic_cfg.remote_tp_ns();
@@ -97,7 +101,8 @@ ss::future<topic_mount_result> topic_mount_handler::mount_topic(
     const auto manifest = topic_mount_manifest(
       topic_cfg.properties.remote_label.value_or(
         remote_label{model::default_cluster_uuid}),
-      remote_tp_ns);
+      remote_tp_ns,
+      rev);
 
     const auto check_result = co_await check_mount(
       manifest, path_provider, parent);
@@ -129,7 +134,9 @@ ss::future<topic_mount_result> topic_mount_handler::mount_topic(
 }
 
 ss::future<topic_unmount_result> topic_mount_handler::unmount_topic(
-  const cluster::topic_configuration& topic_cfg, retry_chain_node& parent) {
+  const cluster::topic_configuration& topic_cfg,
+  model::initial_revision_id rev,
+  retry_chain_node& parent) {
     const auto remote_tp_ns = topic_cfg.remote_tp_ns();
     const auto path_provider = remote_path_provider(
       topic_cfg.properties.remote_label, remote_tp_ns);
@@ -138,11 +145,28 @@ ss::future<topic_unmount_result> topic_mount_handler::unmount_topic(
     const auto manifest = topic_mount_manifest(
       topic_cfg.properties.remote_label.value_or(
         remote_label{model::default_cluster_uuid}),
-      remote_tp_ns);
+      remote_tp_ns,
+      rev);
+
+    const auto manifest_path = manifest.get_manifest_path(path_provider);
+
+    // Check if manifest already exists: this means a topic of the same name and
+    // initial revision id has been unmounted previously.
+    const auto exists_result = co_await _remote.object_exists(
+      _bucket,
+      cloud_storage_clients::object_key{manifest_path},
+      parent,
+      existence_check_type::manifest);
+    if (exists_result == download_result::success) {
+        vlog(
+          cst_log.warn,
+          "Existing topic mount manifest during the unmount process: {}",
+          manifest_path);
+    }
 
     // Upload manifest to cloud storage to mark it as mountable.
     const auto upload_result = co_await _remote.upload_manifest(
-      _bucket, manifest, manifest.get_manifest_path(path_provider), parent);
+      _bucket, manifest, manifest_path, parent);
 
     if (upload_result != upload_result::success) {
         vlog(
@@ -155,14 +179,53 @@ ss::future<topic_unmount_result> topic_mount_handler::unmount_topic(
     co_return topic_unmount_result::success;
 }
 
+ss::future<result<chunked_vector<topic_mount_manifest_path>>>
+topic_mount_handler::list_mountable_topics(retry_chain_node& parent) {
+    auto log = retry_chain_logger(cst_log, parent);
+
+    cloud_storage_clients::object_key prefix{
+      cloud_storage::topic_mount_manifest_path::prefix()};
+
+    vlog(log.debug, "listing mountable topics with prefix {}", prefix);
+
+    auto list_result = co_await _remote.list_objects(_bucket, parent, prefix);
+    if (!list_result) {
+        vlog(log.error, "failed to list objects: {}", list_result.error());
+        co_return list_result.error();
+    }
+
+    chunked_vector<topic_mount_manifest_path> ret;
+    for (const auto& item : list_result.assume_value().contents) {
+        vlog(log.trace, "parsing object {}", item.key);
+
+        auto path_parse_result
+          = cloud_storage::topic_mount_manifest_path::parse(
+            std::string(item.key));
+        if (!path_parse_result) {
+            vlog(log.error, "failed to parse object key {}", item.key);
+            continue;
+        }
+
+        ret.emplace_back(std::move(path_parse_result.value()));
+    }
+
+    vlog(log.trace, "found {} mountable topics", ret.size());
+
+    co_return ret;
+}
+
 ss::future<topic_mount_result> topic_mount_handler::prepare_mount_topic(
-  const cluster::topic_configuration& topic_cfg, retry_chain_node& parent) {
-    return mount_topic(topic_cfg, true, parent);
+  const cluster::topic_configuration& topic_cfg,
+  model::initial_revision_id rev,
+  retry_chain_node& parent) {
+    return mount_topic(topic_cfg, rev, true, parent);
 }
 
 ss::future<topic_mount_result> topic_mount_handler::confirm_mount_topic(
-  const cluster::topic_configuration& topic_cfg, retry_chain_node& parent) {
-    return mount_topic(topic_cfg, false, parent);
+  const cluster::topic_configuration& topic_cfg,
+  model::initial_revision_id rev,
+  retry_chain_node& parent) {
+    return mount_topic(topic_cfg, rev, false, parent);
 }
 
 } // namespace cloud_storage

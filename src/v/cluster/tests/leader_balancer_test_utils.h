@@ -9,7 +9,7 @@
  * by the Apache License, Version 2.0
  */
 
-#include "cluster/scheduling/leader_balancer_greedy.h"
+#include "cluster/scheduling/leader_balancer_strategy.h"
 #include "cluster/scheduling/leader_balancer_types.h"
 
 namespace leader_balancer_test_utils {
@@ -56,12 +56,27 @@ inline cluster::leader_balancer_strategy::index_type copy_cluster_index(
     cluster::leader_balancer_strategy::index_type index;
 
     for (const auto& [bs, leaders] : c_index) {
+        auto& gid2replicas = index[bs];
         for (const auto& [group_id, replicas] : leaders) {
-            index[bs][group_id] = replicas;
+            gid2replicas[group_id] = replicas;
         }
     }
 
     return index;
+}
+
+inline cluster::leader_balancer_types::group_id_to_topic_id
+make_gid_to_topic_index(
+  const cluster::leader_balancer_types::index_type& index) {
+    cluster::leader_balancer_types::group_id_to_topic_id ret;
+
+    for (const auto& [bs, leaders] : index) {
+        for (const auto& [group, replicas] : leaders) {
+            ret.emplace(group, 0);
+        }
+    }
+
+    return ret;
 }
 
 } // namespace leader_balancer_test_utils

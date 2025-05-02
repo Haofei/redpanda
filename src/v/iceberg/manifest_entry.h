@@ -1,16 +1,18 @@
-// Copyright 2024 Redpanda Data, Inc.
-//
-// Use of this software is governed by the Business Source License
-// included in the file licenses/BSL.md
-//
-// As of the Change Date specified in that file, in accordance with
-// the Business Source License, use of this software will be governed
-// by the Apache License, Version 2.0
+/*
+ * Copyright 2024 Redpanda Data, Inc.
+ *
+ * Licensed as a Redpanda Enterprise file under the Redpanda Community
+ * License (the "License"); you may not use this file except in compliance with
+ * the License. You may obtain a copy of the License at
+ *
+ * https://github.com/redpanda-data/redpanda/blob/master/licenses/rcl.md
+ */
 #pragma once
 
 #include "base/seastarx.h"
 #include "container/chunked_hash_map.h"
 #include "iceberg/partition_key.h"
+#include "iceberg/uri.h"
 #include "iceberg/values.h"
 
 #include <seastar/core/sstring.hh>
@@ -31,7 +33,7 @@ enum class data_file_format {
 
 struct data_file {
     data_file_content_type content_type;
-    ss::sstring file_path;
+    uri file_path;
     data_file_format file_format;
 
     partition_key partition;
@@ -64,6 +66,9 @@ enum class manifest_entry_status {
 };
 
 using snapshot_id = named_type<int64_t, struct snapshot_id_tag>;
+// some catalogs use -1 to indicate that the current snapshot id is not present
+static constexpr snapshot_id invalid_snapshot_id{-1};
+
 using sequence_number = named_type<int64_t, struct data_seq_tag>;
 using file_sequence_number = named_type<int64_t, struct file_seq_tag>;
 struct manifest_entry {

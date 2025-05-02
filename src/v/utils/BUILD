@@ -3,6 +3,14 @@ load("//bazel:build.bzl", "redpanda_cc_library")
 package(default_visibility = ["//visibility:public"])
 
 redpanda_cc_library(
+    name = "arch",
+    hdrs = [
+        "arch.h",
+    ],
+    include_prefix = "utils",
+)
+
+redpanda_cc_library(
     name = "auto_fmt",
     hdrs = [
         "auto_fmt.h",
@@ -475,22 +483,6 @@ redpanda_cc_library(
 )
 
 redpanda_cc_library(
-    name = "bottomless_token_bucket",
-    srcs = [
-        "bottomless_token_bucket.cc",
-    ],
-    hdrs = [
-        "bottomless_token_bucket.h",
-    ],
-    include_prefix = "utils",
-    deps = [
-        "//src/v/base",
-        "@fmt",
-        "@seastar",
-    ],
-)
-
-redpanda_cc_library(
     name = "move_canary",
     hdrs = [
         "move_canary.h",
@@ -655,4 +647,64 @@ redpanda_cc_library(
         "//src/v/utils:mutex",
         "@seastar",
     ],
+)
+
+redpanda_cc_library(
+    name = "copy_range",
+    hdrs = [
+        "copy_range.h",
+    ],
+    include_prefix = "utils",
+    deps = [
+        "//src/v/base",
+        "@seastar",
+    ],
+)
+
+redpanda_cc_library(
+    name = "s3_fifo",
+    hdrs = [
+        "s3_fifo.h",
+    ],
+    include_prefix = "utils",
+    deps = [
+        "@boost//:intrusive",
+        "@fmt",
+    ],
+)
+
+redpanda_cc_library(
+    name = "chunked_kv_cache",
+    hdrs = [
+        "chunked_kv_cache.h",
+    ],
+    include_prefix = "utils",
+    deps = [
+        "//src/v/container:chunked_hash_map",
+        "//src/v/utils:s3_fifo",
+        "@boost//:intrusive",
+    ],
+)
+
+redpanda_cc_library(
+    name = "null_output_stream",
+    srcs = [
+        "null_output_stream.cc",
+    ],
+    hdrs = [
+        "null_output_stream.h",
+    ],
+    include_prefix = "utils",
+    deps = [
+        "//src/v/base",
+        "@seastar",
+    ],
+)
+
+redpanda_cc_library(
+    name = "variant",
+    hdrs = [
+        "variant.h",
+    ],
+    include_prefix = "utils",
 )

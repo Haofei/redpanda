@@ -9,6 +9,7 @@
 
 from collections import defaultdict
 import random, math, time
+from rptest.clients.rpk import RpkTool
 from rptest.services.admin import Admin
 from rptest.services.cluster import cluster
 from ducktape.utils.util import wait_until
@@ -18,9 +19,10 @@ from rptest.clients.types import TopicSpec
 from rptest.clients.default import DefaultClient
 from rptest.services.kgo_verifier_services import KgoVerifierConsumerGroupConsumer, KgoVerifierSeqConsumer, KgoVerifierProducer
 from rptest.services.redpanda import SISettings
-import concurrent
+from rptest.utils.node_operations import verify_offset_translator_state_consistent
 
 from rptest.tests.prealloc_nodes import PreallocNodesTest
+from rptest.util import KafkaCliTools
 from rptest.utils.mode_checks import skip_debug_mode
 
 
@@ -475,14 +477,15 @@ class ScalingUpTest(PreallocNodesTest):
             for id in added_ids:
                 added_node_usage = usage[id]
                 assert added_node_usage < percentage * avg_usage, \
-                f"Added node {id} disk usage {added_node_usage} is too large, "
-                f"expected usage to be smaller than {percentage * avg_usage} bytes"
+                (f"Added node {id} disk usage {added_node_usage} is too large, "
+                 f"expected usage to be smaller than {percentage * avg_usage} bytes")
 
         usage = self._kafka_usage(nodes=self.redpanda.nodes[0:5])
         print_disk_usage(usage)
 
         verify_disk_usage(usage,
-                          [self.redpanda.node_id(self.redpanda.nodes[4])], 0.3)
+                          [self.redpanda.node_id(self.redpanda.nodes[4])],
+                          0.35)
 
         # add sixth node
         self.redpanda.start_node(self.redpanda.nodes[5])
@@ -494,7 +497,7 @@ class ScalingUpTest(PreallocNodesTest):
         verify_disk_usage(usage, [
             self.redpanda.node_id(self.redpanda.nodes[4]),
             self.redpanda.node_id(self.redpanda.nodes[5])
-        ], 0.3)
+        ], 0.35)
         # verify that data can be read
         self.consumer = KgoVerifierSeqConsumer(self.test_context,
                                                self.redpanda,
@@ -626,3 +629,62 @@ class ScalingUpTest(PreallocNodesTest):
         assert self.consumer.consumer_status.validator.invalid_reads == 0, \
         f"Invalid reads in topic: {topic.name}, invalid reads count: "
         "{self.consumer.consumer_status.validator.invalid_reads}"
+
+    @skip_debug_mode
+    @cluster(num_nodes=6)
+    def test_scaling_up_with_recovered_topic(self):
+        log_segment_size = 2 * 1024 * 1024
+        segments_per_partition = 40
+        msg_size = 256 * 1024
+        partition_count = 10
+        total_records = int(
+            (segments_per_partition * partition_count * log_segment_size) /
+            msg_size)
+
+        si_settings = SISettings(test_context=self.test_context,
+                                 log_segment_size=log_segment_size,
+                                 retention_local_strict=True,
+                                 fast_uploads=True)
+
+        self.redpanda.set_si_settings(si_settings)
+        #start 3 node cluster
+        self.redpanda.start(nodes=self.redpanda.nodes[0:3])
+        # create test topic
+        cli = KafkaCliTools(self.redpanda)
+        topic = TopicSpec(name="recovery-topic",
+                          replication_factor=3,
+                          partition_count=partition_count)
+        rpk = RpkTool(self.redpanda)
+        rpk.create_topic(topic.name,
+                         partition_count,
+                         3,
+                         config={
+                             'redpanda.remote.write': 'true',
+                             'redpanda.remote.read': 'true',
+                             'redpanda.remote.delete': 'false'
+                         })
+        # produce some data
+        cli.produce(topic.name, total_records, msg_size)
+        self.redpanda.wait_for_manifest_uploads()
+
+        total_replicas = 3 * partition_count
+        rpk.delete_topic(topic.name)
+
+        rpk.create_topic(topic.name,
+                         partition_count,
+                         3,
+                         config={
+                             'redpanda.remote.recovery': 'true',
+                             'redpanda.remote.write': 'true',
+                             'redpanda.remote.read': 'true',
+                             'redpanda.remote.delete': 'true'
+                         })
+
+        cli.produce(topic.name, total_records, msg_size)
+
+        self.redpanda.start_node(self.redpanda.nodes[3])
+        self.redpanda.start_node(self.redpanda.nodes[4])
+        self.wait_for_partitions_rebalanced(total_replicas=total_replicas,
+                                            timeout_sec=self.rebalance_timeout)
+        self.redpanda.wait_for_manifest_uploads()
+        verify_offset_translator_state_consistent(self.redpanda)

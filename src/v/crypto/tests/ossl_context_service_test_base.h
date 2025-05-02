@@ -13,6 +13,7 @@
 
 #include "base/seastarx.h"
 #include "ssx/thread_worker.h"
+#include "test_utils/runfiles.h"
 #include "test_utils/test.h"
 
 #include <seastar/util/log.hh>
@@ -23,12 +24,12 @@
 #include <memory>
 
 inline std::string get_config_file_path() {
-    auto conf_file = ::getenv("OPENSSL_CONF");
-    if (conf_file) {
-        return conf_file;
-    } else {
-        return "";
+    char* var = std::getenv("OPENSSL_CONF");
+    if (var != nullptr) {
+        return var;
     }
+    return test_utils::get_runfile_path("src/v/crypto/tests/openssl_conf.cnf")
+      .value_or("");
 }
 
 class ossl_context_base_test_framework : public seastar_test {
@@ -60,12 +61,18 @@ protected:
     }
 
     ss::future<bool> fips_module_present() {
-        auto mod_dir = ss::sstring{::getenv("MODULE_DIR")};
-        auto dir_type = co_await ss::file_type(mod_dir);
+        auto module_dir = test_utils::get_runfile_path("src/v/crypto/tests");
+        if (char* override = ::getenv("MODULE_DIR"); override != nullptr) {
+            module_dir = override;
+        }
+        if (!module_dir.has_value()) {
+            co_return false;
+        }
+        auto dir_type = co_await ss::file_type(module_dir.value());
         if (!dir_type || *dir_type != ss::directory_entry_type::directory) {
             co_return false;
         } else {
-            auto fips_file = mod_dir + "/fips.so";
+            auto fips_file = module_dir.value() + "/fips.so";
             co_return co_await ss::file_exists(fips_file);
         }
     }

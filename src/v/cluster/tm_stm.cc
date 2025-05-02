@@ -32,8 +32,7 @@ ss::future<result<raft::replicate_result>>
 tm_stm::replicate_quorum_ack(model::term_id term, model::record_batch&& batch) {
     auto opts = raft::replicate_options{raft::consistency_level::quorum_ack};
     opts.set_force_flush();
-    return _raft->replicate(
-      term, model::make_memory_record_batch_reader(std::move(batch)), opts);
+    return _raft->replicate(term, std::move(batch), opts);
 }
 
 model::record_batch tm_stm::serialize_tx(tx_metadata tx) {
@@ -135,11 +134,11 @@ ss::future<checked<model::term_id, tm_stm::op_status>> tm_stm::do_barrier() {
         });
 }
 
-model::record_batch_reader make_checkpoint() {
+model::record_batch make_checkpoint() {
     storage::record_batch_builder builder(
       model::record_batch_type::checkpoint, model::offset(0));
     builder.add_raw_kv(iobuf(), iobuf());
-    return model::make_memory_record_batch_reader(std::move(builder).build());
+    return std::move(builder).build();
 }
 
 ss::future<result<raft::replicate_result>>
@@ -197,6 +196,33 @@ tm_stm::update_tx(tx_metadata tx, model::term_id term) {
 
 ss::future<checked<tx_metadata, tm_stm::op_status>>
 tm_stm::do_update_tx(tx_metadata tx, model::term_id term) {
+    auto tx_id = tx.id;
+    auto replicate_result = co_await replicate_tx_update(std::move(tx), term);
+
+    if (replicate_result != tm_stm::op_status::success) {
+        vlog(
+          _ctx_log.warn,
+          "[tx_id={}] error replicating tx update - {}",
+          tx_id,
+          replicate_result);
+
+        co_return replicate_result;
+    }
+
+    auto tx_opt = find_tx(tx_id);
+    if (!tx_opt) {
+        vlog(
+          _ctx_log.warn,
+          "[tx_id={}] can't find an updated transaction in the cache",
+          tx_id);
+
+        co_return tm_stm::op_status::conflict;
+    }
+    co_return tx_opt.value();
+}
+
+ss::future<tm_stm::op_status>
+tm_stm::replicate_tx_update(tx_metadata tx, model::term_id term) {
     vlog(
       _ctx_log.trace,
       "[tx_id={}] updating transaction: {} in term: {}",
@@ -240,26 +266,15 @@ tm_stm::do_update_tx(tx_metadata tx, model::term_id term) {
     if (_raft->term() != term) {
         vlog(
           _ctx_log.info,
-          "[tx_id={}] leadership while waiting until offset {} is applied tx: "
-          "{}",
+          "[tx_id={}] leadership lost while waiting until offset {} is applied "
+          "tx: {}",
           tx.id,
           offset,
           tx);
 
         co_return tm_stm::op_status::unknown;
     }
-
-    auto tx_opt = find_tx(tx.id);
-    if (!tx_opt) {
-        vlog(
-          _ctx_log.warn,
-          "[tx_id={}] can't find an updated tx: {} in the cache",
-          tx.id,
-          tx);
-        // update_tx must return conflict only in this case, see expire_tx
-        co_return tm_stm::op_status::conflict;
-    }
-    co_return tx_opt.value();
+    co_return tm_stm::op_status::success;
 }
 
 ss::future<checked<tx_metadata, tm_stm::op_status>>
@@ -584,7 +599,7 @@ fragmented_vector<tx_metadata> tm_stm::get_transactions_list() const {
     return ret;
 }
 
-ss::future<>
+ss::future<raft::local_snapshot_applied>
 tm_stm::apply_local_snapshot(raft::stm_snapshot_header hdr, iobuf&& tm_ss_buf) {
     vassert(
       hdr.version >= tm_snapshot_v0::version
@@ -609,7 +624,7 @@ tm_stm::apply_local_snapshot(raft::stm_snapshot_header hdr, iobuf&& tm_ss_buf) {
         vlog(_ctx_log.trace, "Applied snapshot at offset: {}", hdr.offset);
     }
 
-    return ss::now();
+    co_return raft::local_snapshot_applied::yes;
 }
 
 ss::future<raft::stm_snapshot>
@@ -833,22 +848,19 @@ tm_stm::expire_tx(model::term_id term, kafka::transactional_id tx_id) {
     tx.groups.clear();
     tx.last_update_ts = clock_type::now();
     auto etag = tx.etag;
-    auto r0 = co_await update_tx(std::move(tx), etag);
-    if (r0.has_value()) {
+    auto holder = _gate.hold();
+    // we are using replicate_tx_update instead of update_tx as we do not need
+    // the updated transaction metadata.
+    auto replicate_result = co_await replicate_tx_update(std::move(tx), etag);
+    if (replicate_result != tm_stm::op_status::success) {
         vlog(
-          _ctx_log.error,
-          "[tx_id={}] written tombstone should evict transaction from the "
-          "cache",
-          tx_id);
-        co_return tm_stm::op_status::unknown;
+          txlog.warn,
+          "[tx_id={}] Error replicating transaction metadata update to expire "
+          "transaction - {}",
+          tx_id,
+          replicate_result);
     }
-    if (r0.error() == tm_stm::op_status::conflict) {
-        // update_tx returns conflict when it can't find
-        // tx after the successful update; it may happen only
-        // with the tombstone
-        co_return tm_stm::op_status::success;
-    }
-    co_return r0.error();
+    co_return replicate_result;
 }
 
 ss::future<> tm_stm::apply_raft_snapshot(const iobuf&) {
@@ -870,7 +882,9 @@ bool tm_stm_factory::is_applicable_for(const storage::ntp_config& cfg) const {
 }
 
 void tm_stm_factory::create(
-  raft::state_machine_manager_builder& builder, raft::consensus* raft) {
+  raft::state_machine_manager_builder& builder,
+  raft::consensus* raft,
+  const cluster::stm_instance_config&) {
     auto tm_stm = builder.create_stm<cluster::tm_stm>(
       txlog, raft, _feature_table);
     raft->log()->stm_manager()->add_stm(tm_stm);

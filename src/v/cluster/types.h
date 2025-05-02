@@ -482,7 +482,7 @@ struct partition_assignment
       = default;
 };
 
-enum incremental_update_operation : int8_t { none, set, remove };
+enum class incremental_update_operation : int8_t { none, set, remove };
 
 inline std::string_view
 incremental_update_operation_as_string(incremental_update_operation op) {
@@ -496,6 +496,11 @@ incremental_update_operation_as_string(incremental_update_operation op) {
     default:
         vassert(false, "Unknown operation type passed: {}", int8_t(op));
     }
+}
+
+inline std::ostream&
+operator<<(std::ostream& os, const incremental_update_operation& op) {
+    return os << incremental_update_operation_as_string(op);
 }
 
 template<typename T>
@@ -563,7 +568,7 @@ struct property_update<tristate<T>>
 struct incremental_topic_updates
   : serde::envelope<
       incremental_topic_updates,
-      serde::version<7>,
+      serde::version<8>,
       serde::compat_version<0>> {
     static constexpr int8_t version_with_data_policy = -1;
     static constexpr int8_t version_with_shadow_indexing = -3;
@@ -629,11 +634,21 @@ struct incremental_topic_updates
     property_update<std::optional<model::write_caching_mode>> write_caching;
     property_update<std::optional<std::chrono::milliseconds>> flush_ms;
     property_update<std::optional<size_t>> flush_bytes;
-    property_update<bool> iceberg_enabled{
-      storage::ntp_config::default_iceberg_enabled,
+    property_update<model::iceberg_mode> iceberg_mode{
+      storage::ntp_config::default_iceberg_mode,
       incremental_update_operation::none};
     property_update<std::optional<config::leaders_preference>>
       leaders_preference;
+    property_update<tristate<std::chrono::milliseconds>> delete_retention_ms;
+    property_update<std::optional<bool>> iceberg_delete;
+    property_update<std::optional<ss::sstring>> iceberg_partition_spec;
+    property_update<std::optional<model::iceberg_invalid_record_action>>
+      iceberg_invalid_record_action;
+    property_update<tristate<double>> min_cleanable_dirty_ratio;
+    property_update<std::optional<bool>> remote_allow_gaps;
+
+    property_update<std::optional<std::chrono::milliseconds>>
+      iceberg_target_lag_ms;
 
     // To allow us to better control use of the deprecated shadow_indexing
     // field, use getters and setters instead.
@@ -668,10 +683,17 @@ struct incremental_topic_updates
           write_caching,
           flush_ms,
           flush_bytes,
-          iceberg_enabled,
+          iceberg_mode,
           leaders_preference,
           remote_read,
-          remote_write);
+          remote_write,
+          delete_retention_ms,
+          iceberg_delete,
+          iceberg_partition_spec,
+          iceberg_invalid_record_action,
+          iceberg_target_lag_ms,
+          min_cleanable_dirty_ratio,
+          remote_allow_gaps);
     }
 
     friend std::ostream&
@@ -785,6 +807,9 @@ struct custom_assignable_topic_configuration {
     bool has_custom_assignment() const { return !custom_assignments.empty(); }
     bool is_read_replica() const { return cfg.is_read_replica(); }
     bool is_recovery_enabled() const { return cfg.is_recovery_enabled(); }
+    bool is_schema_id_validation_enabled() const {
+        return cfg.is_schema_id_validation_enabled();
+    }
 
     friend std::ostream&
     operator<<(std::ostream&, const custom_assignable_topic_configuration&);
@@ -882,6 +907,15 @@ struct configuration_with_assignment
 using create_partitions_configuration_assignment
   = configuration_with_assignment<create_partitions_configuration>;
 
+// GC process consists of deleting topic data in several places, and these
+// deletions have to be tracked separately.
+enum class topic_purge_domain {
+    cloud_storage = 0,
+    iceberg = 1,
+};
+
+std::ostream& operator<<(std::ostream&, const topic_purge_domain&);
+
 /**
  * Soft-deleting a topic may put it into different modes: initially this is
  * just a two stage thing: create a marker that acts as a tombstone, later
@@ -892,9 +926,8 @@ using create_partitions_configuration_assignment
  * no intention of deletion.
  */
 enum class topic_lifecycle_transition_mode : uint8_t {
-    // Drop the lifecycle marker: we do this after we're done with any
-    // garbage collection.
-    drop = 0,
+    // Purging of topic-related data in some topic_purge_domain is complete.
+    purged = 0,
 
     // Enter garbage collection phase: the topic appears deleted externally,
     // while internally we are garbage collecting any data that belonged
@@ -924,35 +957,64 @@ struct nt_lifecycle_marker
     auto serde_fields() { return std::tie(config, initial_revision_id); }
 };
 
+// A record in the topic table for a deleted topic that is pending iceberg table
+// deletion.
+struct nt_iceberg_tombstone
+  : serde::envelope<
+      nt_iceberg_tombstone,
+      serde::version<0>,
+      serde::compat_version<0>> {
+    // The topic revision of a last deleted topic for which the corresponding
+    // iceberg table has to be deleted. It is used to avoid deleting iceberg
+    // data from a topic with the same name that was created later. If several
+    // iceberg-enabled topics with the same name are created and deleted in a
+    // rapid succession, we just update this revision (the corresponding table
+    // only has to be deleted once).
+    model::revision_id last_deleted_revision;
+
+    auto serde_fields() { return std::tie(last_deleted_revision); }
+};
+
 struct topic_lifecycle_transition
   : serde::envelope<
       topic_lifecycle_transition,
-      serde::version<0>,
+      serde::version<1>,
       serde::compat_version<0>> {
     nt_revision topic;
 
     topic_lifecycle_transition_mode mode;
 
-    auto serde_fields() { return std::tie(topic, mode); }
+    // Used together with mode=purged. Default is cloud_storage for
+    // backwards compat (legacy lifecycle transitions were always cloud-storage
+    // related).
+    topic_purge_domain domain = topic_purge_domain::cloud_storage;
+
+    auto serde_fields() { return std::tie(topic, mode, domain); }
 };
 
 using topic_configuration_assignment
   = configuration_with_assignment<topic_configuration>;
 
 struct topic_result
-  : serde::envelope<topic_result, serde::version<0>, serde::compat_version<0>> {
+  : serde::envelope<topic_result, serde::version<1>, serde::compat_version<0>> {
     topic_result() noexcept = default;
     explicit topic_result(model::topic_namespace t, errc ec = errc::success)
       : tp_ns(std::move(t))
       , ec(ec) {}
+    topic_result(model::topic_namespace t, errc ec, std::string_view msg)
+      : tp_ns(std::move(t))
+      , ec(ec)
+      , error_message{
+          ssx::sformat("{}: {}", make_error_code(ec).message(), msg)} {}
     model::topic_namespace tp_ns;
-    errc ec;
+    errc ec{errc::success};
+    std::optional<ss::sstring> error_message;
 
     friend bool operator==(const topic_result&, const topic_result&) = default;
 
     friend std::ostream& operator<<(std::ostream& o, const topic_result& r);
 
-    auto serde_fields() { return std::tie(tp_ns, ec); }
+    auto serde_fields() { return std::tie(tp_ns, ec, error_message); }
 };
 
 struct create_topics_request
@@ -1015,12 +1077,13 @@ struct create_topics_reply
 struct purged_topic_request
   : serde::envelope<
       purged_topic_request,
-      serde::version<0>,
+      serde::version<1>,
       serde::compat_version<0>> {
     using rpc_adl_exempt = std::true_type;
 
     nt_revision topic;
     model::timeout_clock::duration timeout;
+    topic_purge_domain domain = topic_purge_domain::cloud_storage;
 
     friend bool
     operator==(const purged_topic_request&, const purged_topic_request&)
@@ -1028,7 +1091,7 @@ struct purged_topic_request
 
     friend std::ostream& operator<<(std::ostream&, const purged_topic_request&);
 
-    auto serde_fields() { return std::tie(topic, timeout); }
+    auto serde_fields() { return std::tie(topic, timeout, domain); }
 };
 
 struct purged_topic_reply
@@ -1178,7 +1241,7 @@ enum class reconfiguration_policy {
      * With target initial retention partition move policy controller backend
      * will calculate the learner start offset based on the configured learner
      * initial retention configuration (either a global cluster property or
-     * topic override ) and partition max collectible offset. Max collectible
+     * topic override ) and partition max removable offset. Max removable
      * offset is advanced after all the previous offsets were successfully
      * uploaded to the cloud.
      */
@@ -1467,9 +1530,41 @@ struct delete_acls_reply
 using transfer_leadership_request = raft::transfer_leadership_request;
 using transfer_leadership_reply = raft::transfer_leadership_reply;
 
+struct replica_recovery_state
+  : serde::envelope<
+      replica_recovery_state,
+      serde::version<0>,
+      serde::compat_version<0>> {
+    model::offset last_offset;
+    size_t bytes_left;
+    friend std::ostream&
+    operator<<(std::ostream&, const replica_recovery_state&);
+
+    friend bool
+    operator==(const replica_recovery_state&, const replica_recovery_state&)
+      = default;
+
+    auto serde_fields() { return std::tie(last_offset, bytes_left); }
+};
+struct recovery_state
+  : serde::
+      envelope<recovery_state, serde::version<0>, serde::compat_version<0>> {
+    model::offset local_last_offset;
+    size_t local_size;
+
+    absl::flat_hash_map<model::node_id, replica_recovery_state> replicas;
+
+    friend std::ostream& operator<<(std::ostream&, const recovery_state&);
+
+    friend bool operator==(const recovery_state&, const recovery_state&)
+      = default;
+
+    auto serde_fields() { return std::tie(local_last_offset, replicas); }
+};
+
 struct backend_operation
   : serde::
-      envelope<backend_operation, serde::version<1>, serde::compat_version<0>> {
+      envelope<backend_operation, serde::version<2>, serde::compat_version<0>> {
     using rpc_adl_exempt = std::true_type;
     ss::shard_id source_shard;
     partition_assignment p_as;
@@ -1478,6 +1573,7 @@ struct backend_operation
     uint64_t current_retry;
     cluster::errc last_operation_result;
     model::revision_id revision_of_operation;
+    std::optional<recovery_state> recovery_state;
 
     friend std::ostream& operator<<(std::ostream&, const backend_operation&);
 
@@ -1491,7 +1587,8 @@ struct backend_operation
           type,
           current_retry,
           last_operation_result,
-          revision_of_operation);
+          revision_of_operation,
+          recovery_state);
     }
 };
 
@@ -1964,7 +2061,7 @@ struct reconciliation_state_request
       serde::compat_version<0>> {
     using rpc_adl_exempt = std::true_type;
 
-    std::vector<model::ntp> ntps;
+    chunked_vector<model::ntp> ntps;
 
     friend bool operator==(
       const reconciliation_state_request&, const reconciliation_state_request&)
@@ -1972,11 +2069,15 @@ struct reconciliation_state_request
 
     friend std::ostream&
     operator<<(std::ostream& o, const reconciliation_state_request& req) {
-        fmt::print(o, "{{ ntps: {} }}", req.ntps);
+        fmt::print(o, "{{ ntps: {} }}", fmt::join(req.ntps, ", "));
         return o;
     }
 
     auto serde_fields() { return std::tie(ntps); }
+
+    reconciliation_state_request copy() const {
+        return reconciliation_state_request{.ntps = ntps.copy()};
+    }
 };
 
 struct ntp_with_majority_loss
@@ -2054,7 +2155,7 @@ struct reconciliation_state_reply
       serde::version<0>,
       serde::compat_version<0>> {
     using rpc_adl_exempt = std::true_type;
-    std::vector<ntp_reconciliation_state> results;
+    chunked_vector<ntp_reconciliation_state> results;
 
     friend bool operator==(
       const reconciliation_state_reply&, const reconciliation_state_reply&)
@@ -2062,12 +2163,12 @@ struct reconciliation_state_reply
 
     friend std::ostream&
     operator<<(std::ostream& o, const reconciliation_state_reply& rep) {
-        fmt::print(o, "{{ results {} }}", rep.results);
+        fmt::print(o, "{{ results {} }}", fmt::join(rep.results, ", "));
         return o;
     }
 
     reconciliation_state_reply copy() const {
-        std::vector<ntp_reconciliation_state> results_cp;
+        chunked_vector<ntp_reconciliation_state> results_cp;
         results_cp.reserve(results.size());
         for (auto& r : results) {
             results_cp.push_back(r.copy());
@@ -2703,10 +2804,11 @@ struct partition_stm_state
 
     ss::sstring name;
     model::offset last_applied_offset;
-    model::offset max_collectible_offset;
+    model::offset max_removable_local_log_offset;
 
     auto serde_fields() {
-        return std::tie(name, last_applied_offset, max_collectible_offset);
+        return std::tie(
+          name, last_applied_offset, max_removable_local_log_offset);
     }
 };
 
@@ -2861,7 +2963,7 @@ struct partition_state
     bool is_remote_fetch_enabled;
     bool is_cloud_data_available;
     ss::sstring read_replica_bucket;
-    bool iceberg_enabled;
+    ss::sstring iceberg_mode;
     partition_raft_state raft_state;
 
     auto serde_fields() {
@@ -2882,7 +2984,7 @@ struct partition_state
           is_cloud_data_available,
           read_replica_bucket,
           raft_state,
-          iceberg_enabled);
+          iceberg_mode);
     }
 
     friend bool operator==(const partition_state&, const partition_state&)
@@ -3089,7 +3191,9 @@ std::ostream& operator<<(std::ostream&, reconfiguration_state);
 
 struct replica_bytes {
     model::node_id node;
-    size_t bytes{0};
+    size_t bytes_left{0};
+    size_t bytes_transferred{0};
+    model::offset offset;
 };
 
 struct partition_reconfiguration_state {
@@ -3100,7 +3204,7 @@ struct partition_reconfiguration_state {
     // state indicating if reconfiguration was cancelled or requested
     reconfiguration_state state;
     // amount of bytes already transferred to new replicas
-    std::vector<replica_bytes> already_transferred_bytes;
+    std::vector<replica_bytes> replicas;
     // current size of partition
     size_t current_partition_size{0};
     // policy used to execute an update
@@ -3115,7 +3219,7 @@ struct node_decommission_progress {
     // Replicas on the node with failures during reallocation.
     ss::chunked_fifo<model::ntp> allocation_failures;
     // list of currently ongoing partition reconfigurations
-    std::vector<partition_reconfiguration_state> current_reconfigurations;
+    chunked_vector<partition_reconfiguration_state> current_reconfigurations;
 };
 
 enum class cloud_storage_mode : uint8_t {
@@ -3171,6 +3275,16 @@ struct metrics_reporter_cluster_info
       = default;
 
     auto serde_fields() { return std::tie(uuid, creation_timestamp); }
+};
+
+struct crash_reporter_rate_limiting_metadata
+  : serde::envelope<
+      crash_reporter_rate_limiting_metadata,
+      serde::version<0>,
+      serde::compat_version<0>> {
+    model::timestamp last_upload_time;
+
+    auto serde_fields() { return std::tie(last_upload_time); }
 };
 
 struct controller_committed_offset_request

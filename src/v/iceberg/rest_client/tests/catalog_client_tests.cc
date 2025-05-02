@@ -17,14 +17,16 @@
 #include <gtest/gtest.h>
 
 namespace r = iceberg::rest_client;
-namespace t = ::testing;
 namespace bh = boost::beast::http;
 
 using namespace std::chrono_literals;
-
+using namespace testing;
 namespace {
 constexpr auto endpoint = "http://localhost:8181";
-const r::credentials credentials{.client_id = "id", .client_secret = "secret"};
+const r::credentials credentials{
+  .client_id = "id",
+  .client_secret = "secret",
+  .oauth2_scope = "PRINCIPAL_ROLE:ALL"};
 
 template<typename Variant, typename Outer>
 void assert_type_and_value(Outer input, Variant expected) {
@@ -46,27 +48,12 @@ public:
     MOCK_METHOD(ss::future<>, shutdown_and_stop, (), (override));
 };
 
-// A client source for testing. Allows setting expectation on a client before
-// returning to the catalog client.
-struct client_source : public r::client_source {
-    client_source(
-      std::function<void(std::reference_wrapper<mock_client>)> expectation)
-      : _expectation{std::move(expectation)} {}
-
-    std::unique_ptr<http::abstract_client> acquire() final {
-        auto ptr = std::make_unique<mock_client>();
-        _expectation(*(ptr.get()));
-
-        // Client passed to caller should always be shut down, and exactly once
-        EXPECT_CALL(*(ptr.get()), shutdown_and_stop())
-          .Times(1)
-          .WillOnce(t::Return(ss::make_ready_future()));
-        return ptr;
-    }
-
-private:
-    std::function<void(std::reference_wrapper<mock_client>)> _expectation;
-};
+std::unique_ptr<http::abstract_client>
+make_http_client(std::function<void(mock_client& mock)> set_expectations) {
+    auto client = std::make_unique<mock_client>();
+    set_expectations(*client);
+    return client;
+}
 
 namespace iceberg::rest_client {
 
@@ -90,33 +77,65 @@ private:
 } // namespace iceberg::rest_client
 
 TEST(path_components, path_with_base_and_prefix) {
-    r::path_components pc{
-      r::base_path{"b"}, r::prefix_path{"pre"}, r::api_version{"v1"}};
+    r::path_components pc{r::base_path{"b"}, r::api_version{"v1"}};
+    pc.reset_prefix(r::prefix_path{"pre"});
     ASSERT_EQ(pc.root_path(), "b/v1/pre/");
     ASSERT_EQ(pc.token_api_path(), "b/v1/oauth/tokens");
 }
 
 TEST(path_components, path_with_no_optional_parts) {
     r::path_components pc{};
+    pc.reset_prefix(std::nullopt);
     ASSERT_EQ(pc.root_path(), "v1/");
     ASSERT_EQ(pc.token_api_path(), "v1/oauth/tokens");
 }
 
 TEST(path_components, path_with_prefix) {
-    r::path_components pc{std::nullopt, r::prefix_path{"pre"}};
+    r::path_components pc{};
+    pc.reset_prefix(r::prefix_path{"pre"});
     ASSERT_EQ(pc.root_path(), "v1/pre/");
     ASSERT_EQ(pc.token_api_path(), "v1/oauth/tokens");
 }
 
 TEST(client, root_url_computed) {
-    client_source cs{[](mock_client&) {}};
+    auto ret = [](
+                 [[maybe_unused]] bh::request_header<>&& r,
+                 [[maybe_unused]] std::optional<iobuf> payload,
+                 [[maybe_unused]] ss::lowres_clock::duration timeout) {
+        return ss::make_ready_future<http::downloaded_response>(
+          http::downloaded_response{
+            .status = bh::status::ok, .body = iobuf::from(R"({
+              "defaults": {"prefix": "x"},
+              "overrides": {"prefix": ""}
+            })")});
+    };
+
     r::catalog_client cc{
-      cs,
+      make_http_client([&ret](mock_client& m) {
+          EXPECT_CALL(
+            m,
+            request_and_collect_response(
+              AllOf(
+                Property(
+                  &boost::beast::http::request_header<>::target,
+                  EndsWith("/config?warehouse=x")),
+                Property(
+                  &boost::beast::http::request_header<>::method,
+                  Eq(boost::beast::http::verb::get))),
+              _,
+              _))
+            .WillRepeatedly(ret);
+      }),
       endpoint,
       credentials,
       r::base_path{"api/catalog/"},
-      r::prefix_path{"x"},
+      r::warehouse{"x"},
       r::api_version{"v2"}};
+    ss::abort_source as;
+    retry_chain_node rtc(as, 1s, 100ms);
+    auto conf_res = cc.maybe_configure(rtc).get();
+    ASSERT_TRUE(conf_res.has_value());
+
     r::catalog_client_tester t{cc};
     ASSERT_EQ(t.root_path(), "api/catalog/v2/x/");
 }
@@ -134,7 +153,7 @@ ss::future<http::downloaded_response> validate_token_request(
     std::ranges::sort(received);
 
     ss::sstring expected{
-      "grant_type=client_credentials&scope=PRINCIPAL_ROLE%3aALL&client_secret="
+      "grant_type=client_credentials&scope=PRINCIPAL_ROLE%3AALL&client_secret="
       "secret&client_id=id"};
     std::ranges::sort(expected);
 
@@ -142,15 +161,18 @@ ss::future<http::downloaded_response> validate_token_request(
 
     co_return http::downloaded_response{
       .status = bh::status::ok,
-      .body = iobuf::from(R"J({"access_token": "token", "expires_in": 1})J")};
+      .body = iobuf::from(
+        R"J({"access_token": "token","token_type":"bearer", "expires_in": 1})J")};
 }
 
 TEST(token_tests, acquire_token) {
-    client_source cs{[](mock_client& m) {
-        EXPECT_CALL(m, request_and_collect_response(t::_, t::_, t::_))
-          .WillOnce(validate_token_request);
-    }};
-    r::catalog_client cc{cs, endpoint, credentials};
+    r::catalog_client cc{
+      make_http_client([](mock_client& m) {
+          EXPECT_CALL(m, request_and_collect_response(_, _, _))
+            .WillOnce(validate_token_request);
+      }),
+      endpoint,
+      credentials};
     r::catalog_client_tester t{cc};
     auto token = t.get_current_token().get();
     ASSERT_TRUE(token.has_value());
@@ -158,13 +180,12 @@ TEST(token_tests, acquire_token) {
 }
 
 TEST(token_tests, supplied_token_used) {
-    client_source cs{[](mock_client& m) {
-        EXPECT_CALL(m, request_and_collect_response(t::_, t::_, t::_)).Times(0);
-    }};
     const r::oauth_token supplied_token{
-      .token = "t", .expires_at = ss::lowres_clock::now() + 1h};
+      .access_token = "t", .expires_at = ss::lowres_clock::now() + 1h};
     r::catalog_client cc{
-      cs,
+      make_http_client([](mock_client& m) {
+          EXPECT_CALL(m, request_and_collect_response(_, _, _)).Times(0);
+      }),
       endpoint,
       credentials,
       std::nullopt,
@@ -175,18 +196,28 @@ TEST(token_tests, supplied_token_used) {
     r::catalog_client_tester t{cc};
     auto token = t.get_current_token().get();
     ASSERT_TRUE(token.has_value());
-    ASSERT_EQ(token, supplied_token.token);
+    ASSERT_EQ(token, supplied_token.access_token);
 }
 
 TEST(token_tests, supplied_token_expired) {
-    client_source cs{[](mock_client& m) {
-        EXPECT_CALL(m, request_and_collect_response(t::_, t::_, t::_))
-          .WillOnce(validate_token_request);
-    }};
     const r::oauth_token expired_token{
-      .token = "t", .expires_at = ss::lowres_clock::now()};
+      .access_token = "t", .expires_at = ss::lowres_clock::now()};
     r::catalog_client cc{
-      cs,
+      make_http_client([](mock_client& m) {
+          EXPECT_CALL(
+            m,
+            request_and_collect_response(
+              AllOf(
+                Property(
+                  &boost::beast::http::request_header<>::target,
+                  EndsWith("/tokens")),
+                Property(
+                  &boost::beast::http::request_header<>::method,
+                  Eq(boost::beast::http::verb::post))),
+              _,
+              _))
+            .WillOnce(validate_token_request);
+      }),
       endpoint,
       credentials,
       std::nullopt,
@@ -202,54 +233,93 @@ TEST(token_tests, supplied_token_expired) {
 }
 
 TEST(token_tests, handle_bad_json) {
-    client_source cs{[](mock_client& m) {
-        EXPECT_CALL(m, request_and_collect_response(t::_, t::_, t::_))
-          .WillOnce(t::Return(ss::make_ready_future<http::downloaded_response>(
-            http::downloaded_response{
-              .status = bh::status::ok, .body = iobuf::from(R"J({)J")})));
-    }};
-    r::catalog_client cc{cs, endpoint, credentials};
+    r::catalog_client cc{
+      make_http_client([](mock_client& m) {
+          EXPECT_CALL(
+            m,
+            request_and_collect_response(
+              AllOf(
+                Property(
+                  &boost::beast::http::request_header<>::target,
+                  EndsWith("/tokens")),
+                Property(
+                  &boost::beast::http::request_header<>::method,
+                  Eq(boost::beast::http::verb::post))),
+              _,
+              _))
+            .WillOnce(Return(ss::make_ready_future<http::downloaded_response>(
+              http::downloaded_response{
+                .status = bh::status::ok, .body = iobuf::from(R"J({)J")})));
+      }),
+      endpoint,
+      credentials};
     r::catalog_client_tester t{cc};
     auto token = t.get_current_token().get();
     ASSERT_FALSE(token.has_value());
     ASSERT_THAT(
       token.error(),
-      t::VariantWith<r::json_parse_error>(
-        t::Field(&r::json_parse_error::context, "parse_json")));
+      VariantWith<r::json_parse_error>(
+        Field(&r::json_parse_error::context, "parse_json")));
 }
 
 TEST(token_tests, handle_non_retriable_http_status) {
-    client_source cs{[](mock_client& m) {
-        EXPECT_CALL(m, request_and_collect_response(t::_, t::_, t::_))
-          .WillOnce(t::Return(ss::make_ready_future<http::downloaded_response>(
-            http::downloaded_response{
-              .status = bh::status::bad_request, .body = iobuf()})));
-    }};
-
-    r::catalog_client cc{cs, endpoint, credentials};
+    r::catalog_client cc{
+      make_http_client([](mock_client& m) {
+          EXPECT_CALL(
+            m,
+            request_and_collect_response(
+              AllOf(
+                Property(
+                  &boost::beast::http::request_header<>::target,
+                  EndsWith("/tokens")),
+                Property(
+                  &boost::beast::http::request_header<>::method,
+                  Eq(boost::beast::http::verb::post))),
+              _,
+              _))
+            .WillOnce(Return(ss::make_ready_future<http::downloaded_response>(
+              http::downloaded_response{
+                .status = bh::status::bad_request, .body = iobuf()})));
+      }),
+      endpoint,
+      credentials};
     r::catalog_client_tester t{cc};
 
     auto token = t.get_current_token().get();
     ASSERT_FALSE(token.has_value());
     ASSERT_THAT(
       token.error(),
-      t::VariantWith<r::http_call_error>(
-        t::VariantWith<bh::status>(bh::status::bad_request)));
+      VariantWith<r::http_call_error>(
+        VariantWith<bh::status>(bh::status::bad_request)));
 }
 
 TEST(token_tests, handle_retriable_http_status) {
-    client_source cs{[](mock_client& m) {
-        EXPECT_CALL(m, request_and_collect_response(t::_, t::_, t::_))
-          .WillOnce(t::Return(ss::make_ready_future<http::downloaded_response>(
-            http::downloaded_response{
-              .status = bh::status::gateway_timeout, .body = iobuf()})))
-          .WillOnce(t::Return(ss::make_ready_future<http::downloaded_response>(
-            http::downloaded_response{
+    r::catalog_client cc{
+      make_http_client([](mock_client& m) {
+          EXPECT_CALL(
+            m,
+            request_and_collect_response(
+              AllOf(
+                Property(
+                  &boost::beast::http::request_header<>::target,
+                  EndsWith("/tokens")),
+                Property(
+                  &boost::beast::http::request_header<>::method,
+                  Eq(boost::beast::http::verb::post))),
+              _,
+              _))
+            .WillOnce(Return(ss::make_ready_future<http::downloaded_response>(
+              http::downloaded_response{
+                .status = bh::status::gateway_timeout, .body = iobuf()})))
+            .WillOnce(Return(ss::make_ready_future<
+                             http::
+                               downloaded_response>(http::downloaded_response{
               .status = bh::status::ok,
               .body = iobuf::from(
-                R"J({"access_token": "token", "expires_in": 1})J")})));
-    }};
-    r::catalog_client cc{cs, endpoint, credentials};
+                R"J({"access_token": "token","token_type": "bearer", "expires_in": 1})J")})));
+      }),
+      endpoint,
+      credentials};
     r::catalog_client_tester t{cc};
 
     auto token = t.get_current_token().get();
@@ -266,19 +336,31 @@ TEST(token_tests, handle_retries_exhausted) {
           http::downloaded_response{.status = bh::status::gateway_timeout});
     };
 
-    client_source cs{[&ret](mock_client& m) {
-        EXPECT_CALL(m, request_and_collect_response(t::_, t::_, t::_))
-          .WillRepeatedly(ret);
-    }};
-
-    r::catalog_client cc{cs, endpoint, credentials};
+    r::catalog_client cc{
+      make_http_client([&ret](mock_client& m) {
+          EXPECT_CALL(
+            m,
+            request_and_collect_response(
+              AllOf(
+                Property(
+                  &boost::beast::http::request_header<>::target,
+                  EndsWith("/tokens")),
+                Property(
+                  &boost::beast::http::request_header<>::method,
+                  Eq(boost::beast::http::verb::post))),
+              _,
+              _))
+            .WillRepeatedly(ret);
+      }),
+      endpoint,
+      credentials};
     r::catalog_client_tester t{cc};
 
     auto token = t.get_current_token().get();
     ASSERT_FALSE(token.has_value());
     ASSERT_THAT(
       token.error(),
-      t::VariantWith<r::retries_exhausted>(t::Field(
+      VariantWith<r::retries_exhausted>(Field(
         &r::retries_exhausted::errors,
-        t::Each(t::VariantWith<bh::status>(bh::status::gateway_timeout)))));
+        Each(VariantWith<bh::status>(bh::status::gateway_timeout)))));
 }

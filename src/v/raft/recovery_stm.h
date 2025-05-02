@@ -58,11 +58,16 @@ private:
       = std::variant<storage::snapshot_reader, on_demand_snapshot_reader>;
     ss::future<> recover();
     ss::future<> do_recover(ss::io_priority_class);
-    ss::future<std::optional<model::record_batch_reader>>
+    ss::future<
+      std::optional<std::tuple<chunked_vector<model::record_batch>, size_t>>>
     read_range_for_recovery(model::offset, ss::io_priority_class, bool, size_t);
 
     ss::future<> replicate(
-      model::record_batch_reader&&, flush_after_append, ssx::semaphore_units);
+      chunked_vector<model::record_batch> batches,
+      flush_after_append request_flush_after_append,
+      ssx::semaphore_units recovery_memory_units,
+      size_t batches_size);
+
     ss::future<result<append_entries_reply>> dispatch_append_entries(
       append_entries_request&&, std::vector<ssx::semaphore_units>);
     std::optional<follower_index_metadata*> get_follower_meta();

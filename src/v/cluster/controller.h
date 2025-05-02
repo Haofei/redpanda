@@ -11,7 +11,6 @@
 
 #pragma once
 
-#include "cloud_storage/fwd.h"
 #include "cluster/cloud_metadata/producer_id_recovery_manager.h"
 #include "cluster/controller_probe.h"
 #include "cluster/controller_stm.h"
@@ -19,6 +18,7 @@
 #include "cluster/node_status_table.h"
 #include "cluster/scheduling/leader_balancer.h"
 #include "cluster/types.h"
+#include "crash_reporter.h"
 #include "model/fundamental.h"
 #include "model/metadata.h"
 #include "raft/fwd.h"
@@ -33,6 +33,10 @@
 
 #include <chrono>
 #include <vector>
+
+namespace cloud_storage {
+class topic_mount_handler;
+}
 
 namespace cluster {
 
@@ -277,7 +281,8 @@ private:
     ss::sharded<partition_balancer_state>
       _partition_balancer_state; // single instance
     ss::sharded<data_migrations::migrated_resources> _data_migrated_resources;
-    std::unique_ptr<data_migrations::migrations_table> _data_migration_table;
+    ssx::single_sharded<data_migrations::migrations_table>
+      _data_migration_table;
     ss::sharded<partition_leaders_table>
       _partition_leaders;                                // instance per core
     ss::sharded<shard_placement_table> _shard_placement; // instance per core
@@ -312,6 +317,7 @@ private:
     ss::sharded<health_monitor_backend> _hm_backend;   // single instance
     ss::sharded<health_manager> _health_manager;
     ss::sharded<metrics_reporter> _metrics_reporter;
+    ss::sharded<crash_reporter> _crash_reporter;          // single instance
     ss::sharded<feature_manager> _feature_manager;        // single instance
     ss::sharded<feature_backend> _feature_backend;        // instance per core
     ss::sharded<features::feature_table>& _feature_table; // instance per core
@@ -325,6 +331,7 @@ private:
     ss::sharded<client_quota::store> _quota_store;       // instance per core
     ss::sharded<client_quota::backend> _quota_backend;   // single instance
     ss::sharded<data_migrations::worker> _data_migration_worker;
+    ss::sharded<cloud_storage::topic_mount_handler> _topic_mount_handler;
     ssx::single_sharded<data_migrations::backend> _data_migration_backend;
     ss::sharded<data_migrations::irpc_frontend> _data_migration_irpc_frontend;
     ss::gate _gate;

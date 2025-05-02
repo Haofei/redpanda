@@ -7,15 +7,19 @@
 // the Business Source License, use of this software will be governed
 // by the Apache License, Version 2.0
 
+#include "base/units.h"
 #include "cluster/cluster_utils.h"
 #include "cluster/scheduling/allocation_node.h"
 #include "cluster/scheduling/constraints.h"
+#include "cluster/scheduling/topic_memory_per_partition_default.h"
 #include "cluster/scheduling/types.h"
 #include "cluster/tests/partition_allocator_fixture.h"
+#include "config/configuration.h"
 #include "model/metadata.h"
 #include "raft/fundamental.h"
 #include "random/fast_prng.h"
 #include "random/generators.h"
+#include "resource_mgmt/memory_groups.h"
 #include "test_utils/fixture.h"
 
 #include <seastar/core/sharded.hh>
@@ -87,38 +91,183 @@ FIXTURE_TEST(unregister_node, partition_allocator_fixture) {
 }
 
 FIXTURE_TEST(allocation_over_core_capacity, partition_allocator_fixture) {
-    const auto partition_count
-      = partition_allocator_fixture::partitions_per_shard + 1;
+    const auto partition_count = this->partitions_per_shard + 1;
     register_node(0, 1);
-    auto result
-      = allocator().allocate(make_allocation_request(partition_count, 1)).get();
-    BOOST_REQUIRE(result.has_error());
-    BOOST_REQUIRE_EQUAL(
-      result.assume_error(),
-      cluster::make_error_code(
-        cluster::errc::topic_invalid_partitions_core_limit));
+
+    {
+        auto result = allocator()
+                        .allocate(make_allocation_request(partition_count, 1))
+                        .get();
+        BOOST_REQUIRE(result.has_error());
+        BOOST_REQUIRE_EQUAL(
+          result.assume_error(),
+          cluster::make_error_code(
+            cluster::errc::topic_invalid_partitions_core_limit));
+    }
+
+    {
+        auto result = allocator()
+                        .allocate(
+                          make_simple_allocation_request(partition_count, 1))
+                        .get();
+        BOOST_REQUIRE(result.has_error());
+        BOOST_REQUIRE_EQUAL(
+          result.assume_error(),
+          cluster::make_error_code(
+            cluster::errc::topic_invalid_partitions_core_limit));
+    }
 }
 
 FIXTURE_TEST(
-  allocation_over_memory_capacity, partition_allocator_memory_limited_fixture) {
+  allocation_memory_limited, partition_allocator_memory_limited_fixture) {
+    memory_groups_holder().reset();
+    const auto partitions_share = 10;
+    ss::smp::invoke_on_all([partitions_share] {
+        config::shard_local_cfg()
+          .topic_partitions_memory_allocation_percent.set_value(
+            partitions_share);
+        config::shard_local_cfg().topic_memory_per_partition.set_value(200_KiB);
+    }).get();
+
     register_node(0, 1);
-    auto result = allocator().allocate(make_allocation_request(1, 1)).get();
-    BOOST_REQUIRE(result.has_error());
-    BOOST_REQUIRE_EQUAL(
-      result.assume_error(),
-      cluster::make_error_code(
-        cluster::errc::topic_invalid_partitions_memory_limit));
+
+    const auto allowed_partitions
+      = gb_per_core * GiB / 100.0 * partitions_share
+        / config::shard_local_cfg().topic_memory_per_partition().value();
+
+    {
+        auto result = allocator()
+                        .allocate(
+                          make_allocation_request(allowed_partitions + 1, 1))
+                        .get();
+        BOOST_REQUIRE(result.has_error());
+        BOOST_REQUIRE_EQUAL(
+          result.assume_error(),
+          cluster::make_error_code(
+            cluster::errc::topic_invalid_partitions_memory_limit));
+    }
+
+    {
+        auto result = allocator()
+                        .allocate(make_simple_allocation_request(
+                          allowed_partitions + 1, 1))
+                        .get();
+        BOOST_REQUIRE(result.has_error());
+        BOOST_REQUIRE_EQUAL(
+          result.assume_error(),
+          cluster::make_error_code(
+            cluster::errc::topic_invalid_partitions_memory_limit));
+    }
+}
+
+FIXTURE_TEST(
+  allocation_memory_limited_legacy_config_overwrites,
+  partition_allocator_memory_limited_fixture) {
+    memory_groups_holder().reset();
+    const auto partitions_share = 1;
+    ss::smp::invoke_on_all([partitions_share] {
+        config::shard_local_cfg()
+          .topic_partitions_memory_allocation_percent.set_value(
+            partitions_share);
+        config::shard_local_cfg().topic_memory_per_partition.set_value(1_MiB);
+    }).get();
+
+    register_node(0, 1);
+
+    const auto allowed_partitions
+      = gb_per_core * GiB / 100.0 * partitions_share
+        / config::shard_local_cfg().topic_memory_per_partition().value();
+
+    const auto legacy_allowed_partitions
+      = gb_per_core * GiB
+        / config::shard_local_cfg().topic_memory_per_partition().value();
+
+    BOOST_REQUIRE_GT(legacy_allowed_partitions, allowed_partitions);
+
+    {
+        auto result = allocator()
+                        .allocate(
+                          make_allocation_request(allowed_partitions + 1, 1))
+                        .get();
+        BOOST_REQUIRE(!result.has_error());
+    }
+
+    {
+        auto result = allocator()
+                        .allocate(make_simple_allocation_request(
+                          allowed_partitions + 1, 1))
+                        .get();
+        BOOST_REQUIRE(!result.has_error());
+    }
+}
+
+FIXTURE_TEST(
+  allocation_memory_limited_lowering_mem_limit,
+  partition_allocator_memory_limited_fixture) {
+    memory_groups_holder().reset();
+    const auto partitions_share = 5;
+    const auto topic_memory_per_partition
+      = cluster::DEFAULT_TOPIC_MEMORY_PER_PARTITION / 2;
+
+    ss::smp::invoke_on_all([partitions_share, topic_memory_per_partition] {
+        config::shard_local_cfg()
+          .topic_partitions_memory_allocation_percent.set_value(
+            partitions_share);
+        config::shard_local_cfg().topic_memory_per_partition.set_value(
+          topic_memory_per_partition);
+    }).get();
+
+    register_node(0, 1);
+
+    const auto allowed_partitions = gb_per_core * GiB / 100.0 * partitions_share
+                                    / topic_memory_per_partition;
+
+    {
+        auto result = allocator()
+                        .allocate(
+                          make_allocation_request(allowed_partitions + 1, 1))
+                        .get();
+        BOOST_REQUIRE(result.has_error());
+        BOOST_REQUIRE_EQUAL(
+          result.assume_error(),
+          cluster::make_error_code(
+            cluster::errc::topic_invalid_partitions_memory_limit));
+    }
+
+    {
+        auto result = allocator()
+                        .allocate(make_simple_allocation_request(
+                          allowed_partitions + 1, 1))
+                        .get();
+        BOOST_REQUIRE(result.has_error());
+        BOOST_REQUIRE_EQUAL(
+          result.assume_error(),
+          cluster::make_error_code(
+            cluster::errc::topic_invalid_partitions_memory_limit));
+    }
 }
 
 FIXTURE_TEST(
   allocation_over_fds_capacity, partition_allocator_fd_limited_fixture) {
     register_node(0, 1);
-    auto result = allocator().allocate(make_allocation_request(1, 1)).get();
-    BOOST_REQUIRE(result.has_error());
-    BOOST_REQUIRE_EQUAL(
-      result.assume_error(),
-      cluster::make_error_code(
-        cluster::errc::topic_invalid_partitions_fd_limit));
+
+    {
+        auto result = allocator().allocate(make_allocation_request(1, 1)).get();
+        BOOST_REQUIRE(result.has_error());
+        BOOST_REQUIRE_EQUAL(
+          result.assume_error(),
+          cluster::make_error_code(
+            cluster::errc::topic_invalid_partitions_fd_limit));
+    }
+    {
+        auto result
+          = allocator().allocate(make_simple_allocation_request(1, 1)).get();
+        BOOST_REQUIRE(result.has_error());
+        BOOST_REQUIRE_EQUAL(
+          result.assume_error(),
+          cluster::make_error_code(
+            cluster::errc::topic_invalid_partitions_fd_limit));
+    }
 }
 
 FIXTURE_TEST(allocation_over_capacity, partition_allocator_fixture) {
@@ -152,6 +301,28 @@ FIXTURE_TEST(allocation_over_capacity, partition_allocator_fixture) {
       allocator().allocate(make_allocation_request(int_1, 1, 1)).get());
     BOOST_REQUIRE(
       allocator().allocate(make_allocation_request(int_2, 1, 1)).get());
+}
+
+FIXTURE_TEST(
+  allocation_over_capacity_without_shard0, partition_allocator_fixture) {
+    // Disable shard0 reservations
+    partitions_reserve_shard0.update(0);
+
+    register_node(0, 6);
+    register_node(1, 6);
+    register_node(2, 6);
+
+    saturate_all_machines();
+    auto gr = allocator().state().last_group_id();
+    BOOST_REQUIRE(
+      allocator().allocate(make_allocation_request(1, 1)).get().has_error());
+    // group id hasn't changed
+    BOOST_REQUIRE_EQUAL(allocator().state().last_group_id(), gr);
+
+    // Make the topic internal and retry, should work.
+    kafka_internal_topics.update({tn.tp()});
+    BOOST_REQUIRE(allocator().allocate(make_allocation_request(1, 1)).get());
+    BOOST_REQUIRE_GT(allocator().state().last_group_id(), gr);
 }
 
 FIXTURE_TEST(max_allocation, partition_allocator_fixture) {
@@ -341,6 +512,27 @@ FIXTURE_TEST(allocation_units_test, partition_allocator_fixture) {
     // we do not decrement the highest raft group
     BOOST_REQUIRE_EQUAL(allocator().state().last_group_id()(), 10);
 }
+FIXTURE_TEST(allocation_units_test_raw_req, partition_allocator_fixture) {
+    register_node(1, 10);
+    register_node(2, 11);
+    register_node(3, 12);
+    // just fill up the cluster partially
+
+    {
+        auto allocs = allocator()
+                        .allocate(make_simple_allocation_request(10, 3))
+                        .get()
+                        .value();
+        BOOST_REQUIRE_EQUAL(allocs->get_assignments().size(), 10);
+        BOOST_REQUIRE_EQUAL(
+          allocated_nodes_count(allocs->get_assignments()), 3 * 10);
+    }
+
+    BOOST_REQUIRE(all_nodes_empty());
+
+    // we do not decrement the highest raft group
+    BOOST_REQUIRE_EQUAL(allocator().state().last_group_id()(), 10);
+}
 FIXTURE_TEST(decommission_node, partition_allocator_fixture) {
     register_node(0, 32);
     register_node(1, 64);
@@ -463,8 +655,7 @@ FIXTURE_TEST(updating_nodes_properties, partition_allocator_fixture) {
     BOOST_REQUIRE_EQUAL(it->second->allocated_partitions(), allocated);
     BOOST_REQUIRE_EQUAL(
       it->second->max_capacity(),
-      10 * partition_allocator_fixture::partitions_per_shard
-        - partition_allocator_fixture::partitions_reserve_shard0);
+      10 * this->partitions_per_shard - partitions_reserve_shard0());
 }
 
 FIXTURE_TEST(change_replication_factor, partition_allocator_fixture) {
@@ -583,7 +774,7 @@ void check_allocated_counts(
   const std::vector<size_t>& expected) {
     std::vector<size_t> counts;
     for (const auto& [id, node] : allocator.state().allocation_nodes()) {
-        BOOST_REQUIRE(id() == counts.size());
+        BOOST_REQUIRE(id() == static_cast<int>(counts.size()));
         counts.push_back(node->allocated_partitions());
     }
     logger.debug("allocated counts: {}, expected: {}", counts, expected);
@@ -595,7 +786,7 @@ void check_final_counts(
   const std::vector<size_t>& expected) {
     std::vector<size_t> counts;
     for (const auto& [id, node] : allocator.state().allocation_nodes()) {
-        BOOST_REQUIRE(id() == counts.size());
+        BOOST_REQUIRE(id() == static_cast<int>(counts.size()));
         counts.push_back(node->final_partitions());
     }
     logger.debug("final counts: {}, expected: {}", counts, expected);

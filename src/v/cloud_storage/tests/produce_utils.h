@@ -90,7 +90,8 @@ public:
                 co_return -1;
             }
             if (
-              (co_await archiver.upload_next_candidates())
+              (co_await archiver.upload_next_candidates(
+                 archival::archival_stm_fence{.emit_rw_fence_cmd = false}))
                 .non_compacted_upload_result.num_failed
               > 0) {
                 co_return -1;
@@ -108,7 +109,7 @@ public:
             co_return -1;
         }
         co_await archiver.flush_manifest_clean_offset();
-        for (int i = 0; i < _num_local_segs; i++) {
+        for (size_t i = 0; i < _num_local_segs; i++) {
             for (size_t i = 0; i < _batches_per_seg; i++) {
                 std::vector<kv_t> records = kv_t::sequence(
                   total_records, _records_per_batch);

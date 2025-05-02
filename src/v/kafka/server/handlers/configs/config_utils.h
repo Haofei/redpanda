@@ -17,6 +17,7 @@
 #include "cluster/types.h"
 #include "config/configuration.h"
 #include "container/fragmented_vector.h"
+#include "datalake/partition_spec_parser.h"
 #include "kafka/protocol/errors.h"
 #include "kafka/protocol/fwd.h"
 #include "kafka/server/handlers/topics/types.h"
@@ -27,6 +28,7 @@
 #include "pandaproxy/schema_registry/schema_id_validation.h"
 #include "pandaproxy/schema_registry/subject_name_strategy.h"
 #include "security/acl.h"
+#include "serde/rw/chrono.h"
 
 #include <seastar/core/coroutine.hh>
 #include <seastar/core/sstring.hh>
@@ -36,6 +38,7 @@
 
 #include <algorithm>
 #include <optional>
+#include <type_traits>
 
 namespace kafka {
 template<typename T>
@@ -253,6 +256,8 @@ ss::future<chunked_vector<R>> do_alter_topics_configuration(
     for (auto& res : update_results) {
         responses.push_back(R{
           .error_code = map_topic_error_code(res.ec),
+          .error_message = res.error_message.value_or(
+            make_error_code(res.ec).message()),
           .resource_type = static_cast<int8_t>(config_resource_type::topic),
           .resource_name = res.tp_ns.tp(),
         });
@@ -328,6 +333,14 @@ struct noop_validator {
 struct noop_bool_validator {
     std::optional<ss::sstring>
     operator()(model::topic_namespace_view, const ss::sstring&, bool) {
+        return std::nullopt;
+    }
+};
+
+template<typename T>
+struct noop_validator_with_tn {
+    std::optional<ss::sstring>
+    operator()(model::topic_namespace_view, const ss::sstring&, const T&) {
         return std::nullopt;
     }
 };
@@ -458,16 +471,89 @@ struct flush_bytes_validator {
 
 struct iceberg_config_validator {
     std::optional<ss::sstring> operator()(
-      model::topic_namespace_view tns, const ss::sstring&, bool value) {
+      model::topic_namespace_view tns,
+      const ss::sstring&,
+      const model::iceberg_mode& value) {
         if (!model::is_user_topic(tns)) {
             return fmt::format(
               "Iceberg configuration cannot be altered on non user topics");
         }
-        if (!config::shard_local_cfg().iceberg_enabled() && value) {
+        if (
+          !config::shard_local_cfg().iceberg_enabled()
+          && value != model::iceberg_mode::disabled) {
             return fmt::format(
               "Iceberg disabled in the cluster configuration, enable it by "
               "setting: {}",
               config::shard_local_cfg().iceberg_enabled.name());
+        }
+        return std::nullopt;
+    }
+};
+
+struct delete_retention_ms_validator {
+    std::optional<ss::sstring> operator()(
+      const ss::sstring&,
+      const tristate<std::chrono::milliseconds>& maybe_value) {
+        if (maybe_value.has_optional_value()) {
+            const auto& value = maybe_value.value();
+            if (value < 1ms || value > serde::max_serializable_ms) {
+                return fmt::format(
+                  "delete.retention.ms value invalid, expected to be in range "
+                  "[1, {}]",
+                  serde::max_serializable_ms);
+            }
+        }
+        return std::nullopt;
+    }
+};
+
+struct iceberg_partition_spec_validator {
+    std::optional<ss::sstring>
+    operator()(const ss::sstring& /*raw*/, const ss::sstring& value) {
+        auto parsed = datalake::parse_partition_spec(value);
+        if (parsed.has_error()) {
+            return fmt::format(
+              "couldn't parse iceberg partition spec `{}': {}",
+              value,
+              parsed.error());
+        }
+        return std::nullopt;
+    }
+};
+
+struct iceberg_target_lag_ms_validator {
+    std::optional<ss::sstring> operator()(
+      const ss::sstring& /*raw*/,
+      const std::optional<std::chrono::milliseconds>& maybe_value) {
+        if (maybe_value.has_value()) {
+            const auto& value = maybe_value.value();
+            constexpr auto min_lag = std::chrono::milliseconds(10s);
+            if (value < min_lag || value > serde::max_serializable_ms) {
+                return fmt::format(
+                  "target.lag.ms value invalid, expected to be in range "
+                  "[{},{}]",
+                  min_lag,
+                  serde::max_serializable_ms);
+            }
+        }
+        return std::nullopt;
+    }
+};
+
+struct min_cleanable_dirty_ratio_validator {
+    std::optional<ss::sstring>
+    operator()(const ss::sstring&, const tristate<double>& value) {
+        double min = 0.0;
+        double max = 1.0;
+        if (value.has_optional_value()) {
+            if (value.value() < min || value.value() > max) {
+                return fmt::format(
+                  "min.cleanable.dirty.ratio {} is outside of allowed range "
+                  "[{}, {}]",
+                  value.value(),
+                  min,
+                  max);
+            }
         }
         return std::nullopt;
     }
@@ -501,6 +587,50 @@ using replication_factor_validator = config_validator_list<
   replication_factor_must_be_positive,
   replication_factor_must_be_odd,
   replication_factor_must_be_greater_or_equal_to_minimum>;
+
+template<
+  typename T,
+  typename Validator = noop_validator_with_tn<T>,
+  typename ParseFunc = decltype(boost::lexical_cast<T, ss::sstring>)>
+requires requires(
+  model::topic_namespace_view tn,
+  const T& value,
+  const ss::sstring& str,
+  Validator validator,
+  ParseFunc parse) {
+    { parse(str) } -> std::convertible_to<T>;
+    {
+        validator(tn, str, value)
+    } -> std::convertible_to<std::optional<ss::sstring>>;
+}
+void parse_and_set_property(
+  model::topic_namespace_view tn,
+  cluster::property_update<T>& property,
+  const std::optional<ss::sstring>& value,
+  config_resource_operation op,
+  Validator validator = noop_validator<T>{},
+  ParseFunc parse = boost::lexical_cast<T, ss::sstring>) {
+    // remove property value
+    if (op == config_resource_operation::remove) {
+        property.op = cluster::incremental_update_operation::remove;
+        return;
+    }
+    // set property value if preset, otherwise do nothing
+    if (op == config_resource_operation::set && value) {
+        property.op = cluster::incremental_update_operation::set;
+        try {
+            auto v = parse(*value);
+            auto v_error = validator(tn, *value, v);
+            if (v_error) {
+                throw validation_error(*v_error);
+            }
+            property.value = std::move(v);
+        } catch (const std::runtime_error&) {
+            throw boost::bad_lexical_cast();
+        }
+        return;
+    }
+}
 
 template<
   typename T,
@@ -666,11 +796,18 @@ inline void parse_and_set_bool(
     }
 }
 
-template<typename T>
+template<typename T, typename Validator = noop_validator<tristate<T>>>
+requires requires(
+  const tristate<T>& value, const ss::sstring& str, Validator validator) {
+    {
+        validator(str, value)
+    } -> std::convertible_to<std::optional<ss::sstring>>;
+}
 void parse_and_set_tristate(
   cluster::property_update<tristate<T>>& property,
   const std::optional<ss::sstring>& value,
-  config_resource_operation op) {
+  config_resource_operation op,
+  Validator validator = noop_validator<tristate<T>>{}) {
     // remove property value
     if (op == config_resource_operation::remove) {
         property.op = cluster::incremental_update_operation::remove;
@@ -678,11 +815,18 @@ void parse_and_set_tristate(
     }
     // set property value
     if (op == config_resource_operation::set) {
-        auto parsed = boost::lexical_cast<int64_t>(*value);
+        using config_t
+          = std::conditional_t<std::is_floating_point_v<T>, T, int64_t>;
+        auto parsed = boost::lexical_cast<config_t>(*value);
         if (parsed <= 0) {
             property.value = tristate<T>{};
         } else {
             property.value = tristate<T>(std::make_optional<T>(parsed));
+        }
+
+        auto v_error = validator(*value, property.value);
+        if (v_error) {
+            throw validation_error(*v_error);
         }
 
         property.op = cluster::incremental_update_operation::set;

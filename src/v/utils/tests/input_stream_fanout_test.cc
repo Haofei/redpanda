@@ -11,8 +11,9 @@
 #include "bytes/bytes.h"
 #include "bytes/iobuf.h"
 #include "bytes/iostream.h"
-#include "bytes/random.h"
 #include "random/generators.h"
+#include "test_utils/iostream.h"
+#include "test_utils/random_bytes.h"
 #include "utils/stream_utils.h"
 
 #include <seastar/core/abort_source.hh>
@@ -41,7 +42,7 @@ void test_sync_read(
     iobuf input;
     for (int i = 0; i < 20; i++) {
         int sz = random_generators::get_int(100, 32 * 1024);
-        auto b = random_generators::get_bytes(sz);
+        auto b = tests::random_bytes(sz);
         input.append(bytes_to_iobuf(b));
     }
     auto szfull = input.size_bytes();
@@ -80,7 +81,7 @@ void test_async_read(
     [[maybe_unused]] int szfull = 0;
     for (int i = 0; i < 20; i++) {
         int sz = random_generators::get_int(100, 8 * 1024);
-        auto b = random_generators::get_bytes(sz);
+        auto b = tests::random_bytes(sz);
         input.append(bytes_to_iobuf(b));
         copy.append(bytes_to_iobuf(b));
         szfull += sz;
@@ -154,7 +155,7 @@ void test_detached_consumer(
     iobuf input;
     for (int i = 0; i < 20; i++) {
         int sz = random_generators::get_int(100, 32 * 1024);
-        auto b = random_generators::get_bytes(sz);
+        auto b = tests::random_bytes(sz);
         input.append(bytes_to_iobuf(b));
     }
     auto szfull = input.size_bytes();
@@ -197,7 +198,7 @@ SEASTAR_THREAD_TEST_CASE(test_mid_read_detach) {
     iobuf input;
     for (int i = 0; i < 20; i++) {
         int sz = random_generators::get_int(100, 32 * 1024);
-        auto b = random_generators::get_bytes(sz);
+        auto b = tests::random_bytes(sz);
         input.append(bytes_to_iobuf(b));
     }
     auto is = make_iobuf_input_stream(std::move(input));
@@ -437,29 +438,8 @@ SEASTAR_THREAD_TEST_CASE(input_stream_fanout_detach_10_size_limit) {
     test_detached_consumer<10>(4, 1000);
 }
 
-template<class Err>
-ss::input_stream<char> make_throwing_stream(Err err) {
-    struct throwing_stream final : ss::data_source_impl {
-        explicit throwing_stream(Err e)
-          : _err(std::move(e)) {}
-
-        ss::future<ss::temporary_buffer<char>> skip(uint64_t) final {
-            return get();
-        }
-
-        ss::future<ss::temporary_buffer<char>> get() final {
-            return ss::make_exception_future<ss::temporary_buffer<char>>(
-              std::move(_err));
-        }
-
-        Err _err;
-    };
-    auto ds = ss::data_source(std::make_unique<throwing_stream>(err));
-    return ss::input_stream<char>(std::move(ds));
-}
-
 SEASTAR_THREAD_TEST_CASE(input_stream_fanout_producer_throw) {
-    auto is = make_throwing_stream(ss::abort_requested_exception());
+    auto is = tests::make_throwing_stream(ss::abort_requested_exception());
     auto [s1, s2] = input_stream_fanout<2>(std::move(is), 4, 8);
 
     BOOST_REQUIRE_THROW(s1.read().get(), ss::abort_requested_exception);

@@ -12,6 +12,7 @@
 #include "bytes/iobuf.h"
 #include "bytes/iobuf_parser.h"
 #include "bytes/iostream.h"
+#include "cloud_io/tests/s3_imposter.h"
 #include "cloud_storage/base_manifest.h"
 #include "cloud_storage/materialized_resources.h"
 #include "cloud_storage/offset_translation_layer.h"
@@ -22,7 +23,6 @@
 #include "cloud_storage/remote_segment.h"
 #include "cloud_storage/segment_path_utils.h"
 #include "cloud_storage/tests/common_def.h"
-#include "cloud_storage/tests/s3_imposter.h"
 #include "cloud_storage/types.h"
 #include "cloud_storage_clients/client_pool.h"
 #include "config/configuration.h"
@@ -46,9 +46,6 @@
 #include <seastar/testing/test_case.hh>
 #include <seastar/testing/thread_test_case.hh>
 #include <seastar/util/defer.hh>
-
-#include <boost/test/tools/old/interface.hpp>
-#include <boost/test/unit_test.hpp>
 
 #include <algorithm>
 #include <chrono>
@@ -282,7 +279,7 @@ TEST_P(all_types_remote_fixture, test_download_segment) { // NOLINT
     ASSERT_TRUE(upl_res == upload_result::success);
 
     iobuf downloaded;
-    auto try_consume = [&downloaded](uint64_t len, ss::input_stream<char> is) {
+    auto try_consume = [&downloaded](uint64_t, ss::input_stream<char> is) {
         downloaded.clear();
         auto rds = make_iobuf_ref_output_stream(downloaded);
         return ss::do_with(
@@ -358,7 +355,7 @@ TEST_P(all_types_remote_fixture, test_download_segment_range) {
                      .download_segment(
                        bucket_name,
                        path,
-                       [&downloaded](uint64_t len, ss::input_stream<char> is) {
+                       [&downloaded](uint64_t, ss::input_stream<char> is) {
                            downloaded.clear();
                            auto rds = make_iobuf_ref_output_stream(downloaded);
                            return ss::do_with(
@@ -591,7 +588,7 @@ TEST_P(all_types_remote_fixture, test_list_bucket_with_max_keys) {
 
     const auto s3_imposter_max_keys = s3_imposter_fixture::default_max_keys;
     const auto size = s3_imposter_max_keys + 50;
-    for (int i = 0; i < size; i++) {
+    for (size_t i = 0; i < size; i++) {
         cloud_storage_clients::object_key path{fmt::format("{}", i)};
         auto result
           = remote.local()
@@ -1189,8 +1186,7 @@ TEST_P(
     auto download_one = [](cloud_storage::remote& api, auto path, auto bucket) {
         retry_chain_node fib(never_abort, 100ms, 20ms);
         iobuf downloaded;
-        auto try_consume = [&downloaded](
-                             uint64_t len, ss::input_stream<char> is) {
+        auto try_consume = [&downloaded](uint64_t, ss::input_stream<char> is) {
             downloaded.clear();
             auto rds = make_iobuf_ref_output_stream(downloaded);
             return ss::do_with(

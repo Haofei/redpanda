@@ -166,11 +166,11 @@ public:
      *
      * Callers should be wary to either ensure that the stm is synced before
      * calling, or ensure that the producer_id doesn't need to reflect batches
-     * later than the max_collectible_offset.
+     * later than the max_removable_local_log_offset.
      */
     model::producer_id highest_producer_id() const;
 
-    model::offset max_collectible_offset() override {
+    model::offset max_removable_local_log_offset() override {
         const auto lso = last_stable_offset();
         if (lso < model::offset{0}) {
             return model::offset{};
@@ -197,12 +197,12 @@ public:
 
     kafka_stages replicate_in_stages(
       model::batch_identity,
-      model::record_batch_reader,
+      model::record_batch batch,
       raft::replicate_options);
 
     ss::future<result<kafka_result>> replicate(
       model::batch_identity,
-      model::record_batch_reader,
+      model::record_batch batch,
       raft::replicate_options);
 
     ss::future<ss::basic_rwlock<>::holder> prepare_transfer_leadership();
@@ -227,6 +227,11 @@ public:
 
     ss::future<tx::errc> abort_all_txes();
 
+    raft::stm_initial_recovery_policy
+    get_initial_recovery_policy() const final {
+        return raft::stm_initial_recovery_policy::read_everything;
+    }
+
 protected:
     ss::future<> apply_raft_snapshot(const iobuf&) final;
 
@@ -240,9 +245,10 @@ private:
     // for the first time from the incoming request.
     using producer_previously_known
       = ss::bool_class<struct new_producer_created_tag>;
-    std::pair<tx::producer_ptr, producer_previously_known>
+    checked<std::pair<tx::producer_ptr, producer_previously_known>, tx::errc>
       maybe_create_producer(model::producer_identity);
-    void cleanup_producer_state(model::producer_identity);
+    void cleanup_producer_state(model::producer_identity) noexcept;
+    ss::future<> cleanup_evicted_producers();
     ss::future<> reset_producers();
     ss::future<checked<model::term_id, tx::errc>> do_begin_tx(
       model::term_id,
@@ -261,7 +267,7 @@ private:
       tx::producer_ptr,
       std::optional<model::tx_seq>,
       model::timeout_clock::duration);
-    ss::future<>
+    ss::future<raft::local_snapshot_applied>
     apply_local_snapshot(raft::stm_snapshot_header, iobuf&&) override;
     ss::future<raft::stm_snapshot>
     take_local_snapshot(ssx::semaphore_units apply_units) override;
@@ -273,28 +279,28 @@ private:
 
     ss::future<result<kafka_result>> do_replicate(
       model::batch_identity,
-      model::record_batch_reader,
+      model::record_batch,
       raft::replicate_options,
       ss::lw_shared_ptr<available_promise<>>);
 
-    ss::future<result<kafka_result>> transactional_replicate(
-      model::batch_identity, model::record_batch_reader);
+    ss::future<result<kafka_result>>
+      transactional_replicate(model::batch_identity, model::record_batch);
 
     ss::future<result<kafka_result>> transactional_replicate(
       model::term_id,
       tx::producer_ptr,
       model::batch_identity,
-      model::record_batch_reader);
+      model::record_batch);
 
     ss::future<result<kafka_result>> do_transactional_replicate(
       model::term_id,
       tx::producer_ptr,
       model::batch_identity,
-      model::record_batch_reader);
+      model::record_batch);
 
     ss::future<result<kafka_result>> idempotent_replicate(
       model::batch_identity,
-      model::record_batch_reader,
+      model::record_batch,
       raft::replicate_options,
       ss::lw_shared_ptr<available_promise<>>);
 
@@ -302,7 +308,7 @@ private:
       model::term_id,
       tx::producer_ptr,
       model::batch_identity,
-      model::record_batch_reader,
+      model::record_batch,
       raft::replicate_options,
       ss::lw_shared_ptr<available_promise<>>,
       ssx::semaphore_units&,
@@ -312,14 +318,14 @@ private:
       model::term_id,
       tx::producer_ptr,
       model::batch_identity,
-      model::record_batch_reader,
+      model::record_batch,
       raft::replicate_options,
       ss::lw_shared_ptr<available_promise<>>,
       ssx::semaphore_units,
       producer_previously_known);
 
     ss::future<result<kafka_result>> replicate_msg(
-      model::record_batch_reader,
+      model::record_batch,
       raft::replicate_options,
       ss::lw_shared_ptr<available_promise<>>);
 
@@ -414,6 +420,8 @@ private:
     // producers because epoch is unused.
     producers_t _producers;
 
+    ss::queue<model::producer_identity> _producers_pending_cleanup;
+
     // All the producers with open transactions in this partition.
     // The list is sorted by the open transaction begin offset, so
     // the first entry in the list is the earliest open transaction
@@ -442,10 +450,12 @@ public:
       bool enable_idempotence,
       ss::sharded<tx_gateway_frontend>&,
       ss::sharded<cluster::tx::producer_state_manager>&,
-      ss::sharded<features::feature_table>&,
-      ss::sharded<cluster::topic_table>&);
+      ss::sharded<features::feature_table>&);
     bool is_applicable_for(const storage::ntp_config&) const final;
-    void create(raft::state_machine_manager_builder&, raft::consensus*) final;
+    void create(
+      raft::state_machine_manager_builder&,
+      raft::consensus*,
+      const cluster::stm_instance_config&) final;
 
 private:
     bool _enable_transactions;
@@ -453,7 +463,6 @@ private:
     ss::sharded<tx_gateway_frontend>& _tx_gateway_frontend;
     ss::sharded<cluster::tx::producer_state_manager>& _producer_state_manager;
     ss::sharded<features::feature_table>& _feature_table;
-    ss::sharded<topic_table>& _topics;
 };
 
 } // namespace cluster

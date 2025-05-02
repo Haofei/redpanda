@@ -49,7 +49,7 @@ class LogLevelTest(RedpandaTest):
         # Any logger we get we should be able to set.
         for logger in loggers:
             # Skip to avoid bad log lines.
-            if logger == "assert":
+            if logger in ["assert", "assert-unreachable"]:
                 continue
 
             with self.redpanda.monitor_log(node) as mon:
@@ -263,7 +263,7 @@ class LogLevelTest(RedpandaTest):
         logger = 'test\nlog'
 
         def check_log_for_invalid_parameter(val: str):
-            pattern = f'Parameter contained invalid control characters: {val}'
+            pattern = f'Parameter \'name\' contained invalid control characters'
             wait_until(lambda: self.redpanda.search_log_any(pattern),
                        timeout_sec=5)
 

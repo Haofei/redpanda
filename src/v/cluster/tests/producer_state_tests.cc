@@ -71,7 +71,8 @@ struct test_fixture {
     producer_state_manager& manager() { return *_psm; }
 
     producer_ptr new_producer(
-      ss::noncopyable_function<void()> f = [] {},
+      ss::noncopyable_function<void(model::producer_identity)> f =
+        [](model::producer_identity) {},
       std::optional<model::vcluster_id> vcluster = std::nullopt) {
         auto p = ss::make_lw_shared<producer_state>(
           ctx_logger,
@@ -99,7 +100,7 @@ FIXTURE_TEST(test_locked_producer_is_not_evicted, test_fixture) {
     const size_t num_producers = 10;
     std::vector<producer_ptr> producers;
     producers.reserve(num_producers);
-    for (int i = 0; i < num_producers; i++) {
+    for (unsigned i = 0; i < num_producers; i++) {
         producers.push_back(new_producer());
     }
     // Ensure all producers are registered and linked up
@@ -207,7 +208,7 @@ FIXTURE_TEST(test_lru_maintenance, test_fixture) {
     const size_t num_producers = 5;
     std::vector<producer_ptr> producers;
     producers.reserve(num_producers);
-    for (int i = 0; i < num_producers; i++) {
+    for (unsigned i = 0; i < num_producers; i++) {
         auto prod = new_producer();
         producers.push_back(prod);
     }
@@ -216,7 +217,7 @@ FIXTURE_TEST(test_lru_maintenance, test_fixture) {
     // run a function on each producer and ensure that is the
     // moved to the end of LRU list
     for (auto& producer : producers) {
-        producer->run_with_lock([](auto units) {}).get();
+        producer->run_with_lock([](auto) {}).get();
     }
 
     clean(producers);
@@ -225,18 +226,20 @@ FIXTURE_TEST(test_lru_maintenance, test_fixture) {
 
 FIXTURE_TEST(test_eviction_max_pids, test_fixture) {
     create_producer_state_manager(10, 10);
-    int evicted_so_far = 0;
+    unsigned evicted_so_far = 0;
     std::vector<producer_ptr> producers;
     producers.reserve(default_max_producers);
-    for (int i = 0; i < default_max_producers; i++) {
-        producers.push_back(new_producer([&] { evicted_so_far++; }));
+    for (unsigned i = 0; i < default_max_producers; i++) {
+        producers.push_back(
+          new_producer([&](model::producer_identity) { evicted_so_far++; }));
     }
     BOOST_REQUIRE_EQUAL(evicted_so_far, 0);
 
     // we are already at the limit, add a few more producers
     size_t extra_producers = 5;
-    for (int i = 0; i < extra_producers; i++) {
-        producers.push_back(new_producer([&] { evicted_so_far++; }));
+    for (unsigned i = 0; i < extra_producers; i++) {
+        producers.push_back(
+          new_producer([&](model::producer_identity) { evicted_so_far++; }));
     }
 
     validate_producer_count(default_max_producers);
@@ -248,7 +251,7 @@ FIXTURE_TEST(test_eviction_max_pids, test_fixture) {
 
     // producers are evicted on an lru basis, so the prefix
     // set of producers should be evicted first.
-    for (int i = 0; i < producers.size(); i++) {
+    for (unsigned i = 0; i < producers.size(); i++) {
         BOOST_REQUIRE_EQUAL(i < extra_producers, producers[i]->is_evicted());
     }
 
@@ -278,14 +281,16 @@ FIXTURE_TEST(test_state_management_with_multiple_namespaces, test_fixture) {
     producers.reserve(default_max_producers);
 
     auto new_vcluster_producer = [&](model::vcluster_id& vcluster) {
-        auto p = new_producer([&] { evicted_producers[vcluster]++; }, vcluster);
+        auto p = new_producer(
+          [&](model::producer_identity) { evicted_producers[vcluster]++; },
+          vcluster);
         producers.push_back(
           vcluster_producer{.vcluster = vcluster, .producer = p});
     };
     /**
      * Fill producer state manager with producers from one vcluster
      */
-    for (int i = 0; i < total_producers; ++i) {
+    for (unsigned i = 0; i < total_producers; ++i) {
         new_vcluster_producer(vcluster_1);
     }
     validate_producer_count(20);
@@ -334,7 +339,7 @@ FIXTURE_TEST(test_state_management_with_multiple_namespaces, test_fixture) {
     BOOST_REQUIRE_EXCEPTION(
       new_vcluster_producer(vcluster_5),
       cluster::cache_full_error,
-      [](const auto& ex) { return true; });
+      [](const auto&) { return true; });
 
     for (auto vp : producers) {
         manager().deregister_producer(*vp.producer, vp.vcluster);

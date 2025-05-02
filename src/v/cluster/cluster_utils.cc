@@ -287,7 +287,8 @@ partition_state get_partition_state(ss::lw_shared_ptr<partition> partition) {
     } else {
         state.start_cloud_offset = state.next_cloud_offset = model::offset{-1};
     }
-    state.iceberg_enabled = partition->get_ntp_config().iceberg_enabled();
+    state.iceberg_mode = fmt::format(
+      "{}", partition->get_ntp_config().iceberg_mode());
     state.raft_state = get_partition_raft_state(partition->raft());
     return state;
 }
@@ -380,7 +381,8 @@ std::vector<partition_stm_state> get_partition_stm_state(consensus_ptr ptr) {
         partition_stm_state state;
         state.name = stm->name();
         state.last_applied_offset = stm->last_applied();
-        state.max_collectible_offset = stm->max_collectible_offset();
+        state.max_removable_local_log_offset
+          = stm->max_removable_local_log_offset();
         result.push_back(std::move(state));
     }
     return result;

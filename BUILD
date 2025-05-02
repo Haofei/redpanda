@@ -1,3 +1,5 @@
+# Increment to trigger bazel build in CI: 0
+
 load("@gazelle//:def.bzl", "gazelle", "gazelle_test")
 
 # gazelle:prefix github.com/redpanda-data/redpanda
@@ -21,5 +23,36 @@ gazelle_test(
 filegroup(
     name = "clang_tidy_config",
     srcs = [".clang-tidy"],
+    visibility = ["//visibility:public"],
+)
+
+alias(
+    name = "redpanda",
+    actual = "//src/v/redpanda:redpanda",
+    visibility = ["//visibility:public"],
+)
+
+alias(
+    name = "rpk",
+    actual = "//src/go/rpk/cmd/rpk:rpk",
+    visibility = ["//visibility:public"],
+)
+
+alias(
+    name = "cc_gen",
+    actual = "//bazel/compilation_database_generator",
+)
+
+filegroup(
+    name = "lsan_suppressions",
+    testonly = True,
+    srcs = ["lsan_suppressions.txt"],
+    visibility = ["//visibility:public"],
+)
+
+filegroup(
+    name = "ubsan_suppressions",
+    testonly = True,
+    srcs = ["ubsan_suppressions.txt"],
     visibility = ["//visibility:public"],
 )

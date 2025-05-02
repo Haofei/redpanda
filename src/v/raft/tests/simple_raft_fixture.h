@@ -71,6 +71,8 @@ struct simple_raft_fixture {
           .start(
             _self,
             ss::default_scheduling_group(),
+            ss::default_scheduling_group(),
+            ss::default_scheduling_group(),
             [] {
                 return raft::group_manager::configuration{
                   .heartbeat_interval
@@ -89,7 +91,12 @@ struct simple_raft_fixture {
                   .write_caching_flush_bytes
                   = config::mock_binding<std::optional<size_t>>(std::nullopt),
                   .enable_longest_log_detection = config::mock_binding<bool>(
-                    true)};
+                    true),
+                  .max_buffered_bytes_per_node = config::mock_binding<size_t>(
+                    512_KiB),
+                  .max_inflight_requests_per_node
+                  = config::mock_binding<size_t>(10),
+                };
             },
             [] {
                 return raft::recovery_memory_quota::configuration{
@@ -117,7 +124,7 @@ struct simple_raft_fixture {
                       auto group = raft::group_id(0);
                       return _group_mgr.local().create_group(
                         group,
-                        {self_broker()},
+                        {self_vnode()},
                         log,
                         raft::with_learner_recovery_throttle::yes);
                   })
@@ -169,6 +176,7 @@ struct simple_raft_fixture {
           std::nullopt,
           model::broker_properties{});
     }
+    raft::vnode self_vnode() { return {_self, model::revision_id{0}}; }
 
     void wait_for_becoming_leader() {
         using namespace std::chrono_literals;

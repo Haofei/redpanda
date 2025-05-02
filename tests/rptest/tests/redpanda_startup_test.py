@@ -10,13 +10,14 @@
 import os
 from time import sleep
 
+from ducktape.mark import ignore
 from ducktape.cluster.cluster import ClusterNode
-from ducktape.mark import ok_to_fail
 from ducktape.utils.util import wait_until
 from rptest.services.admin import Admin
 from rptest.services.cluster import cluster
 from rptest.services.redpanda import MetricsEndpoint, MetricSamples, RedpandaServiceBase
 from rptest.tests.redpanda_test import RedpandaTest
+from rptest.utils.log_utils import wait_until_nag_is_set
 from rptest.utils.mode_checks import in_fips_environment
 
 
@@ -72,7 +73,7 @@ class RedpandaFIPSStartupTest(RedpandaFIPSStartupTestBase):
         super(RedpandaFIPSStartupTest,
               self).__init__(test_context=test_context)
 
-    @ok_to_fail  # https://redpandadata.atlassian.net/browse/CORE-4283
+    @ignore  # https://redpandadata.atlassian.net/browse/CORE-4283
     @cluster(num_nodes=3)
     def test_startup(self):
         """
@@ -124,7 +125,7 @@ class RedpandaFIPSStartupTest(RedpandaFIPSStartupTestBase):
             metrics_endpoint=MetricsEndpoint.PUBLIC_METRICS,
             expected_mode=RedpandaServiceBase.FIPSMode.permissive)
 
-    @ok_to_fail  # https://redpandadata.atlassian.net/browse/CORE-4283
+    @ignore  # https://redpandadata.atlassian.net/browse/CORE-4283
     @cluster(num_nodes=3)
     def test_non_homogenous(self):
         """
@@ -243,29 +244,22 @@ class RedpandaFIPSStartupLicenseTest(RedpandaFIPSStartupTestBase):
                              fips_mode=RedpandaServiceBase.FIPSMode.disabled)
 
         self.redpanda.set_environment({
-            '__REDPANDA_LICENSE_CHECK_INTERVAL_SEC':
-            f'{self.LICENSE_CHECK_INTERVAL_SEC}'
+            '__REDPANDA_PERIODIC_REMINDER_INTERVAL_SEC':
+            f'{self.LICENSE_CHECK_INTERVAL_SEC}',
+            '__REDPANDA_DISABLE_BUILTIN_TRIAL_LICENSE':
+            True
         })
 
-    def _has_license_nag(self) -> bool:
-        return self.redpanda.search_log_any(
-            "license is required to use enterprise features")
-
-    def _license_nag_is_set(self) -> bool:
-        return self.redpanda.search_log_all(
-            f"Overriding default license log annoy interval to: {self.LICENSE_CHECK_INTERVAL_SEC}s"
-        )
-
-    @ok_to_fail  # https://redpandadata.atlassian.net/browse/CORE-4283
+    @ignore  # https://redpandadata.atlassian.net/browse/CORE-4283
     @cluster(num_nodes=3)
     def test_fips_license_nag(self):
-        wait_until(self._license_nag_is_set,
-                   timeout_sec=30,
-                   err_msg="Failed to set license nag interval")
+        wait_until_nag_is_set(
+            redpanda=self.redpanda,
+            check_interval_sec=self.LICENSE_CHECK_INTERVAL_SEC)
 
         self.logger.debug("Ensuring no license nag")
         sleep(self.LICENSE_CHECK_INTERVAL_SEC * 2)
-        assert not self._has_license_nag(
+        assert not self.redpanda.has_license_nag(
         ), "Should not have license nag yet, FIPS mode not enabled"
 
         fips_mode = RedpandaServiceBase.FIPSMode.enabled if in_fips_environment(
@@ -280,6 +274,6 @@ class RedpandaFIPSStartupLicenseTest(RedpandaFIPSStartupTestBase):
         self.redpanda.restart_nodes(self.redpanda.nodes,
                                     override_cfg_params=fips_config)
 
-        wait_until(self._has_license_nag,
+        wait_until(self.redpanda.has_license_nag,
                    timeout_sec=30,
                    err_msg="License nag failed to appear")

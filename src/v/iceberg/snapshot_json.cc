@@ -1,11 +1,12 @@
-// Copyright 2024 Redpanda Data, Inc.
-//
-// Use of this software is governed by the Business Source License
-// included in the file licenses/BSL.md
-//
-// As of the Change Date specified in that file, in accordance with
-// the Business Source License, use of this software will be governed
-// by the Apache License, Version 2.0
+/*
+ * Copyright 2024 Redpanda Data, Inc.
+ *
+ * Licensed as a Redpanda Enterprise file under the Redpanda Community
+ * License (the "License"); you may not use this file except in compliance with
+ * the License. You may obtain a copy of the License at
+ *
+ * https://github.com/redpanda-data/redpanda/blob/master/licenses/rcl.md
+ */
 #include "iceberg/snapshot_json.h"
 
 #include "iceberg/json_utils.h"
@@ -116,7 +117,7 @@ snapshot parse_snapshot(const json::Value& v) {
               .operation = operation.value(),
               .other = std::move(other_map),
           },
-          .manifest_list_path = manifest_list_path,
+          .manifest_list_path = uri(manifest_list_path),
           .schema_id = schema_id,
     };
 }
@@ -154,7 +155,7 @@ void rjson_serialize(iceberg::json_writer& w, const iceberg::snapshot& s) {
     w.Key("timestamp-ms");
     w.Int64(s.timestamp_ms.value());
     w.Key("manifest-list");
-    w.String(s.manifest_list_path);
+    w.String(s.manifest_list_path());
     if (s.schema_id.has_value()) {
         w.Key("schema-id");
         w.Int(s.schema_id.value()());
@@ -175,6 +176,12 @@ void rjson_serialize(iceberg::json_writer& w, const iceberg::snapshot& s) {
 void rjson_serialize(
   iceberg::json_writer& w, const iceberg::snapshot_reference& s) {
     w.StartObject();
+    serialize_snapshot_reference_properties(w, s);
+    w.EndObject();
+}
+
+void serialize_snapshot_reference_properties(
+  iceberg::json_writer& w, const iceberg::snapshot_reference& s) {
     w.Key("snapshot-id");
     w.Int64(s.snapshot_id());
     w.Key("type");
@@ -191,7 +198,6 @@ void rjson_serialize(
         w.Key("min-snapshots-to-keep");
         w.Int(s.min_snapshots_to_keep.value());
     }
-    w.EndObject();
 }
 
 } // namespace json

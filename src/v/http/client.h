@@ -108,13 +108,35 @@ public:
     client(
       const net::base_transport::configuration& cfg,
       const ss::abort_source* as,
+      ss::shared_ptr<client_probe> probe);
+    client(
+      const net::base_transport::configuration& cfg,
+      const ss::abort_source* as,
       ss::shared_ptr<client_probe> probe,
-      ss::lowres_clock::duration max_idle_time = {});
+      ss::lowres_clock::duration max_idle_time);
 
     /// Stop must be called before destroying the client object.
     ss::future<> stop();
     using net::base_transport::shutdown;
     using net::base_transport::wait_input_shutdown;
+
+    /**
+     * Calling transport::shutdown will shutdown the underlying transport and
+     * cause active connections and on-going connection attempts to fail.
+     * However, the underlying transport can be reused by calling
+     * transport::connect. This behavior is not sufficient to break out of a
+     * connection retry loop, such as `client::get_connected`. Instead, we set a
+     * flag that is checked in such situations so that fast tear down can occur.
+     *
+     * Note that we avoid doing this by closing the _connect_gate because http
+     * clients are stored in a pool and reused. Closing this gate is reserved
+     * for shutting down the pool and all the connections, making reuse more
+     * difficult to orchestrate correctly.
+     */
+    void shutdown_now() noexcept {
+        _shutdown_now = true;
+        shutdown();
+    }
 
     // close the connect gate and fail_outstanding_futures which calls shutdown
     ss::future<> shutdown_and_stop() final { co_return co_await stop(); }
@@ -289,6 +311,7 @@ private:
     void check() const;
 
     bool _stopped{false};
+    bool _shutdown_now{false};
     std::string _host_with_port;
     ss::gate _connect_gate;
     const ss::abort_source* _as;

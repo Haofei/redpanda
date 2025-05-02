@@ -15,14 +15,16 @@ from rptest.services.cluster import cluster
 from rptest.services.redpanda import get_cloud_provider
 from rptest.tests.redpanda_cloud_test import RedpandaCloudTest
 from ducktape.tests.test import TestContext
+from ducktape.mark import matrix
 from rptest.services.producer_swarm import ProducerSwarm
 from rptest.clients.rpk import RpkTool
-from rptest.services.redpanda_cloud import ProductInfo
+from rptest.services.redpanda_cloud import ThroughputTierInfo
 from rptest.services.openmessaging_benchmark import OpenMessagingBenchmark
 from rptest.services.openmessaging_benchmark_configs import \
     OMBSampleConfigurations
 from rptest.services.machinetype import get_machine_info
 from rptest.utils.type_utils import rcast
+from rptest.tests.write_caching_test import WriteCachingMode
 
 # pyright: strict
 
@@ -91,7 +93,7 @@ class OMBValidationTest(RedpandaCloudTest):
             self.logger.info(
                 f"Starting benchmark attempt {try_count}/{max_retries}.")
             benchmark.start()
-            benchmark_time_min = benchmark.benchmark_time() + 5
+            benchmark_time_min = benchmark.benchmark_time_mins() + 5
             benchmark.wait(timeout_sec=benchmark_time_min * 60)
 
             res = benchmark.check_succeed(raise_exceptions=False)
@@ -178,7 +180,8 @@ class OMBValidationTest(RedpandaCloudTest):
             self.config_profile_name]
 
         self.num_brokers: int = config_profile['nodes_count']
-        self.tier_limits: ProductInfo = not_none(self.redpanda.get_product())
+        self.tier_limits: ThroughputTierInfo = not_none(
+            self.redpanda.get_tier())
         self.tier_machine_info = get_machine_info(
             config_profile['machine_type'])
         self.rpk = RpkTool(self.redpanda)
@@ -230,7 +233,8 @@ class OMBValidationTest(RedpandaCloudTest):
         return math.floor(0.9537 * mb)
 
     @cluster(num_nodes=CLUSTER_NODES)
-    def test_max_connections(self):
+    @matrix(write_caching=[WriteCachingMode.TRUE, WriteCachingMode.FALSE])
+    def test_max_connections(self, write_caching: str):
         tier_limits = self.tier_limits
 
         # Constants
@@ -281,6 +285,9 @@ class OMBValidationTest(RedpandaCloudTest):
                 "auto.offset.reset": "earliest",
                 "enable.auto.commit": "false",
             },
+            "topic_config": {
+                "write.caching": write_caching,
+            },
         }
 
         validator = self.base_validator() | {
@@ -316,7 +323,7 @@ class OMBValidationTest(RedpandaCloudTest):
         # advertised limit and this uses up ~half the slack we have in the enforcement (we currently
         # set the per broker limit to 1.2x of what it would be if enforced exactly).
         swarm_target_connections = int(
-            (tier_limits.max_connection_count - omb_connections) * 1.1)
+            (tier_limits.max_connections_count - omb_connections) * 1.1)
 
         # we expect each swarm producer to create 1 connection per broker, plus 1 additional connection
         # for metadata
@@ -375,7 +382,7 @@ class OMBValidationTest(RedpandaCloudTest):
         # If this fails it is probably because some other test left services running
         # against the cluster.
         count_before = self._connection_count()
-        maximum_allowed = int(tier_limits.max_connection_count * 0.02 + 100)
+        maximum_allowed = int(tier_limits.max_connections_count * 0.02 + 100)
         assert count_before <= maximum_allowed, (
             f"Wanted less than {maximum_allowed} "
             f"connections to start but got {count_before}")
@@ -396,7 +403,8 @@ class OMBValidationTest(RedpandaCloudTest):
 
         self.rpk.create_topic(swarm_topic_name,
                               self._partition_count(),
-                              replicas=3)
+                              replicas=3,
+                              config={"write.caching": write_caching})
 
         def make_swarm():
             return ProducerSwarm(
@@ -464,15 +472,15 @@ class OMBValidationTest(RedpandaCloudTest):
 
         # run the OMB portion of the benchmark and ensure it succeeded
         benchmark.start()
-        omb_seconds = benchmark.benchmark_time() * 60
+        omb_seconds = benchmark.benchmark_time_mins() * 60
         benchmark.wait(timeout_sec=omb_seconds + 300)
 
         assert_no_rejected()
 
         body_runtime = time() - time_before_body
 
-        assert body_runtime >= benchmark.benchmark_time(), \
-            f"unexpectedly short runtime: {body_runtime} vs {benchmark.benchmark_time()}"
+        assert body_runtime >= benchmark.benchmark_time_mins(), \
+            f"unexpectedly short runtime: {body_runtime} vs {benchmark.benchmark_time_mins()}"
 
         assert time() - time_before_swarm < swarm_runtime, (
             f"test ran too long and so swarm will have stopped: "
@@ -558,7 +566,8 @@ class OMBValidationTest(RedpandaCloudTest):
             self.logger.warn(str(results))
 
     @cluster(num_nodes=CLUSTER_NODES)
-    def test_max_partitions(self):
+    @matrix(write_caching=[WriteCachingMode.TRUE, WriteCachingMode.FALSE])
+    def test_max_partitions(self, write_caching: str):
         tier_limits = self.tier_limits
 
         # multiplier for the latencies to log warnings on, but still pass the test
@@ -577,7 +586,10 @@ class OMBValidationTest(RedpandaCloudTest):
                             1)
         producer_rate = tier_limits.max_ingress // 2
         total_producers = self._producer_count(producer_rate)
-        total_consumers = self._consumer_count(producer_rate * subscriptions)
+        # double consumer count which is a bit more friendly and realistic in
+        # high partition scenarios
+        total_consumers = self._consumer_count(
+            producer_rate * subscriptions) * 2
 
         workload = self.WORKLOAD_DEFAULTS | {
             "name":
@@ -596,6 +608,27 @@ class OMBValidationTest(RedpandaCloudTest):
             producer_rate / (1 * KiB),
         }
 
+        driver = {
+            "name": "MaxPartitionsTestDriver",
+            "replication_factor": 3,
+            "request_timeout": 300000,
+            "producer_config": {
+                "enable.idempotence": "true",
+                "acks": "all",
+                "linger.ms": 1,
+                "max.in.flight.requests.per.connection": 5,
+                "batch.size": 131072,
+            },
+            "consumer_config": {
+                "auto.offset.reset": "earliest",
+                "enable.auto.commit": "false",
+                "max.partition.fetch.bytes": 131072
+            },
+            "topic_config": {
+                "write.caching": write_caching,
+            },
+        }
+
         # validator to check metrics and fail on
         fail_validator = self.base_validator(fudge_factor) | {
             OMBSampleConfigurations.AVG_THROUGHPUT_MBPS: [
@@ -612,15 +645,13 @@ class OMBValidationTest(RedpandaCloudTest):
             ],
         }
 
-        benchmark = OpenMessagingBenchmark(
-            self._ctx,
-            self.redpanda,
-            "ACK_ALL_GROUP_LINGER_1MS_IDEM_MAX_IN_FLIGHT",
-            (workload, fail_validator),
-            num_workers=self.CLUSTER_NODES - 1,
-            topology="ensemble")
+        benchmark = OpenMessagingBenchmark(self._ctx,
+                                           self.redpanda,
+                                           driver, (workload, fail_validator),
+                                           num_workers=self.CLUSTER_NODES - 1,
+                                           topology="ensemble")
         benchmark.start()
-        benchmark_time_min = benchmark.benchmark_time() + 5
+        benchmark_time_min = benchmark.benchmark_time_mins() + 5
         benchmark.wait(timeout_sec=benchmark_time_min * 60)
 
         # check if omb gave errors, but don't process metrics
@@ -644,7 +675,8 @@ class OMBValidationTest(RedpandaCloudTest):
         self.redpanda.assert_cluster_is_reusable()
 
     @cluster(num_nodes=CLUSTER_NODES)
-    def test_common_workload(self):
+    @matrix(write_caching=[WriteCachingMode.TRUE, WriteCachingMode.FALSE])
+    def test_common_workload(self, write_caching: str):
         tier_limits = self.tier_limits
 
         subscriptions = max(tier_limits.max_egress // tier_limits.max_ingress,
@@ -684,6 +716,9 @@ class OMBValidationTest(RedpandaCloudTest):
                 "auto.offset.reset": "earliest",
                 "enable.auto.commit": "false",
             },
+            "topic_config": {
+                "write.caching": write_caching,
+            },
         }
 
         benchmark = OpenMessagingBenchmark(self._ctx,
@@ -698,7 +733,8 @@ class OMBValidationTest(RedpandaCloudTest):
         self.redpanda.assert_cluster_is_reusable()
 
     @cluster(num_nodes=CLUSTER_NODES)
-    def test_retention(self):
+    @matrix(write_caching=[WriteCachingMode.TRUE, WriteCachingMode.FALSE])
+    def test_retention(self, write_caching: str):
         tier_limits = self.tier_limits
 
         subscriptions = max(tier_limits.max_egress // tier_limits.max_ingress,
@@ -740,6 +776,7 @@ class OMBValidationTest(RedpandaCloudTest):
                 "enable.auto.commit": "false",
             },
             "topic_config": {
+                "write.caching": write_caching,
                 "retention.bytes": retention_bytes,
                 "retention.local.target.bytes": retention_bytes,
                 "segment.bytes": segment_bytes,

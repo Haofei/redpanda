@@ -10,7 +10,7 @@
 import threading
 from ducktape.tests.test import Test
 from ducktape.utils.util import wait_until
-from ducktape.mark import parametrize, ok_to_fail_fips
+from ducktape.mark import parametrize
 
 from rptest.clients.rpk import RpkTool, RpkException
 from rptest.clients.python_librdkafka import PythonLibrdkafka
@@ -20,8 +20,10 @@ from rptest.services.keycloak import DEFAULT_REALM, DEFAULT_AT_LIFESPAN_S, Keycl
 from rptest.services.cluster import cluster
 from rptest.services.tls import TLSCertManager
 from rptest.tests.sasl_reauth_test import get_sasl_metrics, REAUTH_METRIC, EXPIRATION_METRIC
-from rptest.util import expect_exception
 from rptest.tests.tls_metrics_test import FaketimeTLSProvider
+from rptest.util import expect_exception
+from rptest.utils.log_utils import wait_until_nag_is_set
+from rptest.utils.mode_checks import skip_fips_mode
 
 import requests
 import time
@@ -38,6 +40,7 @@ log_config = LoggingConfig('info',
                            logger_levels={
                                'security': 'trace',
                                'pandaproxy': 'trace',
+                               'schemaregistry': 'trace',
                                'kafka/client': 'trace',
                                'kafka': 'debug',
                                'http': 'trace',
@@ -607,38 +610,38 @@ class OIDCLicenseTest(RedpandaOIDCTestBase):
                                               http_authentication=["BASIC"],
                                               **kwargs)
         self.redpanda.set_environment({
-            '__REDPANDA_LICENSE_CHECK_INTERVAL_SEC':
-            f'{self.LICENSE_CHECK_INTERVAL_SEC}'
+            '__REDPANDA_PERIODIC_REMINDER_INTERVAL_SEC':
+            f'{self.LICENSE_CHECK_INTERVAL_SEC}',
         })
 
-    def _has_license_nag(self):
-        return self.redpanda.search_log_any(
-            "license is required to use enterprise features")
-
-    def _license_nag_is_set(self):
-        return self.redpanda.search_log_all(
-            f"Overriding default license log annoy interval to: {self.LICENSE_CHECK_INTERVAL_SEC}s"
-        )
-
     @cluster(num_nodes=3)
-    @ok_to_fail_fips  # See NOTE below
+    @skip_fips_mode  # See NOTE below
     @parametrize(authn_config={"sasl_mechanisms": ["OAUTHBEARER", "SCRAM"]})
     @parametrize(authn_config={"http_authentication": ["OIDC", "BASIC"]})
     def test_license_nag(self, authn_config):
-        wait_until(self._license_nag_is_set,
-                   timeout_sec=30,
-                   err_msg="Failed to set license nag internal")
+        wait_until_nag_is_set(
+            redpanda=self.redpanda,
+            check_interval_sec=self.LICENSE_CHECK_INTERVAL_SEC)
 
         self.logger.debug("Ensuring no license nag")
         time.sleep(self.LICENSE_CHECK_INTERVAL_SEC * 2)
         # NOTE: This assertion will FAIL if running in FIPS mode because
         # being in FIPS mode will trigger the license nag
-        assert not self._has_license_nag()
+        assert not self.redpanda.has_license_nag()
 
         self.logger.debug("Setting cluster config")
         self.redpanda.set_cluster_config(authn_config)
 
+        self.redpanda.set_environment(
+            {'__REDPANDA_DISABLE_BUILTIN_TRIAL_LICENSE': '1'})
+
+        self.redpanda.rolling_restart_nodes(self.redpanda.nodes,
+                                            use_maintenance_mode=False)
+        wait_until_nag_is_set(
+            redpanda=self.redpanda,
+            check_interval_sec=self.LICENSE_CHECK_INTERVAL_SEC)
+
         self.logger.debug("Waiting for license nag")
-        wait_until(self._has_license_nag,
+        wait_until(self.redpanda.has_license_nag,
                    timeout_sec=self.LICENSE_CHECK_INTERVAL_SEC * 2,
                    err_msg="License nag failed to appear")

@@ -106,7 +106,7 @@ public:
                     model::timestamp(
                       model::timestamp::now().value() - ret_duration.count()),
                     std::nullopt,
-                    log->stm_manager()->max_collectible_offset(),
+                    log->stm_manager()->max_removable_local_log_offset(),
                     std::nullopt,
                     ss::default_priority_class(),
                     dummy_as,
@@ -319,11 +319,10 @@ public:
               .last_seq = spec.count - 1,
               .record_count = spec.count,
               .is_transactional = true};
-            auto reader = model::make_memory_record_batch_reader(
-              std::move(batches[0]));
+
             auto result = co_await _ctx._stm->replicate(
               bid,
-              std::move(reader),
+              std::move(batches[0]),
               raft::replicate_options(raft::consistency_level::quorum_ack));
             if (!result.has_value()) {
                 vlog(clusterlog.error, "Error {}", result.error());

@@ -20,7 +20,20 @@
 namespace experimental::io {
 
 /**
- * A container holding non-overlapping pages.
+ * A container that manages non-overlapping pages.
+ *
+ * Note that the container manages one entry per page. One possible optimization
+ * is to collapse an offset range into a single entry in the container where the
+ * entry corresponds to a group of pages. For example, storing two pages:
+ *
+ *     [0000, 4096] -> Page0
+ *     [4096, 8192] -> Page1
+ *
+ * could instead be done with a single entry:
+ *
+ *     [0000, 8192] -> <Page0, Page1>
+ *
+ * which may potentially take pressure off of the index itself.
  */
 class page_set {
     using map_type = interval_map<uint64_t, seastar::lw_shared_ptr<page>>;
@@ -63,8 +76,10 @@ public:
 
     /**
      * Remove the page pointed to be \p it.
+     *
+     * Returns an iterator to the next page in the set.
      */
-    void erase(const_iterator it);
+    const_iterator erase(const_iterator it);
 
     /**
      * Return an iterator to the first page in the set.
@@ -75,6 +90,11 @@ public:
      * Return an iterator to the end of the page set.
      */
     [[nodiscard]] const_iterator end() const;
+
+    /**
+     * Returns the number of pages in the set.
+     */
+    [[nodiscard]] size_t size() const;
 
 private:
     map_type pages_;

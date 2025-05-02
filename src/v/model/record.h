@@ -25,6 +25,7 @@
 #include "serde/rw/iobuf.h"
 #include "serde/rw/rw.h"
 
+#include <seastar/core/loop.hh>
 #include <seastar/core/smp.hh>
 #include <seastar/util/optimized_optional.hh>
 
@@ -105,6 +106,15 @@ public:
     iobuf release_value() { return std::exchange(_value, {}); }
     iobuf share_value() { return _value.share(0, _value.size_bytes()); }
 
+    std::optional<iobuf> share_key_opt() {
+        return key_size() < 0 ? std::nullopt
+                              : std::make_optional<iobuf>(share_key());
+    }
+    std::optional<iobuf> share_value_opt() {
+        return value_size() < 0 ? std::nullopt
+                                : std::make_optional<iobuf>(share_value());
+    }
+
     bool operator==(const record_header& rhs) const {
         return _key_size == rhs._key_size && _val_size == rhs._val_size
                && _key == rhs._key && _value == rhs._value;
@@ -113,8 +123,10 @@ public:
     friend std::ostream& operator<<(std::ostream&, const record_header&);
 
 private:
+    // If negative, the key is nil.
     int32_t _key_size{-1};
     iobuf _key;
+    // If negative, the value is nil.
     int32_t _val_size{-1};
     iobuf _value;
 };
@@ -222,12 +234,25 @@ public:
     const iobuf& key() const { return _key; }
     iobuf release_key() { return std::exchange(_key, {}); }
     iobuf share_key() { return _key.share(0, _key.size_bytes()); }
+    std::optional<iobuf> share_key_opt() {
+        if (!has_key()) {
+            return std::nullopt;
+        }
+        return share_key();
+    }
+    std::optional<iobuf> share_value_opt() {
+        if (!has_value()) {
+            return std::nullopt;
+        }
+        return share_value();
+    }
 
     int32_t value_size() const { return _val_size; }
     const iobuf& value() const { return _value; }
     iobuf release_value() { return std::exchange(_value, {}); }
     iobuf share_value() { return _value.share(0, _value.size_bytes()); }
     bool has_value() const { return _val_size >= 0; }
+    bool has_key() const { return _key_size >= 0; }
     bool is_tombstone() const { return !has_value(); }
 
     const std::vector<record_header>& headers() const { return _headers; }
@@ -847,7 +872,18 @@ public:
     ss::future<> for_each_record_async(Func f) const {
         auto it = record_batch_iterator::create(*this);
         while (it.has_next()) {
-            co_await ss::futurize_invoke(f, it.next());
+            if constexpr (std::is_same_v<
+                            ss::futurize_t<
+                              std::invoke_result_t<Func, model::record>>,
+                            ss::future<ss::stop_iteration>>) {
+                ss::stop_iteration s = co_await ss::futurize_invoke(
+                  f, it.next());
+                if (s == ss::stop_iteration::yes) {
+                    co_return;
+                }
+            } else {
+                co_await ss::futurize_invoke(f, it.next());
+            }
         }
     }
 

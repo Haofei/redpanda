@@ -20,116 +20,143 @@ namespace io = experimental::io;
 
 using imap = io::interval_map<uint64_t, uint64_t>;
 
-TEST(IntervalMap, InsertZeroLength) {
+TEST(IntervalMap, InsertZeroLengthInterval) {
     imap map;
     for (unsigned int i = 0; i < 10; ++i) {
+        // it doesn't matter where the interval starts
         const auto res = map.insert({i, 0}, 0);
         EXPECT_EQ(res, std::make_pair(map.end(), false));
     }
 }
 
-TEST(IntervalMap, InsertEmpty) {
+TEST(IntervalMap, InsertIntoEmptyMap) {
     for (unsigned int i = 0; i < 10; ++i) {
-        imap map;
-        auto res = map.insert({i, 10}, 0);
-        EXPECT_NE(res.first, map.end());
-        EXPECT_TRUE(res.second);
+        for (unsigned int len = 1; len < 10; ++len) {
+            imap map;
+            // start/length don't matter it should always succeed
+            auto res = map.insert({i, len}, 0);
+            EXPECT_NE(res.first, map.end());
+            EXPECT_TRUE(res.second);
+        }
     }
 }
 
-TEST(IntervalMap, InsertOverlapWithLast) {
+TEST(IntervalMap, Size) {
+    imap map;
+    EXPECT_EQ(map.size(), 0);
+
+    EXPECT_TRUE(map.insert({0, 10}, 0).second);
+    EXPECT_EQ(map.size(), 1);
+
+    EXPECT_TRUE(map.insert({10, 10}, 0).second);
+    EXPECT_EQ(map.size(), 2);
+
+    map.erase(map.begin());
+    EXPECT_EQ(map.size(), 1);
+
+    map.erase(map.begin());
+    EXPECT_EQ(map.size(), 0);
+}
+
+TEST(IntervalMap, InsertOverlapRejected) {
+    imap map;
+    EXPECT_TRUE(map.insert({0, 10}, 0).second);
+
     for (unsigned int i = 0; i < 10; ++i) {
-        imap map;
-        EXPECT_TRUE(map.insert({0, 10}, 0).second);
         const auto res = map.insert({i, 10}, 0);
         EXPECT_EQ(res.first, map.find(0));
         EXPECT_FALSE(res.second);
     }
+}
+
+TEST(IntervalMap, InsertRightAbut) {
     imap map;
     EXPECT_TRUE(map.insert({0, 10}, 0).second);
+
     const auto res = map.insert({10, 10}, 0);
     EXPECT_NE(res.first, map.find(0));
+    EXPECT_EQ(res.first, map.find(10));
     EXPECT_TRUE(res.second);
 }
 
-TEST(IntervalMap, InsertOverlapWithFirst) {
-    for (unsigned int i = 0; i < 10; ++i) {
-        imap map;
-        EXPECT_TRUE(map.insert({10, 10}, 0).second);
-        const auto res = map.insert({10 - i, 10}, 0);
-        EXPECT_EQ(res.first, map.find(10));
-        EXPECT_FALSE(res.second);
-    }
+TEST(IntervalMap, InsertLeftAbut) {
     imap map;
     EXPECT_TRUE(map.insert({10, 10}, 0).second);
+
     const auto res = map.insert({0, 10}, 0);
+    EXPECT_EQ(res.first, map.find(0));
     EXPECT_NE(res.first, map.find(10));
     EXPECT_TRUE(res.second);
 }
 
-TEST(IntervalMap, InsertOverlapNoGap) {
+TEST(IntervalMap, InsertOverlapWithNoGapRejected) {
     imap map;
 
-    // [0, 10) [10, 20)
+    // [0, 10) [10, 20) [20, 21)
     EXPECT_TRUE(map.insert({0, 10}, 0).second);
     EXPECT_TRUE(map.insert({10, 10}, 0).second);
+    EXPECT_TRUE(map.insert({20, 1}, 0).second);
 
-    // overlap left
+    // overlap first rejected
     for (unsigned int i = 0; i < 10; ++i) {
         auto res = map.insert({i, 1}, 0);
         EXPECT_EQ(res.first, map.find(0));
         EXPECT_FALSE(res.second);
     }
 
-    // overlap right
+    // overlap second rejected
     for (unsigned int i = 10; i < 20; ++i) {
         auto res = map.insert({i, 1}, 0);
         EXPECT_EQ(res.first, map.find(10));
         EXPECT_FALSE(res.second);
     }
 
+    // overlap third rejected
     auto res = map.insert({20, 1}, 0);
-    EXPECT_NE(res.first, map.find(0));
-    EXPECT_NE(res.first, map.find(10));
-    EXPECT_TRUE(res.second);
+    EXPECT_EQ(res.first, map.find(20));
+    EXPECT_FALSE(res.second);
 }
 
-TEST(IntervalMap, InsertOverlapWithGap) {
+TEST(IntervalMap, InsertWithSparseOverlaps) {
     imap map;
 
     // [0, 10) [20, 30)
     EXPECT_TRUE(map.insert({0, 10}, 0).second);
     EXPECT_TRUE(map.insert({20, 10}, 0).second);
 
-    // overlap left
+    // overlap left rejected
     for (unsigned int i = 0; i < 10; ++i) {
         auto res = map.insert({i, 1}, 0);
         EXPECT_EQ(res.first, map.find(0));
         EXPECT_FALSE(res.second);
     }
 
+    // intervals in between can be inserted
     for (unsigned int i = 10; i < 20; ++i) {
         auto res = map.insert({i, 1}, 0);
+        EXPECT_EQ(res.first, map.find(i));
         EXPECT_NE(res.first, map.find(0));
         EXPECT_NE(res.first, map.find(20));
         EXPECT_TRUE(res.second);
     }
 
-    // overlap right
+    // overlap right rejected
     for (unsigned int i = 20; i < 30; ++i) {
         auto res = map.insert({i, 1}, 0);
         EXPECT_EQ(res.first, map.find(20));
         EXPECT_FALSE(res.second);
     }
 
-    auto res = map.insert({30, 1}, 0);
+    // intervals to the right can be inserted
+    const auto res = map.insert({30, 1}, 0);
+    EXPECT_EQ(res.first, map.find(30));
+    EXPECT_TRUE(res.second);
     for (int i = 0; i < 30; ++i) {
         EXPECT_NE(res.first, map.find(i));
     }
-    EXPECT_TRUE(res.second);
 }
 
-TEST(IntervalMap, FindEmpty) {
+TEST(IntervalMap, FindInEmptyMapReturnsEnd) {
     const imap map;
     EXPECT_EQ(map.find(0), map.end());
 }
@@ -143,7 +170,7 @@ TEST(IntervalMap, FindPastLast) {
     EXPECT_EQ(map.find(11), map.end());
 }
 
-TEST(IntervalMap, FindExact) {
+TEST(IntervalMap, FindExactStartOffset) {
     imap map;
     EXPECT_TRUE(map.insert({0, 10}, 11).second);
     EXPECT_TRUE(map.insert({20, 5}, 12).second);
@@ -151,7 +178,7 @@ TEST(IntervalMap, FindExact) {
     EXPECT_EQ(map.find(20)->second, 12);
 }
 
-TEST(IntervalMap, FindBeforeFirst) {
+TEST(IntervalMap, FindBeforeFirstReturnsEnd) {
     imap map;
     EXPECT_TRUE(map.insert({2, 10}, 33).second);
     EXPECT_EQ(map.find(0), map.end());
@@ -168,6 +195,8 @@ TEST(IntervalMap, FindMiddleNoGap) {
     EXPECT_EQ(map.find(9)->second, 3);
     EXPECT_EQ(map.find(11)->second, 4);
     EXPECT_EQ(map.find(19)->second, 4);
+    EXPECT_EQ(map.find(21)->second, 5);
+    EXPECT_EQ(map.find(29)->second, 5);
 }
 
 TEST(IntervalMap, FindMiddleWithGap) {
@@ -186,7 +215,7 @@ TEST(IntervalMap, FindMiddleWithGap) {
     EXPECT_EQ(map.find(39), map.end());
 }
 
-TEST(IntervalMap, BeginEndEmpty) {
+TEST(IntervalMap, BeginEndAreEqualInEmptyMap) {
     const imap map;
     EXPECT_EQ(map.begin(), map.end());
 }
@@ -199,25 +228,51 @@ TEST(IntervalMap, Empty) {
 }
 
 TEST(IntervalMap, Erase) {
+    // erase 1 becomes empty
     {
         imap map;
         auto res = map.insert({0, 10}, 0);
         EXPECT_FALSE(map.empty());
-        map.erase(res.first);
+        auto next = map.erase(res.first);
         EXPECT_TRUE(map.empty());
+        EXPECT_EQ(next, map.end());
     }
 
+    // erase 2 becomes empty
     {
         imap map;
         EXPECT_TRUE(map.insert({0, 10}, 0).second);
         EXPECT_TRUE(map.insert({10, 10}, 0).second);
-        const auto it0 = map.find(0);
+        EXPECT_FALSE(map.empty());
+
         const auto it1 = map.find(10);
+        auto next = map.erase(it1);
         EXPECT_FALSE(map.empty());
-        map.erase(it1);
-        EXPECT_FALSE(map.empty());
-        map.erase(it0);
+        EXPECT_EQ(next, map.end());
+
+        const auto it0 = map.find(0);
+        next = map.erase(it0);
         EXPECT_TRUE(map.empty());
+        EXPECT_EQ(next, map.end());
+    }
+
+    // erase returns non-end next
+    {
+        imap map;
+        EXPECT_TRUE(map.insert({0, 10}, 0).second);
+        EXPECT_TRUE(map.insert({10, 10}, 0).second);
+        EXPECT_FALSE(map.empty());
+
+        const auto it0 = map.find(0);
+        auto next = map.erase(it0);
+        EXPECT_FALSE(map.empty());
+        EXPECT_EQ(next, map.begin());
+        EXPECT_NE(next, map.end());
+
+        const auto it1 = map.find(10);
+        next = map.erase(it1);
+        EXPECT_TRUE(map.empty());
+        EXPECT_EQ(next, map.end());
     }
 }
 

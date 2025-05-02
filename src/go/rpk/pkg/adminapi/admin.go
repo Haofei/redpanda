@@ -16,15 +16,17 @@ import (
 	"fmt"
 	"os"
 	"strconv"
+	"strings"
 	"time"
 
-	"go.uber.org/zap"
-
+	"github.com/kr/text"
+	mTerm "github.com/moby/term"
 	"github.com/redpanda-data/common-go/rpadmin"
 	"github.com/redpanda-data/redpanda/src/go/rpk/pkg/config"
 	"github.com/redpanda-data/redpanda/src/go/rpk/pkg/oauth"
 	"github.com/redpanda-data/redpanda/src/go/rpk/pkg/oauth/providers/auth0"
 	"github.com/spf13/afero"
+	"go.uber.org/zap"
 )
 
 // GenericErrorBody is the JSON decodable body that is produced by generic error
@@ -127,6 +129,22 @@ func NewHostClient(fs afero.Fs, p *config.RpkProfile, host string) (*rpadmin.Adm
 	return rpadmin.NewClient(addrs, tc, auth, p.FromCloud)
 }
 
+// TryDecodeMessageFromErr tries to decode the message if it's a
+// rpadmin.HTTPResponseError and logs the full error. Otherwise, it returns
+// the original error string.
+func TryDecodeMessageFromErr(err error) string {
+	if err == nil {
+		return ""
+	}
+	if he := (*rpadmin.HTTPResponseError)(nil); errors.As(err, &he) {
+		zap.L().Sugar().Debugf("got admin API error: %v", strings.TrimSpace(err.Error()))
+		if body, err := he.DecodeGenericErrorBody(); err == nil {
+			return body.Message
+		}
+	}
+	return strings.TrimSpace(err.Error())
+}
+
 // licenseFeatureChecks checks if the user is talking to a cluster that has
 // enterprise features enabled without a license and returns a message with a
 // warning.
@@ -135,36 +153,84 @@ func licenseFeatureChecks(ctx context.Context, fs afero.Fs, cl *rpadmin.AdminAPI
 	// We only do a check if:
 	//   1. LicenseCheck == nil: never checked before OR last check was in
 	//      violation. (we only save successful responses).
-	//   2. LicenseStatus was last checked more than 7 days ago.
-	if p.LicenseCheck == nil || p.LicenseCheck != nil && time.Unix(p.LicenseCheck.LastUpdate, 0).AddDate(0, 0, 7).Before(time.Now()) {
-		resp, err := cl.GetEnterpriseFeatures(ctx)
+	//   2. LicenseStatus was last checked more than 1 hour ago.
+	if p.LicenseCheck == nil || p.LicenseCheck != nil && time.Unix(p.LicenseCheck.LastUpdate, 0).Add(1*time.Hour).Before(time.Now()) {
+		featResp, err := cl.GetEnterpriseFeatures(ctx)
 		if err != nil {
 			zap.L().Sugar().Warnf("unable to check licensed enterprise features in the cluster: %v", err)
+			return ""
+		}
+		info, err := cl.GetLicenseInfo(ctx)
+		if err != nil {
+			zap.L().Sugar().Warnf("unable to check license information: %v", err)
 			return ""
 		}
 		// We don't write a profile if the config doesn't exist.
 		y, exists := p.ActualConfig()
 		var licenseCheck *config.LicenseStatusCache
-		if resp.Violation {
-			var features []string
-			for _, f := range resp.Features {
-				if f.Enabled {
-					features = append(features, f.Name)
-				}
+		var enabledFeatures []string
+		for _, f := range featResp.Features {
+			if f.Enabled {
+				enabledFeatures = append(enabledFeatures, f.Name)
 			}
-			msg = fmt.Sprintf("A Redpanda Enterprise Edition license is required to use enterprise features: %v. For more information, see https://docs.redpanda.com/current/get-started/licenses.", features)
-		} else {
+		}
+		// We have 3 types of warnings:
+		//  1. WHEN license.type=TRIAL, enterprise feature(s) enabled, AND
+		//     expiry in <15 days
+		//  2. WHEN license.type=ENTERPRISE and license EXPIRED, AND VIOLATION
+		//     (enterprise featured enabled)
+		//  3. WHEN there is a VIOLATION (no or expired license and
+		//     enterprise(s) features enabled)
+		daysLeft, isTrialCheck := isTrialAboutToExpire(info, enabledFeatures)
+		switch {
+		case isTrialCheck:
+			msg = fmt.Sprintf("\nNote: your TRIAL license will expire in %v days. The following Enterprise features are being used in your Redpanda cluster: %v. These features require a license. To request a license, please visit https://redpanda.com/upgrade. For more information, see https://docs.redpanda.com/current/get-started/licenses/#redpanda-enterprise-edition\n", daysLeft, enabledFeatures)
+		case isEnterpriseExpired(info, enabledFeatures):
+			msg = fmt.Sprintf("\nWARNING: your ENTERPRISE license has expired. The following Enterprise features are being used in your Redpanda cluster: %v. These features require a license. To request a new license, please visit https://support.redpanda.com. For more information, see https://docs.redpanda.com/current/get-started/licenses/#redpanda-enterprise-edition\n", enabledFeatures)
+		case featResp.Violation:
+			msg = fmt.Sprintf("\nWARNING: The following Enterprise features are being used in your Redpanda cluster: %v. These features require a license. To request a license, please visit http://redpanda.com/upgrade. To try Redpanda Enterprise for 30 days, visit http://redpanda.com/try-enterprise. For more information, see https://docs.redpanda.com/current/get-started/licenses/#redpanda-enterprise-edition\n", enabledFeatures)
+		default:
 			licenseCheck = &config.LicenseStatusCache{
 				LastUpdate: time.Now().Unix(),
 			}
 		}
 		if exists && y != nil {
 			actProfile := y.Profile(p.Name)
-			actProfile.LicenseCheck = licenseCheck
-			if err := y.Write(fs); err != nil {
-				zap.L().Sugar().Warnf("unable to save licensed enterprise features check cache to profile: %v", err)
+			if actProfile != nil {
+				actProfile.LicenseCheck = licenseCheck
+				if err := y.Write(fs); err != nil {
+					zap.L().Sugar().Warnf("unable to save licensed enterprise features check cache to profile: %v", err)
+				}
 			}
 		}
 	}
+	if ws, err := mTerm.GetWinsize(0); err == nil && msg != "" {
+		// text.Wrap removes the newline from the text. We add it back.
+		msg = "\n" + text.Wrap(msg, int(ws.Width)) + "\n"
+	}
 	return msg
+}
+
+// isTrialAboutToExpire checks if the loaded "free_trial" license will expire in
+// less than 15 days and if enterprise features are enabled. It returns the
+// number of days remaining until expiration and a boolean indicating whether
+// the trial is about to expire.
+func isTrialAboutToExpire(info rpadmin.License, enabledFeatures []string) (int, bool) {
+	if len(enabledFeatures) > 0 && info.Loaded && strings.EqualFold(info.Properties.Type, "free_trial") {
+		ut := time.Unix(info.Properties.Expires, 0)
+		daysLeft := int(time.Until(ut).Hours() / 24)
+
+		return daysLeft, daysLeft < 15 && !ut.Before(time.Now())
+	}
+	return -1, false
+}
+
+// isEnterpriseExpired returns true if we have a loaded enterprise license
+// that has expired and the user still has enterprise features enabled.
+func isEnterpriseExpired(info rpadmin.License, enabledFeatures []string) bool {
+	if len(enabledFeatures) > 0 && info.Loaded && strings.EqualFold(info.Properties.Type, "enterprise") {
+		ut := time.Unix(info.Properties.Expires, 0)
+		return ut.Before(time.Now())
+	}
+	return false
 }

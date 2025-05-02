@@ -33,8 +33,8 @@ class consensus;
  *
  * The process goes like this: storage layer will send a "deletion notification"
  * - a request to evict log up to a certain offset. log_eviction_stm will then
- * adjust that offset with _stm_manager->max_collectible_offset(), write the
- * raft snapshot and notify the storage layer that log eviction can safely
+ * adjust that offset with _stm_manager->max_removable_local_log_offset(), write
+ * the raft snapshot and notify the storage layer that log eviction can safely
  * proceed up to the adjusted offset.
  *
  * This class also initiates and responds to delete-records events. Call
@@ -108,8 +108,13 @@ public:
 
     ss::future<iobuf> take_snapshot(model::offset) final { co_return iobuf{}; }
 
+    raft::stm_initial_recovery_policy
+    get_initial_recovery_policy() const final {
+        return raft::stm_initial_recovery_policy::read_everything;
+    }
+
 protected:
-    ss::future<>
+    ss::future<raft::local_snapshot_applied>
     apply_local_snapshot(raft::stm_snapshot_header, iobuf&&) override;
 
     ss::future<raft::stm_snapshot>
@@ -161,7 +166,8 @@ public:
 
     void create(
       raft::state_machine_manager_builder& builder,
-      raft::consensus* raft) final;
+      raft::consensus* raft,
+      const cluster::stm_instance_config&) final;
 
 private:
     storage::kvstore& _kvstore;

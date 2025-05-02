@@ -19,7 +19,8 @@ def redpanda_cc_library(
         visibility = None,
         include_prefix = None,
         copts = [],
-        deps = []):
+        deps = [],
+        tags = []):
     """
     Define a Redpanda C++ library.
     """
@@ -36,6 +37,7 @@ def redpanda_cc_library(
         implementation_deps = implementation_deps,
         deps = deps,
         copts = redpanda_copts() + copts,
+        tags = tags,
         features = [
             "layering_check",
         ],
@@ -48,7 +50,9 @@ def redpanda_cc_binary(
         defines = [],
         local_defines = [],
         visibility = None,
+        testonly = False,
         copts = [],
+        linkopts = [],
         deps = []):
     """
     Define a Redpanda C++ binary.
@@ -61,7 +65,9 @@ def redpanda_cc_binary(
         local_defines = local_defines,
         visibility = visibility,
         deps = deps,
+        testonly = testonly,
         copts = redpanda_copts() + copts,
+        linkopts = linkopts,
         features = [
             "layering_check",
         ],

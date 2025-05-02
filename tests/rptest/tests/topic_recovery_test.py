@@ -48,6 +48,10 @@ from rptest.utils.si_utils import (
 
 CLOUD_STORAGE_SEGMENT_MAX_UPLOAD_INTERVAL_SEC = 10
 
+ALLOWED_REPLICA_VALIDATOR_ERRORS = [
+    "anomaly detected: Offset translation anomaly detected for offset",
+]
+
 
 class BaseCase:
     """Base class for all test cases. The template method inside the test
@@ -205,7 +209,10 @@ class BaseCase:
             err_msg=
             f'failed to get high watermark before produce for {topic_spec}')
 
-        self._kafka_tools.produce(topic_spec.name, 10000, 1024)
+        self._kafka_tools.produce(topic_spec.name,
+                                  10000,
+                                  1024,
+                                  enable_idempotence=False)
 
         new_state = PartitionState(self._rpk, topic_spec.name)
         wait_until(
@@ -1204,6 +1211,7 @@ class TopicRecoveryTest(RedpandaTest):
             extra_rp_conf={
                 'cloud_storage_recovery_topic_validation_mode':
                 'check_manifest_existence',
+                'cloud_storage_disable_upload_consistency_checks': 'true',
             },
             **kwargs)
 
@@ -1211,6 +1219,7 @@ class TopicRecoveryTest(RedpandaTest):
         self._started = True
 
         self.rpk = RpkTool(self.redpanda)
+        self.admin = Admin(self.redpanda)
 
     def rpk_producer_maker(self,
                            topic: str,
@@ -1271,9 +1280,13 @@ class TopicRecoveryTest(RedpandaTest):
         def included(path):
             controller_log_prefix = os.path.join(RedpandaService.DATA_DIR,
                                                  "redpanda")
+            internal_log_prefix = os.path.join(RedpandaService.DATA_DIR,
+                                               "kafka_internal")
             log_segment_extension = ".log"
             return not path.startswith(
-                controller_log_prefix) and path.endswith(log_segment_extension)
+                controller_log_prefix) and path.endswith(
+                    log_segment_extension
+                ) and not path.startswith(internal_log_prefix)
 
         return self._get_log_segment_checksums(node, included)
 
@@ -1467,22 +1480,42 @@ class TopicRecoveryTest(RedpandaTest):
         expected_num_leaders = sum(
             [t.partition_count for t in recovered_topics])
 
+        def all_replicas_in_sync(topic, *, partition, num_replicas):
+            partition_state = self.admin.get_partition_state(
+                "kafka", topic, partition)
+            if len(partition_state["replicas"]) != num_replicas:
+                return False
+            hwms = [
+                replica["high_watermark"]
+                for replica in partition_state["replicas"]
+            ]
+            return all([hwm == hwms[0] for hwm in hwms])
+
         def verify():
             num_leaders = 0
-            try:
-                for topic in recovered_topics:
-                    topic_state = self.rpk.describe_topic(topic.name)
-                    # Describe topics only works after leader election succeded.
-                    # We can use it to wait until the recovery is completed.
-                    for partition in topic_state:
-                        self.logger.info(f"partition: {partition}")
-                        if partition.leader in partition.replicas:
-                            num_leaders += 1
-            except:
-                return False
+            for topic in recovered_topics:
+                topic_state = self.rpk.describe_topic(topic.name)
+                # Describe topics only works after leader election succeded.
+                # We can use it to wait until the recovery is completed.
+                for partition in topic_state:
+                    self.logger.info(f"partition: {partition}")
+                    if partition.leader in partition.replicas:
+                        num_leaders += 1
+
+                        # If we have a leader, we can check if all replicas are in sync
+                        if not all_replicas_in_sync(topic.name,
+                                                    partition=partition.id,
+                                                    num_replicas=len(
+                                                        partition.replicas)):
+                            self.logger.debug(
+                                "partition replicas are not in sync yet")
+                            return False
             return num_leaders == expected_num_leaders
 
-        wait_until(verify, timeout_sec=timeout.total_seconds(), backoff_sec=1)
+        wait_until(verify,
+                   timeout_sec=timeout.total_seconds(),
+                   backoff_sec=1,
+                   retry_on_exc=True)
 
     def do_run(self, test_case: BaseCase, upload_delay_sec=60):
         """Template method invoked by all tests."""
@@ -1556,7 +1589,7 @@ class TopicRecoveryTest(RedpandaTest):
              log_allow_list=MISSING_DATA_ERRORS + TRANSIENT_ERRORS)
     @matrix(cloud_storage_type=get_cloud_storage_type())
     def test_no_data(self, cloud_storage_type):
-        """If we're trying to recovery a topic which didn't have any data
+        """If we're trying to recover a topic which didn't have any data
         in old cluster the empty topic should be created. We should be able
         to produce to the topic."""
         test_case = NoDataCase(self.redpanda, self.cloud_storage_client,
@@ -1607,7 +1640,8 @@ class TopicRecoveryTest(RedpandaTest):
         self.do_run(test_case)
 
     @cluster(num_nodes=4,
-             log_allow_list=MISSING_DATA_ERRORS + TRANSIENT_ERRORS)
+             log_allow_list=MISSING_DATA_ERRORS + TRANSIENT_ERRORS +
+             ALLOWED_REPLICA_VALIDATOR_ERRORS)
     @matrix(cloud_storage_type=get_cloud_storage_type())
     def test_missing_segment(self, cloud_storage_type):
         """Test the handling of the missing segment. The segment is

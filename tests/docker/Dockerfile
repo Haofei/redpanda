@@ -12,7 +12,7 @@
 # WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 # See the License for the specific language governing permissions and
 # limitations under the License.
-FROM public.ecr.aws/docker/library/ubuntu:jammy-20230816 AS base
+FROM public.ecr.aws/docker/library/ubuntu:jammy-20240911.1 AS base
 
 ENV TZ="UTC" \
     DEBIAN_FRONTEND=noninteractive
@@ -242,6 +242,32 @@ RUN /polaris && rm /polaris
 
 #################################
 
+FROM base AS nessie
+COPY --chown=0:0 --chmod=0755 tests/docker/ducktape-deps/nessie /
+RUN /nessie && rm /nessie
+
+#################################
+
+FROM base AS iceberg-rest
+COPY --chown=0:0 tests/java/iceberg-rest-catalog /opt/redpanda-tests/java/iceberg-rest-catalog
+COPY --chown=0:0 --chmod=0755 tests/docker/ducktape-deps/iceberg-rest-catalog /
+RUN /iceberg-rest-catalog && rm /iceberg-rest-catalog
+
+#################################
+
+FROM base AS trino
+COPY --chown=0:0 --chmod=0755 tests/docker/ducktape-deps/trino /
+RUN /trino && rm /trino
+
+#################################
+
+FROM base AS spark
+COPY --chown=0:0 tests/java/spark-iceberg-dependencies /opt/redpanda-tests/java/spark-iceberg-dependencies
+COPY --chown=0:0 --chmod=0755 tests/docker/ducktape-deps/spark /
+RUN /spark && rm /spark
+
+#################################
+
 FROM librdkafka AS final
 
 COPY --chown=0:0 --chmod=0755 tests/docker/ducktape-deps/python-deps /
@@ -332,7 +358,11 @@ COPY --from=wasi-transforms /opt/transforms/ /opt/transforms/
 COPY --from=ocsf /opt/ocsf-schema/ /opt/ocsf-schema/
 COPY --from=ocsf /opt/ocsf-server/ /opt/ocsf-server/
 COPY --from=polaris /opt/polaris/ /opt/polaris/
+COPY --from=nessie /opt/nessie/ /opt/nessie/
 COPY --from=flink /opt/flink/ /opt/flink/
+COPY --from=iceberg-rest /opt/iceberg-rest-catalog /opt/iceberg-rest-catalog
+COPY --from=trino /opt/trino /opt/trino
+COPY --from=spark /opt/spark /opt/spark
 
 RUN ldconfig
 

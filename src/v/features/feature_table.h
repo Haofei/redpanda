@@ -38,35 +38,19 @@ struct feature_table_snapshot;
 /// only used at runtime.  Therefore it is safe to re-use an integer that
 /// has been made available by another feature being retired.
 enum class feature : std::uint64_t {
-    serde_raft_0 = 1ULL << 5U,
-    license = 1ULL << 6U,
-    raft_improved_configuration = 1ULL << 7U,
-    transaction_ga = 1ULL << 8U,
-    raftless_node_status = 1ULL << 9U,
-    rpc_v2_by_default = 1ULL << 10U,
     cloud_retention = 1ULL << 11U,
-    node_id_assignment = 1ULL << 12U,
-    replication_factor_change = 1ULL << 13U,
-    ephemeral_secrets = 1ULL << 14U,
-    seeds_driven_bootstrap_capable = 1ULL << 15U,
-    tm_stm_cache = 1ULL << 16U,
-    kafka_gssapi = 1ULL << 17U,
-    partition_move_revert_cancel = 1ULL << 18U,
     node_isolation = 1ULL << 19U,
     group_offset_retention = 1ULL << 20U,
-    rpc_transport_unknown_errc = 1ULL << 21U,
     membership_change_controller_cmds = 1ULL << 22U,
     controller_snapshots = 1ULL << 23U,
     cloud_storage_manifest_format_v2 = 1ULL << 24U,
     force_partition_reconfiguration = 1ULL << 26U,
-    raft_append_entries_serde = 1ULL << 28U,
     delete_records = 1ULL << 29U,
     raft_coordinated_recovery = 1ULL << 31U,
     cloud_storage_scrubbing = 1ULL << 32U,
     enhanced_force_reconfiguration = 1ULL << 33U,
     broker_time_based_retention = 1ULL << 34U,
     wasm_transforms = 1ULL << 35U,
-    raft_config_serde = 1ULL << 36U,
     fast_partition_reconfiguration = 1ULL << 38U,
     disabling_partitions = 1ULL << 39U,
     cloud_metadata_cluster_recovery = 1ULL << 40U,
@@ -83,7 +67,11 @@ enum class feature : std::uint64_t {
     remote_labels = 1ULL << 51U,
     partition_properties_stm = 1ULL << 52U,
     shadow_indexing_split_topic_property_update = 1ULL << 53U,
-
+    datalake_iceberg = 1ULL << 54U,
+    raft_symmetric_reconfiguration_cancel = 1ULL << 55U,
+    datalake_iceberg_ga = 1ULL << 56U,
+    cloud_storage_metadata_rw_fence = 1ULL << 57U,
+    node_restart_risk_assessment = 1ULL << 58U,
     // Dummy features for testing only
     test_alpha = 1ULL << 61U,
     test_bravo = 1ULL << 62U,
@@ -96,8 +84,13 @@ enum class feature : std::uint64_t {
 // controller messages for unknown features (unexpected), and controller
 // messages that refer to features that have been retired.
 //
-// retired does *not* mean the functionality is gone: it just means it
+// Retired does *not* mean the functionality is gone: it just means it
 // is no longer guarded by a feature flag.
+//
+// All feature checks need to be removed one version before the feature is
+// retired. That's because during upgrade, when a mixed version cluster is
+// running, the older version nodes may read a snaphot from the newer version
+// and get the feature automatically enabled.
 inline const std::unordered_set<std::string_view> retired_features = {
   "central_config",
   "consumer_offsets",
@@ -108,6 +101,21 @@ inline const std::unordered_set<std::string_view> retired_features = {
   "idempotency_v2",
   "transaction_partitioning",
   "lightweight_heartbeats",
+  "serde_raft_0",
+  "license",
+  "raft_improved_configuration",
+  "raftless_node_status",
+  "rpc_v2_by_default",
+  "node_id_assignment",
+  "replication_factor_change",
+  "ephemeral_secrets",
+  "seeds_driven_bootstrap_capable",
+  "tm_stm_cache",
+  "kafka_gssapi",
+  "partition_move_revert_cancel",
+  "rpc_transport_unknown_errc",
+  "raft_append_entries_serde",
+  "raft_config_serde",
 };
 
 // The latest_version associated with past releases. Increment this
@@ -134,7 +142,8 @@ enum class release_version : int64_t {
     v24_1_1 = 12,
     v24_2_1 = 13,
     v24_3_1 = 14,
-    MAX = v24_3_1, // affects the latest_version
+    v25_1_1 = 15,
+    MAX = v25_1_1, // affects the latest_version
 };
 
 constexpr cluster::cluster_version to_cluster_version(release_version rv) {
@@ -151,10 +160,13 @@ constexpr cluster::cluster_version to_cluster_version(release_version rv) {
     case release_version::v24_1_1:
     case release_version::v24_2_1:
     case release_version::v24_3_1:
+    case release_version::v25_1_1:
         return cluster::cluster_version{static_cast<int64_t>(rv)};
     }
     vassert(false, "Invalid release_version");
 }
+
+constexpr cluster::cluster_version TEST_VERSION{2001};
 
 bool is_major_version_upgrade(
   cluster::cluster_version from, cluster::cluster_version to);
@@ -220,89 +232,11 @@ struct feature_spec {
 
 inline constexpr std::array feature_schema{
   feature_spec{
-    release_version::v22_2_1,
-    "serde_raft_0",
-    feature::serde_raft_0,
-    feature_spec::available_policy::always,
-    feature_spec::prepare_policy::always},
-  feature_spec{
-    release_version::v22_2_1,
-    "license",
-    feature::license,
-    feature_spec::available_policy::always,
-    feature_spec::prepare_policy::always},
-  feature_spec{
-    release_version::v22_2_1,
-    "raft_improved_configuration",
-    feature::raft_improved_configuration,
-    feature_spec::available_policy::always,
-    feature_spec::prepare_policy::always},
-  feature_spec{
-    release_version::v22_2_6,
-    "transaction_ga",
-    feature::transaction_ga,
-    feature_spec::available_policy::always,
-    feature_spec::prepare_policy::always},
-  feature_spec{
-    release_version::v22_3_1,
-    "raftless_node_status",
-    feature::raftless_node_status,
-    feature_spec::available_policy::always,
-    feature_spec::prepare_policy::always},
-  feature_spec{
-    release_version::v22_3_1,
-    "rpc_v2_by_default",
-    feature::rpc_v2_by_default,
-    feature_spec::available_policy::always,
-    feature_spec::prepare_policy::always},
-  feature_spec{
     release_version::v22_3_1,
     "cloud_retention",
     feature::cloud_retention,
     feature_spec::available_policy::always,
     feature_spec::prepare_policy::requires_migration},
-  feature_spec{
-    release_version::v22_3_1,
-    "node_id_assignment",
-    feature::node_id_assignment,
-    feature_spec::available_policy::always,
-    feature_spec::prepare_policy::always},
-  feature_spec{
-    release_version::v22_3_1,
-    "replication_factor_change",
-    feature::replication_factor_change,
-    feature_spec::available_policy::always,
-    feature_spec::prepare_policy::always},
-  feature_spec{
-    release_version::v22_3_1,
-    "ephemeral_secrets",
-    feature::ephemeral_secrets,
-    feature_spec::available_policy::always,
-    feature_spec::prepare_policy::always},
-  feature_spec{
-    release_version::v22_3_1,
-    "seeds_driven_bootstrap_capable",
-    feature::seeds_driven_bootstrap_capable,
-    feature_spec::available_policy::always,
-    feature_spec::prepare_policy::always},
-  feature_spec{
-    release_version::v22_3_6,
-    "tm_stm_cache",
-    feature::tm_stm_cache,
-    feature_spec::available_policy::always,
-    feature_spec::prepare_policy::always},
-  feature_spec{
-    release_version::v23_1_1,
-    "kafka_gssapi",
-    feature::kafka_gssapi,
-    feature_spec::available_policy::always,
-    feature_spec::prepare_policy::always},
-  feature_spec{
-    release_version::v23_1_1,
-    "partition_move_revert_cancel",
-    feature::partition_move_revert_cancel,
-    feature_spec::available_policy::always,
-    feature_spec::prepare_policy::always},
   feature_spec{
     release_version::v23_1_1,
     "node_isolation",
@@ -313,12 +247,6 @@ inline constexpr std::array feature_schema{
     release_version::v23_1_1,
     "group_offset_retention",
     feature::group_offset_retention,
-    feature_spec::available_policy::always,
-    feature_spec::prepare_policy::always},
-  feature_spec{
-    release_version::v23_1_1,
-    "rpc_transport_unknown_errc",
-    feature::rpc_transport_unknown_errc,
     feature_spec::available_policy::always,
     feature_spec::prepare_policy::always},
   feature_spec{
@@ -343,12 +271,6 @@ inline constexpr std::array feature_schema{
     release_version::v23_2_1,
     "force_partition_reconfiguration",
     feature::force_partition_reconfiguration,
-    feature_spec::available_policy::always,
-    feature_spec::prepare_policy::always},
-  feature_spec{
-    release_version::v23_2_1,
-    "raft_append_entries_serde",
-    feature::raft_append_entries_serde,
     feature_spec::available_policy::always,
     feature_spec::prepare_policy::always},
   feature_spec{
@@ -385,12 +307,6 @@ inline constexpr std::array feature_schema{
     release_version::v23_3_1,
     "wasm_transforms",
     feature::wasm_transforms,
-    feature_spec::available_policy::always,
-    feature_spec::prepare_policy::always},
-  feature_spec{
-    release_version::v23_3_1,
-    "raft_config_serde",
-    feature::raft_config_serde,
     feature_spec::available_policy::always,
     feature_spec::prepare_policy::always},
   feature_spec{
@@ -445,7 +361,7 @@ inline constexpr std::array feature_schema{
     release_version::v24_2_1,
     "node_local_core_assignment",
     feature::node_local_core_assignment,
-    feature_spec::available_policy::explicit_only,
+    feature_spec::available_policy::always,
     feature_spec::prepare_policy::requires_migration},
   feature_spec{
     release_version::v24_2_1,
@@ -487,6 +403,36 @@ inline constexpr std::array feature_schema{
     release_version::v24_3_1,
     "shadow_indexing_split_topic_property_update",
     feature::shadow_indexing_split_topic_property_update,
+    feature_spec::available_policy::always,
+    feature_spec::prepare_policy::always},
+  feature_spec{
+    release_version::v24_3_1,
+    "datalake_iceberg",
+    feature::datalake_iceberg,
+    feature_spec::available_policy::always,
+    feature_spec::prepare_policy::always},
+  feature_spec{
+    release_version::v25_1_1,
+    "raft_symmetric_reconfiguration_cancel",
+    feature::raft_symmetric_reconfiguration_cancel,
+    feature_spec::available_policy::always,
+    feature_spec::prepare_policy::always},
+  feature_spec{
+    release_version::v25_1_1,
+    "datalake_iceberg_ga",
+    feature::datalake_iceberg_ga,
+    feature_spec::available_policy::always,
+    feature_spec::prepare_policy::always},
+  feature_spec{
+    release_version::v25_1_1,
+    "cloud_storage_read_write_fence",
+    feature::cloud_storage_metadata_rw_fence,
+    feature_spec::available_policy::always,
+    feature_spec::prepare_policy::always},
+  feature_spec{
+    release_version::v25_1_1,
+    "node_restart_risk_assessment",
+    feature::node_restart_risk_assessment,
     feature_spec::available_policy::always,
     feature_spec::prepare_policy::always},
 };
@@ -585,9 +531,25 @@ public:
 
     void set_license(security::license license);
 
+    /// Sets the builtin trial license based on the cluster creation time
+    void set_builtin_trial_license(model::timestamp cluster_creation_timestamp);
+
     void revoke_license();
 
+    /// Returns the user-configured license or if not set, a built in trial
+    /// license. The built in trial license is initialized async on cluster
+    /// bootstrap and during startup on subsequent starts, so consider using
+    /// `should_sanction` instead for a general, permissive check on whether
+    /// to act on a missing valid license.
     const std::optional<security::license>& get_license() const;
+
+    /// Returns the user-configured license without falling back to the
+    /// evaluation period license
+    const std::optional<security::license>& get_configured_license() const;
+
+    /// Whether to act on an expired license or evaluation period by restricting
+    /// enterprise feature usage
+    bool should_sanction() const;
 
     /**
      * For use in unit tests: activate all features that would
@@ -719,6 +681,13 @@ private:
 
     // Currently loaded redpanda license details
     std::optional<security::license> _license;
+
+    // Built in trial license to fall back to if there is no license set
+    std::optional<security::license> _builtin_trial_license;
+
+    // Whether _builtin_trial_license has ever been initialized
+    // Used for implementing revoking the trial license for testing
+    bool _builtin_trial_license_initialized{false};
 
     model::offset _applied_offset{};
 

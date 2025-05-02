@@ -40,8 +40,9 @@ struct topic_configuration
     storage::ntp_config make_ntp_config(
       const ss::sstring&,
       model::partition_id,
-      model::revision_id,
-      model::initial_revision_id) const;
+      model::revision_id rev,
+      model::revision_id topic_rev,
+      model::initial_revision_id remote_rev) const;
 
     bool is_internal() const {
         return tp_ns.ns == model::kafka_internal_namespace
@@ -55,6 +56,14 @@ struct topic_configuration
     }
     bool has_remote_topic_namespace_override() const {
         return properties.remote_topic_namespace_override.has_value();
+    }
+    bool is_schema_id_validation_enabled() const {
+        return properties.record_key_schema_id_validation.value_or(false)
+               || properties.record_key_schema_id_validation_compat.value_or(
+                 false)
+               || properties.record_value_schema_id_validation.value_or(false)
+               || properties.record_value_schema_id_validation_compat.value_or(
+                 false);
     }
 
     const model::topic_namespace& remote_tp_ns() const {

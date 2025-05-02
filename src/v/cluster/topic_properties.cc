@@ -17,12 +17,13 @@ namespace cluster {
 std::ostream& operator<<(std::ostream& o, const topic_properties& properties) {
     fmt::print(
       o,
-      "{{compression: {}, cleanup_policy_bitflags: {}, compaction_strategy: "
+      "{{ compression: {}, cleanup_policy_bitflags: {}, compaction_strategy: "
       "{}, retention_bytes: {}, retention_duration_ms: {}, segment_size: {}, "
       "timestamp_type: {}, recovery_enabled: {}, shadow_indexing: {}, "
       "read_replica: {}, read_replica_bucket: {}, "
       "remote_topic_namespace_override: {}, "
       "remote_topic_properties: {}, "
+      "remote_topic_allow_gaps: {}, "
       "batch_max_bytes: {}, retention_local_target_bytes: {}, "
       "retention_local_target_ms: {}, remote_delete: {}, segment_ms: {}, "
       "record_key_schema_id_validation: {}, "
@@ -39,8 +40,14 @@ std::ostream& operator<<(std::ostream& o, const topic_properties& properties) {
       "write_caching: {}, "
       "flush_ms: {}, "
       "flush_bytes: {}, "
-      "remote_label: {}, iceberg_enabled: {}, "
-      "leaders_preference: {}",
+      "remote_label: {}, iceberg_mode: {}, "
+      "leaders_preference: {}, "
+      "delete_retention_ms: {}, "
+      "iceberg_delete: {}, "
+      "iceberg_partition_spec: {}, "
+      "iceberg_invalid_record_action: {}, "
+      "iceberg_target_lag_ms: {}, "
+      "min_cleanable_dirty_ratio: {}",
       properties.compression,
       properties.cleanup_policy_bitflags,
       properties.compaction_strategy,
@@ -54,6 +61,7 @@ std::ostream& operator<<(std::ostream& o, const topic_properties& properties) {
       properties.read_replica_bucket,
       properties.remote_topic_namespace_override,
       properties.remote_topic_properties,
+      properties.remote_topic_allow_gaps,
       properties.batch_max_bytes,
       properties.retention_local_target_bytes,
       properties.retention_local_target_ms,
@@ -74,8 +82,14 @@ std::ostream& operator<<(std::ostream& o, const topic_properties& properties) {
       properties.flush_ms,
       properties.flush_bytes,
       properties.remote_label,
-      properties.iceberg_enabled,
-      properties.leaders_preference);
+      properties.iceberg_mode,
+      properties.leaders_preference,
+      properties.delete_retention_ms,
+      properties.iceberg_delete,
+      properties.iceberg_partition_spec,
+      properties.iceberg_invalid_record_action,
+      properties.iceberg_target_lag_ms,
+      properties.min_cleanable_dirty_ratio);
 
     if (config::shard_local_cfg().development_enable_cloud_topics()) {
         fmt::print(
@@ -86,7 +100,6 @@ std::ostream& operator<<(std::ostream& o, const topic_properties& properties) {
 
     return o;
 }
-
 bool topic_properties::is_compacted() const {
     if (!cleanup_policy_bitflags) {
         return false;
@@ -120,8 +133,13 @@ bool topic_properties::has_overrides() const {
         || initial_retention_local_target_ms.is_engaged()
         || write_caching.has_value() || flush_ms.has_value()
         || flush_bytes.has_value() || remote_label.has_value()
-        || (iceberg_enabled != storage::ntp_config::default_iceberg_enabled)
-        || leaders_preference.has_value();
+        || (iceberg_mode != storage::ntp_config::default_iceberg_mode)
+        || leaders_preference.has_value() || delete_retention_ms.is_engaged()
+        || iceberg_delete.has_value() || iceberg_partition_spec.has_value()
+        || iceberg_invalid_record_action.has_value()
+        || iceberg_target_lag_ms.has_value()
+        || min_cleanable_dirty_ratio.is_engaged()
+        || remote_topic_allow_gaps.has_value();
 
     if (config::shard_local_cfg().development_enable_cloud_topics()) {
         return overrides
@@ -161,8 +179,11 @@ topic_properties::get_ntp_cfg_overrides() const {
     ret.write_caching = write_caching;
     ret.flush_ms = flush_ms;
     ret.flush_bytes = flush_bytes;
-    ret.iceberg_enabled = iceberg_enabled;
+    ret.iceberg_mode = iceberg_mode;
     ret.cloud_topic_enabled = cloud_topic_enabled;
+    ret.tombstone_retention_ms = delete_retention_ms;
+    ret.min_cleanable_dirty_ratio = min_cleanable_dirty_ratio;
+    ret.remote_allow_gaps = remote_topic_allow_gaps;
     return ret;
 }
 
@@ -251,9 +272,17 @@ adl<cluster::topic_properties>::from(iobuf_parser& parser) {
       std::nullopt,
       std::nullopt,
       std::nullopt,
-      false,
+      model::iceberg_mode::disabled,
       std::nullopt,
-      false};
+      false,
+      tristate<std::chrono::milliseconds>{disable_tristate},
+      std::nullopt,
+      std::nullopt,
+      std::nullopt,
+      std::nullopt,
+      tristate<double>{std::nullopt},
+      std::nullopt,
+    };
 }
 
 } // namespace reflection

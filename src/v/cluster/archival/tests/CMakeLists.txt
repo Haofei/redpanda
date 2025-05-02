@@ -68,14 +68,42 @@ else()
       BINARY_NAME gtest_archival
       SOURCES
         archival_metadata_stm_gtest.cc
-        archiver_operations_impl_gtest.cc
-        archiver_scheduler_impl_gtest.cc
       LIBRARIES
         v::raft
         v::raft_fixture
         v::cluster
         v::cloud_roles
         v::http_test_utils
+        v::storage_test_utils
+        v::gtest_main
+      LABELS archival
+      ARGS "-- -c 1"
+    )
+
+    rp_test(
+      UNIT_TEST
+      GTEST
+      BINARY_NAME gtest_archival_policy
+      SOURCES
+      archival_policy_test.cc
+      LIBRARIES
+        v::cluster
+        v::storage
+        v::storage_test_utils
+        v::gtest_main
+      LABELS archival
+      ARGS "-- -c 1"
+    )
+
+    rp_test(
+      UNIT_TEST
+      GTEST
+      BINARY_NAME gtest_replica_state_validator_test
+      SOURCES
+        replica_state_validator_test.cc
+      LIBRARIES
+        v::cluster
+        v::storage
         v::storage_test_utils
         v::gtest_main
       LABELS archival

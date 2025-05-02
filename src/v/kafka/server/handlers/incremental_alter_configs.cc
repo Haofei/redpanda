@@ -10,6 +10,7 @@
 
 #include "cluster/config_frontend.h"
 #include "cluster/types.h"
+#include "config/configuration.h"
 #include "config/node_config.h"
 #include "kafka/protocol/errors.h"
 #include "kafka/protocol/incremental_alter_configs.h"
@@ -334,13 +335,12 @@ create_topic_properties_update(
                   flush_bytes_validator{});
                 continue;
             }
-            if (cfg.name == topic_property_iceberg_enabled) {
-                parse_and_set_bool(
+            if (cfg.name == topic_property_iceberg_mode) {
+                parse_and_set_property(
                   tp_ns,
-                  update.properties.iceberg_enabled,
+                  update.properties.iceberg_mode,
                   cfg.value,
                   op,
-                  storage::ntp_config::default_iceberg_enabled,
                   iceberg_config_validator{});
                 continue;
             }
@@ -361,7 +361,60 @@ create_topic_properties_update(
                 }
                 throw validation_error("Cloud topics is not enabled");
             }
+            if (cfg.name == topic_property_delete_retention_ms) {
+                parse_and_set_tristate(
+                  update.properties.delete_retention_ms,
+                  cfg.value,
+                  op,
+                  delete_retention_ms_validator{});
+                continue;
+            }
+            if (cfg.name == topic_property_iceberg_delete) {
+                parse_and_set_optional_bool_alpha(
+                  update.properties.iceberg_delete, cfg.value, op);
+                continue;
+            }
+            if (cfg.name == topic_property_iceberg_partition_spec) {
+                // Use std::identity as the "parser function" (i.e. pass through
+                // the raw string) because boost::lexical_cast<ss::sstring> (the
+                // default) doesn't allow spaces in the config value.
+                parse_and_set_optional(
+                  update.properties.iceberg_partition_spec,
+                  cfg.value,
+                  op,
+                  iceberg_partition_spec_validator{},
+                  std::identity{});
+                continue;
+            }
+            if (cfg.name == topic_property_iceberg_invalid_record_action) {
+                parse_and_set_optional(
+                  update.properties.iceberg_invalid_record_action,
+                  cfg.value,
+                  op);
+                continue;
+            }
+            if (cfg.name == topic_property_remote_allow_gaps) {
+                parse_and_set_optional_bool_alpha(
+                  update.properties.remote_allow_gaps, cfg.value, op);
+                continue;
+            }
+            if (cfg.name == topic_property_iceberg_target_lag_ms) {
+                parse_and_set_optional_duration(
+                  update.properties.iceberg_target_lag_ms,
+                  cfg.value,
+                  op,
+                  iceberg_target_lag_ms_validator{});
+                continue;
+            }
 
+            if (cfg.name == topic_property_min_cleanable_dirty_ratio) {
+                parse_and_set_tristate(
+                  update.properties.min_cleanable_dirty_ratio,
+                  cfg.value,
+                  op,
+                  min_cleanable_dirty_ratio_validator{});
+                continue;
+            }
         } catch (const validation_error& e) {
             vlog(
               klog.debug,
@@ -416,10 +469,11 @@ inline std::string_view map_config_name(std::string_view input) {
       .match("log.message.timestamp.type", "log_message_timestamp_type")
       .match("log.compression.type", "log_compression_type")
       .match("log.roll.ms", "log_segment_ms")
+      .match("log.cleaner.delete.retention.ms", "tombstone_retention_ms")
       .default_match(input);
 }
 
-static ss::future<chunked_vector<resp_resource_t>> alter_broker_configuartion(
+static ss::future<chunked_vector<resp_resource_t>> alter_broker_configuration(
   request_context& ctx, chunked_vector<req_resource_t> resources) {
     chunked_vector<resp_resource_t> responses;
     responses.reserve(resources.size());
@@ -441,7 +495,8 @@ static ss::future<chunked_vector<resp_resource_t>> alter_broker_configuartion(
             //   compression.type=producer sensitive=false
             //   synonyms={DEFAULT_CONFIG:log_compression_type=producer}
             // (configuration.cc doesn't know `compression.type` but known
-            // `log_compression_type`) but for redpanda's properties it returns
+            // `log_compression_type`) but for redpanda's properties it
+            // returns
             //   redpanda.remote.read=false sensitive=false
             //   synonyms={DEFAULT_CONFIG:redpanda.remote.read=false}
             // which looks wrong because configuration.cc doesn't know
@@ -590,7 +645,7 @@ ss::future<response_ptr> incremental_alter_configs_handler::handle(
     futures.push_back(alter_topic_configuration(
       ctx, std::move(groupped.topic_changes), request.data.validate_only));
     futures.push_back(
-      alter_broker_configuartion(ctx, std::move(groupped.broker_changes)));
+      alter_broker_configuration(ctx, std::move(groupped.broker_changes)));
 
     auto ret = co_await ss::when_all_succeed(futures.begin(), futures.end());
     // include authorization errors

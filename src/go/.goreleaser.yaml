@@ -9,8 +9,6 @@ builds:
       - -X github.com/redpanda-data/redpanda/src/go/rpk/pkg/cli/version.version={{.Tag}}
       - -X github.com/redpanda-data/redpanda/src/go/rpk/pkg/cli/version.rev={{.ShortCommit}}
       - -X github.com/redpanda-data/redpanda/src/go/rpk/pkg/cli/version.buildTime={{.Date}}
-      - -X github.com/redpanda-data/redpanda/src/go/rpk/pkg/cli/version.hostOs={{.Os}}
-      - -X github.com/redpanda-data/redpanda/src/go/rpk/pkg/cli/version.hostArch={{.Arch}}
       - -X github.com/redpanda-data/redpanda/src/go/rpk/pkg/cli/container/common.tag={{.Tag}}
     env:
       - CGO_ENABLED=0
@@ -28,11 +26,11 @@ builds:
       - -X github.com/redpanda-data/redpanda/src/go/rpk/pkg/cli/version.version={{.Tag}}
       - -X github.com/redpanda-data/redpanda/src/go/rpk/pkg/cli/version.rev={{.ShortCommit}}
       - -X github.com/redpanda-data/redpanda/src/go/rpk/pkg/cli/version.buildTime={{.Date}}
-      - -X github.com/redpanda-data/redpanda/src/go/rpk/pkg/cli/version.hostOs={{.Os}}
-      - -X github.com/redpanda-data/redpanda/src/go/rpk/pkg/cli/version.hostArch={{.Arch}}
       - -X github.com/redpanda-data/redpanda/src/go/rpk/pkg/cli/container/common.tag={{.Tag}}
     env:
       - 'CGO_ENABLED={{ if index .Env "CGO_ENABLED" }}{{ .Env.CGO_ENABLED }}{{ else }}0{{ end }}'
+    tags:
+      - fips
     goos:
       - linux
     goarch:
@@ -46,8 +44,6 @@ builds:
       - -X github.com/redpanda-data/redpanda/src/go/rpk/pkg/cli/version.version={{.Tag}}
       - -X github.com/redpanda-data/redpanda/src/go/rpk/pkg/cli/version.rev={{.ShortCommit}}
       - -X github.com/redpanda-data/redpanda/src/go/rpk/pkg/cli/version.buildTime={{.Date}}
-      - -X github.com/redpanda-data/redpanda/src/go/rpk/pkg/cli/version.hostOs={{.Os}}
-      - -X github.com/redpanda-data/redpanda/src/go/rpk/pkg/cli/version.hostArch={{.Arch}}
       - -X github.com/redpanda-data/redpanda/src/go/rpk/pkg/cli/container/common.tag={{.Tag}}
     env:
       - CGO_ENABLED=0
@@ -64,8 +60,6 @@ builds:
       - -X github.com/redpanda-data/redpanda/src/go/rpk/pkg/cli/version.version={{.Tag}}
       - -X github.com/redpanda-data/redpanda/src/go/rpk/pkg/cli/version.rev={{.ShortCommit}}
       - -X github.com/redpanda-data/redpanda/src/go/rpk/pkg/cli/version.buildTime={{.Date}}
-      - -X github.com/redpanda-data/redpanda/src/go/rpk/pkg/cli/version.hostOs={{.Os}}
-      - -X github.com/redpanda-data/redpanda/src/go/rpk/pkg/cli/version.hostArch={{.Arch}}
       - -X github.com/redpanda-data/redpanda/src/go/rpk/pkg/cli/container/common.tag={{.Tag}}
     env:
       - CGO_ENABLED=0
@@ -82,8 +76,6 @@ builds:
       - -X github.com/redpanda-data/redpanda/src/go/rpk/pkg/cli/version.version={{.Tag}}
       - -X github.com/redpanda-data/redpanda/src/go/rpk/pkg/cli/version.rev={{.ShortCommit}}
       - -X github.com/redpanda-data/redpanda/src/go/rpk/pkg/cli/version.buildTime={{.Date}}
-      - -X github.com/redpanda-data/redpanda/src/go/rpk/pkg/cli/version.hostOs={{.Os}}
-      - -X github.com/redpanda-data/redpanda/src/go/rpk/pkg/cli/version.hostArch={{.Arch}}
       - -X github.com/redpanda-data/redpanda/src/go/rpk/pkg/cli/container/common.tag={{.Tag}}
     env:
       - CGO_ENABLED=0
@@ -117,39 +109,5 @@ release:
     - rpk-zip
   draft: true
   discussion_category_name: Releases
-brews:
-  - name: redpanda
-    homepage: "https://redpanda.com"
-    description: "Redpanda CLI & toolbox"
-    repository:
-      owner: redpanda-data
-      name: homebrew-tap
-    folder: Formula
-    skip_upload: auto
-    ids:
-      - rpk-zip
-    extra_install: |
-      generate_completions_from_executable(bin/"rpk", "generate", "shell-completion", base_name: "rpk")
-    caveats: |
-        Redpanda Keeper (rpk) is Redpanda's command line interface (CLI)
-        utility. The rpk commands let you configure, manage, and tune
-        Redpanda clusters. They also let you manage topics, groups,
-        and access control lists (ACLs).
-        Start a three-node docker cluster locally:
-
-            rpk container start -n 3
-
-        Interact with the cluster using commands like:
-
-            rpk topic list
-
-        When done, stop and delete the docker cluster:
-
-            rpk container purge
-
-        For more examples and guides, visit: https://docs.redpanda.com
-    commit_author:
-      name: vbotbuildovich
-      email: vbot@redpanda.com
 announce:
   skip: "true"

@@ -202,6 +202,10 @@ public:
     bool get_default_record_value_schema_id_validation() const;
     pandaproxy::schema_registry::subject_name_strategy
     get_default_record_value_subject_name_strategy() const;
+    std::optional<std::chrono::milliseconds>
+    get_default_delete_retention_ms() const;
+    std::chrono::milliseconds get_default_iceberg_target_lag_ms() const;
+    std::optional<double> get_default_min_cleanable_dirty_ratio() const;
 
     topic_properties get_default_properties() const;
     std::optional<partition_assignment>

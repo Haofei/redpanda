@@ -15,6 +15,8 @@
 #include "model/record_batch_types.h"
 #include "model/record_utils.h"
 #include "random/generators.h"
+#include "storage/compacted_index.h"
+#include "storage/compaction.h"
 #include "storage/index_state.h"
 #include "storage/logger.h"
 #include "storage/parser_utils.h"
@@ -22,6 +24,7 @@
 #include "storage/segment_utils.h"
 
 #include <seastar/core/future.hh>
+#include <seastar/core/loop.hh>
 
 #include <absl/algorithm/container.h>
 #include <boost/range/irange.hpp>
@@ -158,12 +161,14 @@ copy_data_segment_reducer::filter(model::record_batch batch) {
     int32_t records_seen = 0;
     co_await batch.for_each_record_async(
       [this, &batch, &offset_deltas, &records_seen](const model::record& r) {
-          records_seen++;
+          ++records_seen;
           return maybe_keep_offset(
             batch, r, batch.record_count() == records_seen, offset_deltas);
       });
 
-    if (batch.last_offset() == _segment_last_offset && offset_deltas.empty()) {
+    if (
+      _compaction_placeholder_enabled
+      && batch.last_offset() == _segment_last_offset && offset_deltas.empty()) {
         // last batch in the segment has been compacted away.
         // This is most likely caused by aborted data batches getting compacted
         // away during self compaction of the segment if they are the last batch
@@ -171,7 +176,7 @@ copy_data_segment_reducer::filter(model::record_batch batch) {
         // contiguousness of the offset space.
         auto placeholder = make_placeholder_batch(batch.header());
         vlog(
-          stlog.debug,
+          gclog.debug,
           "installing a placeholder {} for compacted batch: {}",
           placeholder,
           batch);
@@ -276,12 +281,22 @@ copy_data_segment_reducer::filter(model::record_batch batch) {
 
 ss::future<ss::stop_iteration> copy_data_segment_reducer::filter_and_append(
   model::compression original, model::record_batch b) {
+    ++_stats.batches_processed;
     using stop_t = ss::stop_iteration;
+    const auto record_count_before = b.record_count();
     auto to_copy = co_await filter(std::move(b));
     if (to_copy == std::nullopt) {
+        ++_stats.batches_discarded;
+        _stats.records_discarded += record_count_before;
         co_return stop_t::no;
     }
+    const auto records_to_remove = record_count_before
+                                   - to_copy->record_count();
+    _stats.records_discarded += records_to_remove;
     bool compactible_batch = is_compactible(to_copy.value());
+    if (!compactible_batch) {
+        ++_stats.non_compactible_batches;
+    }
     if (_compacted_idx && compactible_batch) {
         co_await model::for_each_record(
           to_copy.value(),
@@ -303,7 +318,7 @@ ss::future<ss::stop_iteration> copy_data_segment_reducer::filter_and_append(
     // caller who has more context
     if (_idx.maybe_index(
           _acc,
-          32_KiB,
+          segment_index::default_data_buffer_step,
           start_pos,
           batch.base_offset(),
           batch.last_offset(),
@@ -425,12 +440,63 @@ ss::future<ss::stop_iteration> tx_reducer::operator()(model::record_batch&& b) {
           can_discard_tx_data_batch(b)
           || can_discard_consumer_offsets_batch(b)) {
             vlog(
-              stlog.trace, "discarded batch during compaction: {}", b.header());
+              gclog.trace, "discarded batch during compaction: {}", b.header());
             _stats.batches_discarded++;
             co_return ss::stop_iteration::no;
         }
     }
     co_return co_await _delegate(std::move(b));
+}
+
+ss::future<ss::stop_iteration> map_building_reducer::maybe_index_record_in_map(
+  const model::record& r,
+  model::offset base_offset,
+  model::record_batch_type type,
+  bool is_control,
+  bool& fully_indexed_batch) {
+    auto offset = base_offset + model::offset_delta(r.offset_delta());
+    if (offset < _start_offset) {
+        co_return ss::stop_iteration::no;
+    }
+
+    auto key_view = iobuf_to_bytes(r.key());
+    auto key = enhance_key(type, is_control, key_view);
+    bool success = co_await _map->put(key, offset);
+
+    if (success) {
+        co_return ss::stop_iteration::no;
+    }
+
+    fully_indexed_batch = false;
+    co_return ss::stop_iteration::yes;
+}
+
+ss::future<ss::stop_iteration>
+map_building_reducer::operator()(model::record_batch batch) {
+    bool fully_indexed_batch = true;
+    // There is no point to indexing records in uncompactible batches, since
+    // their inclusion in the segment post compaction is irrespective of the map
+    // state (see copy_data_segment_reducer::filter()).
+    if (!is_compactible(batch)) {
+        co_return ss::stop_iteration::no;
+    }
+    auto b = co_await decompress_batch(std::move(batch));
+    co_await b.for_each_record_async(
+      [this,
+       &fully_indexed_batch,
+       base_offset = b.base_offset(),
+       type = b.header().type,
+       is_control = b.header().attrs.is_control()](
+        const model::record& r) -> ss::future<ss::stop_iteration> {
+          return maybe_index_record_in_map(
+            r, base_offset, type, is_control, fully_indexed_batch);
+      });
+
+    if (fully_indexed_batch) {
+        co_return ss::stop_iteration::no;
+    }
+    _fully_indexed_segment = false;
+    co_return ss::stop_iteration::yes;
 }
 
 } // namespace storage::internal

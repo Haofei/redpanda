@@ -23,13 +23,11 @@ v_cc_library(
     rpc_client_protocol.cc
     group_manager.cc
     probe.cc
-    offset_monitor.cc
     event_manager.cc
     state_machine.cc
     configuration_manager.cc
     group_configuration.cc
     append_entries_buffer.cc
-    follower_queue.cc
     recovery_memory_quota.cc
     coordinated_recovery_throttle.cc
     heartbeats.cc
@@ -38,6 +36,7 @@ v_cc_library(
     recovery_scheduler.cc
     persisted_stm.cc
     replication_monitor.cc
+    buffered_protocol.cc
   DEPS
     v::storage
     raft_rpc

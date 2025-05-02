@@ -36,10 +36,12 @@ public:
 
     ss::future<iobuf> take_snapshot(model::offset) final;
 
-    // Updates partition properties to disable writes
-    ss::future<std::error_code> disable_writes();
-    // Updates partition properties to enable writes
-    ss::future<std::error_code> enable_writes();
+    // Updates partition properties to disable writes;
+    // returns the offset of the blocking message
+    ss::future<result<model::offset>> disable_writes();
+    // Updates partition properties to enable writes;
+    // returns the offset of the unblocking message
+    ss::future<result<model::offset>> enable_writes();
     // Waits for the state to be up to date and returns an up to date state of
     // write disabled property, this method may return an error and is only
     // intended to be called on the current leader.
@@ -47,8 +49,13 @@ public:
     // Returns a current value of the writes disabled property.
     writes_disabled are_writes_disabled() const;
 
+    raft::stm_initial_recovery_policy
+    get_initial_recovery_policy() const final {
+        return raft::stm_initial_recovery_policy::skip_to_end;
+    }
+
 protected:
-    ss::future<>
+    ss::future<raft::local_snapshot_applied>
     apply_local_snapshot(raft::stm_snapshot_header, iobuf&&) override;
 
     ss::future<raft::stm_snapshot>
@@ -126,7 +133,7 @@ private:
     static model::record_batch
       make_update_partitions_batch(update_writes_disabled_cmd);
 
-    ss::future<std::error_code> replicate_properties_update(
+    ss::future<result<model::offset>> replicate_properties_update(
       model::timeout_clock::duration timeout,
       update_writes_disabled_cmd command);
 
@@ -150,7 +157,8 @@ public:
 
     void create(
       raft::state_machine_manager_builder& builder,
-      raft::consensus* raft) final;
+      raft::consensus* raft,
+      const cluster::stm_instance_config& cfg) final;
 
 private:
     storage::kvstore& _kvstore;

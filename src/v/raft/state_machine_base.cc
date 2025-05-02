@@ -16,6 +16,12 @@
 
 namespace raft {
 
+ss::future<> state_machine_base::apply(const model::record_batch& b) {
+    auto units = co_await _apply_lock.get_units();
+    co_await apply(b, units);
+    set_next(model::next_offset(b.last_offset()));
+}
+
 void state_machine_base::set_next(model::offset offset) {
     vassert(
       offset >= _next,
@@ -27,6 +33,7 @@ void state_machine_base::set_next(model::offset offset) {
 }
 
 ss::future<> state_machine_base::stop() {
+    _apply_lock.broken();
     _waiters.stop();
     co_return;
 }
@@ -34,8 +41,18 @@ ss::future<> state_machine_base::stop() {
 ss::future<> state_machine_base::wait(
   model::offset offset,
   model::timeout_clock::time_point timeout,
-  std::optional<std::reference_wrapper<ss::abort_source>> as) {
+  std::optional<std::reference_wrapper<ss::abort_source>> as) const {
     co_await _waiters.wait(offset, timeout, as);
+}
+
+std::ostream&
+operator<<(std::ostream& o, const stm_initial_recovery_policy& p) {
+    switch (p) {
+    case stm_initial_recovery_policy::read_everything:
+        return o << "read_everything";
+    case stm_initial_recovery_policy::skip_to_end:
+        return o << "skip_to_end";
+    }
 }
 
 } // namespace raft

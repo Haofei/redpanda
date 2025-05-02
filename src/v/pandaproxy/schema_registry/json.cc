@@ -178,14 +178,14 @@ struct json_schema_definition::impl {
     impl(
       document_context ctx,
       std::string_view name,
-      canonical_schema_definition::references refs)
+      schema_definition::references refs)
       : ctx{std::move(ctx)}
       , name{name}
       , refs(std::move(refs)) {}
 
     document_context ctx;
     ss::sstring name;
-    canonical_schema_definition::references refs;
+    schema_definition::references refs;
 };
 
 bool operator==(
@@ -202,12 +202,11 @@ std::ostream& operator<<(std::ostream& os, const json_schema_definition& def) {
     return os;
 }
 
-canonical_schema_definition::raw_string json_schema_definition::raw() const {
-    return canonical_schema_definition::raw_string{_impl->to_json()};
+schema_definition::raw_string json_schema_definition::raw() const {
+    return schema_definition::raw_string{_impl->to_json()};
 }
 
-const canonical_schema_definition::references&
-json_schema_definition::refs() const {
+const schema_definition::references& json_schema_definition::refs() const {
     return _impl->refs;
 }
 
@@ -230,15 +229,15 @@ std::string_view as_string_view(const json::Value& v) {
     return {v.GetString(), v.GetStringLength()};
 }
 
-ss::future<> check_references(sharded_store& store, canonical_schema schema) {
+ss::future<> check_references(sharded_store& store, subject_schema schema) {
     for (const auto& ref : schema.def().refs()) {
-        co_await store.is_subject_version_deleted(ref.sub, ref.version)
-          .handle_exception([](auto) { return is_deleted::yes; })
-          .then([&](is_deleted d) {
-              if (d) {
+        co_await store.get_id(ref.sub, ref.version)
+          .handle_exception_type([&](const exception& e) -> schema_id {
+              if (failed_subject_schema_lookup(e.code())) {
                   throw as_exception(
                     no_reference_found_for(schema, ref.sub, ref.version));
               }
+              throw;
           });
     }
 }
@@ -2205,6 +2204,13 @@ void sort(json::Value& val) {
     }
 }
 
+constexpr const char* id_keyword(json_schema_dialect jsd) {
+    if (jsd == json_schema_dialect::draft4) {
+        return "id";
+    }
+    return "$id";
+}
+
 void collect_bundled_schemas_and_fix_refs(
   id_to_schema_pointer& bundled_schemas,
   jsoncons::uri base_uri,
@@ -2229,59 +2235,32 @@ void collect_bundled_schemas_and_fix_refs(
     //   "id"  | >draft4  |       no
     //   "id"  |  draft4  |       yes
 
-    auto maybe_draft4_id_it = this_obj.find("id");
-    auto maybe_id_it = this_obj.find("$id");
-    if (
-      maybe_id_it != this_obj.object_range().end()
-      || maybe_draft4_id_it != this_obj.object_range().end()) {
-        // we are visiting a bundled schema. the dialect has to be known and has
-        // to match the keyword used.
-        // try to extract the dialect from the $schema keyword, or use the
-        // parent dialect. empty means that "$schema" is present but the dialect
-        // is not known, and we should stop scanning this branch.
-        auto maybe_new_dialect = [&]() -> std::optional<json_schema_dialect> {
-            auto dialect_it = this_obj.find("$schema");
-            if (dialect_it == this_obj.object_range().end()) {
-                // If no $schema is declared in an embedded schema, it defaults
-                // to using the dialect of the parent schema. from
-                // https://json-schema.org/understanding-json-schema/structuring#bundling
-                return dialect;
-            }
-
-            // we have a $schema keyword, use this dialect if we find out that
-            // this_obj is a bundled schema
-            return from_uri(dialect_it->value().as_string_view());
-        }();
-
-        if (maybe_new_dialect.has_value() == false) {
-            // stop scanning this tree, we might be in a bundled schema but we
-            // don't know the dialect.
-            throw as_exception(invalid_schema(fmt::format(
-              "bundled schema without a known dialect: '{}'",
-              this_obj["$schema"].as_string_view())));
+    auto maybe_new_dialect = [&]() -> std::optional<json_schema_dialect> {
+        const auto dialect_it = this_obj.find("$schema");
+        if (dialect_it == this_obj.object_range().end()) {
+            // If no $schema is declared in an embedded schema, it defaults
+            // to using the dialect of the parent schema. from
+            // https://json-schema.org/understanding-json-schema/structuring#bundling
+            return dialect;
         }
 
-        // we are in a bundled schema and we know the dialect to use, now we
-        // know which keyword to use to get the base_uri
-        auto id_it = [&] {
-            switch (maybe_new_dialect.value()) {
-            case json_schema_dialect::draft4:
-                return maybe_draft4_id_it;
-            case json_schema_dialect::draft6:
-            case json_schema_dialect::draft7:
-            case json_schema_dialect::draft201909:
-            case json_schema_dialect::draft202012:
-                return maybe_id_it;
-            }
-        }();
+        // we have a $schema keyword, use this dialect if we find out that
+        // this_obj is a bundled schema
+        return from_uri(dialect_it->value().as_string_view());
+    }();
 
-        if (id_it == this_obj.object_range().end()) {
-            // stop scanning this branch, the keyword for base uri does not
-            // agree with schema dialect.
-            throw as_exception(invalid_schema(fmt::format(
-              "bundled schema with mismatched dialect '{}' for id key",
-              to_uri(maybe_new_dialect.value()))));
-        }
+    if (!maybe_new_dialect.has_value()) {
+        // stop scanning this tree, we might be in a bundled schema but we
+        // don't know the dialect.
+        throw as_exception(invalid_schema(fmt::format(
+          "bundled schema without a known dialect: '{}'",
+          this_obj["$schema"].as_string_view())));
+    }
+
+    const auto id_it = this_obj.find(id_keyword(maybe_new_dialect.value()));
+
+    if (id_it != this_obj.object_range().end()) {
+        // we are visiting a bundled schema.
 
         // run validation since we are not a guaranteed to be in proper schema
         if (auto validation = validate_json_schema(
@@ -2293,9 +2272,9 @@ void collect_bundled_schemas_and_fix_refs(
               validation.assume_error().message())));
         }
 
-        // base uri keyword agrees with the dialect, it's a validated schema, we
-        // can register this as a bundled schema and continue scanning.
-        // (run resolve because it could be relative to the parent schema).
+        // it's a validated schema. we can register this as a bundled schema and
+        // continue scanning. (run resolve because it could be relative to the
+        // parent schema).
         base_uri = jsoncons::uri{id_it->value().as_string()}.resolve(base_uri);
         dialect = maybe_new_dialect.value();
         bundled_schemas.insert_or_assign(
@@ -2343,8 +2322,7 @@ result<id_to_schema_pointer> collect_bundled_schema_and_fix_refs(
             return json_id_uri{""};
         }
 
-        auto id_it = doc.find(
-          dialect == json_schema_dialect::draft4 ? "id" : "$id");
+        auto id_it = doc.find(id_keyword(dialect));
         if (id_it == doc.object_range().end()) {
             // no explicit id, use the empty string
             return json_id_uri{""};
@@ -2378,7 +2356,7 @@ result<id_to_schema_pointer> collect_bundled_schema_and_fix_refs(
 } // namespace
 
 ss::future<json_schema_definition>
-make_json_schema_definition(sharded_store&, canonical_schema schema) {
+make_json_schema_definition(schema_getter&, subject_schema schema) {
     auto doc
       = parse_json(schema.def().shared_raw()()).value(); // throws on error
     std::string_view name = schema.sub()();
@@ -2388,8 +2366,8 @@ make_json_schema_definition(sharded_store&, canonical_schema schema) {
         std::move(doc), name, std::move(refs))};
 }
 
-ss::future<canonical_schema> make_canonical_json_schema(
-  sharded_store& store, unparsed_schema unparsed_schema, normalize norm) {
+ss::future<subject_schema> make_canonical_json_schema(
+  sharded_store& store, subject_schema unparsed_schema, normalize norm) {
     auto [sub, unparsed] = std::move(unparsed_schema).destructure();
     auto [def, type, refs] = std::move(unparsed).destructure();
 
@@ -2403,10 +2381,10 @@ ss::future<canonical_schema> make_canonical_json_schema(
     json::Writer<json::chunked_buffer> w{out};
     ctx.doc.Accept(w);
 
-    canonical_schema schema{
+    subject_schema schema{
       std::move(sub),
-      canonical_schema_definition{
-        canonical_schema_definition::raw_string{std::move(out).as_iobuf()},
+      schema_definition{
+        schema_definition::raw_string{std::move(out).as_iobuf()},
         type,
         std::move(refs)}};
 

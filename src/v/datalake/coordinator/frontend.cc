@@ -14,12 +14,97 @@
 #include "cluster/partition_manager.h"
 #include "cluster/shard_table.h"
 #include "cluster/topics_frontend.h"
+#include "datalake/coordinator/coordinator_manager.h"
 #include "datalake/coordinator/state_machine.h"
+#include "datalake/coordinator/translated_offset_range.h"
+#include "datalake/coordinator/types.h"
 #include "datalake/logger.h"
 #include "raft/group_manager.h"
 #include "rpc/connection_cache.h"
 
 namespace datalake::coordinator {
+
+namespace {
+errc to_rpc_errc(coordinator::errc e) {
+    switch (e) {
+    case coordinator::errc::shutting_down:
+    case coordinator::errc::not_leader:
+        return errc::not_leader;
+    case coordinator::errc::stm_apply_error:
+        return errc::stale;
+    case coordinator::errc::revision_mismatch:
+        return errc::revision_mismatch;
+    case coordinator::errc::incompatible_schema:
+        return errc::incompatible_schema;
+    case coordinator::errc::timedout:
+        return errc::timeout;
+    case coordinator::errc::failed:
+        return errc::failed;
+    }
+}
+ss::future<ensure_table_exists_reply> do_ensure_table_exists(
+  coordinator_manager& mgr,
+  model::ntp coordinator_ntp,
+  ensure_table_exists_request req) {
+    auto crd = mgr.get(coordinator_ntp);
+    if (!crd) {
+        co_return ensure_table_exists_reply{errc::not_leader};
+    }
+    auto ret = co_await crd->sync_ensure_table_exists(
+      req.topic, req.topic_revision, std::move(req.schema_components));
+    if (ret.has_error()) {
+        co_return to_rpc_errc(ret.error());
+    }
+    co_return ensure_table_exists_reply{errc::ok};
+}
+ss::future<ensure_dlq_table_exists_reply> do_ensure_dlq_table_exists(
+  coordinator_manager& mgr,
+  model::ntp coordinator_ntp,
+  ensure_dlq_table_exists_request req) {
+    auto crd = mgr.get(coordinator_ntp);
+    if (!crd) {
+        co_return ensure_dlq_table_exists_reply{errc::not_leader};
+    }
+    auto ret = co_await crd->sync_ensure_dlq_table_exists(
+      req.topic, req.topic_revision);
+    if (ret.has_error()) {
+        co_return to_rpc_errc(ret.error());
+    }
+    co_return ensure_dlq_table_exists_reply{errc::ok};
+}
+ss::future<add_translated_data_files_reply> add_files(
+  coordinator_manager& mgr,
+  model::ntp coordinator_ntp,
+  add_translated_data_files_request req) {
+    auto crd = mgr.get(coordinator_ntp);
+    if (!crd) {
+        co_return add_translated_data_files_reply{errc::not_leader};
+    }
+    auto ret = co_await crd->sync_add_files(
+      req.tp, req.topic_revision, std::move(req.ranges));
+    if (ret.has_error()) {
+        co_return to_rpc_errc(ret.error());
+    }
+    co_return add_translated_data_files_reply{errc::ok};
+}
+ss::future<fetch_latest_translated_offset_reply> fetch_latest_offset(
+  coordinator_manager& mgr,
+  model::ntp coordinator_ntp,
+  fetch_latest_translated_offset_request req) {
+    auto crd = mgr.get(coordinator_ntp);
+    if (!crd) {
+        co_return fetch_latest_translated_offset_reply{errc::not_leader};
+    }
+    auto ret = co_await crd->sync_get_last_added_offsets(
+      req.tp, req.topic_revision);
+    if (ret.has_error()) {
+        co_return to_rpc_errc(ret.error());
+    }
+    auto& val = ret.value();
+    co_return fetch_latest_translated_offset_reply{
+      val.last_added_offset, val.last_committed_offset};
+}
+} // namespace
 
 template<auto Func, typename req_t>
 requires requires(frontend::proto_t f, req_t req, ::rpc::client_opts opts) {
@@ -39,14 +124,15 @@ auto frontend::remote_dispatch(req_t request, model::node_id leader_id) {
               ::rpc::client_opts{model::timeout_clock::now() + rpc_timeout});
         })
       .then(&::rpc::get_ctx_data<resp_t>)
-      .then([leader_id](result<resp_t> r) {
+      .then([leader_id, self = _self](result<resp_t> r) {
           if (r.has_error()) {
               vlog(
                 datalake::datalake_log.warn,
-                "got error {} on coordinator {}",
+                "got error {} sending to coordinator leader {} from node {}",
                 r.error().message(),
-                leader_id);
-              return resp_t{datalake::coordinator_errc::timeout};
+                leader_id,
+                self);
+              return resp_t{errc::timeout};
           }
           return r.value();
       });
@@ -63,9 +149,13 @@ auto frontend::process(req_t req, bool local_only) {
                                         bool exists) mutable {
         if (!exists) {
             return ss::make_ready_future<resp_t>(
-              resp_t{datalake::coordinator_errc::coordinator_topic_not_exists});
+              resp_t{errc::coordinator_topic_not_exists});
         }
-        auto cp = coordinator_partition(req.topic_partition());
+        auto cp = coordinator_partition(req.get_topic());
+        if (!cp) {
+            return ss::make_ready_future<resp_t>(
+              resp_t{errc::coordinator_topic_not_exists});
+        }
         model::ntp c_ntp{
           model::datalake_coordinator_nt.ns,
           model::datalake_coordinator_nt.tp,
@@ -80,8 +170,7 @@ auto frontend::process(req_t req, bool local_only) {
         } else if (leader && !local_only) {
             return remote_dispatch<RemoteFunc>(std::move(req), leader.value());
         }
-        return ss::make_ready_future<resp_t>(
-          resp_t{datalake::coordinator_errc::not_leader});
+        return ss::make_ready_future<resp_t>(resp_t{errc::not_leader});
     });
 }
 
@@ -96,43 +185,47 @@ template auto frontend::process<
   add_translated_data_files_request, bool);
 
 template auto
-  frontend::remote_dispatch<&frontend::client::fetch_latest_data_file>(
-    fetch_latest_data_file_request, model::node_id);
+  frontend::remote_dispatch<&frontend::client::fetch_latest_translated_offset>(
+    fetch_latest_translated_offset_request, model::node_id);
 
 template auto frontend::process<
-  &frontend::fetch_latest_data_file_locally,
-  &frontend::client::fetch_latest_data_file>(
-  fetch_latest_data_file_request, bool);
+  &frontend::fetch_latest_translated_offset_locally,
+  &frontend::client::fetch_latest_translated_offset>(
+  fetch_latest_translated_offset_request, bool);
 
 // -- explicit instantiations ---
 
 frontend::frontend(
   model::node_id self,
+  ss::sharded<coordinator_manager>* coordinator_mgr,
   ss::sharded<raft::group_manager>* group_mgr,
   ss::sharded<cluster::partition_manager>* partition_mgr,
   ss::sharded<cluster::topics_frontend>* topics_frontend,
   ss::sharded<cluster::metadata_cache>* metadata,
   ss::sharded<cluster::partition_leaders_table>* leaders,
-  ss::sharded<cluster::shard_table>* shards)
+  ss::sharded<cluster::shard_table>* shards,
+  ss::sharded<::rpc::connection_cache>* connections)
   : _self(self)
+  , _coordinator_mgr(coordinator_mgr)
   , _group_mgr(group_mgr)
   , _partition_mgr(partition_mgr)
   , _topics_frontend(topics_frontend)
   , _metadata(metadata)
   , _leaders(leaders)
-  , _shard_table(shards) {}
+  , _shard_table(shards)
+  , _connection_cache(connections) {}
 
 ss::future<> frontend::stop() { return _gate.close(); }
 
 std::optional<model::partition_id>
-frontend::coordinator_partition(const model::topic_partition& tp) const {
+frontend::coordinator_partition(const model::topic& topic) const {
     const auto md = _metadata->local().get_topic_metadata_ref(
       model::datalake_coordinator_nt);
     if (!md) {
         return std::nullopt;
     }
     iobuf temp;
-    write(temp, tp);
+    write(temp, topic);
     auto bytes = iobuf_to_bytes(temp);
     auto partition = murmur2(bytes.data(), bytes.size())
                      % md->get().get_configuration().partition_count;
@@ -200,22 +293,68 @@ ss::future<bool> frontend::ensure_topic_exists() {
     }
 }
 
+ss::future<ensure_table_exists_reply> frontend::ensure_table_exists_locally(
+  ensure_table_exists_request request,
+  const model::ntp& coordinator_partition,
+  ss::shard_id shard) {
+    co_return co_await _coordinator_mgr->invoke_on(
+      shard,
+      [coordinator_partition,
+       req = std::move(request)](coordinator_manager& mgr) mutable {
+          auto partition = mgr.get(coordinator_partition);
+          if (!partition) {
+              return ssx::now(ensure_table_exists_reply{errc::not_leader});
+          }
+          return do_ensure_table_exists(
+            mgr, coordinator_partition, std::move(req));
+      });
+}
+
+ss::future<ensure_table_exists_reply> frontend::ensure_table_exists(
+  ensure_table_exists_request request, local_only local_only_exec) {
+    auto holder = _gate.hold();
+    co_return co_await process<
+      &frontend::ensure_table_exists_locally,
+      &client::ensure_table_exists>(std::move(request), bool(local_only_exec));
+}
+
+ss::future<ensure_dlq_table_exists_reply>
+frontend::ensure_dlq_table_exists_locally(
+  ensure_dlq_table_exists_request request,
+  const model::ntp& coordinator_partition,
+  ss::shard_id shard) {
+    co_return co_await _coordinator_mgr->invoke_on(
+      shard,
+      [coordinator_partition,
+       req = std::move(request)](coordinator_manager& mgr) mutable {
+          auto partition = mgr.get(coordinator_partition);
+          if (!partition) {
+              return ssx::now(ensure_dlq_table_exists_reply{errc::not_leader});
+          }
+          return do_ensure_dlq_table_exists(
+            mgr, coordinator_partition, std::move(req));
+      });
+}
+
+ss::future<ensure_dlq_table_exists_reply> frontend::ensure_dlq_table_exists(
+  ensure_dlq_table_exists_request request, local_only local_only_exec) {
+    auto holder = _gate.hold();
+    co_return co_await process<
+      &frontend::ensure_dlq_table_exists_locally,
+      &client::ensure_dlq_table_exists>(
+      std::move(request), bool(local_only_exec));
+}
+
 ss::future<add_translated_data_files_reply>
 frontend::add_translated_data_files_locally(
   add_translated_data_files_request request,
   const model::ntp& coordinator_partition,
   ss::shard_id shard) {
-    co_return co_await _partition_mgr->invoke_on(
+    co_return co_await _coordinator_mgr->invoke_on(
       shard,
-      [&coordinator_partition,
-       req = std::move(request)](cluster::partition_manager& mgr) mutable {
-          auto partition = mgr.get(coordinator_partition);
-          if (!partition) {
-              return ssx::now(
-                add_translated_data_files_reply{coordinator_errc::not_leader});
-          }
-          auto stm = partition->raft()->stm_manager()->get<coordinator_stm>();
-          return stm->add_translated_data_file(std::move(req));
+      [coordinator_partition,
+       req = std::move(request)](coordinator_manager& mgr) mutable {
+          return add_files(mgr, coordinator_partition, std::move(req));
       });
 }
 
@@ -228,31 +367,32 @@ ss::future<add_translated_data_files_reply> frontend::add_translated_data_files(
       std::move(request), bool(local_only_exec));
 }
 
-ss::future<fetch_latest_data_file_reply>
-frontend::fetch_latest_data_file_locally(
-  fetch_latest_data_file_request request,
+ss::future<fetch_latest_translated_offset_reply>
+frontend::fetch_latest_translated_offset_locally(
+  fetch_latest_translated_offset_request request,
   const model::ntp& coordinator_partition,
   ss::shard_id shard) {
-    co_return co_await _partition_mgr->invoke_on(
+    co_return co_await _coordinator_mgr->invoke_on(
       shard,
-      [&coordinator_partition,
-       req = std::move(request)](cluster::partition_manager& mgr) mutable {
+      [coordinator_partition,
+       req = std::move(request)](coordinator_manager& mgr) mutable {
           auto partition = mgr.get(coordinator_partition);
           if (!partition) {
               return ssx::now(
-                fetch_latest_data_file_reply{coordinator_errc::not_leader});
+                fetch_latest_translated_offset_reply{errc::not_leader});
           }
-          auto stm = partition->raft()->stm_manager()->get<coordinator_stm>();
-          return stm->fetch_latest_data_file(std::move(req));
+          return fetch_latest_offset(
+            mgr, coordinator_partition, std::move(req));
       });
 }
 
-ss::future<fetch_latest_data_file_reply> frontend::fetch_latest_data_file(
-  fetch_latest_data_file_request request, local_only local_only_exec) {
+ss::future<fetch_latest_translated_offset_reply>
+frontend::fetch_latest_translated_offset(
+  fetch_latest_translated_offset_request request, local_only local_only_exec) {
     auto holder = _gate.hold();
     co_return co_await process<
-      &frontend::fetch_latest_data_file_locally,
-      &client::fetch_latest_data_file>(
+      &frontend::fetch_latest_translated_offset_locally,
+      &client::fetch_latest_translated_offset>(
       std::move(request), bool(local_only_exec));
 }
 

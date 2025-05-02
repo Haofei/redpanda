@@ -12,7 +12,6 @@
 #pragma once
 
 #include "bytes/iobuf.h"
-#include "model/limits.h"
 #include "model/record_batch_reader.h"
 #include "storage/lock_manager.h"
 #include "storage/offset_translator_state.h"
@@ -130,10 +129,16 @@ private:
 };
 
 class log_reader final : public model::record_batch_reader::impl {
+    friend struct fmt::formatter<log_reader>;
+
 public:
     using data_t = model::record_batch_reader::data_t;
     using foreign_data_t = model::record_batch_reader::foreign_data_t;
     using storage_t = model::record_batch_reader::storage_t;
+    static std::vector<model::record_batch> make_ghost_batches(
+      model::offset start_offset,
+      model::offset end_offset,
+      model::term_id term);
 
     log_reader(
       std::unique_ptr<lock_manager::lease>,
@@ -151,6 +156,8 @@ public:
 
     ss::future<storage_t> do_load_slice(model::timeout_clock::time_point) final;
 
+    virtual std::optional<private_flags> get_flags() const final;
+
     ss::future<> finally() noexcept final { return _iterator.close(); }
 
     void print(std::ostream& os) final {
@@ -167,14 +174,10 @@ public:
      * 1. read batches with offsets [0,100]
      * 2. reset configuration with start_offset = 101
      * 3. read next chunk of batches
+     *
+     * Resetting a reader also sets its "was cached" attribute to true.
      */
-    void reset_config(log_reader_config cfg) {
-        _config = cfg;
-        _iterator.next_seg = _iterator.current_reader_seg;
-        _expected_next = _config.fill_gaps ? std::make_optional<model::offset>(
-                                               _config.start_offset)
-                                           : std::nullopt;
-    };
+    void reset_config(log_reader_config cfg);
 
     /**
      * Return next read request lower bound. i.e. lowest offset that can be read
@@ -217,12 +220,15 @@ private:
 
 private:
     struct iterator_pair {
-        iterator_pair(segment_set::iterator i)
+        iterator_pair(
+          segment_set::iterator i,
+          std::unique_ptr<log_segment_batch_reader> reader = nullptr)
           : next_seg(i)
-          , current_reader_seg(i) {}
+          , current_reader_seg(i)
+          , reader{std::move(reader)} {}
         segment_set::iterator next_seg;
         segment_set::iterator current_reader_seg;
-        std::unique_ptr<log_segment_batch_reader> reader = nullptr;
+        std::unique_ptr<log_segment_batch_reader> reader;
 
         explicit operator bool() { return bool(reader); }
         ss::future<> close() {
@@ -240,6 +246,11 @@ private:
     bool log_load_slice_depth_warning() const;
     void maybe_log_load_slice_depth_warning(std::string_view) const;
 
+    // Reset the internal state of the reader, using the given config and
+    // the given segment set iterator. This method is shared between the
+    // constructor and the reader cache hit path (which calls reset_config()).
+    void reset(log_reader_config, iterator_pair, bool cache_hit);
+
     std::unique_ptr<lock_manager::lease> _lease;
     iterator_pair _iterator;
 
@@ -249,6 +260,9 @@ private:
 
     // The base offset of the previous batch processed.
     model::offset _last_base;
+
+    // true if this reader was returned as a hit from the readers cache
+    bool _was_cached{};
 
     // The expected next offset to be processed, used to detect and fill gaps.
     std::optional<model::offset> _expected_next;
@@ -283,8 +297,8 @@ private:
  * \param t The timestamp to search for
  * \param max_offset The maximum offset to consider
  */
-timequery_result batch_timequery(
-  const model::record_batch& b,
+ss::future<timequery_result> batch_timequery(
+  model::record_batch b,
   model::offset min_offset,
   model::timestamp t,
   model::offset max_offset);

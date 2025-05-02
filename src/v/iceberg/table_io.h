@@ -1,11 +1,12 @@
-// Copyright 2024 Redpanda Data, Inc.
-//
-// Use of this software is governed by the Business Source License
-// included in the file licenses/BSL.md
-//
-// As of the Change Date specified in that file, in accordance with
-// the Business Source License, use of this software will be governed
-// by the Apache License, Version 2.0
+/*
+ * Copyright 2024 Redpanda Data, Inc.
+ *
+ * Licensed as a Redpanda Enterprise file under the Redpanda Community
+ * License (the "License"); you may not use this file except in compliance with
+ * the License. You may obtain a copy of the License at
+ *
+ * https://github.com/redpanda-data/redpanda/blob/master/licenses/rcl.md
+ */
 #pragma once
 
 #include "base/outcome.h"
@@ -16,8 +17,13 @@
 
 namespace iceberg {
 
+// /<table-location>/metadata/
+using metadata_location_path
+  = named_type<std::filesystem::path, struct metadata_location_path_tag>;
+// /<table-location>/metadata/v0.metadata.json
 using table_metadata_path
   = named_type<std::filesystem::path, struct table_metadata_path_tag>;
+// /<table-location>/metadata/version-hint.text
 using version_hint_path
   = named_type<std::filesystem::path, struct table_metadata_path_tag>;
 
@@ -40,6 +46,9 @@ public:
 
     ss::future<checked<bool, metadata_io::errc>>
     version_hint_exists(const version_hint_path& path);
+
+    ss::future<checked<std::nullopt_t, metadata_io::errc>>
+    delete_all_metadata(const metadata_location_path& path);
 };
 
 } // namespace iceberg

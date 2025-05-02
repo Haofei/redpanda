@@ -1,4 +1,4 @@
-load("//bazel:test.bzl", "redpanda_cc_btest", "redpanda_test_cc_library")
+load("//bazel:test.bzl", "redpanda_cc_btest", "redpanda_cc_gtest", "redpanda_test_cc_library")
 
 redpanda_test_cc_library(
     name = "random",
@@ -21,6 +21,7 @@ redpanda_test_cc_library(
         "//src/v/model",
         "//src/v/random:generators",
         "//src/v/test_utils:random",
+        "//src/v/test_utils:random_bytes",
         "//src/v/utils:vint",
         "//src/v/utils/tests:random",
         "@seastar",
@@ -75,6 +76,24 @@ redpanda_cc_btest(
 )
 
 redpanda_cc_btest(
+    name = "timeout_adl",
+    timeout = "short",
+    srcs = [
+        "timeout_adl.cc",
+    ],
+    cpu = 1,
+    deps = [
+        "//src/v/bytes:iobuf_parser",
+        "//src/v/model",
+        "//src/v/reflection:adl",
+        "//src/v/test_utils:seastar_boost",
+        "//src/v/utils:to_string",
+        "@boost//:test",
+        "@seastar",
+    ],
+)
+
+redpanda_cc_btest(
     name = "topic_view_test",
     timeout = "short",
     srcs = [
@@ -91,16 +110,72 @@ redpanda_cc_btest(
 )
 
 redpanda_cc_btest(
+    name = "record_batch_test",
+    timeout = "short",
+    srcs = [
+        "record_batch_test.cc",
+    ],
+    cpu = 1,
+    deps = [
+        ":random",
+        "//src/v/model",
+        "//src/v/test_utils:seastar_boost",
+        "@boost//:test",
+        "@seastar//:testing",
+    ],
+)
+
+redpanda_cc_btest(
+    name = "model_serialization_test",
+    timeout = "short",
+    srcs = [
+        "model_serialization_test.cc",
+    ],
+    cpu = 1,
+    deps = [
+        "//src/v/model",
+        "//src/v/test_utils:rpc",
+        "//src/v/test_utils:seastar_boost",
+        "@boost//:test",
+        "@seastar//:testing",
+    ],
+)
+
+redpanda_cc_btest(
     name = "record_batch_reader_test",
     timeout = "short",
     srcs = [
         "record_batch_reader_test.cc",
     ],
+    cpu = 1,
     deps = [
         ":random",
         "//src/v/model",
         "//src/v/test_utils:seastar_boost",
         "@seastar",
         "@seastar//:testing",
+    ],
+)
+
+redpanda_cc_gtest(
+    name = "transform_test",
+    timeout = "short",
+    srcs = ["transform_test.cc"],
+    cpu = 1,
+    deps = [
+        ":random",
+        "//src/v/base",
+        "//src/v/model",
+        "//src/v/random:generators",
+        "//src/v/serde:map",
+        "//src/v/serde:sstring",
+        "//src/v/serde:uuid",
+        "//src/v/serde:variant",
+        "//src/v/serde:vector",
+        "//src/v/test_utils:gtest",
+        "//src/v/test_utils:random",
+        "//src/v/test_utils:random_bytes",
+        "@googletest//:gtest",
+        "@seastar",
     ],
 )

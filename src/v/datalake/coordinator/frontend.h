@@ -8,11 +8,14 @@
  * https://github.com/redpanda-data/redpanda/blob/master/licenses/rcl.md
  */
 
+#pragma once
+
 #include "base/outcome.h"
 #include "base/seastarx.h"
 #include "cluster/fwd.h"
 #include "datalake/coordinator/rpc_service.h"
 #include "datalake/coordinator/types.h"
+#include "datalake/fwd.h"
 #include "model/namespace.h"
 #include "raft/fwd.h"
 #include "rpc/fwd.h"
@@ -34,20 +37,29 @@ public:
 
     frontend(
       model::node_id self,
+      ss::sharded<coordinator_manager>*,
       ss::sharded<raft::group_manager>*,
       ss::sharded<cluster::partition_manager>*,
       ss::sharded<cluster::topics_frontend>*,
       ss::sharded<cluster::metadata_cache>*,
       ss::sharded<cluster::partition_leaders_table>*,
-      ss::sharded<cluster::shard_table>*);
+      ss::sharded<cluster::shard_table>*,
+      ss::sharded<::rpc::connection_cache>*);
 
     ss::future<> stop();
+
+    ss::future<ensure_table_exists_reply> ensure_table_exists(
+      ensure_table_exists_request, local_only = local_only::no);
+
+    ss::future<ensure_dlq_table_exists_reply> ensure_dlq_table_exists(
+      ensure_dlq_table_exists_request, local_only = local_only::no);
 
     ss::future<add_translated_data_files_reply> add_translated_data_files(
       add_translated_data_files_request, local_only = local_only::no);
 
-    ss::future<fetch_latest_data_file_reply> fetch_latest_data_file(
-      fetch_latest_data_file_request, local_only = local_only::no);
+    ss::future<fetch_latest_translated_offset_reply>
+      fetch_latest_translated_offset(
+        fetch_latest_translated_offset_request, local_only = local_only::no);
 
 private:
     using proto_t = datalake::coordinator::rpc::impl::
@@ -74,8 +86,22 @@ private:
 
     ss::future<bool> ensure_topic_exists();
 
+    /**
+     * Returns the partition of datalake coordinator topic that
+     * coordinates datalake tasks for this topic partitions.
+     */
     std::optional<model::partition_id>
-    coordinator_partition(const model::topic_partition&) const;
+    coordinator_partition(const model::topic&) const;
+
+    ss::future<ensure_table_exists_reply> ensure_table_exists_locally(
+      ensure_table_exists_request,
+      const model::ntp& coordinator_partition,
+      ss::shard_id);
+
+    ss::future<ensure_dlq_table_exists_reply> ensure_dlq_table_exists_locally(
+      ensure_dlq_table_exists_request,
+      const model::ntp& coordinator_partition,
+      ss::shard_id);
 
     ss::future<add_translated_data_files_reply>
     add_translated_data_files_locally(
@@ -83,12 +109,14 @@ private:
       const model::ntp& coordinator_partition,
       ss::shard_id);
 
-    ss::future<fetch_latest_data_file_reply> fetch_latest_data_file_locally(
-      fetch_latest_data_file_request,
+    ss::future<fetch_latest_translated_offset_reply>
+    fetch_latest_translated_offset_locally(
+      fetch_latest_translated_offset_request,
       const model::ntp& coordinator_partition,
       ss::shard_id);
 
     model::node_id _self;
+    ss::sharded<coordinator_manager>* _coordinator_mgr;
     ss::sharded<raft::group_manager>* _group_mgr;
     ss::sharded<cluster::partition_manager>* _partition_mgr;
     ss::sharded<cluster::topics_frontend>* _topics_frontend;
@@ -97,5 +125,7 @@ private:
     ss::sharded<cluster::shard_table>* _shard_table;
     ss::sharded<::rpc::connection_cache>* _connection_cache;
     ss::gate _gate;
+
+    friend class datalake::tests::datalake_cluster_test_fixture;
 };
 } // namespace datalake::coordinator

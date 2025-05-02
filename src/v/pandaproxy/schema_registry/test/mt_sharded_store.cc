@@ -25,7 +25,7 @@ namespace pp = pandaproxy;
 namespace pps = pp::schema_registry;
 
 SEASTAR_THREAD_TEST_CASE(test_sharded_store_cross_shard_def) {
-    constexpr size_t id_n = 1000;
+    constexpr int id_n = 1000;
     pps::sharded_store store;
     store.start(pps::is_mutable::yes, ss::default_smp_service_group()).get();
     auto stop_store = ss::defer([&store] { store.stop().get(); });
@@ -35,7 +35,7 @@ SEASTAR_THREAD_TEST_CASE(test_sharded_store_cross_shard_def) {
     // Upsert a large(ish) number of schemas to the store, all with different
     // subject names and IDs, so they should hash to different shards.
     for (int i = 1; i <= id_n; ++i) {
-        auto referenced_schema = pps::canonical_schema{
+        auto referenced_schema = pps::subject_schema{
           pps::subject{fmt::format("simple_{}.proto", i)}, simple.share()};
         store
           .upsert(

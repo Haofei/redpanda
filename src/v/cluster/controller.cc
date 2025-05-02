@@ -10,6 +10,7 @@
 #include "cluster/controller.h"
 
 #include "base/likely.h"
+#include "cloud_storage/topic_mount_handler.h"
 #include "cluster/bootstrap_backend.h"
 #include "cluster/client_quota_backend.h"
 #include "cluster/client_quota_frontend.h"
@@ -152,7 +153,6 @@ ss::future<> controller::wire_up() {
           return _partition_allocator.start_single(
             std::ref(_members_table),
             std::ref(_feature_table),
-            config::shard_local_cfg().topic_memory_per_partition.bind(),
             config::shard_local_cfg().topic_fds_per_partition.bind(),
             config::shard_local_cfg().topic_partitions_per_shard.bind(),
             config::shard_local_cfg().topic_partitions_reserve_shard0.bind(),
@@ -164,13 +164,13 @@ ss::future<> controller::wire_up() {
       .then([this] { return _roles.start(); })
       .then([this] { return _data_migrated_resources.start(); })
       .then([this] {
-          _data_migration_table
-            = std::make_unique<data_migrations::migrations_table>(
-              _data_migrated_resources,
-              std::ref(_tp_state),
-              config::shard_local_cfg().cloud_storage_enabled()
-                && config::shard_local_cfg()
-                     .cloud_storage_disable_archiver_manager());
+          return _data_migration_table.start_on(
+            data_migrations::data_migrations_shard,
+            std::ref(_data_migrated_resources),
+            std::ref(_tp_state),
+            config::shard_local_cfg().cloud_storage_enabled()
+              && config::shard_local_cfg()
+                   .cloud_storage_disable_archiver_manager());
       })
       .then([this] {
           return _authorizer.start(
@@ -248,7 +248,7 @@ ss::future<> controller::start(
       _partition_manager,
       _shard_table,
       config::node().data_directory().as_sstring(),
-      initial_raft0_brokers);
+      seed_nodes);
 
     co_await _partition_leaders.start(std::ref(_tp_state));
     co_await _drain_manager.start(std::ref(_partition_manager));
@@ -305,14 +305,30 @@ ss::future<> controller::start(
       std::ref(_members_table),
       std::ref(_as));
 
+    if (auto bucket_opt = get_configured_bucket(); bucket_opt.has_value()) {
+        co_await _topic_mount_handler.start(
+          bucket_opt.value(), ss::sharded_parameter([this] {
+              return std::ref(_cloud_storage_api.local());
+          }));
+    }
+
     co_await _data_migration_frontend.start(
       _raft0->self().id(),
       _cloud_storage_api.local_is_initialized(),
-      std::ref(*_data_migration_table),
+      std::ref(_data_migration_table),
       std::ref(_feature_table),
       std::ref(_stm),
       std::ref(_partition_leaders),
       std::ref(_connections),
+      ss::sharded_parameter(
+        [this]() -> std::optional<
+                   std::reference_wrapper<cloud_storage::topic_mount_handler>> {
+            if (_topic_mount_handler.local_is_initialized()) {
+                return std::ref(_topic_mount_handler.local());
+            } else {
+                return {};
+            }
+        }),
       std::ref(_as));
 
     co_await _data_migration_worker.start(
@@ -364,7 +380,7 @@ ss::future<> controller::start(
           std::ref(_plugin_backend),
           std::ref(_recovery_manager),
           std::ref(_quota_backend),
-          std::ref(*_data_migration_table));
+          std::ref(_data_migration_table.local()));
     }
 
     co_await _members_frontend.start(
@@ -458,7 +474,6 @@ ss::future<> controller::start(
       std::ref(_shard_placement),
       std::ref(_shard_table),
       std::ref(_partition_manager),
-      std::ref(_members_table),
       std::ref(_partition_leaders),
       std::ref(_tp_frontend),
       std::ref(_storage),
@@ -494,7 +509,6 @@ ss::future<> controller::start(
       std::ref(_tp_state),
       std::ref(_backend),
       config::shard_local_cfg().core_balancing_on_core_count_change.bind(),
-      config::shard_local_cfg().core_balancing_continuous.bind(),
       config::shard_local_cfg().core_balancing_debounce_timeout.bind(),
       config::shard_local_cfg().topic_partitions_per_shard.bind(),
       config::shard_local_cfg().topic_partitions_reserve_shard0.bind());
@@ -571,14 +585,16 @@ ss::future<> controller::start(
     _tp_frontend.local().print_rf_warning_message();
 
     co_await cluster_creation_hook(discovery);
-
-    // start shard_balancer before controller_backend so that it bootstraps
-    // shard_placement_table and controller_backend can start with already
-    // initialized table.
-    co_await _shard_balancer.invoke_on(
-      shard_balancer::shard_id,
-      &shard_balancer::start,
-      conf_invariants.core_count);
+    {
+        auto u = _stm.local().lock_apply();
+        // start shard_balancer before controller_backend so that it bootstraps
+        // shard_placement_table and controller_backend can start with already
+        // initialized table.
+        co_await _shard_balancer.invoke_on(
+          shard_balancer::shard_id,
+          &shard_balancer::start,
+          conf_invariants.core_count);
+    }
 
     if (conf_invariants.core_count > ss::smp::count) {
         // Successfully starting shard_balancer with reduced core count means
@@ -609,6 +625,7 @@ ss::future<> controller::start(
       std::ref(_hm_frontend),
       std::ref(_members_table),
       std::ref(_partition_balancer),
+      std::ref(_partition_manager),
       std::ref(_as));
 
     co_await _members_backend.invoke_on(
@@ -625,6 +642,7 @@ ss::future<> controller::start(
       std::ref(_feature_table),
       std::ref(_connections),
       std::ref(_roles),
+      std::ref(_tp_state),
       _raft0->group());
 
     co_await _health_manager.start_single(
@@ -670,7 +688,6 @@ ss::future<> controller::start(
       config::shard_local_cfg().leader_balancer_node_mute_timeout.bind(),
       config::shard_local_cfg().leader_balancer_transfer_limit_per_shard.bind(),
       config::shard_local_cfg().enable_rack_awareness.bind(),
-      config::shard_local_cfg().default_leaders_preference.bind(),
       config::shard_local_cfg().metadata_dissemination_interval_ms(),
       _raft0);
     co_await _leader_balancer->start();
@@ -700,18 +717,27 @@ ss::future<> controller::start(
       std::ref(_roles),
       std::addressof(_plugin_table),
       std::addressof(_feature_manager),
+      std::addressof(_storage),
       std::ref(_as));
     co_await _metrics_reporter.invoke_on(0, &metrics_reporter::start);
+
+    co_await _crash_reporter.start_single(
+      std::ref(_storage.local().kvs()),
+      std::ref(_stm),
+      std::ref(_as),
+      std::ref(_metrics_reporter));
+    co_await _crash_reporter.invoke_on(
+      crash_reporter::shard, &crash_reporter::start);
 
     co_await _partition_balancer.start_single(
       _raft0,
       std::ref(_stm),
+      std::ref(_feature_table),
       std::ref(_partition_balancer_state),
       std::ref(_hm_backend),
       std::ref(_partition_allocator),
       std::ref(_tp_frontend),
       std::ref(_members_frontend),
-      config::shard_local_cfg().partition_autobalancing_mode.bind(),
       config::shard_local_cfg()
         .partition_autobalancing_node_availability_timeout_sec.bind(),
       config::shard_local_cfg()
@@ -775,7 +801,7 @@ ss::future<> controller::start(
 
     co_await _data_migration_backend.start_on(
       data_migrations::data_migrations_shard,
-      std::ref(*_data_migration_table),
+      std::ref(_data_migration_table.local()),
       std::ref(_data_migration_frontend.local()),
       std::ref(_data_migration_worker),
       std::ref(_partition_leaders.local()),
@@ -784,6 +810,9 @@ ss::future<> controller::start(
       std::ref(_shard_table.local()),
       _cloud_storage_api.local_is_initialized()
         ? std::make_optional(std::ref(_cloud_storage_api.local()))
+        : std::nullopt,
+      _topic_mount_handler.local_is_initialized()
+        ? std::make_optional(std::ref(_topic_mount_handler.local()))
         : std::nullopt,
       std::ref(_as.local()));
     co_await _data_migration_backend.invoke_on_instance(
@@ -808,6 +837,13 @@ ss::future<> controller::shutdown_input() {
     if (_metadata_uploader) {
         _metadata_uploader->stop();
     }
+
+    co_await ss::smp::submit_to(controller_stm_shard, [&stm = _stm] {
+        if (stm.local_is_initialized()) {
+            stm.local().shutdown_apply_loop();
+        }
+    });
+
     co_await _as.invoke_on_all(&ss::abort_source::request_abort);
     vlog(clusterlog.debug, "Shut down controller inputs");
 }
@@ -819,16 +855,13 @@ ss::future<> controller::stop() {
         co_await shutdown_input();
     }
 
+    co_await ss::smp::submit_to(controller_stm_shard, [&stm = _stm] {
+        return stm.local_is_initialized() ? stm.local().shutdown() : ss::now();
+    });
+
     if (_leader_balancer) {
         co_await _leader_balancer->stop();
     }
-
-    co_await ss::smp::submit_to(controller_stm_shard, [&stm = _stm] {
-        if (stm.local_is_initialized()) {
-            return stm.local().shutdown();
-        }
-        return ss::now();
-    });
 
     if (_metadata_uploader) {
         co_await _metadata_uploader->stop_and_wait();
@@ -841,6 +874,7 @@ ss::future<> controller::stop() {
     co_await _recovery_manager.stop();
     co_await _recovery_table.stop();
     co_await _partition_balancer.stop();
+    co_await _crash_reporter.stop();
     co_await _metrics_reporter.stop();
     co_await _feature_manager.stop();
     co_await _hm_frontend.stop();
@@ -849,6 +883,7 @@ ss::future<> controller::stop() {
     co_await _members_backend.stop();
     co_await _data_migration_worker.stop();
     co_await _data_migration_frontend.stop();
+    co_await _topic_mount_handler.stop();
     co_await _config_manager.stop();
     co_await _api.stop();
     co_await _shard_balancer.stop();
@@ -865,6 +900,7 @@ ss::future<> controller::stop() {
     co_await _oidc_service.stop();
     co_await _authorizer.stop();
     co_await _ephemeral_credentials.stop();
+    co_await _data_migration_table.stop();
     co_await _data_migrated_resources.stop();
     co_await _roles.stop();
     co_await _credentials.stop();
@@ -1015,15 +1051,10 @@ ss::future<> controller::cluster_creation_hook(cluster_discovery& discovery) {
     // upgraded from a version before 22.3. Replicate just a cluster UUID so we
     // can advertise that a cluster has already been bootstrapped to nodes
     // trying to discover existing clusters.
+    bootstrap_cluster_cmd_data cmd_data;
+    cmd_data.uuid = model::cluster_uuid(uuid_t::create());
     ssx::background
-      = _feature_table.local()
-          .await_feature(
-            features::feature::seeds_driven_bootstrap_capable, _as.local())
-          .then([this] {
-              bootstrap_cluster_cmd_data cmd_data;
-              cmd_data.uuid = model::cluster_uuid(uuid_t::create());
-              return create_cluster(std::move(cmd_data));
-          })
+      = create_cluster(std::move(cmd_data))
           .handle_exception([](const std::exception_ptr e) {
               vlog(clusterlog.warn, "Error creating cluster UUID. {}", e);
           });

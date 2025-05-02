@@ -37,10 +37,6 @@ class ShardPlacementScaleTest(RedpandaTest):
         # start the nodes manually
         pass
 
-    def enable_feature(self):
-        self.redpanda.set_feature_active("node_local_core_assignment",
-                                         active=True)
-
     def start_omb(self):
         producer_rate_mbps = 100
 
@@ -101,7 +97,7 @@ class ShardPlacementScaleTest(RedpandaTest):
         return [t for t in rpk.list_topics() if t.startswith('test-topic-')]
 
     def finish_omb(self):
-        benchmark_time_min = self._benchmark.benchmark_time() + 2
+        benchmark_time_min = self._benchmark.benchmark_time_mins() + 2
         self._benchmark.wait(timeout_sec=benchmark_time_min * 60)
         self._benchmark.check_succeed()
 
@@ -109,7 +105,6 @@ class ShardPlacementScaleTest(RedpandaTest):
     @skip_debug_mode
     def test_manual_moves(self):
         self.redpanda.start()
-        self.enable_feature()
 
         self.start_omb()
 
@@ -160,7 +155,6 @@ class ShardPlacementScaleTest(RedpandaTest):
         joiner_nodes = self.redpanda.nodes[4:]
 
         self.redpanda.start(nodes=seed_nodes)
-        self.enable_feature()
 
         self.start_omb()
 

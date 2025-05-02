@@ -10,9 +10,9 @@
  */
 
 #pragma once
+#include "cloud_io/tests/s3_imposter.h"
 #include "cloud_roles/types.h"
 #include "cloud_storage/configuration.h"
-#include "cloud_storage/tests/s3_imposter.h"
 #include "cloud_storage_clients/configuration.h"
 #include "cluster/archival/types.h"
 #include "cluster/cluster_utils.h"
@@ -104,9 +104,10 @@ public:
       configure_node_id use_node_id = configure_node_id::yes,
       const empty_seed_starts_cluster empty_seed_starts_cluster_val
       = empty_seed_starts_cluster::yes,
-      std::optional<uint32_t> kafka_admin_topic_api_rate = std::nullopt,
       bool enable_data_transforms = false,
-      bool enable_legacy_upload_mode = true)
+      bool enable_legacy_upload_mode = true,
+      bool iceberg_enabled = false,
+      bool development_enable_cloud_topics = false)
       : app(ssx::sformat("redpanda-{}", node_id()))
       , proxy_port(proxy_port)
       , schema_reg_port(schema_reg_port)
@@ -124,9 +125,10 @@ public:
           std::move(cloud_cfg),
           use_node_id,
           empty_seed_starts_cluster_val,
-          kafka_admin_topic_api_rate,
           enable_data_transforms,
-          enable_legacy_upload_mode);
+          enable_legacy_upload_mode,
+          iceberg_enabled,
+          development_enable_cloud_topics);
         app.initialize(
           proxy_config(proxy_port),
           proxy_client_config(kafka_port),
@@ -150,6 +152,8 @@ public:
             &configs,
             app.smp_service_groups.kafka_smp_sg(),
             app.sched_groups.fetch_sg(),
+            app.sched_groups.produce_sg(),
+            app.sched_groups.kafka_sg(),
             std::ref(app.metadata_cache),
             std::ref(app.controller->get_topics_frontend()),
             std::ref(app.controller->get_config_frontend()),
@@ -170,6 +174,7 @@ public:
             std::ref(app.controller->get_security_frontend()),
             std::ref(app.controller->get_api()),
             std::ref(app.tx_gateway_frontend),
+            std::ref(app.datalake_throttle_manager),
             std::nullopt,
             std::ref(*app.thread_worker),
             std::ref(app.schema_registry()))
@@ -225,6 +230,34 @@ public:
           get_s3_config(port, url_style),
           get_archival_config(),
           get_cloud_config(port, url_style)) {}
+
+    struct init_cloud_topics_tag {};
+
+    // Start redpanda with shadow indexing enabled
+    explicit redpanda_thread_fixture(
+      init_cloud_topics_tag,
+      std::optional<uint16_t> port = std::nullopt,
+      cloud_storage_clients::s3_url_style url_style = default_url_style,
+      model::node_id node_id = model::node_id(1))
+      : redpanda_thread_fixture(
+          node_id,
+          9092,
+          33145,
+          8082,
+          8081,
+          {},
+          ssx::sformat("test.dir_{}", time(0)),
+          std::nullopt,
+          true,
+          get_s3_config(port, url_style),
+          get_archival_config(),
+          get_cloud_config(port, url_style),
+          configure_node_id::yes,
+          empty_seed_starts_cluster::yes,
+          false,
+          true,
+          false,
+          true) {}
 
     struct init_cloud_storage_no_archiver_tag {};
 
@@ -334,9 +367,10 @@ public:
       configure_node_id use_node_id = configure_node_id::yes,
       const empty_seed_starts_cluster empty_seed_starts_cluster_val
       = empty_seed_starts_cluster::yes,
-      std::optional<uint32_t> kafka_admin_topic_api_rate = std::nullopt,
       bool data_transforms_enabled = false,
-      bool legacy_upload_mode_enabled = true) {
+      bool legacy_upload_mode_enabled = true,
+      bool iceberg_enabled = false,
+      bool development_enable_cloud_topics = false) {
         auto base_path = std::filesystem::path(data_dir);
         ss::smp::invoke_on_all([=]() {
             auto& config = config::shard_local_cfg();
@@ -424,14 +458,22 @@ public:
                     static_cast<int16_t>(cloud_cfg->connection_limit()));
             }
 
-            if (kafka_admin_topic_api_rate) {
-                config.get("kafka_admin_topic_api_rate")
-                  .set_value(kafka_admin_topic_api_rate);
-            }
             config.get("data_transforms_enabled")
               .set_value(data_transforms_enabled);
             config.get("cloud_storage_disable_archiver_manager")
               .set_value(legacy_upload_mode_enabled);
+            config.get("iceberg_enabled").set_value(iceberg_enabled);
+
+            if (development_enable_cloud_topics) {
+                const auto time_since_epoch
+                  = std::chrono::system_clock::now().time_since_epoch();
+                config
+                  .get("enable_developmental_unrecoverable_data_corrupting_"
+                       "features")
+                  .set_value(ssx::sformat("{}", time_since_epoch));
+
+                config.get("development_enable_cloud_topics").set_value(true);
+            }
         }).get();
     }
 
@@ -661,7 +703,7 @@ public:
                     auto ctrl_p = p_mgr.get(model::controller_ntp);
                     vassert(ctrl_p, "Controller partition must exists");
                     return ctrl_p->linearizable_barrier().then(
-                      [ctrl_p](result<model::offset> o) {
+                      [ctrl_p](result<model::offset>) {
                           return ctrl_p->committed_offset();
                       });
                 });

@@ -1,3 +1,4 @@
+load("@bazel_skylib//rules:common_settings.bzl", "bool_flag")
 load("//bazel:build.bzl", "redpanda_cc_binary", "redpanda_cc_library")
 
 redpanda_cc_library(
@@ -19,21 +20,32 @@ redpanda_cc_library(
         "//src/v/cloud_io:remote",
         "//src/v/cloud_storage",
         "//src/v/cloud_storage_clients",
-        "//src/v/cloud_topics/reconciler",
+        "//src/v/cloud_topics:app",
+        "//src/v/cloud_topics/dl_stm:dl_stm_factory",
         "//src/v/cluster",
+        "//src/v/cluster:cloud_metadata_offsets_recovery_router",
+        "//src/v/cluster:cloud_metadata_offsets_recovery_service",
+        "//src/v/cluster:cloud_metadata_offsets_upload_router",
         "//src/v/cluster:offsets_lookup",
         "//src/v/compression",
         "//src/v/config",
         "//src/v/crypto",
-        "//src/v/datalake:manager",
+        #       "//src/v/datalake:manager",
         "//src/v/datalake:types",
+        "//src/v/datalake:cloud_data_io",
+        "//src/v/datalake:manager",
+        "//src/v/datalake/coordinator:coordinator_manager",
         "//src/v/datalake/coordinator:frontend",
         "//src/v/datalake/coordinator:stm",
+        "//src/v/datalake/coordinator:catalog_factory",
+        "//src/v/datalake/translation:stm",
         "//src/v/debug_bundle",
         "//src/v/features",
         "//src/v/finjector",
         "//src/v/kafka/client",
         "//src/v/kafka/server",
+        "//src/v/kafka/server:app",
+        "//src/v/kafka/server:qdc_monitor_config",
         "//src/v/metrics",
         "//src/v/migrations",
         "//src/v/model",
@@ -54,11 +66,13 @@ redpanda_cc_library(
         "//src/v/security/audit",
         "//src/v/ssx:abort_source",
         "//src/v/ssx:thread_worker",
+        "//src/v/ssx:watchdog",
         "//src/v/storage",
         "//src/v/storage:chunk_cache",
         "//src/v/strings:utf8",
         "//src/v/syschecks",
         "//src/v/transform",
+        "//src/v/transform:fwd",
         "//src/v/transform/rpc",
         "//src/v/transform/stm",
         "//src/v/utils:file_io",
@@ -70,6 +84,7 @@ redpanda_cc_library(
         "//src/v/wasm:api",
         "//src/v/wasm:cache",
         "//src/v/wasm:impl",
+        "//src/v/crash_tracker",
         "@abseil-cpp//absl/log:globals",
         "@boost//:program_options",
         "@fmt",
@@ -79,11 +94,34 @@ redpanda_cc_library(
     ],
 )
 
+# Enable or disable (thin) LTO for the redpanda binary (only)
+bool_flag(
+    name = "lto",
+    build_setting_default = False,
+)
+
+config_setting(
+    name = "use_lto",
+    flag_values = {
+        ":lto": "true",
+    },
+    visibility = ["//visibility:public"],
+)
+
 redpanda_cc_binary(
     name = "redpanda",
     srcs = [
         "main.cc",
     ],
+    linkopts =
+        select({
+            ":use_lto": [
+                "-flto=thin",
+                "-ffat-lto-objects",
+            ],
+            "//conditions:default": [
+            ],
+        }),
     visibility = ["//visibility:public"],
     deps = [
         ":application",

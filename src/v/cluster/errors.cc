@@ -150,8 +150,6 @@ std::ostream& operator<<(std::ostream& o, cluster::errc err) {
         return o << "cluster::errc::role_exists";
     case errc::role_does_not_exist:
         return o << "cluster::errc::role_does_not_exist";
-    case errc::inconsistent_stm_update:
-        return o << "cluster::errc::inconsistent_stm_update";
     case errc::waiting_for_shard_placement_update:
         return o << "cluster::errc::waiting_for_shard_placement_update";
     case errc::topic_invalid_partitions_core_limit:
@@ -176,6 +174,10 @@ std::ostream& operator<<(std::ostream& o, cluster::errc err) {
         return o << "cluster::errc::data_migration_already_exists";
     case errc::data_migration_invalid_resources:
         return o << "cluster::errc::data_migration_invalid_resources";
+    case errc::data_migration_invalid_definition:
+        return o << "cluster::errc::data_migration_invalid_definition";
+    case errc::data_migrations_disabled:
+        return o << "cluster::errc::data_migrations_disabled";
     case errc::resource_is_being_migrated:
         return o << "cluster::errc::resource_is_being_migrated";
     case errc::invalid_target_node_id:

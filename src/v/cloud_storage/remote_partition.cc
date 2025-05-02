@@ -966,7 +966,7 @@ ss::future<> remote_partition::run_eviction_loop() {
         // got stuck. The deadline is set to 5 minutes to avoid false positives.
         // The callback is self sufficient and can outlive the remote_partition
         // instance.
-        watchdog wd(300s, [ntp = _ntp] {
+        ssx::watchdog wd(300s, [ntp = _ntp] {
             vlog(cst_log.error, "Eviction loop for partition {} stuck", ntp);
         });
         auto eviction_in_flight = std::exchange(_eviction_pending, {});
@@ -1150,7 +1150,7 @@ remote_partition::aborted_transactions(offset_range offsets) {
 
 ss::future<> remote_partition::stop() {
     vlog(_ctxlog.debug, "remote partition stop {} segments", _segments.size());
-    watchdog wd(300s, [ntp = get_ntp()] {
+    ssx::watchdog wd(300s, [ntp = get_ntp()] {
         vlog(cst_log.error, "remote_partition {} stop operation stuck", ntp);
     });
 
@@ -1280,16 +1280,17 @@ remote_partition::timequery(storage::timequery_config cfg) {
     auto translating_reader = co_await make_reader(config);
 
     // Read one batch from the reader to learn the offset
-    model::record_batch_reader::storage_t data
-      = co_await model::consume_reader_to_memory(
-        std::move(translating_reader.reader), model::no_timeout);
+    auto batches = co_await model::consume_reader_to_memory(
+      std::move(translating_reader.reader), model::no_timeout);
 
-    auto& batches = std::get<model::record_batch_reader::data_t>(data);
     vlog(_ctxlog.debug, "timequery: {} batches", batches.size());
 
     if (batches.size()) {
-        co_return storage::batch_timequery(
-          *(batches.begin()), cfg.min_offset, cfg.time, cfg.max_offset);
+        co_return co_await storage::batch_timequery(
+          std::move(*(batches.begin())),
+          cfg.min_offset,
+          cfg.time,
+          cfg.max_offset);
     } else {
         co_return std::nullopt;
     }
@@ -1316,19 +1317,28 @@ struct finalize_data {
     cloud_storage_clients::bucket_name bucket;
     iobuf serialized_manifest;
     model::offset insync_offset;
+    bool remote_manifest_expected;
 };
 
-ss::future<> finalize_background(
+/// This function runs as a detached background fiber, so has no shutdown
+/// logic of its own: our remote operations will be shut down when the
+/// `remote` object is shut down.
+///
+/// Precondition: the caller must ensure that api object is valid for the
+/// duration of this function. I.e. hold a gate.
+ss::future<> finalize_in_background(
   remote& api, finalize_data data, remote_path_provider path_provider) {
-    // This function runs as a detached background fiber, so has no shutdown
-    // logic of its own: our remote operations will be shut down when the
-    // `remote` object is shut down.
     ss::abort_source& as = api.as();
 
     retry_chain_node local_rtc(as, finalize_timeout, finalize_backoff);
 
+    // Start with an empty manifest.
     partition_manifest remote_manifest(data.ntp, data.revision);
 
+    // Try downloading the remote manifest unconditionally. Although locally we
+    // might believe it does not exist (e.g. because we are a replica and
+    // haven't received yet the command informing us that remote manifest is
+    // clean), it might exist and we should try to use it if so.
     partition_manifest_downloader dl(
       data.bucket, path_provider, data.ntp, data.revision, api);
     auto manifest_get_result = co_await dl.download_manifest(
@@ -1341,16 +1351,28 @@ ss::future<> finalize_background(
           manifest_get_result.error());
         co_return;
     }
+
     if (
       manifest_get_result.value()
       == find_partition_manifest_outcome::no_matching_manifest) {
-        vlog(
-          cst_log.error,
-          "[{}] Failed to fetch manifest during finalize(). Not found",
-          data.ntp);
-        co_return;
+        if (data.remote_manifest_expected) {
+            // Log an error if manifest doesn't exist but we expected it to.
+            // This is a bug.
+            vlog(
+              cst_log.error,
+              "[{}] Failed to fetch manifest during finalize(). Not found",
+              data.ntp);
+            co_return;
+        } else {
+            vlog(
+              cst_log.debug,
+              "[{}] Failed to fetch manifest during finalize(). Not found. "
+              "Will upload a new one.",
+              data.ntp);
+        }
     }
 
+    // Note: We might get here with empty remote_manifest (default constructed).
     if (remote_manifest.get_insync_offset() > data.insync_offset) {
         // Our local manifest is behind the remote: return a copy of the
         // remote manifest for use in deletion
@@ -1402,7 +1424,7 @@ ss::future<> finalize_background(
     }
 }
 
-void remote_partition::finalize() {
+void remote_partition::finalize(bool remote_manifest_expected) {
     vlog(_ctxlog.info, "Finalizing remote storage state...");
 
     // We do this in the background, because
@@ -1422,14 +1444,16 @@ void remote_partition::finalize() {
       .revision = stm_manifest.get_revision_id(),
       .bucket = _bucket,
       .serialized_manifest = std::move(serialized_manifest),
-      .insync_offset = stm_manifest.get_insync_offset()};
+      .insync_offset = stm_manifest.get_insync_offset(),
+      .remote_manifest_expected = remote_manifest_expected,
+    };
 
     ssx::spawn_with_gate(
       _api.gate(),
       [&api = _api,
        data = std::move(data),
        pp = _manifest_view->path_provider().copy()]() mutable -> ss::future<> {
-          return finalize_background(api, std::move(data), pp.copy());
+          return finalize_in_background(api, std::move(data), pp.copy());
       });
 }
 

@@ -13,74 +13,71 @@
 
 #include "bytes/iobuf.h"
 #include "container/fragmented_vector.h"
-#include "utils/uuid.h"
-
-#include <absl/numeric/int128.h>
 
 #include <cstdint>
-#include <variant>
+#include <unistd.h>
 
 // A subset of parquet values that is needed for iceberg.
 
 namespace serde::parquet {
 
-struct null_value {};
+struct null_value {
+    bool operator==(const null_value&) const = default;
+};
 struct boolean_value {
     bool val;
+
+    bool operator==(const boolean_value&) const = default;
 };
 struct int32_value {
     int32_t val;
+
+    bool operator==(const int32_value&) const = default;
 };
 struct int64_value {
     int64_t val;
+
+    bool operator==(const int64_value&) const = default;
 };
 struct float32_value {
     float val;
+
+    bool operator==(const float32_value&) const = default;
 };
 struct float64_value {
     double val;
-};
-struct decimal_value {
-    absl::int128 val;
-};
-// DATE is used to for a logical date type, without a time of day. It must
-// annotate an int32 that stores the number of days from the Unix epoch, 1
-// January 1970.
-struct date_value {
-    int32_t val;
-};
-// TIME is used for a logical time type without a date with millisecond or
-// microsecond precision. The type has two type parameters: UTC adjustment (true
-// or false) and unit (MILLIS or MICROS, NANOS).
-struct time_value {
-    int64_t val;
-};
-// In data annotated with the TIMESTAMP logical type, each value is a single
-// int64 number that can be decoded into year, month, day, hour, minute, second
-// and subsecond fields using calculations detailed below. Please note that a
-// value defined this way does not necessarily correspond to a single instant on
-// the time-line and such interpretations are allowed on purpose.
-struct timestamp_value {
-    int64_t val;
-};
-struct string_value {
-    iobuf val;
-};
-struct uuid_value {
-    uuid_t val;
+
+    bool operator==(const float64_value&) const = default;
 };
 struct byte_array_value {
     iobuf val;
+
+    bool operator==(const byte_array_value&) const = default;
 };
 struct fixed_byte_array_value {
     iobuf val;
+
+    bool operator==(const fixed_byte_array_value&) const = default;
 };
 
-struct list_element;
-struct map_entry;
+struct repeated_element;
+struct group_member;
 
-// Parquet proper actually supports a lot more types than this, but we only need
-// a few of them for iceberg.
+// The group member ordering here matters - it must be the same as specified in
+// the schema.
+//
+// This maps to any "group node" (protobuf v2 naming) or non-leaf element in a
+// schema.
+using group_value = chunked_vector<group_member>;
+
+// Repeated values are what should wrap any repeated value in the schema,
+// it does *not* directly encode a logical list type value (this is the same as
+// protocol buffer semantics). See the parquet spec on logical types for more
+// information about how translate logical lists into a parquet schema.
+using repeated_value = chunked_vector<repeated_element>;
+
+// We only support physical types for parquet. Logical types are encoded in the
+// schema and should be translated during value conversion.
 using value = std::variant<
   null_value,
   boolean_value,
@@ -88,26 +85,46 @@ using value = std::variant<
   int64_value,
   float32_value,
   float64_value,
-  decimal_value,
-  date_value,
-  time_value,
-  timestamp_value,
-  string_value,
-  uuid_value,
   byte_array_value,
   fixed_byte_array_value,
-  chunked_vector<list_element>,
-  chunked_vector<map_entry>>;
+  group_value,
+  repeated_value>;
 
-struct list_element {
+struct group_member {
+    value field;
+
+    bool operator==(const group_member&) const = default;
+};
+
+struct repeated_element {
     value element;
+
+    bool operator==(const repeated_element&) const = default;
 };
 
-struct map_entry {
-    // Only non-primative values are supported here
-    // no lists and maps are not valid.
-    value key;
-    std::optional<value> val;
-};
+value copy(const value&);
 
 } // namespace serde::parquet
+
+template<>
+struct fmt::formatter<serde::parquet::value>
+  : fmt::formatter<std::string_view> {
+    // This does not truncate the output, so it could print a very large value
+    auto format(const serde::parquet::value&, fmt::format_context& ctx) const
+      -> decltype(ctx.out());
+};
+
+template<>
+struct fmt::formatter<serde::parquet::group_member>
+  : fmt::formatter<std::string_view> {
+    auto format(const serde::parquet::group_member&, fmt::format_context& ctx)
+      const -> decltype(ctx.out());
+};
+
+template<>
+struct fmt::formatter<serde::parquet::repeated_element>
+  : fmt::formatter<std::string_view> {
+    auto format(
+      const serde::parquet::repeated_element&,
+      fmt::format_context& ctx) const -> decltype(ctx.out());
+};

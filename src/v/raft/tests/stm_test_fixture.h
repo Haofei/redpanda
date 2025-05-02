@@ -8,6 +8,8 @@
 // the Business Source License, use of this software will be governed
 // by the Apache License, Version 2.0
 
+#pragma once
+
 #include "bytes/iostream.h"
 #include "model/fundamental.h"
 #include "model/metadata.h"
@@ -18,11 +20,10 @@
 #include "raft/group_configuration.h"
 #include "raft/state_machine_manager.h"
 #include "raft/tests/raft_fixture.h"
-#include "raft/tests/raft_group_fixture.h"
+#include "raft/tests/raft_fixture_retry_policy.h"
 #include "raft/types.h"
 #include "random/generators.h"
 #include "serde/envelope.h"
-#include "serde/serde.h"
 #include "storage/record_batch_builder.h"
 #include "storage/types.h"
 #include "test_utils/async.h"
@@ -100,7 +101,8 @@ struct simple_kv_base : public BaseT {
     ss::future<> start() override { return ss::now(); }
     ss::future<> stop() override { co_await BaseT::stop(); };
 
-    ss::future<> apply(const model::record_batch& batch) override {
+    ss::future<> apply(
+      const model::record_batch& batch, const ssx::semaphore_units&) override {
         apply_to_state(batch, state);
         co_return;
     }
@@ -149,6 +151,10 @@ public:
 
         co_return serde::to_iobuf(std::move(inc_state));
     };
+
+    stm_initial_recovery_policy get_initial_recovery_policy() const override {
+        return stm_initial_recovery_policy::read_everything;
+    }
 };
 using wait_for_each_batch = ss::bool_class<struct wait_for_each_tag>;
 
@@ -175,7 +181,7 @@ struct state_machine_fixture : raft_fixture {
           [b = std::move(builder).build()](
             raft_node_instance& leader_node) mutable {
               return leader_node.raft()->replicate(
-                model::make_memory_record_batch_reader(b.share()),
+                b.share(),
                 raft::replicate_options(raft::consistency_level::quorum_ack));
           });
     }
@@ -191,7 +197,7 @@ struct state_machine_fixture : raft_fixture {
             const auto batch_sz = random_generators::get_int<size_t>(
               1, max_batch_size);
             std::vector<std::pair<ss::sstring, std::optional<ss::sstring>>> ops;
-            for (auto n = 0; n < batch_sz; ++n) {
+            for (size_t n = 0; n < batch_sz; ++n) {
                 auto k = random_generators::gen_alphanum_string(10);
                 auto v = random_generators::gen_alphanum_string(10);
 

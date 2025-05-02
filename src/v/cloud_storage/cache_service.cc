@@ -27,6 +27,7 @@
 #include <seastar/core/shard_id.hh>
 #include <seastar/core/smp.hh>
 #include <seastar/core/sstring.hh>
+#include <seastar/coroutine/as_future.hh>
 #include <seastar/util/defer.hh>
 
 #include <cloud_storage/cache_service.h>
@@ -353,6 +354,10 @@ ss::future<> cache::trim(
 
     if (_current_cache_size + _reserved_cache_size > target_size) {
         target_size *= _cache_size_low_watermark;
+    }
+
+    if (!_free_space.has_value()) {
+        throw std::runtime_error("Free space information is not available.");
     }
 
     // In the extreme case where even trimming to the low watermark wouldn't
@@ -1137,6 +1142,28 @@ ss::future<std::optional<cache_item>> cache::get(std::filesystem::path key) {
     co_return std::move(result);
 }
 
+ss::future<std::optional<cloud_io::cache_item_stream>> cache::get(
+  std::filesystem::path key,
+  ss::io_priority_class io_priority,
+  size_t read_buffer_size,
+  unsigned int read_ahead) {
+    auto get_res = co_await get(key);
+    if (!get_res.has_value()) {
+        co_return std::nullopt;
+    }
+
+    ss::file_input_stream_options options{};
+    options.buffer_size = read_buffer_size;
+    options.read_ahead = read_ahead;
+    options.io_priority_class = io_priority;
+    auto stream = ss::make_file_input_stream(
+      std::move(get_res->body), 0, std::move(options));
+    co_return cloud_io::cache_item_stream{
+      .body = std::move(stream),
+      .size = get_res->size,
+    };
+}
+
 ss::future<std::optional<cache_item>> cache::_get(std::filesystem::path key) {
     auto guard = _gate.hold();
     vlog(cst_log.debug, "Trying to get {} from archival cache.", key.native());
@@ -1232,6 +1259,7 @@ ss::future<> cache::put(
       ss::this_shard_id(),
       (++_cnt),
       cache_tmp_file_extension));
+    auto tmp_filepath = dir_path / tmp_filename;
 
     ss::file tmp_cache_file;
     while (true) {
@@ -1246,14 +1274,14 @@ ss::future<> cache::put(
                          | ss::open_flags::exclusive;
 
             tmp_cache_file = co_await ss::open_file_dma(
-              (dir_path / tmp_filename).native(), flags);
+              tmp_filepath.native(), flags);
             break;
         } catch (const std::filesystem::filesystem_error& e) {
             if (e.code() == std::errc::no_such_file_or_directory) {
                 vlog(
                   cst_log.debug,
                   "Couldn't open {}, gonna retry",
-                  (dir_path / tmp_filename).native());
+                  tmp_filepath.native());
             } else {
                 throw;
             }
@@ -1266,42 +1294,65 @@ ss::future<> cache::put(
     options.io_priority_class = io_priority;
     auto out = co_await ss::make_file_output_stream(tmp_cache_file, options);
 
-    std::exception_ptr disk_full_error;
+    std::exception_ptr eptr;
+    bool no_space_on_device = false;
     try {
         co_await ss::copy(data, out)
           .then([&out]() { return out.flush(); })
           .finally([&out]() { return out.close(); });
     } catch (const std::filesystem::filesystem_error& e) {
         // For ENOSPC errors, delay handling so that we can do a trim
-        if (e.code() == std::errc::no_space_on_device) {
-            disk_full_error = std::current_exception();
-        } else {
-            throw;
-        }
+        no_space_on_device = e.code() == std::errc::no_space_on_device;
+        eptr = std::current_exception();
+    } catch (...) {
+        // For other errors, delay handling so that we can clean up the tmp file
+        eptr = std::current_exception();
     }
 
-    if (disk_full_error) {
-        vlog(cst_log.error, "Out of space while writing to cache");
+    // If we failed to write to the tmp file, we should delete it, maybe do an
+    // eager trim, and rethrow the exception.
+    if (eptr) {
+        if (!_gate.is_closed()) {
+            vlog(
+              cst_log.debug,
+              "Removing temporary file {}. Exception during copy: {}",
+              tmp_filepath.native(),
+              eptr);
+            auto delete_tmp_fut = co_await ss::coroutine::as_future(
+              delete_file_and_empty_parents(tmp_filepath.native()));
+            if (delete_tmp_fut.failed()) {
+                auto e = delete_tmp_fut.get_exception();
+                if (!ssx::is_shutdown_exception(e)) {
+                    vlog(
+                      cst_log.error,
+                      "Failed to delete tmp file {}: {}",
+                      tmp_filepath.native(),
+                      e);
+                }
+            }
+        }
 
-        // Block further puts from being attempted until notify_disk_status
-        // reports that there is space available.
-        set_block_puts(true);
+        if (no_space_on_device) {
+            vlog(cst_log.error, "Out of space while writing to cache");
 
-        // Trim proactively: if many fibers hit this concurrently,
-        // they'll contend for cleanup_sm and the losers will skip
-        // trim due to throttling.
-        co_await trim_throttled();
+            // Block further puts from being attempted until notify_disk_status
+            // reports that there is space available.
+            set_block_puts(true);
 
-        throw disk_full_error;
+            // Trim proactively: if many fibers hit this concurrently,
+            // they'll contend for cleanup_sm and the losers will skip
+            // trim due to throttling.
+            co_await trim_throttled();
+        }
+
+        std::rethrow_exception(eptr);
     }
 
     // commit write transaction
-    auto src = (dir_path / tmp_filename).native();
+    auto put_size = co_await ss::file_size(tmp_filepath.native());
+
     auto dest = (dir_path / filename).native();
-
-    auto put_size = co_await ss::file_size(src);
-
-    co_await ss::rename_file(src, dest);
+    co_await ss::rename_file(tmp_filepath.native(), dest);
 
     // We will now update
     reservation.wrote_data(put_size, 1);
@@ -1486,7 +1537,7 @@ bool cache::may_exceed_limits(uint64_t bytes, size_t objects) {
 
     auto would_fit_in_cache = _current_cache_size + bytes <= _max_bytes;
 
-    return !_block_puts && _free_space > bytes * 10
+    return !_block_puts && _free_space.value_or(0) > bytes * 10
            && _current_cache_objects + _reserved_cache_objects + objects
                 < _max_objects()
            && !would_fit_in_cache;
@@ -1824,7 +1875,12 @@ ss::future<> cache::do_reserve_space(uint64_t bytes, size_t objects) {
                     // all skipping the cache limit based on the same apparent
                     // free bytes.  This counter will get reset to ground
                     // truth the next time we get a disk status notification.
-                    _free_space -= bytes;
+                    if (unlikely(!_free_space.has_value())) {
+                        throw std::runtime_error(
+                          "Free space information must be available by the "
+                          "time we execute this code path");
+                    }
+                    *_free_space -= bytes;
                     break;
                 } else {
                     // No allowance, and the disk does not have a lot of
@@ -1888,27 +1944,6 @@ void cache::notify_disk_status(
             return container().invoke_on_all(
               [block_puts](cache& c) { c.set_block_puts(block_puts); });
         });
-    }
-}
-
-void space_reservation_guard::wrote_data(
-  uint64_t written_bytes, size_t written_objects) {
-    // Release the reservation, and update usage stats for how much we actually
-    // wrote.
-    _cache.reserve_space_release(
-      _bytes, _objects, written_bytes, written_objects);
-
-    // This reservation is now used up.
-    _bytes = 0;
-    _objects = 0;
-}
-
-space_reservation_guard::~space_reservation_guard() {
-    if (_bytes || _objects) {
-        // This is the case of a failed write, where wrote_data was never
-        // called: release the reservation and do not acquire any space
-        // usage for the written data (there should be none).
-        _cache.reserve_space_release(_bytes, _objects, 0, 0);
     }
 }
 

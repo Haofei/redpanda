@@ -20,7 +20,9 @@
 namespace experimental::cloud_topics {
 
 enum class dl_stm_key {
-    overlay,
+    push_overlay = 0,
+    start_snapshot = 1,
+    remove_snapshots_before_version = 2,
     // TODO: add all commands
 };
 
@@ -35,8 +37,8 @@ using object_id = named_type<uuid_t, struct object_id_tag>;
 
 /// Type of ownership
 enum class dl_stm_object_ownership {
-    exclusive,
-    shared,
+    exclusive = 0,
+    shared = 1,
 };
 
 } // namespace experimental::cloud_topics
@@ -46,5 +48,21 @@ struct fmt::formatter<experimental::cloud_topics::dl_stm_key>
   : fmt::formatter<std::string_view> {
     auto format(
       experimental::cloud_topics::dl_stm_key,
+      fmt::format_context& ctx) const -> decltype(ctx.out());
+};
+
+template<>
+struct fmt::formatter<experimental::cloud_topics::object_id>
+  : fmt::formatter<std::string_view> {
+    auto format(
+      const experimental::cloud_topics::object_id&,
+      fmt::format_context& ctx) const -> decltype(ctx.out());
+};
+
+template<>
+struct fmt::formatter<experimental::cloud_topics::dl_stm_object_ownership>
+  : fmt::formatter<std::string_view> {
+    auto format(
+      experimental::cloud_topics::dl_stm_object_ownership,
       fmt::format_context& ctx) const -> decltype(ctx.out());
 };

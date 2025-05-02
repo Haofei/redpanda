@@ -14,6 +14,7 @@
 #include "cluster/data_migration_types.h"
 #include "cluster/topic_table.h"
 #include "container/fragmented_vector.h"
+#include "errc.h"
 #include "utils/named_type.h"
 #include "utils/notification_list.h"
 
@@ -31,15 +32,27 @@ class data_migration_table_test_accessor;
  * fired every time the migration is update. The data migration table is also
  * responsible for driving migrated resources updates.
  */
+
 class migrations_table {
 public:
-    using validation_error
-      = named_type<ss::sstring, struct validation_error_tag>;
+    class validation_error {
+    public:
+        validation_error(errc ec, ss::sstring details);
+        std::error_code ec() const;
+        friend fmt::formatter<
+          cluster::data_migrations::migrations_table::validation_error>;
+
+    private:
+        errc _ec;
+        ss::sstring _message;
+    };
 
     explicit migrations_table(
       ss::sharded<migrated_resources>& resources,
       ss::sharded<topic_table>& topics,
       bool enabled);
+
+    ss::future<> stop();
 
     using notification_id = named_type<uint64_t, struct notification_id_tag>;
     using notification_callback = ss::noncopyable_function<void(id)>;
@@ -138,3 +151,13 @@ private:
     notification_list<notification_callback, notification_id> _callbacks;
 };
 } // namespace cluster::data_migrations
+
+template<>
+struct fmt::formatter<
+  cluster::data_migrations::migrations_table::validation_error>
+  final : public fmt::formatter<std::string_view> {
+    using validation_error
+      = cluster::data_migrations::migrations_table::validation_error;
+    fmt::appender
+    format(const validation_error& e, fmt::format_context& ctx) const;
+};

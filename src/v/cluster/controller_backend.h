@@ -201,7 +201,6 @@ public:
       ss::sharded<shard_placement_table>&,
       ss::sharded<shard_table>&,
       ss::sharded<partition_manager>&,
-      ss::sharded<members_table>&,
       ss::sharded<cluster::partition_leaders_table>&,
       ss::sharded<topics_frontend>&,
       ss::sharded<storage::api>&,
@@ -295,7 +294,9 @@ private:
       raft::group_id,
       model::revision_id log_revision,
       replicas_t initial_replicas,
-      force_reconfiguration is_force_reconfigured);
+      const replicas_revision_map& replicas_revisions,
+      force_reconfiguration is_force_reconfigured,
+      const topic_metadata& topic_md);
 
     ss::future<> add_to_shard_table(
       model::ntp,
@@ -305,6 +306,7 @@ private:
     ss::future<> remove_from_shard_table(
       model::ntp, raft::group_id, model::revision_id log_revision);
 
+    /* may fail only with ss::gate_closed_exception */
     ss::future<xshard_transfer_state>
       shutdown_partition(ss::lw_shared_ptr<partition>);
 
@@ -327,7 +329,6 @@ private:
       shard_placement_table&);
 
     ss::future<result<ss::stop_iteration>> reconcile_partition_reconfiguration(
-      ntp_reconciliation_state&,
       ss::lw_shared_ptr<partition>,
       const topic_table::in_progress_update&,
       const replicas_revision_map& replicas_revisions);
@@ -365,7 +366,6 @@ private:
 
     bool can_finish_update(
       std::optional<model::node_id> current_leader,
-      uint64_t current_retry,
       reconfiguration_state,
       const replicas_t& requested_replicas);
 
@@ -375,8 +375,6 @@ private:
     ss::future<std::error_code> dispatch_revert_cancel_move(model::ntp);
 
     void setup_metrics();
-
-    bool command_based_membership_active() const;
 
     bool should_skip(const model::ntp&) const;
 
@@ -388,7 +386,6 @@ private:
     shard_placement_table& _shard_placement;
     ss::sharded<shard_table>& _shard_table;
     ss::sharded<partition_manager>& _partition_manager;
-    ss::sharded<members_table>& _members_table;
     ss::sharded<partition_leaders_table>& _partition_leaders_table;
     ss::sharded<topics_frontend>& _topics_frontend;
     ss::sharded<storage::api>& _storage;

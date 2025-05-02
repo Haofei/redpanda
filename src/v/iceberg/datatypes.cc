@@ -1,14 +1,16 @@
-// Copyright 2024 Redpanda Data, Inc.
-//
-// Use of this software is governed by the Business Source License
-// included in the file licenses/BSL.md
-//
-// As of the Change Date specified in that file, in accordance with
-// the Business Source License, use of this software will be governed
-// by the Apache License, Version 2.0
+/*
+ * Copyright 2024 Redpanda Data, Inc.
+ *
+ * Licensed as a Redpanda Enterprise file under the Redpanda Community
+ * License (the "License"); you may not use this file except in compliance with
+ * the License. You may obtain a copy of the License at
+ *
+ * https://github.com/redpanda-data/redpanda/blob/master/licenses/rcl.md
+ */
 
 #include "iceberg/datatypes.h"
 
+#include <ranges>
 #include <variant>
 
 namespace iceberg {
@@ -92,6 +94,21 @@ struct type_copying_visitor {
     }
 };
 
+ss::sstring format_nested_field_ptr_type(const iceberg::nested_field_ptr& ptr) {
+    if (ptr == nullptr) {
+        return "null";
+    }
+    return fmt::to_string(ptr->type);
+}
+
+ss::sstring
+format_nested_field_ptr_name_type(const iceberg::nested_field_ptr& ptr) {
+    if (ptr == nullptr) {
+        return "null";
+    }
+    return fmt::format("{}<{}>", ptr->name, ptr->type);
+}
+
 } // namespace
 
 primitive_type make_copy(const primitive_type& type) { return type; }
@@ -172,18 +189,46 @@ std::ostream& operator<<(std::ostream& o, const binary_type&) {
     return o;
 }
 
-std::ostream& operator<<(std::ostream& o, const struct_type&) {
-    o << "struct";
+std::ostream& operator<<(std::ostream& o, const struct_type& st) {
+    /**
+     * Struct is printed as struct[field_1_name<field_1_type>,...]
+     */
+    fmt::print(o, "struct[");
+    if (!st.fields.empty()) {
+        auto it = st.fields.begin();
+        fmt::print(o, "{}", format_nested_field_ptr_name_type(*it));
+        ++it;
+        for (; it != st.fields.end(); ++it) {
+            fmt::print(o, ", {}", format_nested_field_ptr_name_type(*it));
+        }
+    }
+
+    fmt::print(o, "]");
     return o;
 }
 
-std::ostream& operator<<(std::ostream& o, const list_type&) {
-    o << "list";
+std::ostream& operator<<(std::ostream& o, const list_type& lt) {
+    fmt::print(o, "list<{}>", format_nested_field_ptr_type(lt.element_field));
     return o;
 }
 
-std::ostream& operator<<(std::ostream& o, const map_type&) {
-    o << "map";
+std::ostream& operator<<(std::ostream& o, const map_type& mt) {
+    fmt::print(
+      o,
+      "map<{},{}>",
+      format_nested_field_ptr_type(mt.key_field),
+      format_nested_field_ptr_type(mt.value_field));
+    return o;
+}
+
+std::ostream& operator<<(std::ostream& o, const nested_field& nf) {
+    fmt::print(
+      o,
+      "{{id: {}, name: {}, required: {}, type: {}}}",
+      nf.id,
+      nf.name,
+      nf.required,
+      nf.type);
     return o;
 }
 
@@ -270,6 +315,30 @@ struct_type struct_type::copy() const {
     return {std::move(fields_copy)};
 }
 
+const nested_field* struct_type::find_field_by_name(
+  const std::vector<ss::sstring>& nested_name) const {
+    const auto* cur_struct_type = this;
+    const nested_field* field = nullptr;
+    for (const auto& n : nested_name) {
+        if (!cur_struct_type) {
+            return nullptr;
+        }
+
+        for (const auto& f : cur_struct_type->fields) {
+            if (f->name == n) {
+                field = f.get();
+                break;
+            }
+        }
+        if (!field) {
+            return nullptr;
+        }
+
+        cur_struct_type = std::get_if<struct_type>(&field->type);
+    }
+    return field;
+}
+
 list_type list_type::create(
   int32_t element_id, field_required element_required, field_type element) {
     // NOTE: the element field doesn't have a name. Functionally, the list type
@@ -308,7 +377,25 @@ map_type map_type::create(
 }
 
 nested_field_ptr nested_field::copy() const {
-    return nested_field::create(id, name, required, make_copy(type));
+    return nested_field::create(id, name, required, make_copy(type), meta);
 };
+
+void nested_field::set_evolution_metadata(evolution_metadata v) const {
+    vassert(
+      !has_evolution_metadata(),
+      "Evolution metadata should not be overwritten");
+    meta = v;
+}
+
+bool nested_field::has_evolution_metadata() const {
+    return !std::holds_alternative<std::nullopt_t>(meta);
+}
+
+bool nested_field::is_add() const {
+    return !has_evolution_metadata() || std::holds_alternative<is_new>(meta);
+}
+bool nested_field::is_drop() const {
+    return std::holds_alternative<removed>(meta) && std::get<removed>(meta);
+}
 
 } // namespace iceberg

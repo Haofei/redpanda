@@ -24,8 +24,9 @@ namespace cloud_storage_clients::util {
 /// cloud provider (e.g. connection error).
 /// \param current_exception is the current exception thrown by the client
 /// \param logger is the logger to use
+template<typename Logger>
 error_outcome handle_client_transport_error(
-  std::exception_ptr current_exception, ss::logger& logger);
+  std::exception_ptr current_exception, Logger& logger);
 
 /// \brief: Drain the reponse stream pointed to by the 'resp' handle into an
 /// iobuf
@@ -51,5 +52,12 @@ bool has_abort_or_gate_close_exception(const ss::nested_exception& ex);
 /// of valid prefix paths. For instance, if the input is: a/b/log.txt,
 /// return a, a/b, a/b/log.txt
 std::vector<object_key> all_paths_to_file(const object_key& path);
+
+// Helper to URL encode the target field in the request header
+// TODO: This should be replaced after we will represent URIs as structs
+void url_encode_target(http::client::request_header& header);
+
+response_content_type
+get_response_content_type(const http::client::response_header& headers);
 
 } // namespace cloud_storage_clients::util

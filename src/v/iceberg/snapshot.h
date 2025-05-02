@@ -1,15 +1,17 @@
-// Copyright 2024 Redpanda Data, Inc.
-//
-// Use of this software is governed by the Business Source License
-// included in the file licenses/BSL.md
-//
-// As of the Change Date specified in that file, in accordance with
-// the Business Source License, use of this software will be governed
-// by the Apache License, Version 2.0
+/*
+ * Copyright 2024 Redpanda Data, Inc.
+ *
+ * Licensed as a Redpanda Enterprise file under the Redpanda Community
+ * License (the "License"); you may not use this file except in compliance with
+ * the License. You may obtain a copy of the License at
+ *
+ * https://github.com/redpanda-data/redpanda/blob/master/licenses/rcl.md
+ */
 #pragma once
 
 #include "iceberg/manifest_entry.h"
 #include "iceberg/schema.h"
+#include "iceberg/uri.h"
 #include "model/timestamp.h"
 
 #include <absl/container/btree_map.h>
@@ -73,7 +75,7 @@ struct snapshot {
 
     // Location of a manifest list for this snapshot that tracks manifest files
     // and additional metadata.
-    ss::sstring manifest_list_path;
+    uri manifest_list_path;
 
     // Current schema at the time the snapshot was created.
     std::optional<schema::id_t> schema_id;

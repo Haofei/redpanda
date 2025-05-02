@@ -17,6 +17,7 @@
 #include "pandaproxy/schema_registry/schema_id_cache.h"
 #include "pandaproxy/schema_registry/service.h"
 #include "pandaproxy/schema_registry/sharded_store.h"
+#include "pandaproxy/schema_registry/types.h"
 #include "pandaproxy/schema_registry/validation_metrics.h"
 
 #include <seastar/core/coroutine.hh>
@@ -74,18 +75,20 @@ ss::future<> api::start() {
 }
 
 ss::future<> api::stop() {
+    vlog(srlog.debug, "Stopping schema registry API...");
+    co_await _client.stop();
     co_await _service.stop();
     co_await _sequencer.stop();
-    co_await _client.stop();
     co_await _schema_id_cache.stop();
     co_await _schema_id_validation_probe.stop();
     if (_store) {
         co_await _store->stop();
     }
+    vlog(srlog.debug, "Stopped schema registry API...");
 }
 
 ss::future<> api::restart() {
-    vlog(plog.info, "Restarting the schema registry");
+    vlog(srlog.info, "Restarting the schema registry");
     co_await stop();
     co_await start();
 }

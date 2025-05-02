@@ -25,6 +25,7 @@
 #include "storage/kvstore.h"
 #include "storage/storage_resources.h"
 #include "test_utils/test.h"
+#include "utils/file_io.h"
 
 #include <seastar/core/fstream.hh>
 #include <seastar/core/seastar.hh>
@@ -281,6 +282,7 @@ TEST_F_CORO(debug_bundle_service_started_fixture, test_all_parameters) {
         logs_until_tp = debug_bundle::clock::from_time_t(tt);
     }
     std::chrono::seconds metrics_interval_seconds{54};
+    uint64_t metrics_samples = 3;
     model::topic_namespace tn1(model::ns{"kafka"}, model::topic{"t1"});
     model::topic_namespace tn2(model::ns{"internal"}, model::topic{"t2"});
     std::vector<debug_bundle::partition_selection> partition{
@@ -297,6 +299,9 @@ TEST_F_CORO(debug_bundle_service_started_fixture, test_all_parameters) {
     bool tls_enabled = true;
     bool tls_insecure_skip_verify = false;
     ss::sstring k8s_namespace_name = "redpanda-namespace";
+    std::vector<debug_bundle::label_selection> label_select{
+      debug_bundle::label_selection{.key = "test/key1", .value = "value1"},
+      debug_bundle::label_selection{.key = "key2", .value = "value2"}};
 
     debug_bundle::debug_bundle_parameters params{
       .authn_options = debug_bundle::
@@ -307,18 +312,21 @@ TEST_F_CORO(debug_bundle_service_started_fixture, test_all_parameters) {
       .logs_size_limit_bytes = logs_size_limit,
       .logs_until = logs_until_tp,
       .metrics_interval_seconds = metrics_interval_seconds,
+      .metrics_samples = metrics_samples,
       .partition = partition,
       .tls_enabled = tls_enabled,
       .tls_insecure_skip_verify = tls_insecure_skip_verify,
-      .k8s_namespace = debug_bundle::k8s_namespace{k8s_namespace_name}};
+      .k8s_namespace = k8s_namespace_name,
+      .label_selector = label_select};
 
     ss::sstring expected_params(fmt::format(
       "debug bundle --output {}/{}.zip --verbose -Xuser={} -Xpass={} "
       "-Xsasl.mechanism={} --controller-logs-size-limit {}B "
       "--cpu-profiler-wait {}s --logs-since {} --logs-size-limit {}B "
-      "--logs-until {} --metrics-interval {}s --partition {}/{}/1,2,3 "
-      "{}/{}/4,5,6 -Xtls.enabled=true -Xtls.insecure_skip_verify=false "
-      "--namespace {}\n",
+      "--logs-until {} --metrics-interval {}s --metrics-samples {} --partition "
+      "{}/{}/1,2,3 {}/{}/4,5,6 -Xtls.enabled=true "
+      "-Xtls.insecure_skip_verify=false --namespace {} --label-selector "
+      "{}={},{}={}\n",
       (_data_dir / debug_bundle::service::debug_bundle_dir_name).native(),
       job_id,
       username,
@@ -330,11 +338,16 @@ TEST_F_CORO(debug_bundle_service_started_fixture, test_all_parameters) {
       logs_size_limit,
       logs_until,
       metrics_interval_seconds.count(),
+      metrics_samples,
       tn1.ns,
       tn1.tp,
       tn2.ns,
       tn2.tp,
-      k8s_namespace_name));
+      k8s_namespace_name,
+      label_select[0].key,
+      label_select[0].value,
+      label_select[1].key,
+      label_select[1].value));
 
     auto res = co_await _service.local().initiate_rpk_debug_bundle_collection(
       job_id, std::move(params));
@@ -364,18 +377,6 @@ TEST_F_CORO(debug_bundle_service_started_fixture, test_all_parameters) {
         ASSERT_NE_CORO(++num_retries, max_retries)
           << "Maximum number of retries reached!";
     }
-}
-
-TEST_F_CORO(debug_bundle_service_started_fixture, test_invalid_k8s_name) {
-    debug_bundle::job_id_t job_id(uuid_t::create());
-    ss::sstring invalid_k8s_namespace_name = "redpanda-namespace.*/";
-    debug_bundle::debug_bundle_parameters params{
-      .k8s_namespace = debug_bundle::k8s_namespace{invalid_k8s_namespace_name}};
-    auto res = co_await _service.local().initiate_rpk_debug_bundle_collection(
-      job_id, std::move(params));
-    ASSERT_FALSE_CORO(res.has_value());
-    EXPECT_EQ(
-      res.assume_error().code(), debug_bundle::error_code::invalid_parameters);
 }
 
 TEST_F_CORO(debug_bundle_service_started_fixture, try_running_multiple) {
@@ -722,17 +723,6 @@ ss::future<> wait_for_kvstore_to_populate(
     throw std::runtime_error("Timed out waiting for metadata to be written");
 }
 
-ss::future<iobuf> read_file_contents(std::string_view file_path) {
-    auto file = co_await ss::open_file_dma(
-      file_path.data(), ss::open_flags::ro);
-    auto h = ss::defer([file]() mutable { ssx::background = file.close(); });
-    auto istrm = ss::make_file_input_stream(file);
-    iobuf buf;
-    auto ostrm = make_iobuf_ref_output_stream(buf);
-    co_await ss::copy(istrm, ostrm);
-    co_return buf;
-}
-
 TEST_F_CORO(debug_bundle_service_started_fixture, validate_metadata) {
     debug_bundle::job_id_t job_id(uuid_t::create());
 
@@ -772,8 +762,7 @@ TEST_F_CORO(debug_bundle_service_started_fixture, validate_metadata) {
       co_await debug_bundle::calculate_sha256_sum(job_file.native()));
 
     ASSERT_TRUE_CORO(co_await ss::file_exists(process_output_file.native()));
-    auto process_output_buf = co_await read_file_contents(
-      process_output_file.native());
+    auto process_output_buf = co_await read_fully(process_output_file);
 
     iobuf_parser process_output_parser(std::move(process_output_buf));
     auto po = serde::read<debug_bundle::process_output>(process_output_parser);

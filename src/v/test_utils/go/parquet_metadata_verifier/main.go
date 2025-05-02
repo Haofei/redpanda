@@ -20,6 +20,7 @@ import (
 	"github.com/parquet-go/parquet-go/deprecated"
 	"github.com/parquet-go/parquet-go/format"
 	"github.com/segmentio/encoding/thrift"
+	"github.com/sergi/go-diff/diffmatchpatch"
 )
 
 func ptr[T any](t T) *T {
@@ -47,6 +48,11 @@ var testCases = []any{
 			DefinitionLevelsByteLength: 21,
 			RepetitionLevelsByteLength: 1,
 			IsCompressed:               ptr(false),
+			Statistics: format.Statistics{
+				NullCount: 42,
+				MinValue:  []byte{0xDE, 0xAD, 0xBE, 0xE0},
+				MaxValue:  []byte{0xDE, 0xAD, 0xBE, 0xEF},
+			},
 		},
 	},
 	&format.PageHeader{
@@ -119,16 +125,19 @@ var testCases = []any{
 							DataPageOffset:       2,
 							IndexPageOffset:      5,
 							DictionaryPageOffset: 9,
+							Statistics: format.Statistics{
+								NullCount: 9,
+								MinValue:  []byte{0x00},
+								MaxValue:  []byte{0xFF},
+							},
 						},
-						OffsetIndexOffset: 23,
-						OffsetIndexLength: 43,
-						ColumnIndexOffset: 999,
-						ColumnIndexLength: 876,
 					},
 				},
-				TotalByteSize: 321,
-				NumRows:       1,
-				FileOffset:    1234,
+				TotalByteSize:       321,
+				NumRows:             1,
+				FileOffset:          1234,
+				TotalCompressedSize: 231,
+				Ordinal:             1,
 			},
 			{
 				TotalByteSize: 99999,
@@ -146,7 +155,9 @@ var testCases = []any{
 						NullsFirst: false,
 					},
 				},
-				FileOffset: 4123,
+				FileOffset:          4123,
+				TotalCompressedSize: 8888,
+				Ordinal:             2,
 			},
 		},
 		NumRows: math.MaxInt64,
@@ -156,6 +167,177 @@ var testCases = []any{
 			{Key: "nice", Value: ""},
 		},
 		CreatedBy: "The best Message Broker in the West",
+		ColumnOrders: []format.ColumnOrder{
+			{TypeOrder: &format.TypeDefinedOrder{}},
+			{TypeOrder: &format.TypeDefinedOrder{}},
+			{TypeOrder: &format.TypeDefinedOrder{}},
+		},
+	},
+	&format.FileMetaData{
+		Version: 2,
+		Schema: []format.SchemaElement{
+			{
+				Name:        "root",
+				NumChildren: 16,
+			},
+			{
+				Type:           ptr(format.Boolean),
+				RepetitionType: ptr(format.Optional),
+				Name:           "iceberg_bool",
+			},
+			{
+				Type:           ptr(format.Int32),
+				RepetitionType: ptr(format.Optional),
+				Name:           "iceberg_i32",
+				LogicalType: &format.LogicalType{
+					Integer: &format.IntType{BitWidth: 32, IsSigned: true},
+				},
+				ConvertedType: ptr(deprecated.Int32),
+			},
+			{
+				Type:           ptr(format.Int64),
+				RepetitionType: ptr(format.Optional),
+				Name:           "iceberg_i64",
+				LogicalType: &format.LogicalType{
+					Integer: &format.IntType{BitWidth: 64, IsSigned: true},
+				},
+				ConvertedType: ptr(deprecated.Int64),
+			},
+			{
+				Type:           ptr(format.Float),
+				RepetitionType: ptr(format.Optional),
+				Name:           "iceberg_f32",
+			},
+			{
+				Type:           ptr(format.Double),
+				RepetitionType: ptr(format.Optional),
+				Name:           "iceberg_f64",
+			},
+			{
+				Type:           ptr(format.FixedLenByteArray),
+				TypeLength:     ptr[int32](16),
+				RepetitionType: ptr(format.Optional),
+				Name:           "iceberg_decimal",
+				Scale:          ptr[int32](8),
+				Precision:      ptr[int32](38),
+				LogicalType: &format.LogicalType{
+					Decimal: &format.DecimalType{
+						Scale: 8, Precision: 38,
+					},
+				},
+				ConvertedType: ptr(deprecated.Decimal),
+			},
+			{
+				Type:           ptr(format.Int32),
+				RepetitionType: ptr(format.Optional),
+				Name:           "iceberg_date",
+				LogicalType: &format.LogicalType{
+					Date: &format.DateType{},
+				},
+				ConvertedType: ptr(deprecated.Date),
+			},
+			{
+				Type:           ptr(format.Int64),
+				RepetitionType: ptr(format.Optional),
+				Name:           "iceberg_time",
+				LogicalType: &format.LogicalType{
+					Time: &format.TimeType{IsAdjustedToUTC: false, Unit: format.TimeUnit{Micros: &format.MicroSeconds{}}},
+				},
+				ConvertedType: ptr(deprecated.TimeMicros),
+			},
+			{
+				Type:           ptr(format.Int64),
+				RepetitionType: ptr(format.Optional),
+				Name:           "iceberg_timestamp",
+				LogicalType: &format.LogicalType{
+					Timestamp: &format.TimestampType{IsAdjustedToUTC: false, Unit: format.TimeUnit{Micros: &format.MicroSeconds{}}},
+				},
+				ConvertedType: ptr(deprecated.TimestampMicros),
+			},
+			{
+				Type:           ptr(format.Int64),
+				RepetitionType: ptr(format.Optional),
+				Name:           "iceberg_timestamptz",
+				LogicalType: &format.LogicalType{
+					Timestamp: &format.TimestampType{IsAdjustedToUTC: true, Unit: format.TimeUnit{Micros: &format.MicroSeconds{}}},
+				},
+				ConvertedType: ptr(deprecated.TimestampMicros),
+			},
+			{
+				Type:           ptr(format.ByteArray),
+				RepetitionType: ptr(format.Optional),
+				Name:           "iceberg_string",
+				LogicalType: &format.LogicalType{
+					UTF8: &format.StringType{},
+				},
+				ConvertedType: ptr(deprecated.UTF8),
+			},
+			{
+				Type:           ptr(format.FixedLenByteArray),
+				TypeLength:     ptr[int32](16),
+				RepetitionType: ptr(format.Optional),
+				Name:           "iceberg_uuid",
+				LogicalType: &format.LogicalType{
+					UUID: &format.UUIDType{},
+				},
+			},
+			{
+				Type:           ptr(format.FixedLenByteArray),
+				TypeLength:     ptr[int32](103),
+				RepetitionType: ptr(format.Required),
+				Name:           "iceberg_fixed",
+			},
+			{
+				Type:           ptr(format.ByteArray),
+				RepetitionType: ptr(format.Optional),
+				Name:           "iceberg_binary",
+			},
+			{
+				RepetitionType: ptr(format.Optional),
+				Name:           "iceberg_string_int_map",
+				NumChildren:    1,
+				LogicalType:    &format.LogicalType{Map: &format.MapType{}},
+				ConvertedType:  ptr(deprecated.Map),
+			},
+			{
+				RepetitionType: ptr(format.Repeated),
+				Name:           "map",
+				NumChildren:    2,
+			},
+			{
+				Type:           ptr(format.ByteArray),
+				RepetitionType: ptr(format.Required),
+				Name:           "key",
+				LogicalType: &format.LogicalType{
+					UTF8: &format.StringType{},
+				},
+				ConvertedType: ptr(deprecated.UTF8),
+			},
+			{
+				Type:           ptr(format.Int32),
+				RepetitionType: ptr(format.Optional),
+				Name:           "value",
+			},
+			{
+				RepetitionType: ptr(format.Optional),
+				Name:           "iceberg_int_list",
+				NumChildren:    1,
+				LogicalType:    &format.LogicalType{List: &format.ListType{}},
+				ConvertedType:  ptr(deprecated.List),
+			},
+			{
+				RepetitionType: ptr(format.Repeated),
+				Name:           "list",
+				NumChildren:    1,
+			},
+			{
+				Type:           ptr(format.Int32),
+				RepetitionType: ptr(format.Optional),
+				Name:           "element",
+			},
+		},
+		RowGroups:        []format.RowGroup{},
+		KeyValueMetadata: []format.KeyValue{},
 	},
 }
 
@@ -193,7 +375,14 @@ func main() {
 	if !reflect.DeepEqual(expected, actual) {
 		fmt.Fprintf(os.Stderr, "❌ structs not equals!\n\n\tgot: %#v\n\twant: %#v\n=== DIFF ===\n", actual, expected)
 		pretty.Fdiff(os.Stderr, expected, actual)
-		fmt.Fprintln(os.Stderr)
+		diff := diffmatchpatch.New()
+		fmt.Fprintln(os.Stderr, "\n=== RAW DIFF ===\n",
+			diff.DiffPrettyText(diff.DiffMain(
+				fmt.Sprintf("%#v", actual),
+				fmt.Sprintf("%#v", expected),
+				false,
+			)),
+		)
 		os.Exit(1)
 	}
 	fmt.Println("✅ test case successful")

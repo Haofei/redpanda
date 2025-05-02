@@ -7,7 +7,25 @@
         ],
         "produces": [
             "application/json"
-        ]
+        ],
+        "responses": {
+            "200": {
+                "description": "OK",
+                "schema": {
+                    "type": "array",
+                    "items": {
+                        "oneOf": [
+                            {
+                                "type": "outbound_migration_state"
+                            },
+                            {
+                                "type": "inbound_migration_state"
+                            }
+                        ]
+                    }
+                }
+            }
+        }
     },
     "put": {
         "operationId": "add_migration",
@@ -50,7 +68,22 @@
                 "required": true,
                 "type": "int"
             }
-        ]
+        ],
+        "responses": {
+            "200": {
+                "description": "OK",
+                "schema": {
+                    "oneOf": [
+                        {
+                            "type": "outbound_migration_state"
+                        },
+                        {
+                            "type": "inbound_migration_state"
+                        }
+                    ]
+                }
+            }
+        }
     },
     "post": {
         "summary": "Execute migration action",
@@ -88,6 +121,20 @@
                 "type": "int"
             }
         ]
+    }
+},
+"/v1/topics/mountable": {
+    "get": {
+        "operationId": "list_mountable_topics",
+        "summary": "List mountable topics",
+        "responses": {
+            "200": {
+                "description": "List of mountable topics",
+                "schema": {
+                    "$ref": "list_mountable_topics_response"
+                }
+            }
+        }
     }
 },
 "/v1/topics/mount": {

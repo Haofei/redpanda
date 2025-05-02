@@ -12,7 +12,6 @@
 #include "cloud_storage/types.h"
 #include "cluster/archival/archival_metadata_stm.h"
 #include "cluster/errc.h"
-#include "features/feature_table.h"
 #include "http/tests/http_imposter.h"
 #include "model/fundamental.h"
 #include "model/metadata.h"
@@ -21,10 +20,10 @@
 #include "raft/fundamental.h"
 #include "raft/persisted_stm.h"
 #include "raft/state_machine_manager.h"
-#include "raft/tests/raft_group_fixture.h"
 #include "raft/tests/simple_raft_fixture.h"
 #include "storage/tests/utils/disk_log_builder.h"
 #include "test_utils/async.h"
+#include "test_utils/fixture.h"
 
 #include <seastar/core/io_priority_class.hh>
 #include <seastar/core/lowres_clock.hh>
@@ -91,7 +90,6 @@ struct archival_metadata_stm_base_fixture
     archival_metadata_stm_base_fixture()
       : http_imposter_fixture(4446) {
         // Blank feature table to satisfy constructor interface
-        feature_table.start().get();
         // Cloud storage config
         cloud_cfg.start().get();
         cloud_cfg
@@ -134,10 +132,8 @@ struct archival_metadata_stm_base_fixture
         cloud_api.stop().get();
         cloud_conn_pool.stop().get();
         cloud_cfg.stop().get();
-        feature_table.stop().get();
     }
 
-    ss::sharded<features::feature_table> feature_table;
     ss::sharded<cloud_storage::configuration> cloud_cfg;
     ss::sharded<cloud_storage_clients::client_pool> cloud_conn_pool;
     ss::sharded<cloud_io::remote> cloud_io;
@@ -152,7 +148,7 @@ struct archival_metadata_stm_fixture : archival_metadata_stm_base_fixture {
         archival_stm = builder.create_stm<cluster::archival_metadata_stm>(
           _raft.get(),
           cloud_api.local(),
-          feature_table.local(),
+          _feature_table.local(),
           logger,
           std::nullopt,
           std::nullopt);
@@ -316,7 +312,7 @@ void check_snapshot_size(
 FIXTURE_TEST(test_snapshot_loading, archival_metadata_stm_base_fixture) {
     create_raft();
     auto& ntp_cfg = _raft->log_config();
-    partition_manifest m(ntp_cfg.ntp(), ntp_cfg.get_initial_revision());
+    partition_manifest m(ntp_cfg.ntp(), ntp_cfg.get_remote_revision());
     m.add(
       segment_name("0-1-v1.log"),
       segment_meta{
@@ -368,7 +364,7 @@ FIXTURE_TEST(test_snapshot_loading, archival_metadata_stm_base_fixture) {
     auto archival_stm = builder.create_stm<cluster::archival_metadata_stm>(
       _raft.get(),
       cloud_api.local(),
-      feature_table.local(),
+      _feature_table.local(),
       logger,
       std::nullopt,
       std::nullopt);
@@ -396,7 +392,7 @@ FIXTURE_TEST(test_snapshot_loading, archival_metadata_stm_base_fixture) {
 FIXTURE_TEST(test_sname_derivation, archival_metadata_stm_base_fixture) {
     create_raft();
     auto& ntp_cfg = _raft->log_config();
-    partition_manifest m(ntp_cfg.ntp(), ntp_cfg.get_initial_revision());
+    partition_manifest m(ntp_cfg.ntp(), ntp_cfg.get_remote_revision());
 
     // original segments
     m.add(
@@ -468,7 +464,7 @@ FIXTURE_TEST(test_sname_derivation, archival_metadata_stm_base_fixture) {
     auto archival_stm = builder.create_stm<cluster::archival_metadata_stm>(
       _raft.get(),
       cloud_api.local(),
-      feature_table.local(),
+      _feature_table.local(),
       logger,
       std::nullopt,
       std::nullopt);
@@ -513,7 +509,7 @@ FIXTURE_TEST(
       .committed_offset = model::offset(399),
       .archiver_term = model::term_id(1),
       .segment_term = model::term_id(1)});
-    partition_manifest pm(ntp_cfg.ntp(), ntp_cfg.get_initial_revision());
+    partition_manifest pm(ntp_cfg.ntp(), ntp_cfg.get_remote_revision());
     for (const auto& s : m) {
         auto name = cloud_storage::generate_local_segment_name(
           s.base_offset, model::term_id{1});
@@ -655,7 +651,7 @@ FIXTURE_TEST(
   archival_metadata_stm_base_fixture) {
     create_raft();
     auto& ntp_cfg = _raft->log_config();
-    partition_manifest m(ntp_cfg.ntp(), ntp_cfg.get_initial_revision());
+    partition_manifest m(ntp_cfg.ntp(), ntp_cfg.get_remote_revision());
     m.add(
       segment_name("0-1-v1.log"),
       segment_meta{
@@ -688,7 +684,7 @@ FIXTURE_TEST(
     auto archival_stm = builder.create_stm<cluster::archival_metadata_stm>(
       _raft.get(),
       cloud_api.local(),
-      feature_table.local(),
+      _feature_table.local(),
       logger,
       std::nullopt,
       std::nullopt);

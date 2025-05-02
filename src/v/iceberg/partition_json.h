@@ -1,13 +1,15 @@
-// Copyright 2024 Redpanda Data, Inc.
-//
-// Use of this software is governed by the Business Source License
-// included in the file licenses/BSL.md
-//
-// As of the Change Date specified in that file, in accordance with
-// the Business Source License, use of this software will be governed
-// by the Apache License, Version 2.0
+/*
+ * Copyright 2024 Redpanda Data, Inc.
+ *
+ * Licensed as a Redpanda Enterprise file under the Redpanda Community
+ * License (the "License"); you may not use this file except in compliance with
+ * the License. You may obtain a copy of the License at
+ *
+ * https://github.com/redpanda-data/redpanda/blob/master/licenses/rcl.md
+ */
 #pragma once
 
+#include "container/fragmented_vector.h"
 #include "iceberg/json_writer.h"
 #include "iceberg/partition.h"
 #include "json/document.h"
@@ -15,6 +17,8 @@
 namespace iceberg {
 
 partition_field parse_partition_field(const json::Value&);
+chunked_vector<partition_field>
+parse_partition_fields(const json::Value::ConstArray&);
 partition_spec parse_partition_spec(const json::Value&);
 
 } // namespace iceberg
@@ -23,6 +27,9 @@ namespace json {
 
 void rjson_serialize(
   iceberg::json_writer& w, const iceberg::partition_field& m);
+void rjson_serialize(
+  iceberg::json_writer& w,
+  const chunked_vector<iceberg::partition_field>& fields);
 void rjson_serialize(iceberg::json_writer& w, const iceberg::partition_spec& m);
 
 } // namespace json

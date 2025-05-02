@@ -14,6 +14,7 @@
 #include "base/likely.h"
 #include "model/record.h"
 #include "raft/configuration_bootstrap_state.h"
+#include "raft/group_configuration.h"
 #include "raft/types.h"
 #include "storage/log.h"
 #include "storage/snapshot.h"
@@ -36,8 +37,7 @@ ss::future<std::vector<model::record_batch_reader>>
 foreign_share_n(model::record_batch_reader&&, std::size_t);
 
 /// serialize group configuration as config-type batch
-ss::circular_buffer<model::record_batch>
-serialize_configuration_as_batches(group_configuration cfg);
+model::record_batch serialize_configuration_as_batch(group_configuration cfg);
 
 iobuf serialize_configuration(group_configuration cfg);
 void write_configuration(group_configuration cfg, iobuf& out);
@@ -168,7 +168,7 @@ auto for_each_ref_extract_configuration(
 
         ReferenceConsumer wrapped;
         model::offset next_offset;
-        std::vector<offset_configuration> configurations;
+        chunked_vector<offset_configuration> configurations;
     };
 
     return std::move(rdr).for_each_ref(
@@ -209,6 +209,6 @@ ss::future<> bootstrap_pre_existing_partition(
   model::offset min_rp_offset,
   model::offset max_rp_offset,
   model::term_id last_included_term,
-  std::vector<model::broker> initial_nodes,
+  std::vector<raft::vnode> initial_nodes,
   ss::lw_shared_ptr<storage::offset_translator_state> ot_state);
 } // namespace raft::details

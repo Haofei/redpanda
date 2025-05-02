@@ -76,7 +76,7 @@ FIXTURE_TEST(replicate_after_compaction, compaction_multinode_test) {
     storage::housekeeping_config conf(
       model::timestamp::min(),
       std::nullopt,
-      first_log->stm_manager()->max_collectible_offset(),
+      first_log->stm_manager()->max_removable_local_log_offset(),
       std::nullopt,
       ss::default_priority_class(),
       as);
@@ -102,7 +102,7 @@ FIXTURE_TEST(replicate_after_compaction, compaction_multinode_test) {
                  .decommission_node(model::node_id(0))
                  .get();
     BOOST_REQUIRE(!err);
-    RPTEST_REQUIRE_EVENTUALLY(10s, [&] {
+    RPTEST_REQUIRE_EVENTUALLY(60s, [&] {
         auto partition = app->partition_manager.local().get(ntp);
         return partition == nullptr;
     });
@@ -125,7 +125,7 @@ FIXTURE_TEST(replicate_after_compaction, compaction_multinode_test) {
     storage::housekeeping_config conf2(
       model::timestamp::min(),
       std::nullopt,
-      new_log->stm_manager()->max_collectible_offset(),
+      new_log->stm_manager()->max_removable_local_log_offset(),
       std::nullopt,
       ss::default_priority_class(),
       as);
@@ -198,7 +198,7 @@ FIXTURE_TEST(compact_transactions_and_replicate, compaction_multinode_test) {
     storage::housekeeping_config conf(
       model::timestamp::min(),
       std::nullopt,
-      first_log->stm_manager()->max_collectible_offset(),
+      first_log->stm_manager()->max_removable_local_log_offset(),
       std::nullopt,
       ss::default_priority_class(),
       as);
@@ -212,7 +212,7 @@ FIXTURE_TEST(compact_transactions_and_replicate, compaction_multinode_test) {
                  .decommission_node(model::node_id(0))
                  .get();
     BOOST_REQUIRE(!err);
-    RPTEST_REQUIRE_EVENTUALLY(10s, [&] {
+    RPTEST_REQUIRE_EVENTUALLY(60s, [&] {
         auto partition = app->partition_manager.local().get(ntp);
         return partition == nullptr;
     });
@@ -227,7 +227,7 @@ FIXTURE_TEST(compact_transactions_and_replicate, compaction_multinode_test) {
     storage::housekeeping_config conf2(
       model::timestamp::min(),
       std::nullopt,
-      new_log->stm_manager()->max_collectible_offset(),
+      new_log->stm_manager()->max_removable_local_log_offset(),
       std::nullopt,
       ss::default_priority_class(),
       as);

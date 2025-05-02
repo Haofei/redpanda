@@ -139,10 +139,19 @@ class DeleteRecordsTest(RedpandaTest, PartitionMovementMixin):
             self.local_retention)
 
     def get_topic_info(self, topic_name):
-        topics_info = list(self.rpk.describe_topic(topic_name))
-        self.logger.info(topics_info)
-        assert len(topics_info) == 1
-        return topics_info[0]
+        def describe_topic():
+            topics_info = list(self.rpk.describe_topic(topic_name))
+            if len(topics_info) > 0:
+                self.logger.info(topics_info)
+                return True, topics_info[0]
+            else:
+                return False
+
+        topic_info = wait_until_result(describe_topic,
+                                       timeout_sec=15,
+                                       backoff_sec=1,
+                                       err_msg="Couldn't get topic info")
+        return topic_info
 
     def wait_until_records(self,
                            topic_name,
@@ -606,7 +615,8 @@ class DeleteRecordsTest(RedpandaTest, PartitionMovementMixin):
     @parametrize(cloud_storage_enabled=False)
     def test_delete_records_with_transactions(self, cloud_storage_enabled):
         """
-        Tests that the log_eviction_stm is respecting the max_collectible_offset
+        Tests that the log_eviction_stm is respecting the
+        max_removable_local_log_offset
         """
         self._start(cloud_storage_enabled)
 
@@ -772,10 +782,10 @@ class DeleteRecordsTest(RedpandaTest, PartitionMovementMixin):
         partition_move_thread.join()
         self.redpanda.logger.info("Joining on producer thread")
         producer.wait()
-        self.redpanda.logger.info("Calling consumer::stop")
-        consumer.stop()
         self.redpanda.logger.info("Joining on consumer thread")
         consumer.wait()
+        self.redpanda.logger.info("Calling consumer::stop")
+        consumer.stop()
         if DeleteRecordsExceptionReporter.exc is not None:
             raise DeleteRecordsExceptionReporter.exc
         if PartitionMoveExceptionReporter.exc is not None:
@@ -783,7 +793,6 @@ class DeleteRecordsTest(RedpandaTest, PartitionMovementMixin):
 
         status = consumer.consumer_status
         assert status.validator.invalid_reads == 0
-        assert status.validator.out_of_scope_invalid_reads == 0
 
 
 class TopicPartitionOffset(NamedTuple):

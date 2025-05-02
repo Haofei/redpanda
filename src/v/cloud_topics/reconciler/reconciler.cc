@@ -11,8 +11,12 @@
 #include "cloud_topics/reconciler/reconciler.h"
 
 #include "base/vlog.h"
+#include "cloud_storage/configuration.h"
+#include "cloud_topics/dl_overlay.h"
+#include "cloud_topics/dl_stm/dl_stm_api.h"
+#include "cloud_topics/types.h"
 #include "cluster/partition.h"
-#include "kafka/server/partition_proxy.h"
+#include "kafka/data/partition_proxy.h"
 #include "kafka/utils/txn_reader.h"
 #include "model/namespace.h"
 #include "random/generators.h"
@@ -38,10 +42,16 @@ namespace experimental::cloud_topics::reconciler {
 reconciler::reconciler(
   ss::sharded<cluster::partition_manager>* pm,
   ss::sharded<cloud_io::remote>* cloud_io,
-  cloud_storage_clients::bucket_name bucket)
+  std::optional<cloud_storage_clients::bucket_name> bucket)
   : _partition_manager(pm)
-  , _cloud_io(cloud_io)
-  , _bucket(std::move(bucket)) {}
+  , _cloud_io(cloud_io) {
+    if (bucket.has_value()) {
+        _bucket = std::move(bucket.value());
+    } else {
+        _bucket = cloud_storage_clients::bucket_name(
+          cloud_storage::configuration::get_bucket_config().value().value());
+    }
+}
 
 ss::future<> reconciler::start() {
     _manage_notify_handle
@@ -90,7 +100,7 @@ void reconciler::attach_partition(
 
 void reconciler::detach_partition(const model::ntp& ntp) {
     if (auto it = _partitions.find(ntp); it != _partitions.end()) {
-        vlog(lg.info, "Reconciler is detatching partition {}", ntp);
+        vlog(lg.info, "Reconciler is detaching partition {}", ntp);
         /*
          * This upcall doesn't synchronize with the rest of the reconciler,
          * which means that once a reference to an attached partition is held,
@@ -103,7 +113,6 @@ void reconciler::detach_partition(const model::ntp& ntp) {
 
 void reconciler::object::add(range range, const attached_partition& partition) {
     vassert(!range.data.empty(), "cannot add an empty range to object");
-
     const auto physical_offset_start = data.size_bytes();
     data.append(std::move(range.data));
     const auto physical_offset_end = data.size_bytes();
@@ -217,12 +226,40 @@ ss::future<> reconciler::commit_object(const object_range_info& range) {
      * TODO: we aren't actually replicating an overlay batch here yet. This will
      * come at the time of integration with the data layout STM.
      */
-    range.partition->lro = range.info.last_offset + model::offset(1);
+    const auto& part = range.partition->partition;
+    object_id id = object_id{uuid_t::create()};
+    dl_overlay_object overlay_obj(
+      id,
+      first_byte_offset_t{range.physical_offset_start},
+      byte_range_size_t{
+        range.physical_offset_end - range.physical_offset_start},
+      dl_stm_object_ownership::shared);
+
+    dl_overlay overlay{
+      range.info.base_offset,
+      range.info.last_offset,
+      range.info.base_timestamp,
+      range.info.last_timestamp,
+      range.info.terms,
+      overlay_obj};
+
+    auto push_result = co_await part->dl_stm_api()->push_overlay(overlay);
+    if (push_result.has_error()) {
+        vlog(
+          lg.error,
+          "Failed to replicate dl_overlay batch to {}, error: {}",
+          part->ntp(),
+          push_result.error());
+        co_return;
+    }
+
+    range.partition->lro = range.info.last_offset + kafka::offset(1);
 
     vlog(
       lg.info,
-      "Committed overlay for {} phy {}~{} log {}~{}. New LRO {}",
-      range.partition->partition->ntp(),
+      "Committed overlay {} for {} phy {}~{} log {}~{}. New LRO {}",
+      id,
+      part->ntp(),
       range.physical_offset_start,
       range.physical_offset_end,
       range.info.base_offset,
@@ -246,8 +283,8 @@ reconciler::make_reader(const attached_partition& partition, size_t max_bytes) {
         co_return model::make_empty_record_batch_reader();
     }
 
-    model::offset start_offset = std::max(
-      effective_start.value(), partition->lro);
+    kafka::offset start_offset = std::max(
+      model::offset_cast(effective_start.value()), partition->lro);
 
     auto maybe_lso = proxy.last_stable_offset();
     if (maybe_lso.has_error()) {
@@ -261,15 +298,15 @@ reconciler::make_reader(const attached_partition& partition, size_t max_bytes) {
 
     // It's possible for LSO to be 0, which in this case the previous offset
     // is model::offset::min(), this is the same as the kafka fetch path.
-    model::offset max_offset = model::prev_offset(maybe_lso.value());
+    auto max_offset = kafka::prev_offset(model::offset_cast(maybe_lso.value()));
 
     if (max_offset < start_offset) {
         co_return model::make_empty_record_batch_reader();
     }
 
     auto reader = co_await proxy.make_reader(storage::log_reader_config(
-      start_offset,
-      max_offset,
+      kafka::offset_cast(start_offset),
+      kafka::offset_cast(max_offset),
       0,
       max_bytes,
       ss::default_priority_class(),

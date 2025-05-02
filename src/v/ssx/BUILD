@@ -87,7 +87,7 @@ redpanda_cc_library(
     visibility = ["//visibility:public"],
     deps = [
         "//src/v/base",
-        "@abseil-cpp//absl/container:flat_hash_map",
+        "//src/v/container:chunked_hash_map",
         "@seastar",
     ],
 )
@@ -211,6 +211,31 @@ redpanda_cc_library(
     deps = [
         ":future_util",
         "//src/v/base",
+        "@seastar",
+    ],
+)
+
+redpanda_cc_library(
+    name = "when_all",
+    hdrs = [
+        "when_all.h",
+    ],
+    include_prefix = "ssx",
+    visibility = ["//visibility:public"],
+    deps = [
+        "//src/v/serde",
+        "@seastar",
+    ],
+)
+
+redpanda_cc_library(
+    name = "rate_limited_function",
+    hdrs = [
+        "rate_limited_function.h",
+    ],
+    include_prefix = "ssx",
+    visibility = ["//visibility:public"],
+    deps = [
         "@seastar",
     ],
 )

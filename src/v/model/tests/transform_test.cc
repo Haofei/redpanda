@@ -18,7 +18,12 @@
 #include "model/timestamp.h"
 #include "model/transform.h"
 #include "random/generators.h"
-#include "serde/serde.h"
+#include "serde/rw/map.h"
+#include "serde/rw/sstring.h"
+#include "serde/rw/uuid.h"
+#include "serde/rw/variant.h"
+#include "serde/rw/vector.h"
+#include "test_utils/random_bytes.h"
 #include "test_utils/randoms.h"
 
 #include <seastar/core/chunked_fifo.hh>
@@ -142,8 +147,7 @@ TEST(ClusterTransformReportTest, Merge) {
 }
 
 TEST(TransformedDataTest, Serialize) {
-    auto src = model::test::make_random_record(
-      0, random_generators::make_iobuf());
+    auto src = model::test::make_random_record(0, tests::random_iobuf());
     auto validated = transformed_data::from_record(src.copy());
     auto got = std::move(validated).to_serialized_record(
       src.attributes(), src.timestamp_delta(), src.offset_delta());
@@ -183,7 +187,7 @@ TEST(TransformedDataTest, MakeBatch) {
       transformed_batch.header().size_bytes, transformed_batch.size_bytes());
     auto expected_records = batch.copy_records();
     auto actual_records = transformed_batch.copy_records();
-    for (auto i = 0; i < expected_records.size(); ++i) {
+    for (size_t i = 0; i < expected_records.size(); ++i) {
         EXPECT_EQ(actual_records[i].key(), expected_records[i].key());
         EXPECT_EQ(actual_records[i].value(), expected_records[i].value());
         EXPECT_EQ(actual_records[i].headers(), expected_records[i].headers());

@@ -20,6 +20,7 @@ from rptest.services.cluster import cluster
 from ducktape.mark import parametrize, matrix
 from rptest.clients.kafka_cli_tools import KafkaCliTools
 from rptest.clients.rpk import RpkTool
+from rptest.utils.mode_checks import skip_fips_mode
 
 from rptest.services.redpanda_installer import RedpandaVersionTriple
 from rptest.clients.types import TopicSpec
@@ -50,6 +51,8 @@ class AlterTopicConfiguration(RedpandaTest):
     @parametrize(property=TopicSpec.PROPERTY_RETENTION_TIME, value=360000)
     @parametrize(property=TopicSpec.PROPERTY_TIMESTAMP_TYPE,
                  value="LogAppendTime")
+    @parametrize(property=TopicSpec.PROPERTY_DELETE_RETENTION_MS,
+                 value=123456789)
     def test_altering_topic_configuration(self, property, value):
         topic = self.topics[0].name
         self.client().alter_topic_configs(topic, {property: value})
@@ -70,7 +73,8 @@ class AlterTopicConfiguration(RedpandaTest):
         kcl.raw_alter_topic_config(
             1, topic, {
                 TopicSpec.PROPERTY_RETENTION_TIME: 360000,
-                TopicSpec.PROPERTY_TIMESTAMP_TYPE: "LogAppendTime"
+                TopicSpec.PROPERTY_TIMESTAMP_TYPE: "LogAppendTime",
+                TopicSpec.PROPERTY_DELETE_RETENTION_MS: 1234567890
             })
         kafka_tools = KafkaCliTools(self.redpanda)
         spec = kafka_tools.describe_topic(topic)
@@ -78,6 +82,7 @@ class AlterTopicConfiguration(RedpandaTest):
         assert spec.replication_factor == 3
         assert spec.retention_ms == 360000
         assert spec.message_timestamp_type == "LogAppendTime"
+        assert spec.delete_retention_ms == 1234567890
 
     @cluster(num_nodes=3)
     def test_altering_multiple_topic_configurations(self):
@@ -87,13 +92,15 @@ class AlterTopicConfiguration(RedpandaTest):
             topic, {
                 TopicSpec.PROPERTY_SEGMENT_SIZE: 1024 * 1024,
                 TopicSpec.PROPERTY_RETENTION_TIME: 360000,
-                TopicSpec.PROPERTY_TIMESTAMP_TYPE: "LogAppendTime"
+                TopicSpec.PROPERTY_TIMESTAMP_TYPE: "LogAppendTime",
+                TopicSpec.PROPERTY_DELETE_RETENTION_MS: 1234567890
             })
         spec = kafka_tools.describe_topic(topic)
 
         assert spec.segment_bytes == 1024 * 1024
         assert spec.retention_ms == 360000
         assert spec.message_timestamp_type == "LogAppendTime"
+        assert spec.delete_retention_ms == 1234567890
 
     def random_string(self, size):
         return ''.join(
@@ -244,6 +251,53 @@ class AlterTopicConfiguration(RedpandaTest):
         assert altered_output["redpanda.remote.read"] == "false"
         assert altered_output["redpanda.remote.write"] == "false"
 
+    @cluster(num_nodes=3)
+    def test_min_cleanable_dirty_ratio_validation(self):
+        topic = self.topics[0].name
+        kafka_tools = KafkaCliTools(self.redpanda)
+        self.redpanda.set_cluster_config({"min_cleanable_dirty_ratio": 0.5})
+        initial_spec = kafka_tools.describe_topic(topic)
+
+        # Check that a value outside valid range is rejected
+        try:
+            self.client().alter_topic_configs(
+                topic, {TopicSpec.PROPERTY_MIN_CLEANABLE_DIRTY_RATIO: 1.01})
+        except subprocess.CalledProcessError as e:
+            assert "is outside of allowed range" in e.output
+
+        assert initial_spec.min_cleanable_dirty_ratio == kafka_tools.describe_topic(
+            topic
+        ).min_cleanable_dirty_ratio, "min.cleanable.dirty.ratio shouldn't be changed to invalid value"
+
+        # Check that a valid value is accepted
+        self.client().alter_topic_configs(
+            topic, {TopicSpec.PROPERTY_MIN_CLEANABLE_DIRTY_RATIO: 0.3})
+
+        assert kafka_tools.describe_topic(
+            topic).min_cleanable_dirty_ratio == 0.3
+
+        # Check that we can disable the tristate with -1
+        self.client().alter_topic_configs(
+            topic, {TopicSpec.PROPERTY_MIN_CLEANABLE_DIRTY_RATIO: -1})
+
+        assert kafka_tools.describe_topic(
+            topic).min_cleanable_dirty_ratio == -1
+
+        # Check that we can disable the tristate with any value < 0
+        self.client().alter_topic_configs(
+            topic, {TopicSpec.PROPERTY_MIN_CLEANABLE_DIRTY_RATIO: -123.456})
+
+        assert kafka_tools.describe_topic(
+            topic).min_cleanable_dirty_ratio == -1
+
+        # Check that deleting the topic config resets it back to cluster default
+        self.client().delete_topic_config(
+            topic, TopicSpec.PROPERTY_MIN_CLEANABLE_DIRTY_RATIO)
+
+        assert kafka_tools.describe_topic(
+            topic
+        ).min_cleanable_dirty_ratio == initial_spec.min_cleanable_dirty_ratio
+
 
 class ShadowIndexingGlobalConfig(RedpandaTest):
     topics = (TopicSpec(partition_count=1, replication_factor=3), )
@@ -361,6 +415,8 @@ class AlterConfigMixedNodeTest(EndToEndTest):
     def __init__(self, ctx):
         super(AlterConfigMixedNodeTest, self).__init__(test_context=ctx)
 
+    # fips_mode requires the bucket to configured in virtual_host mode which is not available prior to v24.2
+    @skip_fips_mode
     @cluster(num_nodes=3)
     @matrix(incremental_update=[True, False])
     def test_alter_config_shadow_indexing_mixed_node(self, incremental_update):
@@ -374,8 +430,7 @@ class AlterConfigMixedNodeTest(EndToEndTest):
         self.start_redpanda(
             num_nodes=num_nodes,
             si_settings=SISettings(test_context=self.test_context),
-            install_opts=install_opts,
-            license_required=True)
+            install_opts=install_opts)
 
         rpk = RpkTool(self.redpanda)
         # KCL is used to direct AlterConfig and DescribeConfigs requests to specific brokers.
@@ -406,10 +461,13 @@ class AlterConfigMixedNodeTest(EndToEndTest):
                 props = set()
                 for line in desc.split('\n'):
                     line = line.rstrip()
+                    # normalize spaces/tabs from outputs across nodes
+                    line = " ".join(line.split())
                     if 'redpanda.remote.read' in line:
                         props.add(line)
                     elif 'redpanda.remote.write' in line:
                         props.add(line)
+                self.logger.debug(f"{props}")
                 assert len(props) == 2
                 node_props.append(props)
             return all(p == node_props[0] for p in node_props)

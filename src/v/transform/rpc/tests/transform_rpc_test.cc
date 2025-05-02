@@ -15,7 +15,7 @@
 #include "config/mock_property.h"
 #include "gmock/gmock.h"
 #include "gtest/gtest.h"
-#include "kafka/server/partition_proxy.h"
+#include "kafka/data/partition_proxy.h"
 #include "model/fundamental.h"
 #include "model/ktp.h"
 #include "model/metadata.h"
@@ -174,13 +174,13 @@ public:
         // tests.
         const auto& prop_update = update.properties.batch_max_bytes;
         switch (prop_update.op) {
-        case cluster::none:
+        case cluster::incremental_update_operation::none:
             return;
-        case cluster::set:
+        case cluster::incremental_update_operation::set:
             config.properties.batch_max_bytes
               = update.properties.batch_max_bytes.value;
             break;
-        case cluster::remove:
+        case cluster::incremental_update_operation::remove:
             config.properties.batch_max_bytes.reset();
             break;
         }
@@ -555,6 +555,9 @@ private:
         sync_effective_start(model::timeout_clock::duration) final {
             throw std::runtime_error("unimplemented");
         }
+        model::offset local_start_offset() const final {
+            throw std::runtime_error("unimplemented");
+        }
         model::offset start_offset() const final {
             throw std::runtime_error("unimplemented");
         }
@@ -620,9 +623,8 @@ private:
         }
 
         ss::future<result<model::offset>> replicate(
-          model::record_batch_reader rdr, raft::replicate_options) final {
-            auto batches = co_await model::consume_reader_to_memory(
-              std::move(rdr), model::no_timeout);
+          chunked_vector<model::record_batch> batches,
+          raft::replicate_options) final {
             auto offset = latest_offset();
             for (const auto& batch : batches) {
                 auto b = batch.copy();
@@ -634,15 +636,23 @@ private:
 
         raft::replicate_stages replicate(
           model::batch_identity,
-          model::record_batch_reader&&,
+          model::record_batch,
           raft::replicate_options) final {
             throw std::runtime_error("unimplemented");
         }
 
+        ss::future<result<model::offset>>
+        replicate(model::record_batch, raft::replicate_options) final {
+            throw std::runtime_error("unimplemented");
+        }
         result<kafka::partition_info> get_partition_info() const override {
             throw std::runtime_error("unimplemented");
         }
         cluster::partition_probe& probe() override {
+            throw std::runtime_error("unimplemented");
+        }
+        size_t
+        estimate_size_between(kafka::offset, kafka::offset) const override {
             throw std::runtime_error("unimplemented");
         }
 
@@ -664,7 +674,7 @@ private:
     fake_offset_tracker* _offset_tracker;
     int _errors_to_inject = 0;
     ss::chunked_fifo<produced_batch> _produced_batches;
-    model::ntp_flat_map_type<ss::shard_id> _shard_locations;
+    model::ntp_map_type<ss::shard_id> _shard_locations;
 };
 
 constexpr uint16_t test_server_port = 8080;

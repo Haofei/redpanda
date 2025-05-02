@@ -23,7 +23,8 @@
 namespace cluster {
 
 ss::future<> controller_stm::on_batch_applied() {
-    if (!_feature_table.is_active(features::feature::controller_snapshots)) {
+    if (!_feature_table.local().is_active(
+          features::feature::controller_snapshots)) {
         co_return;
     }
     if (_gate.is_closed()) {
@@ -37,6 +38,7 @@ ss::future<> controller_stm::on_batch_applied() {
         _snapshot_debounce_timer.arm(_snapshot_max_age());
     };
 }
+void controller_stm::shutdown_apply_loop() { _as.request_abort(); }
 
 ss::future<> controller_stm::shutdown() {
     _snapshot_debounce_timer.cancel();
@@ -106,7 +108,8 @@ ss::future<std::optional<iobuf>>
 controller_stm::maybe_make_snapshot(ssx::semaphore_units apply_mtx_holder) {
     auto started_at = ss::steady_clock_type::now();
 
-    if (!_feature_table.is_active(features::feature::controller_snapshots)) {
+    if (!_feature_table.local().is_active(
+          features::feature::controller_snapshots)) {
         vlog(clusterlog.warn, "skipping snapshotting, feature not enabled");
         co_return std::nullopt;
     }
@@ -200,6 +203,14 @@ ss::future<> controller_stm::apply_snapshot(
     }
 
     _metrics_reporter_cluster_info = snapshot.metrics_reporter.cluster_info;
+    co_await _feature_table.invoke_on_all([&](features::feature_table& ft) {
+        ft.set_builtin_trial_license(
+          _metrics_reporter_cluster_info.creation_timestamp);
+    });
+}
+
+ss::future<ssx::semaphore_units> controller_stm::lock_apply() {
+    return _apply_mtx.get_units();
 }
 
 } // namespace cluster

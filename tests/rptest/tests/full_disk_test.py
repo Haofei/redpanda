@@ -15,7 +15,7 @@ from ducktape.mark import matrix
 from ducktape.tests.test import TestContext
 from ducktape.utils.util import wait_until
 from kafka import KafkaProducer
-from kafka.errors import BrokerNotAvailableError, NotLeaderForPartitionError
+from kafka.errors import KafkaStorageError, NotLeaderForPartitionError
 
 from rptest.clients.default import DefaultClient
 from rptest.clients.kafka_cli_tools import KafkaCliTools
@@ -24,7 +24,7 @@ from rptest.clients.types import TopicSpec
 from rptest.services.admin import Admin
 from rptest.services.cluster import cluster
 from rptest.services.kgo_verifier_services import KgoVerifierProducer, KgoVerifierSeqConsumer
-from rptest.services.redpanda import LoggingConfig, RedpandaService, SISettings
+from rptest.services.redpanda import LoggingConfig, MetricsEndpoint, RedpandaService, SISettings
 from rptest.tests.end_to_end import EndToEndTest
 from rptest.tests.redpanda_test import RedpandaTest
 from rptest.util import produce_total_bytes, search_logs_with_timeout
@@ -97,7 +97,7 @@ class WriteRejectTest(RedpandaTest):
                     i = i + 1
                     f = producer.send(topic, msg)
                     f.get(30)
-            except BrokerNotAvailableError as e1:
+            except KafkaStorageError as e1:
                 was_blocked = True
                 if expect_blocked:
                     self.logger.info(f"Write rejected as expected: {e1}")
@@ -147,7 +147,7 @@ class WriteRejectTest(RedpandaTest):
             # Looking for a log statement about a change in disk space.
             # This is a check for the health monitor frontend because
             # that structure logs disk space alerts.
-            pattern = f"Update disk health cache {disk_space_change}"
+            pattern = f"Update data disk health cache {disk_space_change}"
             wait_until(
                 lambda: self.redpanda.search_log_any(pattern),
                 timeout_sec=5,
@@ -315,6 +315,17 @@ class FullDiskReclaimTest(RedpandaTest):
                    timeout_sec=30,
                    backoff_sec=2)
 
+        assert self.redpanda.metric_sum(
+            metric_name=
+            "vectorized_storage_manager_housekeeping_log_processed_total",
+            metrics_endpoint=MetricsEndpoint.METRICS
+        ) == 0, "Housekeeping should not have run"
+
+        assert self.redpanda.metric_sum(
+            metric_name="vectorized_storage_manager_urgent_gc_runs_total",
+            metrics_endpoint=MetricsEndpoint.METRICS
+        ) == 0, "GC should not have run yet"
+
         # now trigger the disk space alert on the same node. unlike the 30
         # second delay above, we should almost immediately observe the data
         # be reclaimed from disk.
@@ -330,6 +341,17 @@ class FullDiskReclaimTest(RedpandaTest):
             lambda: observed_data_size(lambda s: s < expected_size_after_gc),
             timeout_sec=10,
             backoff_sec=2)
+
+        # Disk space alerts only triggers urgent gc, not housekeeping.
+        assert self.redpanda.metric_sum(
+            metric_name=
+            "vectorized_storage_manager_housekeeping_log_processed_total",
+            metrics_endpoint=MetricsEndpoint.METRICS
+        ) == 0, "Housekeeping should not have run"
+
+        assert self.redpanda.metric_sum(
+            metric_name="vectorized_storage_manager_urgent_gc_runs_total",
+            metrics_endpoint=MetricsEndpoint.METRICS) > 0, "GC should have run"
 
 
 class LocalDiskReportTimeTest(RedpandaTest):
@@ -357,7 +379,8 @@ class LocalDiskReportTimeTest(RedpandaTest):
                             1024,
                             throughput=500,
                             acks=-1,
-                            linger_ms=50)
+                            linger_ms=50,
+                            enable_idempotence=False)
 
         node = self.redpanda.nodes[0]
         reported = admin.get_local_storage_usage(

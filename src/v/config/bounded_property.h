@@ -12,7 +12,9 @@
 #include "config/base_property.h"
 #include "config/property.h"
 
+#include <cstdlib>
 #include <optional>
+#include <type_traits>
 
 namespace config {
 
@@ -83,6 +85,10 @@ concept bounds = requires(T bounds, const typename T::underlying_t& value) {
     { bounds.validate(value) } -> std::same_as<std::optional<ss::sstring>>;
     { bounds.clamp(value) } -> std::same_as<typename T::underlying_t>;
 };
+
+inline bool bounds_checking_disabled() {
+    return std::getenv("__REDPANDA_TEST_DISABLE_BOUNDED_PROPERTY_CHECKS");
+}
 
 } // namespace detail
 
@@ -197,6 +203,9 @@ public:
           meta,
           def,
           [this](T new_value) -> std::optional<ss::sstring> {
+              if (detail::bounds_checking_disabled()) {
+                  return std::nullopt;
+              }
               // Extract inner value if we are an optional<>,
               // and pass through into numeric_bounds::validate
               using outer_type = std::decay_t<T>;
@@ -235,6 +244,13 @@ public:
     }
 
 private:
+    I clamp_with_bounds(I val) {
+        if (detail::bounds_checking_disabled()) {
+            return val;
+        }
+        return _bounds.clamp(val);
+    }
+
     bool clamp_and_update(T val) {
         using outer_type = std::decay_t<T>;
 
@@ -248,19 +264,23 @@ private:
         if constexpr (reflection::is_std_optional<outer_type>) {
             if (val.has_value()) {
                 return property<T>::update_value(
-                  std::move(_bounds.clamp(val.value())));
+                  std::move(clamp_with_bounds(val.value())));
             } else {
                 // nullopt is always valid, never clamped.  Pass it through.
                 return property<T>::update_value(std::move(val));
             }
         } else {
-            return property<T>::update_value(std::move(_bounds.clamp(val)));
+            return property<T>::update_value(std::move(clamp_with_bounds(val)));
         }
     }
 
     /*
      * Pre-generate an example for docs/api, if the explicit property
      * metadata does not provide one.
+     *
+     * The stringified value must be valid YAML that can be parsed as a
+     * property value (i.e. by \ref bounded_property::set_value). Also see
+     * \ref base_property::example.
      */
     ss::sstring generate_example() {
         auto parent = property<T>::example();
@@ -288,7 +308,16 @@ private:
                 guess = property<T>::_default;
             }
         }
-        return fmt::format("{}", guess);
+
+        if constexpr (::detail::
+                        is_specialization_of_v<I, std::chrono::duration>) {
+            return fmt::format("{}", guess.count());
+        } else if constexpr (std::is_arithmetic_v<I>) {
+            return fmt::format("{}", guess);
+        } else {
+            static_assert(
+              false, "type does not have a valid example generation strategy");
+        }
     }
 
     B<I> _bounds;

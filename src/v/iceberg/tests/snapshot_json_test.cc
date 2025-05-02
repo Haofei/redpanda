@@ -1,11 +1,12 @@
-// Copyright 2024 Redpanda Data, Inc.
-//
-// Use of this software is governed by the Business Source License
-// included in the file licenses/BSL.md
-//
-// As of the Change Date specified in that file, in accordance with
-// the Business Source License, use of this software will be governed
-// by the Apache License, Version 2.0
+/*
+ * Copyright 2024 Redpanda Data, Inc.
+ *
+ * Licensed as a Redpanda Enterprise file under the Redpanda Community
+ * License (the "License"); you may not use this file except in compliance with
+ * the License. You may obtain a copy of the License at
+ *
+ * https://github.com/redpanda-data/redpanda/blob/master/licenses/rcl.md
+ */
 
 #include "iceberg/json_writer.h"
 #include "iceberg/snapshot.h"
@@ -42,7 +43,7 @@ TEST(SnapshotJsonSerde, TestSnapshot) {
     ASSERT_EQ(snapshot_operation::append, snap.summary.operation);
     ASSERT_EQ(1, snap.summary.other.size());
     ASSERT_EQ("bar", snap.summary.other.at("foo"));
-    ASSERT_STREQ("s3://b/wh/.../s1.avro", snap.manifest_list_path.c_str());
+    ASSERT_STREQ("s3://b/wh/.../s1.avro", snap.manifest_list_path().c_str());
     ASSERT_TRUE(snap.schema_id.has_value());
     ASSERT_EQ(0, snap.schema_id.value());
 
@@ -77,7 +78,7 @@ TEST(SnapshotJsonSerde, TestSnapshotMissingOptionals) {
     ASSERT_EQ(snapshot_operation::append, snap.summary.operation);
     ASSERT_EQ(1, snap.summary.other.size());
     ASSERT_EQ("bar", snap.summary.other.at("foo"));
-    ASSERT_STREQ("s3://b/wh/.../s1.avro", snap.manifest_list_path.c_str());
+    ASSERT_STREQ("s3://b/wh/.../s1.avro", snap.manifest_list_path().c_str());
     ASSERT_FALSE(snap.schema_id.has_value());
 
     const auto parsed_orig_as_str = iceberg::to_json_str(snap);

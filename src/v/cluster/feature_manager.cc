@@ -20,9 +20,12 @@
 #include "cluster/logger.h"
 #include "cluster/members_table.h"
 #include "config/configuration.h"
+#include "config/endpoint_tls_config.h"
 #include "config/node_config.h"
+#include "config/tls_config.h"
 #include "config/types.h"
 #include "config/validators.h"
+#include "features/enterprise_feature_messages.h"
 #include "features/feature_state.h"
 #include "features/feature_table.h"
 #include "model/timeout_clock.h"
@@ -33,9 +36,9 @@
 
 #include <seastar/core/semaphore.hh>
 
-#include <absl/algorithm/container.h>
 #include <fmt/format.h>
 
+#include <algorithm>
 #include <stdexcept>
 
 namespace cluster {
@@ -52,6 +55,7 @@ feature_manager::feature_manager(
   ss::sharded<features::feature_table>& table,
   ss::sharded<rpc::connection_cache>& connection_cache,
   ss::sharded<security::role_store>& role_store,
+  ss::sharded<topic_table>& topic_table,
   raft::group_id raft0_group)
   : _stm(stm)
   , _as(as)
@@ -62,6 +66,7 @@ feature_manager::feature_manager(
   , _feature_table(table)
   , _connection_cache(connection_cache)
   , _role_store(role_store)
+  , _topic_table(topic_table)
   , _raft0_group(raft0_group)
   , _barrier_state(
       *config::node().node_id(),
@@ -181,7 +186,7 @@ feature_manager::start(std::vector<model::node_id>&& cluster_founder_nodes) {
     ssx::background = ssx::spawn_with_gate_then(_gate, [this] {
         return ss::do_until(
           [this] { return _as.local().abort_requested(); },
-          [this] { return maybe_log_license_check_info(); });
+          [this] { return maybe_log_periodic_reminders(); });
     });
 
     for (const model::node_id n : cluster_founder_nodes) {
@@ -205,7 +210,7 @@ feature_manager::report_enterprise_features() const {
     const auto& cfg = config::shard_local_cfg();
     const auto& node_cfg = config::node();
     auto has_gssapi = [&cfg]() {
-        return absl::c_any_of(
+        return std::ranges::any_of(
           cfg.sasl_mechanisms(), [](const auto& m) { return m == "GSSAPI"; });
     };
     auto has_oidc = []() {
@@ -225,6 +230,22 @@ feature_manager::report_enterprise_features() const {
     auto has_non_default_roles
       = n_roles >= 2
         || (n_roles == 1 && !_role_store.local().contains(security::default_role));
+    auto leadership_pinning_enabled = [&cfg, this]() {
+        const config::leaders_preference no_leaders_preference{};
+        if (cfg.default_leaders_preference() != no_leaders_preference) {
+            return true;
+        }
+        for (const auto& topic : _topic_table.local().topics_map()) {
+            const auto leaders_preference
+              = topic.second.get_configuration().properties.leaders_preference;
+            if (
+              leaders_preference.has_value()
+              && leaders_preference.value() != no_leaders_preference) {
+                return true;
+            }
+        }
+        return false;
+    };
 
     features::enterprise_feature_report report;
     report.set(
@@ -249,51 +270,73 @@ feature_manager::report_enterprise_features() const {
     report.set(
       features::license_required_feature::datalake_iceberg,
       cfg.iceberg_enabled());
+    report.set(
+      features::license_required_feature::leadership_pinning,
+      leadership_pinning_enabled());
     return report;
 }
 
-ss::future<> feature_manager::maybe_log_license_check_info() {
-    auto license_check_retry = std::chrono::seconds(60 * 5);
+ss::future<> feature_manager::maybe_log_periodic_reminders() {
+    auto reminder_period = std::chrono::seconds(60 * 5);
     auto interval_override = std::getenv(
-      "__REDPANDA_LICENSE_CHECK_INTERVAL_SEC");
+      "__REDPANDA_PERIODIC_REMINDER_INTERVAL_SEC");
     if (interval_override != nullptr) {
         try {
-            license_check_retry = std::min(
-              std::chrono::seconds{license_check_retry},
+            reminder_period = std::min(
+              std::chrono::seconds{reminder_period},
               std::chrono::seconds{std::stoi(interval_override)});
             vlog(
               clusterlog.info,
-              "Overriding default license log annoy interval to: {}s",
-              license_check_retry.count());
+              "Overriding default reminder period interval to: {}s",
+              reminder_period.count());
         } catch (...) {
             vlog(
               clusterlog.error,
-              "Invalid license check interval override '{}'",
+              "Invalid reminder period interval override '{}'",
               interval_override);
         }
     }
     try {
-        co_await ss::sleep_abortable(license_check_retry, _as.local());
+        co_await ss::sleep_abortable(reminder_period, _as.local());
     } catch (const ss::sleep_aborted&) {
         // Shutting down - next iteration will drop out
         co_return;
     }
-    if (_feature_table.local().is_active(features::feature::license)) {
-        auto enterprise_features = report_enterprise_features();
-        if (enterprise_features.any()) {
-            const auto& license = _feature_table.local().get_license();
-            if (!license || license->is_expired()) {
-                vlog(
-                  clusterlog.warn,
-                  "A Redpanda Enterprise Edition license is required to use "
-                  "enterprise features: ([{}]). Enter an active license key "
-                  "(for example, rpk cluster license set <key>). To request a "
-                  "license, see https://redpanda.com/license-request. For more "
-                  "information, see "
-                  "https://docs.redpanda.com/current/get-started/licenses.",
-                  fmt::join(enterprise_features.enabled(), ", "));
-            }
+
+    maybe_log_license_nag();
+    maybe_log_security_nag();
+}
+
+void feature_manager::maybe_log_license_nag() {
+    auto enterprise_features = report_enterprise_features();
+    if (enterprise_features.any()) {
+        if (_feature_table.local().should_sanction()) {
+            vlog(
+              clusterlog.warn,
+              "{}",
+              features::enterprise_error_message::license_nag(
+                enterprise_features.enabled()));
         }
+    }
+}
+
+void feature_manager::maybe_log_security_nag() {
+    if (std::ranges::any_of(
+          config::shard_local_cfg().sasl_mechanisms(),
+          [](const auto& m) { return m == "PLAIN"; })) {
+        const bool any_tls_disabled
+          = std::ranges::any_of(
+              config::node_config().kafka_api_tls.value(),
+              [](const config::endpoint_tls_config& cfg) {
+                  return !cfg.config.is_enabled();
+              })
+            || config::node_config().kafka_api_tls.value().empty();
+
+        vlogl(
+          clusterlog,
+          any_tls_disabled ? ss::log_level::error : ss::log_level::warn,
+          "SASL/PLAIN is enabled. This is insecure and not recommended for "
+          "production.");
     }
 }
 
@@ -312,7 +355,6 @@ void feature_manager::verify_enterprise_license() {
         return;
     }
 
-    const auto& license = _feature_table.local().get_license();
     std::optional<security::license> fallback_license = std::nullopt;
     auto fallback_license_str = std::getenv(
       "REDPANDA_FALLBACK_ENTERPRISE_LICENSE");
@@ -332,7 +374,7 @@ void feature_manager::verify_enterprise_license() {
     auto invalid = [](const std::optional<security::license>& license) {
         return !license || license->is_expired();
     };
-    auto license_missing_or_expired = invalid(license)
+    auto license_missing_or_expired = _feature_table.local().should_sanction()
                                       && invalid(fallback_license);
     auto enterprise_features = report_enterprise_features();
 
@@ -342,19 +384,14 @@ void feature_manager::verify_enterprise_license() {
       "enterprise_features=[{}], license_missing_or_expired={}{}",
       _feature_table.local().get_active_version(),
       _feature_table.local().get_latest_logical_version(),
-      enterprise_features.enabled(),
+      fmt::join(enterprise_features.enabled(), ", "),
       license_missing_or_expired,
       fallback_license ? " (detected fallback license)" : "");
 
     if (enterprise_features.any() && license_missing_or_expired) {
-        throw std::runtime_error{fmt::format(
-          "A Redpanda Enterprise Edition license is required to use enterprise "
-          "features: ([{}]). To add your license, downgrade this broker to the "
-          "pre-upgrade version, and enter the active license key (for example, "
-          "rpk cluster license set). To request a license, see "
-          "https://redpanda.com/license-request. For more information, see "
-          "https://docs.redpanda.com/current/get-started/licenses.",
-          fmt::join(enterprise_features.enabled(), ", "))};
+        throw std::runtime_error{
+          features::enterprise_error_message::upgrade_failure(
+            enterprise_features.enabled())};
     }
 
     _verified_enterprise_license.signal();

@@ -1,15 +1,16 @@
-// Copyright 2024 Redpanda Data, Inc.
-//
-// Use of this software is governed by the Business Source License
-// included in the file licenses/BSL.md
-//
-// As of the Change Date specified in that file, in accordance with
-// the Business Source License, use of this software will be governed
-// by the Apache License, Version 2.0
+/*
+ * Copyright 2024 Redpanda Data, Inc.
+ *
+ * Licensed as a Redpanda Enterprise file under the Redpanda Community
+ * License (the "License"); you may not use this file except in compliance with
+ * the License. You may obtain a copy of the License at
+ *
+ * https://github.com/redpanda-data/redpanda/blob/master/licenses/rcl.md
+ */
 
 #include "cloud_io/remote.h"
+#include "cloud_io/tests/s3_imposter.h"
 #include "cloud_io/tests/scoped_remote.h"
-#include "cloud_storage/tests/s3_imposter.h"
 #include "iceberg/metadata_query.h"
 #include "iceberg/table_metadata.h"
 #include "iceberg/tests/test_schemas.h"
@@ -55,7 +56,7 @@ public:
         return table_metadata{
           .format_version = format_version::v2,
           .table_uuid = uuid_t::create(),
-          .location = "foo/bar",
+          .location = uri(fmt::format("s3://{}/foo/bar", bucket_name())),
           .last_sequence_number = sequence_number{0},
           .last_updated_ms = model::timestamp::now(),
           .last_column_id = s.highest_field_id().value(),
@@ -73,38 +74,49 @@ public:
         return {std::move(pk_struct)};
     }
 
-    chunked_vector<data_file> create_data_files(
+    chunked_vector<file_to_append> create_data_files(
+      const table_metadata& md,
       const ss::sstring& path_base,
       size_t num_files,
       size_t record_count,
       int32_t pk_value = 42) {
-        chunked_vector<data_file> ret;
+        chunked_vector<file_to_append> ret;
         ret.reserve(num_files);
         const auto records_per_file = record_count / num_files;
         const auto leftover_records = record_count % num_files;
         for (size_t i = 0; i < num_files; i++) {
-            const auto path = fmt::format("{}-{}", path_base, i);
-            ret.emplace_back(data_file{
+            const auto path = uri(fmt::format("{}-{}", path_base, i));
+            data_file file{
               .content_type = data_file_content_type::data,
               .file_path = path,
               .partition = partition_key{make_int_pk(pk_value)},
               .record_count = records_per_file,
               .file_size_bytes = 1_KiB,
+            };
+            ret.emplace_back(file_to_append{
+              .file = std::move(file),
+              .schema_id = md.current_schema_id,
+              .partition_spec_id = md.default_spec_id,
             });
         }
-        ret[0].record_count += leftover_records;
+        ret[0].file.record_count += leftover_records;
         return ret;
     }
     /**
      * Generates table with 5 snapshots.
      */
     ss::future<transaction> generate_metadata() {
-        transaction tx(io, create_table());
-        (void)co_await tx.merge_append(create_data_files("test_1", 1, 10, 1));
-        (void)co_await tx.merge_append(create_data_files("test_2", 2, 20, 2));
-        (void)co_await tx.merge_append(create_data_files("test_3", 3, 30, 3));
-        (void)co_await tx.merge_append(create_data_files("test_4", 2, 40, 4));
-        (void)co_await tx.merge_append(create_data_files("test_5", 1, 50, 5));
+        transaction tx(create_table());
+        (void)co_await tx.merge_append(
+          io, create_data_files(tx.table(), "test_1", 1, 10, 1));
+        (void)co_await tx.merge_append(
+          io, create_data_files(tx.table(), "test_2", 2, 20, 2));
+        (void)co_await tx.merge_append(
+          io, create_data_files(tx.table(), "test_3", 3, 30, 3));
+        (void)co_await tx.merge_append(
+          io, create_data_files(tx.table(), "test_4", 2, 40, 4));
+        (void)co_await tx.merge_append(
+          io, create_data_files(tx.table(), "test_5", 1, 50, 5));
         co_return tx;
     }
 
@@ -115,7 +127,7 @@ public:
 
         for (auto& s : *table.snapshots) {
             auto m_list = co_await io.download_manifest_list(
-              manifest_list_path(s.manifest_list_path));
+              s.manifest_list_path);
             for (auto& f : m_list.assume_value().files) {
                 if (!paths.contains(f.manifest_path)) {
                     paths.emplace(f.manifest_path);
@@ -136,8 +148,7 @@ public:
         chunked_vector<iceberg::manifest> manifests;
         auto files = co_await collect_all_manifest_files(table);
         for (auto& f : files) {
-            auto m = co_await io.download_manifest(
-              manifest_path(f.manifest_path), make_partition_key_type(table));
+            auto m = co_await io.download_manifest(f.manifest_path);
             manifests.push_back(std::move(m.assume_value()));
         }
         co_return manifests;

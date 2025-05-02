@@ -1,4 +1,4 @@
-load("//bazel:test.bzl", "redpanda_cc_btest", "redpanda_test_cc_library")
+load("//bazel:test.bzl", "redpanda_cc_bench", "redpanda_cc_btest", "redpanda_cc_gtest", "redpanda_test_cc_library")
 
 redpanda_test_cc_library(
     name = "utils",
@@ -6,10 +6,11 @@ redpanda_test_cc_library(
         "randoms.h",
     ],
     include_prefix = "security/tests",
+    visibility = ["//visibility:public"],
     deps = [
-        "//src/v/bytes:random",
         "//src/v/security",
         "//src/v/test_utils:random",
+        "//src/v/test_utils:random_bytes",
     ],
 )
 
@@ -22,11 +23,26 @@ redpanda_cc_btest(
     deps = [
         "//src/v/random:generators",
         "//src/v/security",
+        "//src/v/test_utils:random_bytes",
         "//src/v/utils:base64",
         "@boost//:algorithm",
         "@boost//:test",
         "@fmt",
         "@seastar//:testing",
+    ],
+)
+
+redpanda_cc_gtest(
+    name = "plain_authenticator_test",
+    timeout = "short",
+    srcs = [
+        "plain_authenticator_test.cc",
+    ],
+    deps = [
+        "//src/v/security",
+        "//src/v/test_utils:gtest",
+        "@googletest//:gtest",
+        "@seastar",
     ],
 )
 
@@ -196,5 +212,20 @@ redpanda_cc_btest(
         "//src/v/test_utils:seastar_boost",
         "@seastar",
         "@seastar//:testing",
+    ],
+)
+
+redpanda_cc_bench(
+    name = "role_store_bench_rpbench",
+    srcs = [
+        "role_store_bench.cc",
+    ],
+    deps = [
+        "//src/v/config",
+        "//src/v/random:generators",
+        "//src/v/security",
+        "@boost//:range",
+        "@seastar",
+        "@seastar//:benchmark",
     ],
 )

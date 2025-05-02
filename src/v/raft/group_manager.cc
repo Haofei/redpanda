@@ -14,6 +14,7 @@
 #include "features/feature_table.h"
 #include "metrics/prometheus_sanitize.h"
 #include "model/metadata.h"
+#include "raft/buffered_protocol.h"
 #include "raft/group_configuration.h"
 #include "raft/rpc_client_protocol.h"
 #include "resource_mgmt/io_priority.h"
@@ -26,7 +27,9 @@ namespace raft {
 
 group_manager::group_manager(
   model::node_id self,
-  ss::scheduling_group raft_sg,
+  ss::scheduling_group raft_recv_sg,
+  ss::scheduling_group raft_send_sg,
+  ss::scheduling_group raft_heartbeats_sched_group,
   group_manager::config_provider_fn cfg,
   recovery_memory_quota::config_provider_fn recovery_mem_cfg,
   ss::sharded<rpc::connection_cache>& clients,
@@ -34,12 +37,18 @@ group_manager::group_manager(
   ss::sharded<coordinated_recovery_throttle>& recovery_throttle,
   ss::sharded<features::feature_table>& feature_table)
   : _self(self)
-  , _raft_sg(raft_sg)
-  , _client(make_rpc_client_protocol(self, clients))
+  , _raft_recv_sg(raft_recv_sg)
+  , _raft_send_sg(raft_send_sg)
   , _configuration(cfg())
+  , _buffered_protocol(ss::make_shared<buffered_protocol>(
+      _raft_send_sg,
+      make_rpc_client_protocol(self, clients),
+      _configuration.max_inflight_requests_per_node,
+      _configuration.max_buffered_bytes_per_node))
   , _heartbeats(
+      raft_heartbeats_sched_group,
       _configuration.heartbeat_interval,
-      _client,
+      consensus_client_protocol(_buffered_protocol),
       _self,
       _configuration.heartbeat_timeout,
       _configuration.enable_lw_heartbeat,
@@ -94,12 +103,14 @@ ss::future<> group_manager::stop() {
         f = f.then([this] { return _heartbeats.stop(); });
     }
 
-    return f.then([this] {
-        return ss::parallel_for_each(
-          _groups, [](ss::lw_shared_ptr<consensus> raft) {
-              return raft->stop().discard_result();
-          });
-    });
+    return f
+      .then([this] {
+          return ss::parallel_for_each(
+            _groups, [](ss::lw_shared_ptr<consensus> raft) {
+                return raft->stop().discard_result();
+            });
+      })
+      .then([this] { return _buffered_protocol->stop(); });
 }
 void group_manager::set_ready() {
     _is_ready = true;
@@ -113,23 +124,22 @@ ss::future<> group_manager::stop_heartbeats() { return _heartbeats.stop(); }
 
 ss::future<ss::lw_shared_ptr<raft::consensus>> group_manager::create_group(
   raft::group_id id,
-  std::vector<model::broker> nodes,
+  const std::vector<raft::vnode>& nodes,
   ss::shared_ptr<storage::log> log,
   with_learner_recovery_throttle enable_learner_recovery_throttle,
   keep_snapshotted_log keep_snapshotted_log) {
     auto revision = log->config().get_revision();
-    auto raft_cfg = create_initial_configuration(std::move(nodes), revision);
 
     auto raft = ss::make_lw_shared<raft::consensus>(
       _self,
       id,
-      std::move(raft_cfg),
+      raft::group_configuration(nodes, revision),
       raft::timeout_jitter(_configuration.election_timeout_ms),
       log,
-      scheduling_config(_raft_sg, raft_priority()),
+      scheduling_config(_raft_recv_sg, _raft_send_sg, raft_priority()),
       _configuration.raft_io_timeout_ms,
       _configuration.enable_longest_log_detection,
-      _client,
+      consensus_client_protocol(_buffered_protocol),
       [this](raft::leadership_status st) {
           trigger_leadership_notification(std::move(st));
       },
@@ -158,35 +168,6 @@ ss::future<ss::lw_shared_ptr<raft::consensus>> group_manager::create_group(
             return raft;
         });
     });
-}
-
-raft::group_configuration group_manager::create_initial_configuration(
-  std::vector<model::broker> initial_brokers,
-  model::revision_id revision) const {
-    /**
-     * Decide which raft configuration to use for the partition, if all nodes
-     * are able to understand configuration without broker information the
-     * configuration will only use raft::vnode
-     */
-    if (likely(_feature_table.is_active(
-          features::feature::membership_change_controller_cmds))) {
-        std::vector<vnode> nodes;
-        nodes.reserve(initial_brokers.size());
-        for (auto& b : initial_brokers) {
-            nodes.emplace_back(b.id(), revision);
-        }
-
-        return {std::move(nodes), revision};
-    }
-
-    // old configuration with brokers
-    auto raft_cfg = raft::group_configuration(
-      std::move(initial_brokers), revision);
-    if (unlikely(!_feature_table.is_active(
-          features::feature::raft_improved_configuration))) {
-        raft_cfg.set_version(group_configuration::v_3);
-    }
-    return raft_cfg;
 }
 
 ss::future<> group_manager::remove(ss::lw_shared_ptr<raft::consensus> c) {

@@ -11,6 +11,8 @@
 
 #include "config/tls_config.h"
 #include "config/types.h"
+#include "json/stringbuffer.h"
+#include "model/metadata.h"
 
 namespace json {
 
@@ -178,11 +180,6 @@ void rjson_serialize(
 }
 
 void rjson_serialize(
-  json::Writer<json::StringBuffer>& w, const model::leader_balancer_mode& v) {
-    stringize(w, v);
-}
-
-void rjson_serialize(
   json::Writer<json::StringBuffer>& w, const model::fetch_read_strategy& v) {
     stringize(w, v);
 }
@@ -264,6 +261,27 @@ void rjson_serialize(
 void rjson_serialize(
   json::Writer<json::StringBuffer>& w, const config::leaders_preference& lp) {
     stringize(w, lp);
+}
+
+void rjson_serialize(
+  json::Writer<json::StringBuffer>& w, config::datalake_catalog_type ct) {
+    stringize(w, ct);
+}
+
+void rjson_serialize(
+  json::Writer<json::StringBuffer>& w,
+  const model::iceberg_invalid_record_action& v) {
+    stringize(w, v);
+}
+
+void rjson_serialize(
+  json::Writer<json::StringBuffer>& w, config::datalake_catalog_auth_mode cam) {
+    stringize(w, cam);
+}
+
+void rjson_serialize(
+  json::Writer<json::StringBuffer>& w, config::tls_name_format format) {
+    stringize(w, format);
 }
 
 } // namespace json

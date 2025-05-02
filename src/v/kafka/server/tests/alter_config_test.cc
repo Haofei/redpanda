@@ -7,25 +7,22 @@
 // the Business Source License, use of this software will be governed
 // by the Apache License, Version 2.0
 
-#include "cluster/config_frontend.h"
 #include "config/configuration.h"
+#include "config/leaders_preference.h"
 #include "container/fragmented_vector.h"
+#include "features/enterprise_feature_messages.h"
 #include "kafka/protocol/alter_configs.h"
 #include "kafka/protocol/create_topics.h"
 #include "kafka/protocol/describe_configs.h"
 #include "kafka/protocol/errors.h"
 #include "kafka/protocol/incremental_alter_configs.h"
 #include "kafka/protocol/metadata.h"
-#include "kafka/protocol/schemata/alter_configs_request.h"
-#include "kafka/protocol/schemata/describe_configs_request.h"
-#include "kafka/protocol/schemata/describe_configs_response.h"
-#include "kafka/protocol/schemata/incremental_alter_configs_request.h"
 #include "kafka/server/handlers/topics/types.h"
 #include "kafka/server/rm_group_frontend.h"
+#include "kafka/server/tests/topic_properties_helpers.h"
 #include "model/fundamental.h"
 #include "model/metadata.h"
 #include "model/namespace.h"
-#include "redpanda/tests/fixture.h"
 #include "test_utils/scoped_config.h"
 
 #include <seastar/core/loop.hh>
@@ -33,6 +30,7 @@
 #include <seastar/util/defer.hh>
 
 #include <absl/container/flat_hash_map.h>
+#include <boost/test/tools/context.hpp>
 
 #include <optional>
 
@@ -40,8 +38,9 @@ using namespace std::chrono_literals; // NOLINT
 
 inline ss::logger test_log("test"); // NOLINT
 
-class alter_config_test_fixture : public redpanda_thread_fixture {
+class alter_config_test_fixture : public topic_properties_test_fixture {
 public:
+    using topic_properties_test_fixture::create_topic;
     void create_topic(
       model::topic name,
       int partitions,
@@ -57,53 +56,6 @@ public:
                 model::ntp(tp_ns.ns, tp_ns.tp, model::partition_id(i)),
                 model::offset(0));
           })
-          .get();
-    }
-
-    template<typename Func>
-    auto do_with_client(Func&& f) {
-        return make_kafka_client().then(
-          [f = std::forward<Func>(f)](kafka::client::transport client) mutable {
-              return ss::do_with(
-                std::move(client),
-                [f = std::forward<Func>(f)](
-                  kafka::client::transport& client) mutable {
-                    return client.connect().then(
-                      [&client, f = std::forward<Func>(f)]() mutable {
-                          return f(client);
-                      });
-                });
-          });
-    }
-
-    kafka::create_topics_response create_topic(
-      const model::topic& tp,
-      const absl::flat_hash_map<ss::sstring, ss::sstring>& properties,
-      int num_partitions = 1,
-      int16_t replication_factor = 1) {
-        kafka::creatable_topic topic{
-          .name = model::topic(tp),
-          .num_partitions = num_partitions,
-          .replication_factor = replication_factor,
-        };
-        for (auto& [k, v] : properties) {
-            kafka::createable_topic_config config;
-            config.name = k;
-            config.value = v;
-            topic.configs.push_back(std::move(config));
-        }
-
-        auto req = kafka::create_topics_request{.data{
-          .topics = {topic},
-          .timeout_ms = 10s,
-          .validate_only = false,
-        }};
-
-        return do_with_client([req = std::move(req)](
-                                kafka::client::transport& client) mutable {
-                   return client.dispatch(
-                     std::move(req), kafka::api_version(0));
-               })
           .get();
     }
 
@@ -224,17 +176,15 @@ public:
       const ss::sstring& key,
       const kafka::describe_configs_response& resp,
       const bool presented) {
-        auto it = std::find_if(
-          resp.data.results.begin(),
-          resp.data.results.end(),
+        auto it = std::ranges::find_if(
+          resp.data.results,
           [&resource_name](const kafka::describe_configs_result& res) {
               return res.resource_name == resource_name;
           });
         BOOST_REQUIRE(it != resp.data.results.end());
 
-        auto cfg_it = std::find_if(
-          it->configs.begin(),
-          it->configs.end(),
+        auto cfg_it = std::ranges::find_if(
+          it->configs,
           [&key](const kafka::describe_configs_resource_result& res) {
               return res.name == key;
           });
@@ -249,9 +199,8 @@ public:
       const ss::sstring& resource_name,
       const kafka::describe_configs_response& resp,
       const size_t amount) {
-        auto it = std::find_if(
-          resp.data.results.begin(),
-          resp.data.results.end(),
+        auto it = std::ranges::find_if(
+          resp.data.results,
           [&resource_name](const kafka::describe_configs_result& res) {
               return res.resource_name == resource_name;
           });
@@ -259,37 +208,407 @@ public:
         vlog(test_log.trace, "amount: {}", amount);
         vlog(test_log.trace, "it->configs.size(): {}", it->configs.size());
         vlog(test_log.trace, "it->configs: {}", it->configs);
-        BOOST_REQUIRE(it->configs.size() == amount);
+        BOOST_CHECK_EQUAL(it->configs.size(), amount);
     }
 
     void assert_property_value(
       const model::topic& topic,
-      const ss::sstring& key,
-      const ss::sstring& value,
+      std::string_view key,
+      std::string_view value,
       const kafka::describe_configs_response& resp) {
-        auto it = std::find_if(
-          resp.data.results.begin(),
-          resp.data.results.end(),
-          [&topic](const kafka::describe_configs_result& res) {
-              return res.resource_name == topic;
-          });
-        BOOST_REQUIRE(it != resp.data.results.end());
+        BOOST_TEST_CONTEXT(
+          fmt::format("topic: {}, key: {}, value: {}", topic, key, value)) {
+            auto it = std::ranges::find_if(
+              resp.data.results,
+              [&topic](const kafka::describe_configs_result& res) {
+                  return res.resource_name == topic;
+              });
+            BOOST_REQUIRE(it != resp.data.results.end());
 
-        auto cfg_it = std::find_if(
-          it->configs.begin(),
-          it->configs.end(),
-          [&key](const kafka::describe_configs_resource_result& res) {
-              return res.name == key;
-          });
-        BOOST_REQUIRE(cfg_it != it->configs.end());
-        BOOST_REQUIRE_EQUAL(cfg_it->value, value);
+            auto cfg_it = std::ranges::find_if(
+              it->configs,
+              [&key](const kafka::describe_configs_resource_result& res) {
+                  return res.name == key;
+              });
+            BOOST_REQUIRE(cfg_it != it->configs.end());
+            BOOST_CHECK_EQUAL(cfg_it->value, value);
+        }
+    }
+
+    void alter_config_no_license_test(bool enable_cluster_config) {
+        using props_t = absl::flat_hash_map<ss::sstring, ss::sstring>;
+        using alter_props_t = absl::flat_hash_map<
+          ss::sstring,
+          std::
+            pair<std::optional<ss::sstring>, kafka::config_resource_operation>>;
+        using skip_create = ss::bool_class<struct skip_create_tag>;
+        struct test_case {
+            ss::sstring tp_raw;
+            props_t props;
+            alter_props_t alteration;
+            kafka::error_code expected;
+            skip_create skip{skip_create::no};
+        };
+        std::vector<test_case> test_cases;
+
+        constexpr auto success = kafka::error_code::none;
+        constexpr auto failure = kafka::error_code::invalid_config;
+
+        constexpr auto with =
+          [](std::string_view prop, auto val) -> props_t::value_type {
+            return {ss::sstring{prop}, ssx::sformat("{}", val)};
+        };
+
+        constexpr auto set =
+          [](std::string_view prop, auto val) -> alter_props_t::value_type {
+            return {
+              ss::sstring{prop},
+              {ssx::sformat("{}", val), kafka::config_resource_operation::set}};
+        };
+
+        constexpr auto remove =
+          [](std::string_view prop) -> alter_props_t::value_type {
+            return {
+              ss::sstring{prop},
+              {std::nullopt, kafka::config_resource_operation::remove}};
+        };
+
+        const auto enterprise_props =
+          [enable_cluster_config]() -> std::vector<std::string_view> {
+            // If we aren't enabling Schema ID validation cluster config,
+            // then skip testing those topic properties
+            if (enable_cluster_config) {
+                return {
+                  kafka::topic_property_remote_read,
+                  kafka::topic_property_remote_write,
+                  kafka::topic_property_record_key_schema_id_validation,
+                  kafka::topic_property_record_key_schema_id_validation_compat,
+                  kafka::topic_property_record_value_schema_id_validation,
+                  kafka::
+                    topic_property_record_value_schema_id_validation_compat,
+                };
+            } else {
+                return {
+                  kafka::topic_property_remote_read,
+                  kafka::topic_property_remote_write,
+                };
+            }
+        }();
+
+        const auto non_enterprise_prop = props_t::value_type{
+          kafka::topic_property_max_message_bytes, "4096"};
+
+        for (const auto& p : enterprise_props) {
+            // A topic without an enterprise property set, and then enable it
+            test_cases.emplace_back(
+              ssx::sformat("enable_{}", p),
+              props_t{},
+              alter_props_t{{set(p, true)}},
+              enable_cluster_config ? failure : success);
+            // A topic with an enterprise property set, and then set it to false
+            test_cases.emplace_back(
+              ssx::sformat("set_false_{}", p),
+              props_t{with(p, true)},
+              alter_props_t{{set(p, false)}},
+              success);
+            // A topic with an enterprise property set, and then remove it
+            test_cases.emplace_back(
+              ssx::sformat("remove_{}", p),
+              props_t{with(p, true)},
+              alter_props_t{{remove(p)}},
+              success);
+            // A topic with an enterprise property set, and then change
+            // non-enterprise property
+            test_cases.emplace_back(
+              ssx::sformat("set_other_{}", p),
+              props_t{with(p, true)},
+              alter_props_t{{std::apply(set, non_enterprise_prop)}},
+              success);
+            // A topic with an enterprise property set, and then remove
+            // non-enterprise property
+            test_cases.emplace_back(
+              ssx::sformat("remove_other_{}", p),
+              props_t{with(p, true), non_enterprise_prop},
+              alter_props_t{{remove(non_enterprise_prop.first)}},
+              success);
+
+            // Skip creating topic. Expect no sanctions.
+            // Alter operations should fail downstream.
+            test_cases.emplace_back(
+              ssx::sformat("skip_create_{}", p),
+              props_t{},
+              alter_props_t{{set(p, true)}},
+              kafka::error_code::unknown_topic_or_partition,
+              skip_create::yes);
+        }
+
+        // Specific tests for tiered storage
+        {
+            const auto full_si = props_t{
+              with(kafka::topic_property_remote_read, true),
+              with(kafka::topic_property_remote_write, true),
+              with(kafka::topic_property_remote_delete, true)};
+            test_cases.emplace_back(
+              "remove_remote.read_from_full",
+              full_si,
+              alter_props_t{{remove(kafka::topic_property_remote_read)}},
+              success);
+            test_cases.emplace_back(
+              "remove_remote.write_from_full",
+              full_si,
+              alter_props_t{{remove(kafka::topic_property_remote_write)}},
+              success);
+            test_cases.emplace_back(
+              "remove_remote.delete_from_full",
+              full_si,
+              alter_props_t{{remove(kafka::topic_property_remote_delete)}},
+              success);
+            test_cases.emplace_back(
+              "enable_remote.delete",
+              props_t{with(kafka::topic_property_remote_delete, false)},
+              alter_props_t{{set(kafka::topic_property_remote_delete, true)}},
+              enable_cluster_config ? failure : success);
+        }
+
+        // Specific tests for schema id validation subject name strategy
+        if (enable_cluster_config) {
+            using sns = pandaproxy::schema_registry::subject_name_strategy;
+
+            const auto full_validation = props_t{
+              with(kafka::topic_property_record_key_schema_id_validation, true),
+              with(
+                kafka::topic_property_record_value_schema_id_validation, true),
+            };
+            test_cases.emplace_back(
+              "set_key_sns",
+              full_validation,
+              alter_props_t{
+                {set(
+                  kafka::topic_property_record_key_subject_name_strategy,
+                  sns::topic_name)},
+              },
+              failure);
+            test_cases.emplace_back(
+              "set_value_sns",
+              full_validation,
+              alter_props_t{
+                {set(
+                  kafka::topic_property_record_value_subject_name_strategy,
+                  sns::topic_name)},
+              },
+              failure);
+
+            const auto key_validation = props_t{
+              with(kafka::topic_property_record_key_schema_id_validation, true),
+            };
+            test_cases.emplace_back(
+              "set_value_after_key",
+              key_validation,
+              alter_props_t{{set(
+                kafka::topic_property_record_value_schema_id_validation_compat,
+                true)}},
+              failure);
+            test_cases.emplace_back(
+              "unset_key",
+              key_validation,
+              alter_props_t{{set(
+                kafka::topic_property_record_key_schema_id_validation, false)}},
+              success);
+
+            const auto value_validation = props_t{
+              with(
+                kafka::topic_property_record_value_schema_id_validation, true),
+            };
+            test_cases.emplace_back(
+              "set_key_after_value",
+              value_validation,
+              alter_props_t{{set(
+                kafka::topic_property_record_key_schema_id_validation_compat,
+                true)}},
+              failure);
+            test_cases.emplace_back(
+              "unset_value",
+              value_validation,
+              alter_props_t{{set(
+                kafka::topic_property_record_value_schema_id_validation,
+                false)}},
+              success);
+
+            const auto validation_with_strat = props_t{
+              with(kafka::topic_property_record_key_schema_id_validation, true),
+              with(
+                kafka::topic_property_record_value_schema_id_validation, true),
+              with(
+                kafka::topic_property_record_key_subject_name_strategy,
+                sns::topic_name),
+              with(
+                kafka::topic_property_record_value_subject_name_strategy,
+                sns::topic_name),
+            };
+            test_cases.emplace_back(
+              "change_key_sns",
+              validation_with_strat,
+              alter_props_t{
+                {set(
+                  kafka::topic_property_record_key_subject_name_strategy,
+                  sns::record_name)},
+              },
+              failure);
+            test_cases.emplace_back(
+              "change_value_sns",
+              validation_with_strat,
+              alter_props_t{
+                {set(
+                  kafka::topic_property_record_value_subject_name_strategy,
+                  sns::record_name)},
+              },
+              failure);
+            test_cases.emplace_back(
+              "remove_key_sns",
+              validation_with_strat,
+              alter_props_t{{remove(
+                kafka::topic_property_record_key_subject_name_strategy)}},
+              success);
+
+            test_cases.emplace_back(
+              "remove_value_sns",
+              validation_with_strat,
+              alter_props_t{{remove(
+                kafka::topic_property_record_value_subject_name_strategy)}},
+              success);
+        }
+
+        // NOTE(oren): w/o schema validation enabled at the cluster level,
+        // related properties will be ignored on the topic create path. stick to
+        // COMPAT here because it's a superset of REDPANDA.
+        if (enable_cluster_config) {
+            update_cluster_config("enable_schema_id_validation", "compat");
+            update_cluster_config("cloud_storage_enabled", "true");
+        }
+        auto unset_cluster_config = ss::defer([&] {
+            update_cluster_config("enable_schema_id_validation", "none");
+            update_cluster_config("cloud_storage_enabled", "false");
+        });
+
+        // Specific tests for leadership pinning
+        {
+            const config::leaders_preference no_preference{};
+            const config::leaders_preference pref_a{
+              .type = config::leaders_preference::type_t::racks,
+              .racks = {model::rack_id{"A"}}};
+            const config::leaders_preference pref_b{
+              .type = config::leaders_preference::type_t::racks,
+              .racks = {model::rack_id{"A"}, model::rack_id{"B"}}};
+
+            test_cases.emplace_back(
+              "leaders_preference.enable",
+              props_t{},
+              alter_props_t{
+                {set(kafka::topic_property_leaders_preference, pref_a)}},
+              failure);
+            test_cases.emplace_back(
+              "leaders_preference.change",
+              props_t{with(kafka::topic_property_leaders_preference, pref_a)},
+              alter_props_t{
+                {set(kafka::topic_property_leaders_preference, pref_b)}},
+              failure);
+            test_cases.emplace_back(
+              "leaders_preference.no_change",
+              props_t{with(kafka::topic_property_leaders_preference, pref_a)},
+              alter_props_t{
+                {set(kafka::topic_property_leaders_preference, pref_a)}},
+              success);
+            test_cases.emplace_back(
+              "leaders_preference.unset",
+              props_t{with(kafka::topic_property_leaders_preference, pref_a)},
+              alter_props_t{{remove(kafka::topic_property_leaders_preference)}},
+              success);
+            test_cases.emplace_back(
+              "leaders_preference.disable",
+              props_t{with(kafka::topic_property_leaders_preference, pref_a)},
+              alter_props_t{
+                {set(kafka::topic_property_leaders_preference, no_preference)}},
+              success);
+        }
+
+        // Create the topics for the tests
+        constexpr auto inc_alter_topic = [](std::string_view tp_raw) {
+            return model::topic{ssx::sformat("incremental_alter_{}", tp_raw)};
+        };
+        constexpr auto alter_topic = [](std::string_view tp_raw) {
+            return model::topic{ssx::sformat("alter_{}", tp_raw)};
+        };
+
+        for (const auto& [tp_raw, props, alteration, expected, skip] :
+             test_cases) {
+            BOOST_TEST_CONTEXT(fmt::format("topic: {}", tp_raw)) {
+                BOOST_REQUIRE(
+                  skip
+                  || !create_topic(inc_alter_topic(tp_raw), props, 3)
+                        .data.errored());
+                BOOST_REQUIRE(
+                  skip
+                  || !create_topic(alter_topic(tp_raw), props, 3)
+                        .data.errored());
+            }
+
+            revoke_license();
+
+            // Test incremental alter config
+            auto tp = inc_alter_topic(tp_raw);
+            BOOST_TEST_CONTEXT(tp) {
+                auto resp = incremental_alter_configs(
+                  make_incremental_alter_topic_config_resource_cv(
+                    tp, alteration));
+                BOOST_REQUIRE_EQUAL(resp.data.responses.size(), 1);
+                BOOST_CHECK_EQUAL(resp.data.responses[0].error_code, expected);
+                if (expected == failure) {
+                    BOOST_CHECK(
+                      resp.data.responses[0]
+                        .error_message.value_or("")
+                        .contains(
+                          features::enterprise_error_message::required));
+                }
+            }
+
+            delete_topic(
+              model::topic_namespace{model::kafka_namespace, std::move(tp)})
+              .get();
+
+            // Test alter config
+            tp = alter_topic(tp_raw);
+            BOOST_TEST_CONTEXT(tp) {
+                auto properties = props;
+                for (const auto& a : alteration) {
+                    if (
+                      a.second.second
+                      == kafka::config_resource_operation::remove) {
+                        properties.erase(a.first);
+                    } else if (
+                      a.second.second
+                      == kafka::config_resource_operation::set) {
+                        properties.insert_or_assign(
+                          a.first, a.second.first.value());
+                    };
+                }
+
+                auto resp = alter_configs(
+                  make_alter_topic_config_resource_cv(tp, properties));
+                BOOST_REQUIRE_EQUAL(resp.data.responses.size(), 1);
+                BOOST_CHECK_EQUAL(resp.data.responses[0].error_code, expected);
+            }
+            delete_topic(
+              model::topic_namespace{model::kafka_namespace, std::move(tp)})
+              .get();
+
+            reinstall_license();
+        }
     }
 };
 
 FIXTURE_TEST(
   test_broker_describe_configs_requested_properties,
   alter_config_test_fixture) {
-    wait_for_controller_leadership().get();
     model::topic test_tp{"topic-1"};
     create_topic(test_tp, 6);
 
@@ -389,8 +708,6 @@ FIXTURE_TEST(
 
 FIXTURE_TEST(
   test_topic_describe_configs_requested_properties, alter_config_test_fixture) {
-    wait_for_controller_leadership().get();
-
     cluster::config_update_request r{
       .upsert = {{"enable_schema_id_validation", "compat"}}};
     app.controller->get_config_frontend()
@@ -429,8 +746,11 @@ FIXTURE_TEST(
       "write.caching",
       "flush.ms",
       "flush.bytes",
-      "redpanda.iceberg.enabled",
+      "redpanda.iceberg.mode",
       "redpanda.leaders.preference",
+      "delete.retention.ms",
+      "min.cleanable.dirty.ratio",
+      "redpanda.remote.allowgaps",
     };
 
     // All properties_request
@@ -507,7 +827,6 @@ FIXTURE_TEST(
 }
 
 FIXTURE_TEST(test_alter_single_topic_config, alter_config_test_fixture) {
-    wait_for_controller_leadership().get();
     model::topic test_tp{"topic-1"};
     create_topic(test_tp, 6);
 
@@ -519,6 +838,7 @@ FIXTURE_TEST(test_alter_single_topic_config, alter_config_test_fixture) {
     properties.emplace("write.caching", "true");
     properties.emplace("flush.ms", "225");
     properties.emplace("flush.bytes", "32468");
+    properties.emplace("delete.retention.ms", "-1");
 
     auto resp = alter_configs(
       make_alter_topic_config_resource_cv(test_tp, properties));
@@ -529,15 +849,14 @@ FIXTURE_TEST(test_alter_single_topic_config, alter_config_test_fixture) {
     BOOST_REQUIRE_EQUAL(resp.data.responses[0].resource_name, test_tp);
 
     auto describe_resp = describe_configs(test_tp);
-    assert_property_value(
-      test_tp, "retention.ms", fmt::format("{}", 1234ms), describe_resp);
+    assert_property_value(test_tp, "retention.ms", "1234", describe_resp);
     assert_property_value(test_tp, "cleanup.policy", "compact", describe_resp);
     assert_property_value(
       test_tp, "redpanda.remote.read", "true", describe_resp);
+    assert_property_value(test_tp, "delete.retention.ms", "-1", describe_resp);
 }
 
 FIXTURE_TEST(test_alter_multiple_topics_config, alter_config_test_fixture) {
-    wait_for_controller_leadership().get();
     model::topic topic_1{"topic-1"};
     model::topic topic_2{"topic-2"};
     create_topic(topic_1, 1);
@@ -550,6 +869,7 @@ FIXTURE_TEST(test_alter_multiple_topics_config, alter_config_test_fixture) {
     properties_1.emplace("write.caching", "true");
     properties_1.emplace("flush.ms", "225");
     properties_1.emplace("flush.bytes", "32468");
+    properties_1.emplace("delete.retention.ms", "5678");
 
     absl::flat_hash_map<ss::sstring, ss::sstring> properties_2;
     properties_2.emplace("retention.bytes", "4096");
@@ -557,6 +877,7 @@ FIXTURE_TEST(test_alter_multiple_topics_config, alter_config_test_fixture) {
     properties_2.emplace("write.caching", "false");
     properties_2.emplace("flush.ms", "100");
     properties_2.emplace("flush.bytes", "990");
+    properties_2.emplace("delete.retention.ms", "8765");
 
     auto cv = make_alter_topic_config_resource_cv(topic_1, properties_1);
     cv.push_back(make_alter_topic_config_resource(topic_2, properties_2));
@@ -571,24 +892,26 @@ FIXTURE_TEST(test_alter_multiple_topics_config, alter_config_test_fixture) {
     BOOST_REQUIRE_EQUAL(resp.data.responses[1].resource_name, topic_2);
 
     auto describe_resp_1 = describe_configs(topic_1);
-    assert_property_value(
-      topic_1, "retention.ms", fmt::format("{}", 1234ms), describe_resp_1);
+    assert_property_value(topic_1, "retention.ms", "1234", describe_resp_1);
     assert_property_value(
       topic_1, "cleanup.policy", "compact", describe_resp_1);
     assert_property_value(topic_1, "write.caching", "true", describe_resp_1);
     assert_property_value(topic_1, "flush.ms", "225", describe_resp_1);
     assert_property_value(topic_1, "flush.bytes", "32468", describe_resp_1);
+    assert_property_value(
+      topic_1, "delete.retention.ms", "5678", describe_resp_1);
 
     auto describe_resp_2 = describe_configs(topic_2);
     assert_property_value(topic_2, "retention.bytes", "4096", describe_resp_2);
     assert_property_value(topic_2, "write.caching", "false", describe_resp_2);
     assert_property_value(topic_2, "flush.ms", "100", describe_resp_2);
     assert_property_value(topic_2, "flush.bytes", "990", describe_resp_2);
+    assert_property_value(
+      topic_2, "delete.retention.ms", "8765", describe_resp_2);
 }
 
 FIXTURE_TEST(
   test_alter_topic_kafka_config_allowlist, alter_config_test_fixture) {
-    wait_for_controller_leadership().get();
     model::topic test_tp{"topic-1"};
     create_topic(test_tp, 6);
 
@@ -604,7 +927,6 @@ FIXTURE_TEST(
 }
 
 FIXTURE_TEST(test_alter_topic_error, alter_config_test_fixture) {
-    wait_for_controller_leadership().get();
     model::topic test_tp{"topic-1"};
     create_topic(test_tp, 6);
 
@@ -633,7 +955,6 @@ FIXTURE_TEST(test_alter_topic_error, alter_config_test_fixture) {
 
 FIXTURE_TEST(
   test_alter_configuration_should_override, alter_config_test_fixture) {
-    wait_for_controller_leadership().get();
     model::topic test_tp{"topic-1"};
     create_topic(test_tp, 6);
     /**
@@ -645,6 +966,7 @@ FIXTURE_TEST(
     properties.emplace("write.caching", "true");
     properties.emplace("flush.ms", "225");
     properties.emplace("flush.bytes", "32468");
+    properties.emplace("delete.retention.ms", "5678");
 
     auto resp = alter_configs(
       make_alter_topic_config_resource_cv(test_tp, properties));
@@ -655,11 +977,12 @@ FIXTURE_TEST(
     BOOST_REQUIRE_EQUAL(resp.data.responses[0].resource_name, test_tp);
 
     auto describe_resp = describe_configs(test_tp);
-    assert_property_value(
-      test_tp, "retention.ms", fmt::format("{}", 1234ms), describe_resp);
+    assert_property_value(test_tp, "retention.ms", "1234", describe_resp);
     assert_property_value(test_tp, "write.caching", "true", describe_resp);
     assert_property_value(test_tp, "flush.ms", "225", describe_resp);
     assert_property_value(test_tp, "flush.bytes", "32468", describe_resp);
+    assert_property_value(
+      test_tp, "delete.retention.ms", "5678", describe_resp);
 
     /**
      * Set custom properties again, previous settings should be overriden
@@ -670,6 +993,7 @@ FIXTURE_TEST(
     new_properties.emplace("write.caching", "false");
     new_properties.emplace("flush.ms", "9999");
     new_properties.emplace("flush.bytes", "8888");
+    new_properties.emplace("delete.retention.ms", "7777");
 
     alter_configs(make_alter_topic_config_resource_cv(test_tp, new_properties));
 
@@ -679,17 +1003,19 @@ FIXTURE_TEST(
       test_tp,
       "retention.ms",
       fmt::format(
-        "{}", config::shard_local_cfg().log_retention_ms().value_or(-1ms)),
+        "{}",
+        config::shard_local_cfg().log_retention_ms().value_or(-1ms).count()),
       new_describe_resp);
     assert_property_value(
       test_tp, "retention.bytes", "4096", new_describe_resp);
     assert_property_value(test_tp, "write.caching", "false", new_describe_resp);
     assert_property_value(test_tp, "flush.ms", "9999", new_describe_resp);
     assert_property_value(test_tp, "flush.bytes", "8888", new_describe_resp);
+    assert_property_value(
+      test_tp, "delete.retention.ms", "7777", new_describe_resp);
 }
 
 FIXTURE_TEST(test_incremental_alter_config, alter_config_test_fixture) {
-    wait_for_controller_leadership().get();
     model::topic test_tp{"topic-1"};
     create_topic(test_tp, 6);
     // set custom properties
@@ -709,6 +1035,9 @@ FIXTURE_TEST(test_incremental_alter_config, alter_config_test_fixture) {
     properties.emplace(
       "flush.bytes",
       std::make_pair("5678", kafka::config_resource_operation::set));
+    properties.emplace(
+      "delete.retention.ms",
+      std::make_pair("5678", kafka::config_resource_operation::set));
 
     auto resp = incremental_alter_configs(
       make_incremental_alter_topic_config_resource_cv(test_tp, properties));
@@ -719,11 +1048,12 @@ FIXTURE_TEST(test_incremental_alter_config, alter_config_test_fixture) {
     BOOST_REQUIRE_EQUAL(resp.data.responses[0].resource_name, test_tp);
 
     auto describe_resp = describe_configs(test_tp);
-    assert_property_value(
-      test_tp, "retention.ms", fmt::format("{}", 1234ms), describe_resp);
+    assert_property_value(test_tp, "retention.ms", "1234", describe_resp);
     assert_property_value(test_tp, "write.caching", "true", describe_resp);
     assert_property_value(test_tp, "flush.ms", "1234", describe_resp);
     assert_property_value(test_tp, "flush.bytes", "5678", describe_resp);
+    assert_property_value(
+      test_tp, "delete.retention.ms", "5678", describe_resp);
 
     /**
      * Set only few properties, only they should be updated
@@ -744,19 +1074,19 @@ FIXTURE_TEST(test_incremental_alter_config, alter_config_test_fixture) {
 
     auto new_describe_resp = describe_configs(test_tp);
     // retention.ms should stay untouched
-    assert_property_value(
-      test_tp, "retention.ms", fmt::format("{}", 1234ms), new_describe_resp);
+    assert_property_value(test_tp, "retention.ms", "1234", new_describe_resp);
     assert_property_value(
       test_tp, "retention.bytes", "4096", new_describe_resp);
     assert_property_value(test_tp, "write.caching", "false", new_describe_resp);
     assert_property_value(test_tp, "flush.ms", "1234", new_describe_resp);
     assert_property_value(test_tp, "flush.bytes", "5678", new_describe_resp);
+    assert_property_value(
+      test_tp, "delete.retention.ms", "5678", new_describe_resp);
 }
 
 FIXTURE_TEST(
   test_incremental_alter_config_kafka_config_allowlist,
   alter_config_test_fixture) {
-    wait_for_controller_leadership().get();
     model::topic test_tp{"topic-1"};
     create_topic(test_tp, 6);
 
@@ -776,7 +1106,6 @@ FIXTURE_TEST(
 }
 
 FIXTURE_TEST(test_incremental_alter_config_remove, alter_config_test_fixture) {
-    wait_for_controller_leadership().get();
     model::topic test_tp{"topic-1"};
     create_topic(test_tp, 6);
     // set custom properties
@@ -796,6 +1125,9 @@ FIXTURE_TEST(test_incremental_alter_config_remove, alter_config_test_fixture) {
     properties.emplace(
       "flush.bytes",
       std::make_pair("8888", kafka::config_resource_operation::set));
+    properties.emplace(
+      "delete.retention.ms",
+      std::make_pair("7777", kafka::config_resource_operation::set));
 
     auto resp = incremental_alter_configs(
       make_incremental_alter_topic_config_resource_cv(test_tp, properties));
@@ -806,11 +1138,12 @@ FIXTURE_TEST(test_incremental_alter_config_remove, alter_config_test_fixture) {
     BOOST_REQUIRE_EQUAL(resp.data.responses[0].resource_name, test_tp);
 
     auto describe_resp = describe_configs(test_tp);
-    assert_property_value(
-      test_tp, "retention.ms", fmt::format("{}", 1234ms), describe_resp);
+    assert_property_value(test_tp, "retention.ms", "1234", describe_resp);
     assert_property_value(test_tp, "write.caching", "true", describe_resp);
     assert_property_value(test_tp, "flush.ms", "9999", describe_resp);
     assert_property_value(test_tp, "flush.bytes", "8888", describe_resp);
+    assert_property_value(
+      test_tp, "delete.retention.ms", "7777", describe_resp);
 
     /**
      * Remove custom properties
@@ -831,6 +1164,9 @@ FIXTURE_TEST(test_incremental_alter_config_remove, alter_config_test_fixture) {
     new_properties.emplace(
       "flush.bytes",
       std::pair{std::nullopt, kafka::config_resource_operation::remove});
+    new_properties.emplace(
+      "delete.retention.ms",
+      std::pair{std::nullopt, kafka::config_resource_operation::remove});
 
     resp = incremental_alter_configs(
       make_incremental_alter_topic_config_resource_cv(test_tp, new_properties));
@@ -845,7 +1181,8 @@ FIXTURE_TEST(test_incremental_alter_config_remove, alter_config_test_fixture) {
       test_tp,
       "retention.ms",
       fmt::format(
-        "{}", config::shard_local_cfg().log_retention_ms().value_or(-1ms)),
+        "{}",
+        config::shard_local_cfg().log_retention_ms().value_or(-1ms).count()),
       new_describe_resp);
     assert_property_value(
       test_tp,
@@ -868,24 +1205,32 @@ FIXTURE_TEST(test_incremental_alter_config_remove, alter_config_test_fixture) {
           .raft_replica_max_pending_flush_bytes()
           .value()),
       new_describe_resp);
+    assert_property_value(
+      test_tp,
+      "delete.retention.ms",
+      fmt::format(
+        "{}",
+        config::shard_local_cfg()
+          .tombstone_retention_ms()
+          .value_or(-1ms)
+          .count()),
+      new_describe_resp);
 }
 
 FIXTURE_TEST(test_iceberg_property, alter_config_test_fixture) {
-    wait_for_controller_leadership().get();
-
-    auto do_create_topic = [&](model::topic tp, bool iceberg) {
-        absl::flat_hash_map<ss::sstring, ss::sstring> properties;
-        properties.emplace(
-          "redpanda.iceberg.enabled", (iceberg ? "true" : "false"));
-        return create_topic(tp, properties);
-    };
+    auto do_create_topic =
+      [&](model::topic tp, ss::sstring iceberg_mode = "key_value") {
+          absl::flat_hash_map<ss::sstring, ss::sstring> properties;
+          properties.emplace("redpanda.iceberg.mode", iceberg_mode);
+          return create_topic(tp, properties);
+      };
 
     model::topic topic1{"test1"};
     model::topic topic2{"topic2"};
     {
         // Try creating a topic with iceberg enabled while it is
         // disabled in cluster config.
-        auto resp = do_create_topic(topic1, true);
+        auto resp = do_create_topic(topic1);
         BOOST_REQUIRE_EQUAL(resp.data.topics.size(), 1);
         BOOST_REQUIRE_EQUAL(
           resp.data.topics[0].error_code, kafka::error_code::invalid_config);
@@ -894,13 +1239,13 @@ FIXTURE_TEST(test_iceberg_property, alter_config_test_fixture) {
     {
         // create a topic without iceberg and try enabling iceberg
         // while it is disabled at the cluster lvel.
-        auto resp = do_create_topic(topic2, false);
+        auto resp = do_create_topic(topic2, "disabled");
         BOOST_REQUIRE_EQUAL(resp.data.topics.size(), 1);
         BOOST_REQUIRE_EQUAL(
           resp.data.topics[0].error_code, kafka::error_code::none);
 
         absl::flat_hash_map<ss::sstring, ss::sstring> properties;
-        properties.emplace("redpanda.iceberg.enabled", "true");
+        properties.emplace("redpanda.iceberg.mode", "value_schema_id_prefix");
         auto alter_resp = alter_configs(
           make_alter_topic_config_resource_cv(topic2, properties));
         BOOST_REQUIRE_EQUAL(alter_resp.data.responses.size(), 1);
@@ -917,8 +1262,9 @@ FIXTURE_TEST(test_iceberg_property, alter_config_test_fixture) {
             pair<std::optional<ss::sstring>, kafka::config_resource_operation>>
           properties;
         properties.emplace(
-          "redpanda.iceberg.enabled",
-          std::make_pair("true", kafka::config_resource_operation::set));
+          "redpanda.iceberg.mode",
+          std::make_pair(
+            "value_schema_id_prefix", kafka::config_resource_operation::set));
 
         auto resp = incremental_alter_configs(
           make_incremental_alter_topic_config_resource_cv(topic2, properties));
@@ -934,7 +1280,7 @@ FIXTURE_TEST(test_iceberg_property, alter_config_test_fixture) {
 
     {
         // Attempt to create the topic again.
-        auto resp = do_create_topic(topic1, true);
+        auto resp = do_create_topic(topic1);
         BOOST_REQUIRE_EQUAL(resp.data.topics.size(), 1);
         BOOST_REQUIRE_EQUAL(
           resp.data.topics[0].error_code, kafka::error_code::none);
@@ -942,10 +1288,17 @@ FIXTURE_TEST(test_iceberg_property, alter_config_test_fixture) {
 
     {
         // alter the iceberg config of an existing topic, should work.
-        for (auto prop : {false, true}) {
-            ss::sstring prop_str = prop ? "true" : "false";
+        for (const auto& prop : {
+               "disabled",
+               "key_value",
+               "value_schema_id_prefix",
+               "value_schema_latest",
+               "value_schema_latest:protobuf_name=com.redpanda.Example",
+               "value_schema_latest:protobuf_name=Example,subject=foo",
+               "value_schema_latest:subject=foo",
+             }) {
             absl::flat_hash_map<ss::sstring, ss::sstring> properties;
-            properties.emplace("redpanda.iceberg.enabled", prop_str);
+            properties.emplace("redpanda.iceberg.mode", prop);
 
             auto resp = alter_configs(
               make_alter_topic_config_resource_cv(topic2, properties));
@@ -957,14 +1310,21 @@ FIXTURE_TEST(test_iceberg_property, alter_config_test_fixture) {
 
             auto describe_resp = describe_configs(topic2);
             assert_property_value(
-              topic2, "redpanda.iceberg.enabled", prop_str, describe_resp);
+              topic2, "redpanda.iceberg.mode", prop, describe_resp);
         }
     }
 
     {
         // same as above, with incremental alter
-        for (auto prop : {false, true}) {
-            ss::sstring prop_str = prop ? "true" : "false";
+        for (const auto& prop : {
+               "disabled",
+               "key_value",
+               "value_schema_id_prefix",
+               "value_schema_latest",
+               "value_schema_latest:protobuf_name=com.redpanda.Example",
+               "value_schema_latest:protobuf_name=Example,subject=foo",
+               "value_schema_latest:subject=foo",
+             }) {
             absl::flat_hash_map<
               ss::sstring,
               std::pair<
@@ -972,8 +1332,8 @@ FIXTURE_TEST(test_iceberg_property, alter_config_test_fixture) {
                 kafka::config_resource_operation>>
               properties;
             properties.emplace(
-              "redpanda.iceberg.enabled",
-              std::make_pair(prop_str, kafka::config_resource_operation::set));
+              "redpanda.iceberg.mode",
+              std::make_pair(prop, kafka::config_resource_operation::set));
 
             auto resp = incremental_alter_configs(
               make_incremental_alter_topic_config_resource_cv(
@@ -986,7 +1346,7 @@ FIXTURE_TEST(test_iceberg_property, alter_config_test_fixture) {
 
             auto describe_resp = describe_configs(topic2);
             assert_property_value(
-              topic2, "redpanda.iceberg.enabled", prop_str, describe_resp);
+              topic2, "redpanda.iceberg.mode", prop, describe_resp);
         }
     }
 
@@ -1003,7 +1363,7 @@ FIXTURE_TEST(test_iceberg_property, alter_config_test_fixture) {
           .set_value(std::vector<ss::sstring>{});
 
         absl::flat_hash_map<ss::sstring, ss::sstring> properties;
-        properties.emplace("redpanda.iceberg.enabled", "true");
+        properties.emplace("redpanda.iceberg.mode", "key_value");
 
         auto resp = alter_configs(make_alter_topic_config_resource_cv(
           model::kafka_consumer_offsets_topic, properties));
@@ -1017,8 +1377,9 @@ FIXTURE_TEST(test_iceberg_property, alter_config_test_fixture) {
             pair<std::optional<ss::sstring>, kafka::config_resource_operation>>
           incr_properties;
         incr_properties.emplace(
-          "redpanda.iceberg.enabled",
-          std::make_pair("true", kafka::config_resource_operation::set));
+          "redpanda.iceberg.mode",
+          std::make_pair(
+            "value_schema_id_prefix", kafka::config_resource_operation::set));
         auto incr_resp = incremental_alter_configs(
           make_incremental_alter_topic_config_resource_cv(
             model::kafka_consumer_offsets_topic, incr_properties));
@@ -1029,8 +1390,48 @@ FIXTURE_TEST(test_iceberg_property, alter_config_test_fixture) {
     }
 }
 
+FIXTURE_TEST(test_describe_iceberg_properties, alter_config_test_fixture) {
+    std::vector<ss::sstring> iceberg_properties = {
+      "redpanda.iceberg.delete",
+      "redpanda.iceberg.partition.spec",
+      "redpanda.iceberg.invalid.record.action",
+      "redpanda.iceberg.target.lag.ms"};
+
+    {
+        model::topic test_tp{"topic-1"};
+        create_topic(test_tp, 1);
+        auto all_describe_resp = describe_configs(test_tp);
+        // Iceberg mode is present.
+        assert_property_presented(
+          test_tp, "redpanda.iceberg.mode", all_describe_resp, true);
+        // Everything else is not present because iceberg is disabled.
+        for (const auto& property : iceberg_properties) {
+            assert_property_presented(
+              test_tp, property, all_describe_resp, false);
+        }
+    }
+
+    {
+        scoped_config config;
+        config.get("iceberg_enabled").set_value(true);
+        model::topic test_tp{"topic-2"};
+        BOOST_REQUIRE(
+          !create_topic(test_tp, {{"redpanda.iceberg.mode", "key_value"}})
+             .data.errored());
+        auto all_describe_resp = describe_configs(test_tp);
+        // Iceberg mode is present.
+        assert_property_presented(
+          test_tp, "redpanda.iceberg.mode", all_describe_resp, true);
+        // Additional iceberg properties are present because iceberg is enabled
+        // for this topic.
+        for (const auto& property : iceberg_properties) {
+            assert_property_presented(
+              test_tp, property, all_describe_resp, true);
+        }
+    }
+}
+
 FIXTURE_TEST(test_shadow_indexing_alter_configs, alter_config_test_fixture) {
-    wait_for_controller_leadership().get();
     model::topic test_tp{"topic-1"};
     create_topic(test_tp, 6);
     using map_t = absl::flat_hash_map<ss::sstring, ss::sstring>;
@@ -1084,7 +1485,6 @@ FIXTURE_TEST(test_shadow_indexing_alter_configs, alter_config_test_fixture) {
 
 FIXTURE_TEST(
   test_shadow_indexing_incremental_alter_configs, alter_config_test_fixture) {
-    wait_for_controller_leadership().get();
     model::topic test_tp{"topic-1"};
     create_topic(test_tp, 6);
     using map_t = absl::flat_hash_map<
@@ -1199,7 +1599,6 @@ FIXTURE_TEST(
 
 FIXTURE_TEST(
   test_shadow_indexing_uppercase_alter_config, alter_config_test_fixture) {
-    wait_for_controller_leadership().get();
     model::topic test_tp{"topic-1"};
     create_topic(test_tp, 6);
     using map_t = absl::flat_hash_map<
@@ -1225,4 +1624,13 @@ FIXTURE_TEST(
       test_tp, "redpanda.remote.write", "true", describe_resp);
     assert_property_value(
       test_tp, "redpanda.remote.read", "true", describe_resp);
+}
+
+FIXTURE_TEST(test_unlicensed_alter_configs, alter_config_test_fixture) {
+    alter_config_no_license_test(true);
+}
+
+FIXTURE_TEST(
+  test_unlicensed_alter_configs_no_cluster_config, alter_config_test_fixture) {
+    alter_config_no_license_test(false);
 }

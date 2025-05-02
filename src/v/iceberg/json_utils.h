@@ -1,13 +1,15 @@
-// Copyright 2024 Redpanda Data, Inc.
-//
-// Use of this software is governed by the Business Source License
-// included in the file licenses/BSL.md
-//
-// As of the Change Date specified in that file, in accordance with
-// the Business Source License, use of this software will be governed
-// by the Apache License, Version 2.0
+/*
+ * Copyright 2024 Redpanda Data, Inc.
+ *
+ * Licensed as a Redpanda Enterprise file under the Redpanda Community
+ * License (the "License"); you may not use this file except in compliance with
+ * the License. You may obtain a copy of the License at
+ *
+ * https://github.com/redpanda-data/redpanda/blob/master/licenses/rcl.md
+ */
 #pragma once
 
+#include "container/chunked_hash_map.h"
 #include "json/document.h"
 
 namespace iceberg {
@@ -39,9 +41,18 @@ parse_optional_i32(const json::Value& v, std::string_view member_name);
 std::optional<int64_t>
 parse_optional_i64(const json::Value& v, std::string_view member_name);
 
+std::optional<ss::sstring>
+parse_optional_str(const json::Value& v, std::string_view member_name);
+
 bool parse_required_bool(const json::Value& v, std::string_view member_name);
 
 std::string_view
 extract_between(char start_ch, char end_ch, std::string_view s);
+
+chunked_hash_map<ss::sstring, ss::sstring>
+parse_required_string_map(const json::Value&, std::string_view);
+
+std::optional<chunked_hash_map<ss::sstring, ss::sstring>>
+parse_optional_string_map(const json::Value&, std::string_view);
 
 } // namespace iceberg

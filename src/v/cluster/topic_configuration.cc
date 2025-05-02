@@ -23,7 +23,8 @@ storage::ntp_config topic_configuration::make_ntp_config(
   const ss::sstring& work_dir,
   model::partition_id p_id,
   model::revision_id rev,
-  model::initial_revision_id init_rev) const {
+  model::revision_id topic_rev,
+  model::initial_revision_id remote_rev) const {
     auto has_overrides = properties.has_overrides() || is_internal();
     std::unique_ptr<storage::ntp_config::default_overrides> overrides = nullptr;
 
@@ -55,8 +56,11 @@ storage::ntp_config topic_configuration::make_ntp_config(
             .write_caching = properties.write_caching,
             .flush_ms = properties.flush_ms,
             .flush_bytes = properties.flush_bytes,
-            .iceberg_enabled = properties.iceberg_enabled,
+            .iceberg_mode = properties.iceberg_mode,
             .cloud_topic_enabled = properties.cloud_topic_enabled,
+            .tombstone_retention_ms = properties.delete_retention_ms,
+            .min_cleanable_dirty_ratio = properties.min_cleanable_dirty_ratio,
+            .remote_allow_gaps = properties.remote_topic_allow_gaps,
           });
     }
     return {
@@ -64,7 +68,8 @@ storage::ntp_config topic_configuration::make_ntp_config(
       work_dir,
       std::move(overrides),
       rev,
-      init_rev};
+      topic_rev,
+      remote_rev};
 }
 
 void topic_configuration::serde_write(iobuf& out) {

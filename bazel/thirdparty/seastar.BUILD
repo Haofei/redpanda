@@ -18,19 +18,13 @@ bool_flag(
 
 bool_flag(
     name = "heap_profiling",
-    build_setting_default = False,
+    build_setting_default = True,
 )
 
 # "Enable the compile-time {fmt} check when formatting logging messages" ON
 # "fmt_VERSION VERSION_GREATER_EQUAL 8.0.0" OFF)
 bool_flag(
     name = "logger_compile_time_fmt",
-    build_setting_default = False,
-)
-
-# TODO(bazel) the default should be true, but need to fix a numactl undefined reference
-bool_flag(
-    name = "numactl",
     build_setting_default = False,
 )
 
@@ -99,13 +93,6 @@ config_setting(
     name = "use_logger_compile_time_fmt",
     flag_values = {
         ":logger_compile_time_fmt": "true",
-    },
-)
-
-config_setting(
-    name = "use_numactl",
-    flag_values = {
-        ":numactl": "true",
     },
 )
 
@@ -243,6 +230,7 @@ cc_library(
         "src/core/scollectd-impl.hh",
         "src/core/semaphore.cc",
         "src/core/sharded.cc",
+        "src/core/signal.cc",
         "src/core/smp.cc",
         "src/core/sstring.cc",
         "src/core/syscall_result.hh",
@@ -409,6 +397,7 @@ cc_library(
         "include/seastar/core/shared_ptr.hh",
         "include/seastar/core/shared_ptr_debug_helper.hh",
         "include/seastar/core/shared_ptr_incomplete.hh",
+        "include/seastar/core/signal.hh",
         "include/seastar/core/simple-stream.hh",
         "include/seastar/core/slab.hh",
         "include/seastar/core/sleep.hh",
@@ -432,6 +421,7 @@ cc_library(
         "include/seastar/core/vector-data-sink.hh",
         "include/seastar/core/weak_ptr.hh",
         "include/seastar/core/when_all.hh",
+        "include/seastar/core/when_any.hh",
         "include/seastar/core/with_scheduling_group.hh",
         "include/seastar/core/with_timeout.hh",
         "include/seastar/coroutine/all.hh",
@@ -503,6 +493,7 @@ cc_library(
         "include/seastar/rpc/rpc_impl.hh",
         "include/seastar/rpc/rpc_types.hh",
         "include/seastar/util/alloc_failure_injector.hh",
+        "include/seastar/util/assert.hh",
         "include/seastar/util/backtrace.hh",
         "include/seastar/util/bool_class.hh",
         "include/seastar/util/closeable.hh",
@@ -560,6 +551,7 @@ cc_library(
         "SEASTAR_API_LEVEL=$(API_LEVEL)",
         "SEASTAR_SCHEDULING_GROUPS_COUNT=$(SCHEDULING_GROUPS)",
         "SEASTAR_WITH_TLS_OSSL",
+        "SEASTAR_DEPRECATED_OSTREAM_FORMATTERS",
     ] + select({
         ":use_task_backtrace": ["SEASTAR_TASK_BACKTRACE"],
         "//conditions:default": [],
@@ -570,8 +562,24 @@ cc_library(
         ":use_logger_compile_time_fmt": ["SEASTAR_LOGGER_COMPILE_TIME_FMT"],
         "//conditions:default": [],
     }) + select({
-        ":with_debug": ["SEASTAR_DEBUG"],
+        ":use_system_allocator": ["SEASTAR_DEFAULT_ALLOCATOR"],
         "//conditions:default": [],
+    }) + select({
+        ":with_debug": [
+            "SEASTAR_DEBUG",
+            "SEASTAR_DEBUG_PROMISE",
+            "SEASTAR_DEBUG_SHARED_PTR",
+            "SEASTAR_TYPE_ERASE_MORE",
+        ],
+        "//conditions:default": [],
+    }) + select({
+        # This isn't the best way to check this, but is the only way I can
+        # currently think of to replicate this behavior in Bazel. In CMake
+        # seastar only enables this if CMAKE_BUILD_SHARED_LIBS is enabled.
+        "@//bazel:optimized_build": [],
+        "//conditions:default": [
+            "SEASTAR_BUILD_SHARED_LIBS",
+        ],
     }),
     includes = [
         "include",
@@ -579,6 +587,11 @@ cc_library(
     ],
     local_defines = [
         "SEASTAR_DEFERRED_ACTION_REQUIRE_NOEXCEPT",
+        # This is nested in a `#ifdef SEASTAR_ASAN_ENABLED` so it's safe
+        # to always enable this as it will only have effect if ASAN is
+        # is enabled for the build.
+        # NOTE: SEASTAR_ASAN_ENABLED is auto detected - it's not set here
+        "SEASTAR_HAVE_ASAN_FIBER_SUPPORT",
     ] + select({
         ":use_debug_allocations": ["SEASTAR_DEBUG_ALLOCATIONS"],
         "//conditions:default": [],
@@ -589,16 +602,10 @@ cc_library(
         ":use_io_uring": ["SEASTAR_HAVE_URING"],
         "//conditions:default": [],
     }) + select({
-        ":use_numactl": ["SEASTAR_HAVE_NUMA"],
-        "//conditions:default": [],
-    }) + select({
         # this only needs to be applied to memory.cc and reactor.cc. could be
         # split out into a separate cc_library, but we'd need to inherit all the
         # build settings. defining for all compilation units seems harmless.
         ":use_heap_profiling": ["SEASTAR_HEAPPROF"],
-        "//conditions:default": [],
-    }) + select({
-        ":use_system_allocator": ["SEASTAR_DEFAULT_ALLOCATOR"],
         "//conditions:default": [],
     }) + select({
         ":with_shuffle_task_queue": ["SEASTAR_SHUFFLE_TASK_QUEUE"],
@@ -635,9 +642,6 @@ cc_library(
         "//conditions:default": [],
     }) + select({
         ":use_io_uring": ["@liburing"],
-        "//conditions:default": [],
-    }) + select({
-        ":use_numactl": ["@numactl"],
         "//conditions:default": [],
     }),
 )
@@ -695,5 +699,20 @@ cc_library(
     ],
     deps = [
         ":testing",
+    ],
+)
+
+cc_binary(
+    name = "iotune",
+    srcs = [
+        "apps/iotune/iotune.cc",
+    ],
+    visibility = ["//visibility:public"],
+    deps = [
+        ":seastar",
+        "@boost//:program_options",
+        "@boost//:range",
+        "@fmt",
+        "@yaml-cpp",
     ],
 )

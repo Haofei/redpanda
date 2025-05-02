@@ -9,6 +9,7 @@
 
 #include "cluster/topics_frontend.h"
 
+#include "base/type_traits.h"
 #include "cloud_storage/remote.h"
 #include "cloud_storage_clients/configuration.h"
 #include "cluster/cluster_utils.h"
@@ -31,7 +32,9 @@
 #include "cluster/topic_recovery_validator.h"
 #include "cluster/types.h"
 #include "config/configuration.h"
+#include "config/leaders_preference.h"
 #include "data_migration_types.h"
+#include "features/enterprise_feature_messages.h"
 #include "features/feature_table.h"
 #include "fwd.h"
 #include "model/errc.h"
@@ -45,8 +48,11 @@
 #include "random/generators.h"
 #include "rpc/errc.h"
 #include "rpc/types.h"
+#include "scheduling/types.h"
 #include "ssx/future-util.h"
+#include "ssx/sformat.h"
 #include "topic_configuration.h"
+#include "topic_properties.h"
 
 #include <seastar/core/coroutine.hh>
 #include <seastar/core/future.hh>
@@ -61,6 +67,205 @@
 #include <regex>
 #include <sstream>
 #include <system_error>
+
+namespace {
+
+std::vector<std::string_view>
+get_enterprise_features(const cluster::topic_configuration& cfg) {
+    std::vector<std::string_view> features;
+    const auto si_disabled = model::shadow_indexing_mode::disabled;
+    // Only enforce tiered storage topic config sanctions when cloud storage is
+    // enabled for the cluster
+    if (config::shard_local_cfg().cloud_storage_enabled.is_restricted()) {
+        if (
+          cfg.properties.shadow_indexing.value_or(si_disabled) != si_disabled) {
+            features.emplace_back("tiered storage");
+        }
+        if (cfg.is_recovery_enabled()) {
+            features.emplace_back("topic recovery");
+        }
+        if (cfg.is_read_replica()) {
+            features.emplace_back("remote read replicas");
+        }
+    }
+
+    // Only enforce schema ID validation topic configs if Schema ID validation
+    // is enabled for the cluster
+    if (config::shard_local_cfg().enable_schema_id_validation.is_restricted()) {
+        if (cfg.is_schema_id_validation_enabled()) {
+            features.emplace_back("schema ID validation");
+        }
+    }
+
+    // We are always enforcing leadership preference restrictions
+    if (const auto& leaders_pref = cfg.properties.leaders_preference;
+        leaders_pref.has_value()
+        && config::shard_local_cfg()
+             .default_leaders_preference.check_restricted(
+               leaders_pref.value())) {
+        features.emplace_back("leadership pinning");
+    }
+
+    if (config::shard_local_cfg().iceberg_enabled.is_restricted()) {
+        if (cfg.properties.iceberg_mode != model::iceberg_mode::disabled) {
+            features.emplace_back("iceberg");
+        }
+    }
+    return features;
+}
+
+std::vector<std::string_view> get_enterprise_features(
+  const cluster::metadata_cache& metadata,
+  const cluster::topic_properties_update& update) {
+    auto tp_metadata = metadata.get_topic_metadata_ref(update.tp_ns);
+    if (!tp_metadata.has_value()) {
+        // Topic does not exist, nothing to validate
+        return {};
+    }
+
+    const auto& properties = tp_metadata->get().get_configuration().properties;
+    auto updated_properties = cluster::topic_table::update_topic_properties(
+      properties, {update.tp_ns, update.properties});
+
+    std::vector<std::string_view> features;
+    const auto si_disabled = model::shadow_indexing_mode::disabled;
+    // Only enforce tiered storage topic config sanctions when cloud storage is
+    // enabled for the cluster
+    if (config::shard_local_cfg().cloud_storage_enabled.is_restricted()) {
+        if (
+          (properties.shadow_indexing.value_or(si_disabled)
+           < updated_properties.shadow_indexing.value_or(si_disabled))
+          || (properties.remote_delete < updated_properties.remote_delete)) {
+            features.emplace_back("tiered storage");
+        }
+    }
+
+    static constexpr auto key_schema_id_validation_enabled =
+      [](const cluster::topic_properties& pp) -> bool {
+        return pp.record_key_schema_id_validation.value_or(false)
+               || pp.record_key_schema_id_validation_compat.value_or(false);
+    };
+
+    static constexpr auto value_schema_id_validation_enabled =
+      [](const cluster::topic_properties& pp) -> bool {
+        return pp.record_value_schema_id_validation.value_or(false)
+               || pp.record_value_schema_id_validation_compat.value_or(false);
+    };
+
+    static constexpr auto schema_id_validation_enabled =
+      [](const cluster::topic_properties& pp) -> bool {
+        return key_schema_id_validation_enabled(pp)
+               || value_schema_id_validation_enabled(pp);
+    };
+
+    constexpr auto unset_or_unchanged =
+      [](
+        const reflection::is_std_optional auto& curr,
+        const reflection::is_std_optional auto& nxt) -> bool {
+        // allow anything -> null
+        // allow non-null -> same non-null
+        return !nxt.has_value() || curr == nxt;
+    };
+
+    auto sns_modified = [&unset_or_unchanged,
+                         &pp = properties,
+                         &up = updated_properties]() -> bool {
+        return !(
+          unset_or_unchanged(
+            pp.record_key_subject_name_strategy,
+            up.record_key_subject_name_strategy)
+          && unset_or_unchanged(
+            pp.record_key_subject_name_strategy_compat,
+            up.record_key_subject_name_strategy_compat)
+          && unset_or_unchanged(
+            pp.record_value_subject_name_strategy,
+            up.record_value_subject_name_strategy)
+          && unset_or_unchanged(
+            pp.record_value_subject_name_strategy_compat,
+            up.record_value_subject_name_strategy_compat));
+    };
+
+    // Only enforce schema ID validation topic configs if Schema ID validation
+    // is enabled for the cluster
+    if (config::shard_local_cfg().enable_schema_id_validation.is_restricted()) {
+        if (
+          ((key_schema_id_validation_enabled(properties)
+            < key_schema_id_validation_enabled(updated_properties))
+           || (value_schema_id_validation_enabled(properties) < value_schema_id_validation_enabled(updated_properties)))
+          || (schema_id_validation_enabled(updated_properties) && sns_modified())) {
+            features.emplace_back("schema id validation");
+        }
+    }
+
+    if (const auto& updated_pref = updated_properties.leaders_preference;
+        updated_pref != properties.leaders_preference
+        && updated_pref.has_value()
+        && config::shard_local_cfg()
+             .default_leaders_preference.check_restricted(
+               updated_pref.value())) {
+        features.emplace_back("leadership pinning");
+    }
+    if (config::shard_local_cfg().iceberg_enabled.is_restricted()) {
+        if (properties.iceberg_mode != model::iceberg_mode::disabled) {
+            features.emplace_back("iceberg");
+        }
+    }
+    return features;
+}
+
+cluster::simple_allocation_request make_simple_allocation_request(
+  const cluster::custom_assignable_topic_configuration& ca_cfg,
+  bool topic_aware) {
+    vassert(
+      !ca_cfg.has_custom_assignment(),
+      "make_custom_allocation_request should have been called, instead");
+    cluster::simple_allocation_request req{
+      ca_cfg.cfg.tp_ns,
+      ca_cfg.cfg.partition_count,
+      ca_cfg.cfg.replication_factor};
+    if (topic_aware) {
+        req.existing_replica_counts = cluster::node2count_t{};
+    }
+    return req;
+}
+
+cluster::allocation_request make_custom_allocation_request(
+  const cluster::custom_assignable_topic_configuration& ca_cfg,
+  bool topic_aware) {
+    vassert(
+      ca_cfg.has_custom_assignment(),
+      "make_simple_allocation_request should have been called, instead");
+    // no custom assignments, lets allocator decide based on partition count
+    cluster::allocation_request req(ca_cfg.cfg.tp_ns);
+    req.partitions.reserve(ca_cfg.custom_assignments.size());
+    for (auto& cas : ca_cfg.custom_assignments) {
+        cluster::allocation_constraints constraints;
+        constraints.add(cluster::on_nodes(cas.replicas));
+
+        req.partitions.emplace_back(
+          cas.id, cas.replicas.size(), std::move(constraints));
+    }
+    if (topic_aware) {
+        req.existing_replica_counts = cluster::node2count_t{};
+    }
+    return req;
+}
+
+cluster::allocation_request make_allocation_request(
+  model::ntp ntp,
+  cluster::replication_factor tp_replication_factor,
+  const std::vector<model::node_id>& new_replicas) {
+    auto nt = model::topic_namespace(ntp.ns, ntp.tp.topic);
+    cluster::allocation_request req(nt);
+    req.partitions.reserve(1);
+    cluster::allocation_constraints constraints;
+    constraints.add(cluster::on_nodes(new_replicas));
+    req.partitions.emplace_back(
+      ntp.tp.partition, tp_replication_factor, std::move(constraints));
+    return req;
+}
+
+} // namespace
 
 namespace cluster {
 
@@ -249,6 +454,20 @@ ss::future<std::vector<topic_result>> topics_frontend::update_topic_properties(
 
         auto results = co_await ssx::parallel_transform(
           std::move(updates), [this, timeout](topic_properties_update update) {
+              if (
+                _features.local().should_sanction()
+                && is_user_topic(update.tp_ns)) {
+                  if (auto f = get_enterprise_features(_metadata_cache, update);
+                      !f.empty()) {
+                      auto msg
+                        = features::enterprise_error_message::topic_property(f);
+                      vlog(clusterlog.warn, "{}", msg);
+                      return ss::make_ready_future<topic_result>(topic_result(
+                        update.tp_ns,
+                        errc::topic_invalid_config,
+                        std::move(msg)));
+                  }
+              }
               return do_update_topic_properties(std::move(update), timeout);
           });
 
@@ -291,11 +510,6 @@ ss::future<std::error_code> topics_frontend::do_update_replication_factor(
   topic_properties_update& update, model::timeout_clock::time_point timeout) {
     switch (update.custom_properties.replication_factor.op) {
     case incremental_update_operation::set: {
-        if (!_features.local().is_active(
-              features::feature::replication_factor_change)) {
-            co_return cluster::errc::feature_disabled;
-        }
-
         if (_topics.local().is_fully_disabled(update.tp_ns)) {
             co_return errc::topic_disabled;
         }
@@ -358,54 +572,37 @@ ss::future<topic_result> topics_frontend::do_update_topic_properties(
     }
 }
 
-topic_result
-make_error_result(const model::topic_namespace& tp_ns, std::error_code ec) {
-    if (ec.category() == cluster::error_category()) {
-        return topic_result(tp_ns, cluster::errc(ec.value()));
+topic_result make_error_result(
+  const model::topic_namespace& tp_ns,
+  std::error_code ec,
+  std::optional<ss::sstring> msg = std::nullopt) {
+    errc error = ec.category() == cluster::error_category()
+                   ? errc(ec.value())
+                   : errc::topic_operation_error;
+    if (msg.has_value()) {
+        return {tp_ns, error, std::move(msg).value()};
     }
-
-    return topic_result(tp_ns, errc::topic_operation_error);
+    return topic_result{tp_ns, error};
 }
 
-static allocation_request make_allocation_request(
-  const custom_assignable_topic_configuration& ca_cfg, bool topic_aware) {
-    // no custom assignments, lets allocator decide based on partition count
-    const auto& tp_ns = ca_cfg.cfg.tp_ns;
-    allocation_request req(tp_ns);
-    if (!ca_cfg.has_custom_assignment()) {
-        req.partitions.reserve(ca_cfg.cfg.partition_count);
-        for (auto p = 0; p < ca_cfg.cfg.partition_count; ++p) {
-            req.partitions.emplace_back(
-              model::partition_id(p), ca_cfg.cfg.replication_factor);
-        }
-    } else {
-        req.partitions.reserve(ca_cfg.custom_assignments.size());
-        for (auto& cas : ca_cfg.custom_assignments) {
-            allocation_constraints constraints;
-            constraints.add(on_nodes(cas.replicas));
-
-            req.partitions.emplace_back(
-              cas.id, cas.replicas.size(), std::move(constraints));
-        }
-    }
-    if (topic_aware) {
-        req.existing_replica_counts = node2count_t{};
-    }
-    return req;
-}
-
-errc topics_frontend::validate_topic_configuration(
+topic_result topics_frontend::validate_topic_configuration(
   const custom_assignable_topic_configuration& assignable_config) {
-    if (!validate_topic_name(assignable_config.cfg.tp_ns)) {
-        return errc::invalid_topic_name;
+    const auto make_result = [&assignable_config](
+                               errc err,
+                               std::optional<ss::sstring> msg = std::nullopt) {
+        return cluster::make_error_result(
+          assignable_config.cfg.tp_ns, err, std::move(msg));
+    };
+    if (auto ec = validate_topic_name(assignable_config.cfg.tp_ns); ec) {
+        return make_result(errc::invalid_topic_name, ec.message());
     }
 
     if (assignable_config.cfg.partition_count < 1) {
-        return errc::topic_invalid_partitions;
+        return make_result(errc::topic_invalid_partitions);
     }
 
     if (assignable_config.cfg.replication_factor < 1) {
-        return errc::topic_invalid_replication_factor;
+        return make_result(errc::topic_invalid_replication_factor);
     }
 
     if (assignable_config.has_custom_assignment()) {
@@ -413,7 +610,7 @@ errc topics_frontend::validate_topic_configuration(
             if (
               static_cast<int16_t>(custom.replicas.size())
               != assignable_config.cfg.replication_factor) {
-                return errc::topic_invalid_replication_factor;
+                return make_result(errc::topic_invalid_replication_factor);
             }
         }
     }
@@ -421,23 +618,35 @@ errc topics_frontend::validate_topic_configuration(
       (assignable_config.is_read_replica()
        || assignable_config.is_recovery_enabled())
       && !_cloud_storage_api.local_is_initialized()) {
-        return errc::topic_invalid_config;
+        return make_result(
+          errc::topic_invalid_config, "Tiered storage is not enabled");
     }
 
     // the only way that cloud topics can be enabled on a topic is if the cloud
     // topics development feature is also enabled.
     if (!config::shard_local_cfg().development_enable_cloud_topics()) {
         if (assignable_config.cfg.properties.cloud_topic_enabled) {
-            vlog(
-              clusterlog.error,
+            auto msg = ssx::sformat(
               "Cloud topic flag on {} is set but development feature is "
               "disabled",
               assignable_config.cfg.tp_ns);
-            return errc::topic_invalid_config;
+            vlog(clusterlog.error, "{}", msg);
+            return make_result(errc::topic_invalid_config, std::move(msg));
         }
     }
 
-    return errc::success;
+    if (
+      _features.local().should_sanction()
+      && is_user_topic(assignable_config.cfg.tp_ns)) {
+        if (auto f = get_enterprise_features(assignable_config.cfg);
+            !f.empty()) {
+            auto msg = features::enterprise_error_message::topic_property(f);
+            vlog(clusterlog.warn, "{}", msg);
+            return make_result(errc::topic_invalid_config, std::move(msg));
+        }
+    }
+
+    return make_result(errc::success);
 }
 
 ss::future<topic_result> topics_frontend::do_create_topic(
@@ -468,10 +677,10 @@ ss::future<topic_result> topics_frontend::do_create_topic(
           assignable_config.cfg.tp_ns, errc::resource_is_being_migrated);
     }
 
-    auto validation_err = validate_topic_configuration(assignable_config);
+    auto result = validate_topic_configuration(assignable_config);
 
-    if (validation_err != errc::success) {
-        co_return topic_result(assignable_config.cfg.tp_ns, validation_err);
+    if (result.ec != errc::success) {
+        co_return result;
     }
 
     if (assignable_config.is_read_replica()) {
@@ -547,8 +756,7 @@ ss::future<topic_result> topics_frontend::do_create_topic(
               static_cast<bool>(
                 assignable_config.cfg.properties.remote_topic_properties),
               "remote_topic_properties not set after successful download of "
-              "valid "
-              "topic manifest");
+              "valid topic manifest");
         }
         auto validation_map = co_await maybe_validate_recovery_topic(
           assignable_config, bucket, _cloud_storage_api.local(), _as.local());
@@ -613,8 +821,12 @@ ss::future<topic_result> topics_frontend::do_create_topic(
       partition_allocator::shard,
       [assignable_config, topic_aware = _partition_autobalancing_topic_aware()](
         partition_allocator& al) {
+          if (assignable_config.has_custom_assignment()) {
+              return al.allocate(
+                make_custom_allocation_request(assignable_config, topic_aware));
+          }
           return al.allocate(
-            make_allocation_request(assignable_config, topic_aware));
+            make_simple_allocation_request(assignable_config, topic_aware));
       });
 
     if (!units) {
@@ -824,12 +1036,8 @@ ss::future<topic_result> topics_frontend::do_delete_topic(
     if (migrated_away) {
         mode = topic_lifecycle_transition_mode::delete_migrated;
         vlog(clusterlog.info, "Deleting migrated topic {}", tp_ns);
-    } else if (topic_meta.get_configuration()
-                 .properties.requires_remote_erase()) {
-        mode = topic_lifecycle_transition_mode::pending_gc;
-        vlog(clusterlog.info, "Created deletion marker for topic {}", tp_ns);
     } else {
-        mode = topic_lifecycle_transition_mode::oneshot_delete;
+        mode = topic_lifecycle_transition_mode::pending_gc;
         vlog(clusterlog.info, "Deleting topic {}", tp_ns);
     }
 
@@ -861,7 +1069,9 @@ ss::future<topic_result> topics_frontend::do_delete_topic(
 }
 
 ss::future<topic_result> topics_frontend::purged_topic(
-  nt_revision topic, model::timeout_clock::duration timeout) {
+  nt_revision topic,
+  topic_purge_domain domain,
+  model::timeout_clock::duration timeout) {
     auto leader = _leaders.local().get_leader(model::controller_ntp);
 
     // no leader available
@@ -872,26 +1082,43 @@ ss::future<topic_result> topics_frontend::purged_topic(
     // current node is a leader controller
     if (leader == _self) {
         return do_purged_topic(
-          std::move(topic), model::timeout_clock::now() + timeout);
+          std::move(topic), domain, model::timeout_clock::now() + timeout);
     } else {
         return dispatch_purged_topic_to_leader(
-          leader.value(), std::move(topic), timeout);
+          leader.value(), std::move(topic), domain, timeout);
     }
 }
 
 ss::future<topic_result> topics_frontend::do_purged_topic(
-  nt_revision topic, model::timeout_clock::time_point deadline) {
+  nt_revision topic,
+  topic_purge_domain domain,
+  model::timeout_clock::time_point deadline) {
     topic_lifecycle_transition_cmd cmd(
       topic.nt,
       topic_lifecycle_transition{
-        .topic = topic, .mode = topic_lifecycle_transition_mode::drop});
+        .topic = topic,
+        .mode = topic_lifecycle_transition_mode::purged,
+        .domain = domain});
 
-    if (!_topics.local().get_lifecycle_markers().contains(topic)) {
+    bool marker_exists = false;
+    switch (domain) {
+    case topic_purge_domain::cloud_storage:
+        marker_exists = _topics.local().get_lifecycle_markers().contains(topic);
+        break;
+    case topic_purge_domain::iceberg:
+        marker_exists = _topics.local().get_iceberg_tombstones().contains(
+          topic.nt);
+        break;
+    }
+
+    if (!marker_exists) {
         // Do not write to log if the marker is already gone
         vlog(
           clusterlog.info,
-          "Dropping duplicate purge request for lifecycle marker {}",
-          topic.nt);
+          "Dropping duplicate purge request for lifecycle marker {} in domain "
+          "{}",
+          topic.nt,
+          domain);
         co_return topic_result(std::move(topic.nt), errc::success);
     }
 
@@ -967,6 +1194,7 @@ topics_frontend::dispatch_create_to_leader(
 ss::future<topic_result> topics_frontend::dispatch_purged_topic_to_leader(
   model::node_id leader,
   nt_revision topic,
+  topic_purge_domain domain,
   model::timeout_clock::duration timeout) {
     vlog(
       clusterlog.trace,
@@ -980,10 +1208,13 @@ ss::future<topic_result> topics_frontend::dispatch_purged_topic_to_leader(
                  ss::this_shard_id(),
                  leader,
                  timeout,
-                 [topic, timeout](controller_client_protocol cp) mutable {
+                 [topic, timeout, domain](
+                   controller_client_protocol cp) mutable {
                      return cp.purged_topic(
                        purged_topic_request{
-                         .topic = std::move(topic), .timeout = timeout},
+                         .topic = std::move(topic),
+                         .timeout = timeout,
+                         .domain = domain},
                        rpc::client_opts(model::timeout_clock::now() + timeout));
                  })
                .then(&rpc::get_ctx_data<purged_topic_reply>);
@@ -993,15 +1224,16 @@ ss::future<topic_result> topics_frontend::dispatch_purged_topic_to_leader(
     co_return std::move(r.value().result);
 }
 
-bool topics_frontend::validate_topic_name(const model::topic_namespace& topic) {
+std::error_code
+topics_frontend::validate_topic_name(const model::topic_namespace& topic) {
     if (topic.ns == model::kafka_namespace) {
         const auto errc = model::validate_kafka_topic_name(topic.tp);
         if (static_cast<model::errc>(errc.value()) != model::errc::success) {
             vlog(clusterlog.info, "{} {}", errc.message(), topic.tp());
-            return false;
+            return errc;
         }
     }
-    return true;
+    return model::errc::success;
 }
 
 ss::future<std::error_code> topics_frontend::move_partition_replicas(
@@ -1420,22 +1652,6 @@ topics_frontend::validate_shard(model::node_id node, uint32_t shard) const {
       });
 }
 
-static allocation_request make_allocation_request(
-  int16_t replication_factor,
-  const int32_t current_partitions_count,
-  std::optional<node2count_t> existing_replica_counts,
-  const create_partitions_configuration& cfg) {
-    const auto new_partitions_cnt = cfg.new_total_partition_count
-                                    - current_partitions_count;
-    allocation_request req(cfg.tp_ns);
-    req.existing_replica_counts = std::move(existing_replica_counts);
-    req.partitions.reserve(new_partitions_cnt);
-    for (auto p = 0; p < new_partitions_cnt; ++p) {
-        req.partitions.emplace_back(model::partition_id(p), replication_factor);
-    }
-    return req;
-}
-
 ss::future<topic_result> topics_frontend::do_create_partition(
   create_partitions_configuration p_cfg,
   model::timeout_clock::time_point timeout) {
@@ -1465,6 +1681,15 @@ ss::future<topic_result> topics_frontend::do_create_partition(
         co_return make_error_result(p_cfg.tp_ns, errc::topic_disabled);
     }
 
+    if (_features.local().should_sanction() && is_user_topic(tp_cfg->tp_ns)) {
+        if (auto f = get_enterprise_features(*tp_cfg); !f.empty()) {
+            auto msg = features::enterprise_error_message::create_partition(f);
+            vlog(clusterlog.warn, "{}", msg);
+            co_return make_error_result(
+              p_cfg.tp_ns, errc::topic_invalid_config, std::move(msg));
+        }
+    }
+
     std::optional<node2count_t> existing_replica_counts;
     if (_partition_autobalancing_topic_aware()) {
         auto md_ref = _topics.local().get_topic_metadata_ref(p_cfg.tp_ns);
@@ -1487,8 +1712,14 @@ ss::future<topic_result> topics_frontend::do_create_partition(
        current = tp_cfg->partition_count,
        existing_rc = std::move(existing_replica_counts),
        rf = replication_factor.value()](partition_allocator& al) mutable {
-          return al.allocate(make_allocation_request(
-            rf, current, std::move(existing_rc), p_cfg));
+          const auto new_partitions_cnt = p_cfg.new_total_partition_count
+                                          - current;
+          const auto replication_factor = static_cast<int16_t>(rf);
+          return al.allocate(simple_allocation_request{
+            p_cfg.tp_ns,
+            new_partitions_cnt,
+            replication_factor,
+            std::move(existing_rc)});
       });
 
     // no assignments, error
@@ -1598,7 +1829,7 @@ topics_frontend::cancel_moving_all_partition_replicas(
 
 ss::future<std::vector<move_cancellation_result>>
 topics_frontend::do_cancel_moving_partition_replicas(
-  std::vector<model::ntp> ntps, model::timeout_clock::time_point timeout) {
+  chunked_vector<model::ntp> ntps, model::timeout_clock::time_point timeout) {
     std::vector<move_cancellation_result> results;
     results.reserve(ntps.size());
     co_await ss::max_concurrent_for_each(
@@ -1877,20 +2108,6 @@ ss::future<std::error_code> topics_frontend::decrease_replication_factor(
     move_topic_replicas_cmd cmd(topic, std::move(new_assignments));
 
     co_return co_await replicate_and_wait(_stm, _as, std::move(cmd), timeout);
-}
-
-allocation_request make_allocation_request(
-  model::ntp ntp,
-  replication_factor tp_replication_factor,
-  const std::vector<model::node_id>& new_replicas) {
-    auto nt = model::topic_namespace(ntp.ns, ntp.tp.topic);
-    allocation_request req(nt);
-    req.partitions.reserve(1);
-    allocation_constraints constraints;
-    constraints.add(on_nodes(new_replicas));
-    req.partitions.emplace_back(
-      ntp.tp.partition, tp_replication_factor, std::move(constraints));
-    return req;
 }
 
 ss::future<result<ss::chunked_fifo<partition_assignment>>>

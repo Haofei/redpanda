@@ -10,10 +10,20 @@
 GOCMD=go
 GOLANGCILINTCMD=golangci-lint
 GOFUMPTCMD=gofumpt
-BAZELCMD=bazel
+
+ifeq ($(shell uname),Darwin)
+    BAZELCMD := bazelisk
+    BAZEL_GAZELLE_CMD := run --config system-clang //:gazelle
+    GOFUMPT_OS_CMD := $(shell find . -type f -name '*.go' -print0 | xargs -0 -n 1 $(GOFUMPTCMD) -w)
+else
+	BAZELCMD := bazel
+    BAZEL_GAZELLE_CMD := run //:gazelle
+    GOFUMPT_OS_CMD := 	$(shell find -type f -name '*.go' | xargs -n1 $(GOFUMPTCMD) -w)
+endif
 
 GOOS ?= $(shell go env GOOS)
 GOARCH ?= $(shell go env GOARCH)
+GOPATH ?= $(shell go env GOPATH)
 OUTDIR := $(GOOS)-$(GOARCH)
 
 REV := $(shell git rev-parse --short HEAD)
@@ -29,6 +39,7 @@ all: help
 
 ready: build test fmt lint bazel check_diff ## Runs all. Ensures commit is ready.
 
+.PHONY: build
 build: ## Build rpk.
 	$(shell mkdir -p $(OUTDIR))
 	$(GOCMD) build -ldflags '$(LDFLAGS)' -o $(OUTDIR) ./...
@@ -51,11 +62,10 @@ install_gofumpt:
 
 run_gofumpt:
 	@echo "running gofumpt"
-	$(shell find -type f -name '*.go' | xargs -n1 $(GOFUMPTCMD) -w)
+	$(GOFUMPT_OS_CMD)
 
 install_golangci_lint:
-	@echo "installing golangci-lint"
-	@$(GOCMD) install github.com/golangci/golangci-lint/cmd/golangci-lint@latest
+	@which $(GOLANGCILINTCMD) || (if [ $$? -eq 1 ]; then  echo "golangci-lint not found, installing..."; curl -sSfL https://raw.githubusercontent.com/golangci/golangci-lint/master/install.sh | sh -s -- -b $(GOPATH)/bin v1.62.0; fi)
 
 run_linter:
 	$(GOLANGCILINTCMD) run
@@ -65,7 +75,7 @@ install_bazelisk:
 	@$(GOCMD) install github.com/bazelbuild/bazelisk@latest
 
 bazel_generate_build: install_bazelisk
-	@$(BAZELCMD) run //:gazelle
+	@$(BAZELCMD) $(BAZEL_GAZELLE_CMD)
 
 bazel_tidy: install_bazelisk
 	@$(BAZELCMD) mod tidy

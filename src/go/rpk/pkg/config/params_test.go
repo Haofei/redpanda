@@ -41,6 +41,9 @@ rpk:
     admin_api:
         addresses:
             - 127.0.0.1:9644
+    schema_registry:
+        addresses:
+            - 127.0.0.1:8081
 `,
 		},
 		{
@@ -89,6 +92,7 @@ rpk:
 `,
 			mutate: func(c *RedpandaYaml) {
 				c.Rpk.KafkaAPI.Brokers = []string{"127.0.1.1:9647"}
+				c.Rpk.SR.Addresses = []string{"200.4.2.1:8081"}
 			},
 			exp: `rpk:
     kafka_api:
@@ -100,6 +104,9 @@ rpk:
             - 127.0.0.1:4444
             - 10.0.0.1:4444
             - 122.65.33.12:4444
+    schema_registry:
+        addresses:
+            - 200.4.2.1:8081
 `,
 		},
 		{
@@ -117,6 +124,9 @@ rpk:
     kafka_api:
          brokers:
              - 127.0.0.1:9092
+    schema_registry:
+         addresses:
+             - 127.0.0.1:8081
 `,
 			exp: `redpanda:
     seed_servers: []
@@ -131,6 +141,9 @@ rpk:
     kafka_api:
          brokers:
              - 127.0.0.1:9092
+    schema_registry:
+         addresses:
+             - 127.0.0.1:8081
 `,
 		},
 		{
@@ -151,6 +164,9 @@ rpk:
     kafka_api:
          brokers:
              - 127.0.0.1:9092
+    schema_registry:
+         addresses:
+             - 127.0.0.1:8081
 `,
 			exp: `redpanda:
     data_directory: /var/lib/redpanda/data
@@ -168,6 +184,9 @@ rpk:
     admin_api:
         addresses:
             - 127.0.0.1:9644
+    schema_registry:
+        addresses:
+            - 127.0.0.1:8081
 `,
 		},
 	}
@@ -335,6 +354,9 @@ func TestAddUnsetRedpandaDefaults(t *testing.T) {
 					AdminAPI: RpkAdminAPI{
 						Addresses: []string{"bar:9644"},
 					},
+					SR: RpkSchemaRegistryAPI{
+						Addresses: []string{"baz:8082"},
+					},
 				},
 			},
 			expCfg: &RedpandaYaml{
@@ -353,12 +375,14 @@ func TestAddUnsetRedpandaDefaults(t *testing.T) {
 					AdminAPI: RpkAdminAPI{
 						Addresses: []string{"bar:9644"},
 					},
+					SR: RpkSchemaRegistryAPI{
+						Addresses: []string{"baz:8082"},
+					},
 				},
 			},
 		},
-
 		{
-			name: "kafka broker and admin api from redpanda",
+			name: "kafka broker, admin api and SR from redpanda.yaml",
 			inCfg: &RedpandaYaml{
 				Redpanda: RedpandaNodeConfig{
 					KafkaAPI: []NamedAuthNSocketAddress{
@@ -366,6 +390,11 @@ func TestAddUnsetRedpandaDefaults(t *testing.T) {
 					},
 					AdminAPI: []NamedSocketAddress{
 						{Address: "0.0.2.3", Port: 4444},
+					},
+				},
+				SchemaRegistry: &SchemaRegistry{
+					SchemaRegistryAPI: []NamedAuthNSocketAddress{
+						{Address: "9.12.10.1", Port: 5522},
 					},
 				},
 			},
@@ -378,6 +407,11 @@ func TestAddUnsetRedpandaDefaults(t *testing.T) {
 						{Address: "0.0.2.3", Port: 4444},
 					},
 				},
+				SchemaRegistry: &SchemaRegistry{
+					SchemaRegistryAPI: []NamedAuthNSocketAddress{
+						{Address: "9.12.10.1", Port: 5522},
+					},
+				},
 				Rpk: RpkNodeConfig{
 					KafkaAPI: RpkKafkaAPI{
 						Brokers: []string{"250.12.12.12:9095"},
@@ -385,10 +419,12 @@ func TestAddUnsetRedpandaDefaults(t *testing.T) {
 					AdminAPI: RpkAdminAPI{
 						Addresses: []string{"0.0.2.3:4444"},
 					},
+					SR: RpkSchemaRegistryAPI{
+						Addresses: []string{"9.12.10.1:5522"},
+					},
 				},
 			},
 		},
-
 		{
 			name: "admin api sorted, no TLS used because we have non-TLS servers",
 			inCfg: &RedpandaYaml{
@@ -417,6 +453,20 @@ func TestAddUnsetRedpandaDefaults(t *testing.T) {
 					},
 					AdminAPITLS: []ServerTLS{{Name: "tls", Enabled: true}},
 				},
+				SchemaRegistry: &SchemaRegistry{
+					SchemaRegistryAPI: []NamedAuthNSocketAddress{
+						{Address: "10.1.0.1", Port: 2222, Name: "tls"}, // same as above, numbers in addr/port slightly changed
+						{Address: "127.1.0.1", Port: 2222, Name: "tls"},
+						{Address: "localhost", Port: 2222, Name: "tls"},
+						{Address: "122.61.33.12", Port: 2222, Name: "tls"},
+						{Address: "10.1.2.1", Port: 8888},
+						{Address: "127.1.2.1", Port: 8888},
+						{Address: "localhost", Port: 8888},
+						{Address: "122.61.32.12", Port: 8888},
+						{Address: "0.0.0.0", Port: 8888},
+					},
+					SchemaRegistryAPITLS: []ServerTLS{{Name: "tls", Enabled: true}},
+				},
 			},
 			expCfg: &RedpandaYaml{
 				Redpanda: RedpandaNodeConfig{
@@ -444,6 +494,20 @@ func TestAddUnsetRedpandaDefaults(t *testing.T) {
 					},
 					AdminAPITLS: []ServerTLS{{Name: "tls", Enabled: true}},
 				},
+				SchemaRegistry: &SchemaRegistry{
+					SchemaRegistryAPI: []NamedAuthNSocketAddress{
+						{Address: "10.1.0.1", Port: 2222, Name: "tls"},
+						{Address: "127.1.0.1", Port: 2222, Name: "tls"},
+						{Address: "localhost", Port: 2222, Name: "tls"},
+						{Address: "122.61.33.12", Port: 2222, Name: "tls"},
+						{Address: "10.1.2.1", Port: 8888},
+						{Address: "127.1.2.1", Port: 8888},
+						{Address: "localhost", Port: 8888},
+						{Address: "122.61.32.12", Port: 8888},
+						{Address: "0.0.0.0", Port: 8888},
+					},
+					SchemaRegistryAPITLS: []ServerTLS{{Name: "tls", Enabled: true}},
+				},
 				Rpk: RpkNodeConfig{
 					KafkaAPI: RpkKafkaAPI{
 						Brokers: []string{
@@ -462,12 +526,20 @@ func TestAddUnsetRedpandaDefaults(t *testing.T) {
 							"122.65.32.12:7777", // public
 						},
 					},
+					SR: RpkSchemaRegistryAPI{
+						Addresses: []string{
+							"localhost:8888",
+							"127.1.2.1:8888",
+							"127.0.0.1:8888",
+							"10.1.2.1:8888",
+							"122.61.32.12:8888",
+						},
+					},
 				},
 			},
 		},
-
 		{
-			name: "broker and admin api sorted with TLS and MTLS",
+			name: "broker, admin api, and SR sorted with TLS and MTLS",
 			inCfg: &RedpandaYaml{
 				Redpanda: RedpandaNodeConfig{
 					KafkaAPI: []NamedAuthNSocketAddress{
@@ -497,6 +569,22 @@ func TestAddUnsetRedpandaDefaults(t *testing.T) {
 					AdminAPITLS: []ServerTLS{
 						{Name: "mtls", Enabled: true, RequireClientAuth: true},
 						{Name: "tls", Enabled: true},
+					},
+				},
+				SchemaRegistry: &SchemaRegistry{
+					SchemaRegistryAPI: []NamedAuthNSocketAddress{
+						{Address: "10.1.0.1", Port: 3333, Name: "mtls"},
+						{Address: "127.1.0.1", Port: 3333, Name: "mtls"},
+						{Address: "localhost", Port: 3333, Name: "mtls"},
+						{Address: "122.61.33.12", Port: 3333, Name: "mtls"},
+						{Address: "10.1.0.1", Port: 8888, Name: "tls"},
+						{Address: "127.1.0.1", Port: 8888, Name: "tls"},
+						{Address: "localhost", Port: 8888, Name: "tls"},
+						{Address: "122.61.33.12", Port: 8888, Name: "tls"},
+					},
+					SchemaRegistryAPITLS: []ServerTLS{
+						{Name: "tls", Enabled: true},
+						{Name: "mtls", Enabled: true, RequireClientAuth: true},
 					},
 				},
 			},
@@ -531,6 +619,22 @@ func TestAddUnsetRedpandaDefaults(t *testing.T) {
 						{Name: "tls", Enabled: true},
 					},
 				},
+				SchemaRegistry: &SchemaRegistry{
+					SchemaRegistryAPI: []NamedAuthNSocketAddress{
+						{Address: "10.1.0.1", Port: 3333, Name: "mtls"},
+						{Address: "127.1.0.1", Port: 3333, Name: "mtls"},
+						{Address: "localhost", Port: 3333, Name: "mtls"},
+						{Address: "122.61.33.12", Port: 3333, Name: "mtls"},
+						{Address: "10.1.0.1", Port: 8888, Name: "tls"},
+						{Address: "127.1.0.1", Port: 8888, Name: "tls"},
+						{Address: "localhost", Port: 8888, Name: "tls"},
+						{Address: "122.61.33.12", Port: 8888, Name: "tls"},
+					},
+					SchemaRegistryAPITLS: []ServerTLS{
+						{Name: "tls", Enabled: true},
+						{Name: "mtls", Enabled: true, RequireClientAuth: true},
+					},
+				},
 				Rpk: RpkNodeConfig{
 					KafkaAPI: RpkKafkaAPI{
 						Brokers: []string{
@@ -548,12 +652,19 @@ func TestAddUnsetRedpandaDefaults(t *testing.T) {
 							"122.61.33.9:4444",
 						},
 					},
+					SR: RpkSchemaRegistryAPI{
+						Addresses: []string{
+							"localhost:8888",
+							"127.1.0.1:8888",
+							"10.1.0.1:8888",
+							"122.61.33.12:8888",
+						},
+					},
 				},
 			},
 		},
-
 		{
-			name: "broker and admin api sorted with TLS",
+			name: "broker, admin api, and SR sorted with TLS",
 			inCfg: &RedpandaYaml{
 				Redpanda: RedpandaNodeConfig{
 					KafkaAPI: []NamedAuthNSocketAddress{
@@ -570,6 +681,15 @@ func TestAddUnsetRedpandaDefaults(t *testing.T) {
 						{Address: "122.65.33.12", Port: 4444, Name: "tls"},
 					},
 					AdminAPITLS: []ServerTLS{{Name: "tls", Enabled: true}},
+				},
+				SchemaRegistry: &SchemaRegistry{
+					SchemaRegistryAPI: []NamedAuthNSocketAddress{
+						{Address: "10.1.0.1", Port: 7777, Name: "tls"},
+						{Address: "127.1.0.1", Port: 7777, Name: "tls"},
+						{Address: "localhost", Port: 7777, Name: "tls"},
+						{Address: "122.61.33.12", Port: 7777, Name: "tls"},
+					},
+					SchemaRegistryAPITLS: []ServerTLS{{Name: "tls", Enabled: true}},
 				},
 			},
 			expCfg: &RedpandaYaml{
@@ -589,6 +709,15 @@ func TestAddUnsetRedpandaDefaults(t *testing.T) {
 					},
 					AdminAPITLS: []ServerTLS{{Name: "tls", Enabled: true}},
 				},
+				SchemaRegistry: &SchemaRegistry{
+					SchemaRegistryAPI: []NamedAuthNSocketAddress{
+						{Address: "10.1.0.1", Port: 7777, Name: "tls"},
+						{Address: "127.1.0.1", Port: 7777, Name: "tls"},
+						{Address: "localhost", Port: 7777, Name: "tls"},
+						{Address: "122.61.33.12", Port: 7777, Name: "tls"},
+					},
+					SchemaRegistryAPITLS: []ServerTLS{{Name: "tls", Enabled: true}},
+				},
 				Rpk: RpkNodeConfig{
 					KafkaAPI: RpkKafkaAPI{
 						Brokers: []string{
@@ -606,12 +735,19 @@ func TestAddUnsetRedpandaDefaults(t *testing.T) {
 							"122.65.33.12:4444",
 						},
 					},
+					SR: RpkSchemaRegistryAPI{
+						Addresses: []string{
+							"localhost:7777",
+							"127.1.0.1:7777",
+							"10.1.0.1:7777",
+							"122.61.33.12:7777",
+						},
+					},
 				},
 			},
 		},
-
 		{
-			name: "assume the admin API when only Kafka API is available",
+			name: "assume the admin API and SR when only Kafka API is available",
 			inCfg: &RedpandaYaml{
 				Redpanda: RedpandaNodeConfig{
 					KafkaAPI: []NamedAuthNSocketAddress{
@@ -638,12 +774,55 @@ func TestAddUnsetRedpandaDefaults(t *testing.T) {
 							"127.1.0.1:9644",
 						},
 					},
+					SR: RpkSchemaRegistryAPI{
+						Addresses: []string{
+							"127.1.0.1:8081",
+						},
+					},
 				},
 			},
 		},
-
 		{
-			name: "assume the Kafka API API when only admin API is available from rpk with TLS",
+			name: "assume the admin API and Kafka API when only schema registry is available",
+			inCfg: &RedpandaYaml{
+				SchemaRegistry: &SchemaRegistry{
+					SchemaRegistryAPI: []NamedAuthNSocketAddress{
+						{Address: "localhost", Port: 8888},
+						{Address: "127.0.0.1", Port: 8888},
+					},
+					SchemaRegistryAPITLS: []ServerTLS{{Name: "tls", Enabled: true}},
+				},
+			},
+			expCfg: &RedpandaYaml{
+				SchemaRegistry: &SchemaRegistry{
+					SchemaRegistryAPI: []NamedAuthNSocketAddress{
+						{Address: "localhost", Port: 8888},
+						{Address: "127.0.0.1", Port: 8888},
+					},
+					SchemaRegistryAPITLS: []ServerTLS{{Name: "tls", Enabled: true}},
+				},
+				Rpk: RpkNodeConfig{
+					KafkaAPI: RpkKafkaAPI{
+						Brokers: []string{
+							"localhost:9092", // we only use the first one to infer.
+						},
+					},
+					AdminAPI: RpkAdminAPI{
+						Addresses: []string{
+							"localhost:9644",
+						},
+					},
+					SR: RpkSchemaRegistryAPI{
+						Addresses: []string{
+							"localhost:8888",
+							"127.0.0.1:8888",
+						},
+					},
+				},
+			},
+		},
+		{
+			name: "assume the Kafka API API and SR when only admin API is available from rpk with TLS",
 			inCfg: &RedpandaYaml{
 				Rpk: RpkNodeConfig{
 					AdminAPI: RpkAdminAPI{
@@ -660,6 +839,10 @@ func TestAddUnsetRedpandaDefaults(t *testing.T) {
 					},
 					AdminAPI: RpkAdminAPI{
 						Addresses: []string{"127.1.0.1:5555"},
+						TLS:       new(TLS),
+					},
+					SR: RpkSchemaRegistryAPI{
+						Addresses: []string{"127.1.0.1:8081"},
 						TLS:       new(TLS),
 					},
 				},
@@ -718,12 +901,15 @@ rpk:
     admin_api:
         addresses:
             - 127.0.0.1:9644
+    schema_registry:
+        addresses:
+            - 127.0.0.1:8081
     overprovisioned: true
     coredump_dir: /var/lib/redpanda/coredump
 pandaproxy: {}
 schema_registry: {}
 `,
-			expVirtualRpk: `version: 6
+			expVirtualRpk: `version: 7
 globals:
     prompt: ""
     no_default_cluster: false
@@ -781,6 +967,9 @@ cloud_auth:
         - address: 0.0.0.3
           port: 9092
 rpk:
+    schema_registry:
+        addresses:
+            - 127.0.0.1:3232
     enable_memory_locking: true
     tune_network: true
     tune_disk_scheduler: true
@@ -808,6 +997,9 @@ rpk:
     admin_api:
         addresses:
             - 0.0.0.3:9644
+    schema_registry:
+        addresses:
+            - 127.0.0.1:3232
     enable_memory_locking: true
     tune_network: true
     tune_disk_scheduler: true
@@ -815,7 +1007,7 @@ rpk:
     tune_disk_write_cache: true
     tune_disk_irq: true
 `,
-			expVirtualRpk: `version: 6
+			expVirtualRpk: `version: 7
 globals:
     prompt: ""
     no_default_cluster: false
@@ -841,7 +1033,7 @@ profiles:
             - 0.0.0.3:9644
       schema_registry:
         addresses:
-            - 127.0.0.1:8081
+            - 127.0.0.1:3232
 cloud_auth:
     - name: default
       organization: Default organization
@@ -857,7 +1049,7 @@ cloud_auth:
 		// * admin api is defaulted, using kafka broker ip
 		{
 			name: "rpk.yaml exists",
-			rpkYaml: `version: 6
+			rpkYaml: `version: 7
 globals:
     prompt: ""
     no_default_cluster: false
@@ -909,12 +1101,15 @@ rpk:
     admin_api:
         addresses:
             - 0.0.0.3:9644
+    schema_registry:
+        addresses:
+            - 0.0.0.2:8081
     overprovisioned: true
     coredump_dir: /var/lib/redpanda/coredump
 pandaproxy: {}
 schema_registry: {}
 `,
-			expVirtualRpk: `version: 6
+			expVirtualRpk: `version: 7
 globals:
     prompt: ""
     no_default_cluster: false
@@ -968,6 +1163,9 @@ cloud_auth:
         - address: admin.com
           port: 4444
 rpk:
+    schema_registry:
+        addresses:
+            - 127.0.0.1:8081
     enable_memory_locking: true
     tune_network: true
     tune_disk_scheduler: true
@@ -975,7 +1173,7 @@ rpk:
     tune_disk_write_cache: true
     tune_disk_irq: true
 `,
-			rpkYaml: `version: 6
+			rpkYaml: `version: 7
 globals:
     prompt: ""
     no_default_cluster: false
@@ -997,7 +1195,9 @@ profiles:
         brokers:
             - 128.0.0.4
       admin_api: {}
-      schema_registry: {}
+      schema_registry:
+        addresses:
+            - 127.0.0.1:3232
 cloud_auth: []
 `,
 
@@ -1017,6 +1217,9 @@ rpk:
     admin_api:
         addresses:
             - 128.0.0.4:9644
+    schema_registry:
+        addresses:
+            - 127.0.0.1:3232
     enable_memory_locking: true
     tune_network: true
     tune_disk_scheduler: true
@@ -1025,7 +1228,7 @@ rpk:
     tune_disk_irq: true
 `,
 
-			expVirtualRpk: `version: 6
+			expVirtualRpk: `version: 7
 globals:
     prompt: ""
     no_default_cluster: false
@@ -1051,7 +1254,7 @@ profiles:
             - 128.0.0.4:9644
       schema_registry:
         addresses:
-            - 127.0.0.1:8081
+            - 127.0.0.1:3232
 cloud_auth:
     - name: default
       organization: Default organization
@@ -1130,6 +1333,7 @@ func TestConfig_parseDevOverrides(t *testing.T) {
 func TestParamsHelpComplete(t *testing.T) {
 	h := ParamsHelp()
 	m := maps.Clone(xflags)
+	delete(m, xCloudEnvironment) // We leave this out of the list and docs on purpose.
 	for _, line := range strings.Split(h, "\n") {
 		key := strings.Split(line, "=")[0]
 		delete(m, key)
@@ -1142,6 +1346,7 @@ func TestParamsHelpComplete(t *testing.T) {
 func TestParamsListComplete(t *testing.T) {
 	h := ParamsList()
 	m := maps.Clone(xflags)
+	delete(m, xCloudEnvironment) // We leave this out of the list and docs on purpose.
 	for _, line := range strings.Split(h, "\n") {
 		key := strings.Split(line, "=")[0]
 		delete(m, key)
@@ -1202,5 +1407,417 @@ func TestXSetDefaultsPaths(t *testing.T) {
 		if !strings.HasPrefix(x, "globals.") {
 			t.Errorf("XRpkGlobalFlags() returned xflag %s that doesn't start with globals.", x)
 		}
+	}
+}
+
+func TestConfig_fixSchemePorts(t *testing.T) {
+	tests := []struct {
+		name   string
+		config Config
+		expect Config
+		errMsg string
+	}{
+		{
+			name: "fix missing ports in redpanda.yaml addresses",
+			config: Config{
+				redpandaYaml: RedpandaYaml{
+					Rpk: RpkNodeConfig{
+						KafkaAPI: RpkKafkaAPI{
+							Brokers: []string{"broker1", "broker2:9093"},
+						},
+						AdminAPI: RpkAdminAPI{
+							Addresses: []string{"address1", "address2:2222"},
+						},
+						SR: RpkSchemaRegistryAPI{
+							Addresses: []string{"address1", "address2", "address3:8088"},
+						},
+					},
+				},
+			},
+			expect: Config{
+				redpandaYaml: RedpandaYaml{
+					Rpk: RpkNodeConfig{
+						KafkaAPI: RpkKafkaAPI{
+							Brokers: []string{"broker1:9092", "broker2:9093"},
+						},
+						AdminAPI: RpkAdminAPI{
+							Addresses: []string{"address1:9644", "address2:2222"},
+						},
+						SR: RpkSchemaRegistryAPI{
+							Addresses: []string{"address1:8081", "address2:8081", "address3:8088"},
+						},
+					},
+				},
+			},
+		},
+		{
+			name: "fix missing ports in profile brokers",
+			config: Config{
+				rpkYaml: RpkYaml{
+					CurrentProfile: "default",
+					Profiles: []RpkProfile{
+						{
+							Name: "default",
+							KafkaAPI: RpkKafkaAPI{
+								Brokers: []string{"profile-broker1", "profile-broker2:9094"},
+							},
+							AdminAPI: RpkAdminAPI{
+								Addresses: []string{"address1", "address2:2222"},
+							},
+							SR: RpkSchemaRegistryAPI{
+								Addresses: []string{"address1", "address2", "address3:8088"},
+							},
+						},
+					},
+				},
+			},
+			expect: Config{
+				rpkYaml: RpkYaml{
+					CurrentProfile: "default",
+					Profiles: []RpkProfile{
+						{
+							Name: "default",
+							KafkaAPI: RpkKafkaAPI{
+								Brokers: []string{"profile-broker1:9092", "profile-broker2:9094"},
+							},
+							AdminAPI: RpkAdminAPI{
+								Addresses: []string{"address1:9644", "address2:2222"},
+							},
+							SR: RpkSchemaRegistryAPI{
+								Addresses: []string{"address1:8081", "address2:8081", "address3:8088"},
+							},
+						},
+					},
+				},
+			},
+		},
+		{
+			name: "fix missing ports in redpanda.yaml addresses",
+			config: Config{
+				redpandaYaml: RedpandaYaml{
+					Rpk: RpkNodeConfig{
+						KafkaAPI: RpkKafkaAPI{
+							Brokers: []string{"broker1", "broker2:9093"},
+						},
+						AdminAPI: RpkAdminAPI{
+							Addresses: []string{"address1", "address2:2222"},
+						},
+						SR: RpkSchemaRegistryAPI{
+							Addresses: []string{"address1", "address2", "address3:8088"},
+						},
+					},
+				},
+			},
+			expect: Config{
+				redpandaYaml: RedpandaYaml{
+					Rpk: RpkNodeConfig{
+						KafkaAPI: RpkKafkaAPI{
+							Brokers: []string{"broker1:9092", "broker2:9093"},
+						},
+						AdminAPI: RpkAdminAPI{
+							Addresses: []string{"address1:9644", "address2:2222"},
+						},
+						SR: RpkSchemaRegistryAPI{
+							Addresses: []string{"address1:8081", "address2:8081", "address3:8088"},
+						},
+					},
+				},
+			},
+		},
+		{
+			name: "fix missing ports in redpanda.yaml addresses with IPv6",
+			config: Config{
+				redpandaYaml: RedpandaYaml{
+					Rpk: RpkNodeConfig{
+						KafkaAPI: RpkKafkaAPI{
+							Brokers: []string{"[2001:db8::1]", "[2001:db8::2]:9093"},
+						},
+						AdminAPI: RpkAdminAPI{
+							Addresses: []string{"[2001:db8::3]", "[2001:db8::4]:2222"},
+						},
+						SR: RpkSchemaRegistryAPI{
+							Addresses: []string{"[2001:db8::5]", "[2001:db8::6]", "[2001:db8::7]:8088"},
+						},
+					},
+				},
+			},
+			expect: Config{
+				redpandaYaml: RedpandaYaml{
+					Rpk: RpkNodeConfig{
+						KafkaAPI: RpkKafkaAPI{
+							Brokers: []string{"[2001:db8::1]:9092", "[2001:db8::2]:9093"},
+						},
+						AdminAPI: RpkAdminAPI{
+							Addresses: []string{"[2001:db8::3]:9644", "[2001:db8::4]:2222"},
+						},
+						SR: RpkSchemaRegistryAPI{
+							Addresses: []string{"[2001:db8::5]:8081", "[2001:db8::6]:8081", "[2001:db8::7]:8088"},
+						},
+					},
+				},
+			},
+		},
+		{
+			name: "invalid broker address",
+			config: Config{
+				redpandaYaml: RedpandaYaml{
+					Rpk: RpkNodeConfig{
+						KafkaAPI: RpkKafkaAPI{
+							Brokers: []string{":invalid"},
+						},
+					},
+				},
+			},
+			expect: Config{},
+			errMsg: "unable to fix broker address",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			err := tt.config.fixSchemePorts()
+			if tt.errMsg != "" {
+				require.Error(t, err)
+				require.Contains(t, err.Error(), tt.errMsg)
+			} else {
+				require.NoError(t, err)
+				require.Equal(t, tt.expect, tt.config)
+			}
+		})
+	}
+}
+
+func TestProcessOverrides(t *testing.T) {
+	tests := []struct {
+		name          string
+		envOverrides  map[string]string
+		flagOverrides []string
+		applyCfg      func(*Config)
+		expErr        string
+		verify        func(t *testing.T, y *RpkYaml)
+	}{
+		{
+			name: "Apply flag override to kafka brokers",
+			flagOverrides: []string{
+				"brokers=127.0.0.1:9092,localhost:9092",
+			},
+			verify: func(t *testing.T, y *RpkYaml) {
+				p := y.Profile(y.CurrentProfile)
+				want := []string{"127.0.0.1:9092", "localhost:9092"}
+				require.Equal(t, want, p.KafkaAPI.Brokers)
+			},
+		},
+		{
+			name: "Apply env override to admin addresses",
+			envOverrides: map[string]string{
+				"RPK_ADMIN_HOSTS": "admin.redpanda.com,admin2.redpanda.com",
+			},
+			verify: func(t *testing.T, y *RpkYaml) {
+				p := y.Profile(y.CurrentProfile)
+				want := []string{"admin.redpanda.com", "admin2.redpanda.com"}
+				require.Equal(t, want, p.AdminAPI.Addresses)
+			},
+		},
+		{
+			name: "Flag override takes precedence over env and cfg",
+			envOverrides: map[string]string{
+				"RPK_BROKERS": "from.env:9092",
+			},
+			flagOverrides: []string{
+				"brokers=from.flag:9092",
+			},
+			applyCfg: func(cfg *Config) {
+				p := cfg.rpkYaml.Profile(cfg.rpkYaml.CurrentProfile)
+				p.KafkaAPI.Brokers = []string{"from.cfg:9092"}
+			},
+			verify: func(t *testing.T, y *RpkYaml) {
+				want := []string{"from.flag:9092"}
+				require.Equal(t, want, y.Profile(y.CurrentProfile).KafkaAPI.Brokers)
+			},
+		},
+		{
+			name:          "Apply tls enabled to kafka brokers",
+			flagOverrides: []string{"tls.enabled=true"},
+			verify: func(t *testing.T, y *RpkYaml) {
+				p := y.Profile(y.CurrentProfile)
+				require.True(t, p.KafkaAPI.TLS != nil)
+			},
+		},
+		{
+			name: "Apply kafka TLS enabled via env",
+			envOverrides: map[string]string{
+				"RPK_TLS_ENABLED": "true",
+			},
+			verify: func(t *testing.T, y *RpkYaml) {
+				p := y.Profile(y.CurrentProfile)
+				require.NotNil(t, p.KafkaAPI.TLS)
+			},
+		},
+		{
+			name:          "Apply tls.enabled=false to kafka brokers",
+			flagOverrides: []string{"tls.enabled=false"},
+			applyCfg: func(cfg *Config) {
+				p := cfg.rpkYaml.Profile(cfg.rpkYaml.CurrentProfile)
+				p.KafkaAPI.TLS = new(TLS)
+			},
+			verify: func(t *testing.T, y *RpkYaml) {
+				p := y.Profile(y.CurrentProfile)
+				require.Nil(t, p.KafkaAPI.TLS)
+			},
+		},
+		{
+			name: "Apply kafka TLS disabled via env",
+			envOverrides: map[string]string{
+				"RPK_TLS_ENABLED": "false",
+			},
+			applyCfg: func(cfg *Config) {
+				p := cfg.rpkYaml.Profile(cfg.rpkYaml.CurrentProfile)
+				p.KafkaAPI.TLS = new(TLS)
+			},
+			verify: func(t *testing.T, y *RpkYaml) {
+				p := y.Profile(y.CurrentProfile)
+				require.Nil(t, p.KafkaAPI.TLS)
+			},
+		},
+		{
+			name:          "Apply tls enabled to admin hosts",
+			flagOverrides: []string{"admin.tls.enabled=true"},
+			verify: func(t *testing.T, y *RpkYaml) {
+				p := y.Profile(y.CurrentProfile)
+				require.True(t, p.AdminAPI.TLS != nil)
+			},
+		},
+		{
+			name: "Apply admin TLS enabled via env",
+			envOverrides: map[string]string{
+				"RPK_ADMIN_TLS_ENABLED": "true",
+			},
+			verify: func(t *testing.T, y *RpkYaml) {
+				p := y.Profile(y.CurrentProfile)
+				require.NotNil(t, p.AdminAPI.TLS)
+			},
+		},
+		{
+			name:          "Apply tls.enabled=false to admin hosts",
+			flagOverrides: []string{"admin.tls.enabled=false"},
+			applyCfg: func(cfg *Config) {
+				p := cfg.rpkYaml.Profile(cfg.rpkYaml.CurrentProfile)
+				p.AdminAPI.TLS = new(TLS)
+			},
+			verify: func(t *testing.T, y *RpkYaml) {
+				p := y.Profile(y.CurrentProfile)
+				require.Nil(t, p.AdminAPI.TLS)
+			},
+		},
+		{
+			name: "Apply admin TLS disabled via env",
+			envOverrides: map[string]string{
+				"RPK_ADMIN_TLS_ENABLED": "false",
+			},
+			applyCfg: func(cfg *Config) {
+				p := cfg.rpkYaml.Profile(cfg.rpkYaml.CurrentProfile)
+				p.AdminAPI.TLS = new(TLS)
+			},
+			verify: func(t *testing.T, y *RpkYaml) {
+				p := y.Profile(y.CurrentProfile)
+				require.Nil(t, p.AdminAPI.TLS)
+			},
+		},
+		{
+			name:          "Apply tls enabled to SR hosts",
+			flagOverrides: []string{"registry.tls.enabled=true"},
+			verify: func(t *testing.T, y *RpkYaml) {
+				p := y.Profile(y.CurrentProfile)
+				require.True(t, p.SR.TLS != nil)
+			},
+		},
+		{
+			name: "Apply schema registry TLS enabled via env",
+			envOverrides: map[string]string{
+				"RPK_REGISTRY_TLS_ENABLED": "true",
+			},
+			verify: func(t *testing.T, y *RpkYaml) {
+				p := y.Profile(y.CurrentProfile)
+				require.NotNil(t, p.SR.TLS)
+			},
+		},
+		{
+			name:          "Apply tls.enabled=false to SR hosts",
+			flagOverrides: []string{"registry.tls.enabled=false"},
+			applyCfg: func(cfg *Config) {
+				p := cfg.rpkYaml.Profile(cfg.rpkYaml.CurrentProfile)
+				p.SR.TLS = new(TLS)
+			},
+			verify: func(t *testing.T, y *RpkYaml) {
+				p := y.Profile(y.CurrentProfile)
+				require.Nil(t, p.SR.TLS)
+			},
+		},
+		{
+			name: "Apply schema registry TLS disabled via env",
+			envOverrides: map[string]string{
+				"RPK_REGISTRY_TLS_ENABLED": "false",
+			},
+			applyCfg: func(cfg *Config) {
+				p := cfg.rpkYaml.Profile(cfg.rpkYaml.CurrentProfile)
+				p.SR.TLS = new(TLS)
+			},
+			verify: func(t *testing.T, y *RpkYaml) {
+				p := y.Profile(y.CurrentProfile)
+				require.Nil(t, p.SR.TLS)
+			},
+		},
+		{
+			name: "Error - invalid key format (missing =val)",
+			flagOverrides: []string{
+				"kafka_api.brokers",
+			},
+			expErr: `flag config: "kafka_api.brokers" is not a key=value`,
+		},
+		{
+			name: "Error - unknown key",
+			flagOverrides: []string{
+				"unknown.key=value",
+			},
+			expErr: `flag config: unknown key "unknown.key"`,
+		},
+		{
+			name: "Error - parse failure",
+			flagOverrides: []string{
+				"tls.insecure_skip_verify=notabool",
+			},
+			expErr: `flag config key "tls.insecure_skip_verify": strconv.ParseBool: parsing "notabool": invalid syntax`,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			c := &Config{
+				rpkYaml: RpkYaml{
+					CurrentProfile: "default",
+					Profiles:       []RpkProfile{{Name: "default"}},
+				},
+			}
+			if tt.applyCfg != nil {
+				tt.applyCfg(c)
+			}
+			p := &Params{
+				FlagOverrides: tt.flagOverrides,
+			}
+			if tt.envOverrides != nil {
+				for k, v := range tt.envOverrides {
+					t.Setenv(k, v)
+				}
+			}
+			err := p.processOverrides(c)
+			if tt.expErr != "" {
+				require.ErrorContains(t, err, tt.expErr, "expected error containing %q, got %v", tt.expErr, err)
+				return
+			}
+			require.NoError(t, err)
+			if tt.verify != nil {
+				tt.verify(t, &c.rpkYaml)
+			}
+		})
 	}
 }

@@ -15,7 +15,7 @@
 #include "cluster/partition_manager.h"
 #include "cluster/shard_table.h"
 #include "container/fragmented_vector.h"
-#include "kafka/server/partition_proxy.h"
+#include "kafka/data/partition_proxy.h"
 #include "model/fundamental.h"
 #include "model/ktp.h"
 
@@ -143,7 +143,7 @@ ss::future<result_t> prefix_truncate(
       kafka_truncation_offset, ss::lowres_clock::now() + timeout_ms);
     if (errc != error_code::none) {
         vlog(
-          klog.info,
+          klog.warn,
           "Possible failed attempted to truncate partition: {} error: {}",
           ktp,
           errc);
@@ -154,7 +154,7 @@ ss::future<result_t> prefix_truncate(
     /// until the local start offset was updated
     const auto kafka_start_offset = partition->start_offset();
     vlog(
-      klog.info,
+      klog.debug,
       "Truncated partition: {} to offset: {}",
       ktp,
       kafka_start_offset);

@@ -1,27 +1,24 @@
-// Copyright 2024 Redpanda Data, Inc.
-//
-// Use of this software is governed by the Business Source License
-// included in the file licenses/BSL.md
-//
-// As of the Change Date specified in that file, in accordance with
-// the Business Source License, use of this software will be governed
-// by the Apache License, Version 2.0
+/*
+ * Copyright 2024 Redpanda Data, Inc.
+ *
+ * Licensed as a Redpanda Enterprise file under the Redpanda Community
+ * License (the "License"); you may not use this file except in compliance with
+ * the License. You may obtain a copy of the License at
+ *
+ * https://github.com/redpanda-data/redpanda/blob/master/licenses/rcl.md
+ */
 #pragma once
 
 #include "base/seastarx.h"
 #include "iceberg/partition.h"
 #include "iceberg/schema.h"
+#include "iceberg/table_identifier.h"
 #include "iceberg/transaction.h"
 
 #include <seastar/core/future.hh>
 #include <seastar/core/sstring.hh>
 
 namespace iceberg {
-
-struct table_identifier {
-    chunked_vector<ss::sstring> ns;
-    ss::sstring table;
-};
 
 class catalog {
 public:
@@ -63,6 +60,16 @@ public:
     virtual ss::future<checked<table_metadata, errc>>
     load_table(const table_identifier& table_ident) = 0;
 
+    ss::future<checked<table_metadata, errc>> load_or_create_table(
+      const table_identifier& table_ident,
+      const struct_type& type,
+      const unresolved_partition_spec& spec);
+
+    // Drops the table from the catalog. If `purge` is true, will also delete
+    // associated data and metadata from cloud storage.
+    virtual ss::future<checked<void, errc>>
+    drop_table(const table_identifier& table_ident, bool purge) = 0;
+
     // Commits the given transaction to the catalog.
     //
     // Note that regardless of whether this succeeds or fails, the resulting
@@ -77,6 +84,9 @@ public:
     // the table.
     virtual ss::future<checked<std::nullopt_t, errc>>
     commit_txn(const table_identifier& table_ident, transaction) = 0;
+
+    virtual ss::future<> stop() = 0;
 };
+std::ostream& operator<<(std::ostream&, catalog::errc);
 
 } // namespace iceberg

@@ -104,10 +104,9 @@ ss::future<bool> id_allocator_stm::set_state(
   int64_t value, model::timeout_clock::duration timeout) {
     auto batch = serialize_cmd(
       state_cmd{.next_state = value}, model::record_batch_type::id_allocator);
-    auto reader = model::make_memory_record_batch_reader(std::move(batch));
     auto r = co_await _raft->replicate(
       _insync_term,
-      std::move(reader),
+      std::move(batch),
       raft::replicate_options(raft::consistency_level::quorum_ack));
     if (!r) {
         co_return false;
@@ -223,9 +222,9 @@ ss::future<> id_allocator_stm::write_snapshot() {
       .finally([this] { _is_writing_snapshot = false; });
 }
 
-ss::future<>
+ss::future<raft::local_snapshot_applied>
 id_allocator_stm::apply_local_snapshot(raft::stm_snapshot_header, iobuf&&) {
-    return ss::make_exception_future<>(
+    return ss::make_exception_future<raft::local_snapshot_applied>(
       std::logic_error("id_allocator_stm doesn't support snapshots"));
 }
 
@@ -247,7 +246,9 @@ bool id_allocator_stm_factory::is_applicable_for(
 }
 
 void id_allocator_stm_factory::create(
-  raft::state_machine_manager_builder& builder, raft::consensus* raft) {
+  raft::state_machine_manager_builder& builder,
+  raft::consensus* raft,
+  const cluster::stm_instance_config&) {
     builder.create_stm<id_allocator_stm>(clusterlog, raft);
 }
 

@@ -112,8 +112,8 @@ std::ostream& operator<<(std::ostream& o, const inbound_topic& topic) {
     return o;
 }
 
-std::ostream& operator<<(std::ostream& o, const cloud_storage_location&) {
-    fmt::print(o, "{{cloud_storage_location}}");
+std::ostream& operator<<(std::ostream& o, const cloud_storage_location& l) {
+    fmt::print(o, "{{hint: {}}}", l.hint);
     return o;
 }
 std::ostream& operator<<(std::ostream& o, const copy_target& t) {
@@ -142,13 +142,36 @@ std::ostream& operator<<(std::ostream& o, const outbound_migration& dm) {
     return o;
 }
 
+std::ostream& operator<<(std::ostream& o, const topic_work& tw) {
+    fmt::print(
+      o,
+      "{{migration: {}, sought_state: {}, info: {}}}",
+      tw.migration_id,
+      tw.sought_state,
+      ss::visit(
+        tw.info,
+        [&](const inbound_topic_work_info& itwi) {
+            return ssx::sformat(
+              "{{inbound; source: {}, cloud_storage_location: {}}}",
+              itwi.source,
+              itwi.cloud_storage_location);
+        },
+        [&](const outbound_topic_work_info& otwi) {
+            return ssx::sformat("{{outbound; copy_to: {}}}", otwi.copy_to);
+        }));
+    return o;
+}
+
 std::ostream& operator<<(std::ostream& o, const migration_metadata& m) {
     fmt::print(
       o,
-      "{{id: {}, migration: {}, state: {}}}",
+      "{{id: {}, migration: {}, state: {}, created_timestamp: {}, "
+      "completed_timestamp: {}}}",
       m.id,
       print_migration(m.migration),
-      m.state);
+      m.state,
+      m.created_timestamp,
+      m.completed_timestamp);
     return o;
 }
 
@@ -164,13 +187,22 @@ std::ostream& operator<<(std::ostream& o, const data_migration_ntp_state& r) {
 
 std::ostream& operator<<(std::ostream& o, const create_migration_cmd_data& d) {
     fmt::print(
-      o, "{{id: {}, migration: {}}}", d.id, print_migration(d.migration));
+      o,
+      "{{id: {}, migration: {}, op_timestamp: {}}}",
+      d.id,
+      print_migration(d.migration),
+      d.op_timestamp);
     return o;
 }
 
 std::ostream&
 operator<<(std::ostream& o, const update_migration_state_cmd_data& d) {
-    fmt::print(o, "{{id: {}, requested_state: {}}}", d.id, d.requested_state);
+    fmt::print(
+      o,
+      "{{id: {}, requested_state: {}, op_timestamp: {}}}",
+      d.id,
+      d.requested_state,
+      d.op_timestamp);
     return o;
 }
 

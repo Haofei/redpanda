@@ -15,6 +15,7 @@
 #include "config/configuration.h"
 #include "metrics/metrics.h"
 #include "metrics/prometheus_sanitize.h"
+#include "net/connection.h"
 #include "ssx/abort_source.h"
 #include "ssx/future-util.h"
 #include "ssx/semaphore.h"
@@ -89,6 +90,8 @@ void server::start() {
             if (cfg.listen_backlog.has_value()) {
                 lo.listen_backlog = cfg.listen_backlog.value();
             }
+            lo.so_rcvbuf = cfg.tcp_recv_buf;
+            lo.so_sndbuf = cfg.tcp_send_buf;
 
             if (!endpoint.credentials) {
                 ss = ss::engine().listen(endpoint.addr, lo);
@@ -146,6 +149,15 @@ void server::print_exceptional_future(
             vlog(
               _log.warn,
               "Authentication Failure[{}] remote address: {} - {}",
+              ctx,
+              address,
+              ex);
+        } else if (is_invalid_character_error(ex)) {
+            /// Invalid character exceptions indicate a misbehaving client and
+            /// should be logged at WARN, not ERROR
+            vlog(
+              _log.warn,
+              "Invalid character encountered[{}] remote address: {} - {}",
               ctx,
               address,
               ex);
@@ -227,21 +239,6 @@ ss::future<ss::stop_iteration> server::accept_finish(
               ar.remote_address);
             co_return ss::stop_iteration::no;
         }
-    }
-
-    // Apply socket buffer size settings
-    if (cfg.tcp_recv_buf.has_value()) {
-        // Explicitly store in an int to decouple the
-        // config type from the set_sockopt type.
-        int recv_buf = cfg.tcp_recv_buf.value();
-        ar.connection.set_sockopt(
-          SOL_SOCKET, SO_RCVBUF, &recv_buf, sizeof(recv_buf));
-    }
-
-    if (cfg.tcp_send_buf.has_value()) {
-        int send_buf = cfg.tcp_send_buf.value();
-        ar.connection.set_sockopt(
-          SOL_SOCKET, SO_SNDBUF, &send_buf, sizeof(send_buf));
     }
 
     if (_connection_rates) {

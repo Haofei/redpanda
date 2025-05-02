@@ -21,15 +21,28 @@ service::service(
   : impl::datalake_coordinator_rpc_service(sg, smp_sg)
   , _frontend(frontend) {}
 
+ss::future<ensure_table_exists_reply> service::ensure_table_exists(
+  ensure_table_exists_request request, ::rpc::streaming_context&) {
+    return _frontend->local().ensure_table_exists(
+      std::move(request), frontend::local_only::yes);
+}
+
+ss::future<ensure_dlq_table_exists_reply> service::ensure_dlq_table_exists(
+  ensure_dlq_table_exists_request request, ::rpc::streaming_context&) {
+    return _frontend->local().ensure_dlq_table_exists(
+      std::move(request), frontend::local_only::yes);
+}
+
 ss::future<add_translated_data_files_reply> service::add_translated_data_files(
   add_translated_data_files_request request, ::rpc::streaming_context&) {
     return _frontend->local().add_translated_data_files(
       std::move(request), frontend::local_only::yes);
 }
 
-ss::future<fetch_latest_data_file_reply> service::fetch_latest_data_file(
-  fetch_latest_data_file_request request, ::rpc::streaming_context&) {
-    return _frontend->local().fetch_latest_data_file(
+ss::future<fetch_latest_translated_offset_reply>
+service::fetch_latest_translated_offset(
+  fetch_latest_translated_offset_request request, ::rpc::streaming_context&) {
+    return _frontend->local().fetch_latest_translated_offset(
       std::move(request), frontend::local_only::yes);
 }
 

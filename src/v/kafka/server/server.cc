@@ -17,11 +17,14 @@
 #include "config/broker_authn_endpoint.h"
 #include "config/configuration.h"
 #include "config/node_config.h"
+#include "features/enterprise_feature_messages.h"
 #include "features/feature_table.h"
 #include "kafka/protocol/errors.h"
+#include "kafka/protocol/produce.h"
 #include "kafka/protocol/schemata/list_groups_response.h"
 #include "kafka/server/connection_context.h"
 #include "kafka/server/coordinator_ntp_mapper.h"
+#include "kafka/server/datalake_throttle_manager.h"
 #include "kafka/server/errors.h"
 #include "kafka/server/group.h"
 #include "kafka/server/group_manager.h"
@@ -64,6 +67,7 @@
 #include "security/gssapi_authenticator.h"
 #include "security/mtls.h"
 #include "security/oidc_authenticator.h"
+#include "security/plain_authenticator.h"
 #include "security/scram_algorithm.h"
 #include "security/scram_authenticator.h"
 #include "ssx/future-util.h"
@@ -78,6 +82,7 @@
 #include <seastar/core/sstring.hh>
 #include <seastar/net/api.hh>
 #include <seastar/net/socket_defs.hh>
+#include <seastar/net/tls.hh>
 #include <seastar/util/log.hh>
 
 #include <absl/algorithm/container.h>
@@ -116,6 +121,8 @@ server::server(
   ss::sharded<net::server_configuration>* cfg,
   ss::smp_service_group smp,
   ss::scheduling_group fetch_sg,
+  ss::scheduling_group produce_sg,
+  ss::scheduling_group handler_sg,
   ss::sharded<cluster::metadata_cache>& meta,
   ss::sharded<cluster::topics_frontend>& tf,
   ss::sharded<cluster::config_frontend>& cf,
@@ -136,12 +143,15 @@ server::server(
   ss::sharded<cluster::security_frontend>& sec_fe,
   ss::sharded<cluster::controller_api>& controller_api,
   ss::sharded<cluster::tx_gateway_frontend>& tx_gateway_frontend,
-  std::optional<qdc_monitor::config> qdc_config,
+  ss::sharded<kafka::datalake_throttle_manager>& datalake_throttle_manager,
+  std::optional<qdc_monitor_config> qdc_config,
   ssx::singleton_thread_worker& tw,
   const std::unique_ptr<pandaproxy::schema_registry::api>& sr) noexcept
   : net::server(cfg, klog)
   , _smp_group(smp)
   , _fetch_scheduling_group(fetch_sg)
+  , _produce_scheduling_group(produce_sg)
+  , _request_handler_scheduling_group(handler_sg)
   , _topics_frontend(tf)
   , _config_frontend(cf)
   , _feature_table(ft)
@@ -170,6 +180,7 @@ server::server(
   , _security_frontend(sec_fe)
   , _controller_api(controller_api)
   , _tx_gateway_frontend(tx_gateway_frontend)
+  , _datalake_throttle_manager(datalake_throttle_manager)
   , _mtls_principal_mapper(
       config::shard_local_cfg().kafka_mtls_principal_mapping_rules.bind())
   , _gssapi_principal_mapper(
@@ -180,7 +191,7 @@ server::server(
         cfg->local().max_service_memory_per_core
         * config::shard_local_cfg().kafka_memory_share_for_fetch()),
       "kafka/server-mem-fetch")
-  , _probe(std::make_unique<class latency_probe>())
+  , _probe(std::make_unique<class kafka_probe>())
   , _sasl_probe(std::make_unique<class sasl_probe>())
   , _read_dist_probe(std::make_unique<read_distribution_probe>())
   , _thread_worker(tw)
@@ -225,6 +236,18 @@ ss::scheduling_group server::fetch_scheduling_group() const {
              : ss::default_scheduling_group();
 }
 
+ss::scheduling_group server::produce_scheduling_group() const {
+    return config::shard_local_cfg().use_produce_scheduler_group()
+             ? _produce_scheduling_group
+             : ss::default_scheduling_group();
+}
+
+ss::scheduling_group server::get_request_handler_sg() const {
+    return config::shard_local_cfg().use_kafka_handler_scheduler_group()
+             ? _request_handler_scheduling_group
+             : ss::default_scheduling_group();
+}
+
 coordinator_ntp_mapper& server::coordinator_mapper() {
     return _group_router.local().coordinator_mapper().local();
 }
@@ -265,8 +288,18 @@ config::broker_authn_method get_authn_method(const net::connection& conn) {
 ss::future<security::tls::mtls_state> get_mtls_principal_state(
   const security::tls::principal_mapper& pm, net::connection& conn) {
     using namespace std::chrono_literals;
+    auto format = [] {
+        auto fmt = config::shard_local_cfg().tls_certificate_name_format();
+        switch (fmt) {
+        case config::tls_name_format::legacy:
+            return ss::tls::dn_format::legacy;
+        case config::tls_name_format::rfc2253:
+            return ss::tls::dn_format::rfc2253;
+        }
+    }();
     return ss::with_timeout(
-             model::timeout_clock::now() + 5s, conn.get_distinguished_name())
+             model::timeout_clock::now() + 5s,
+             conn.get_distinguished_name(format))
       .then([&pm](std::optional<ss::session_dn> dn) {
           ss::sstring anonymous_principal;
           if (!dn.has_value()) {
@@ -427,6 +460,27 @@ ss::future<> server::apply(ss::lw_shared_ptr<net::connection> conn) {
     }
 }
 
+void server::mark_datalake_producer(
+  const std::optional<std::string_view>& client_id) {
+    if (
+      !config::shard_local_cfg().iceberg_enabled()
+      || !_datalake_throttle_manager.local_is_initialized()) {
+        return;
+    }
+    _datalake_throttle_manager.local().mark_datalake_producer(client_id);
+}
+
+ss::future<std::chrono::milliseconds> server::get_datalake_producer_throttle(
+  std::optional<std::string_view> client_id) {
+    if (
+      !config::shard_local_cfg().iceberg_enabled()
+      || !_datalake_throttle_manager.local_is_initialized()) {
+        return ssx::now<std::chrono::milliseconds>(0ms);
+    }
+
+    return _datalake_throttle_manager.local().maybe_throttle_producer(
+      client_id);
+}
 template<>
 ss::future<response_ptr> heartbeat_handler::handle(
   request_context ctx, [[maybe_unused]] ss::smp_service_group g) {
@@ -719,9 +773,17 @@ ss::future<response_ptr> sasl_handshake_handler::handle(
         }
     }
 
-    const bool has_kafka_gssapi = ctx.feature_table().local().is_active(
-      features::feature::kafka_gssapi);
-    if (has_kafka_gssapi && supports("GSSAPI")) {
+    if (supports("PLAIN")) {
+        supported_sasl_mechanisms.emplace_back(
+          security::plain_authenticator::name);
+        if (request.data.mechanism == security::plain_authenticator::name) {
+            ctx.sasl()->set_mechanism(
+              std::make_unique<security::plain_authenticator>(
+                ctx.credentials()));
+        }
+    }
+
+    if (supports("GSSAPI")) {
         supported_sasl_mechanisms.emplace_back(
           security::gssapi_authenticator::name);
 
@@ -1291,17 +1353,18 @@ delete_topics_handler::handle(request_context ctx, ss::smp_service_group) {
 
     // Measure the partition mutation rate
     auto resp_delay = 0ms;
+    const auto now = quota_manager::clock::now();
     auto quota_exceeded_it = co_await ssx::partition(
       request.data.topic_names.begin(),
       request.data.topic_names.end(),
-      [&ctx, &resp_delay](const model::topic& t) {
+      [&ctx, &resp_delay, now](const model::topic& t) {
           const auto cfg = ctx.metadata_cache().get_topic_cfg(
             model::topic_namespace_view(model::kafka_namespace, t));
           const auto mutations = cfg ? cfg->partition_count : 0;
           /// Capture before next scheduling point below
           auto& resp_delay_ref = resp_delay;
           return ctx.quota_mgr()
-            .record_partition_mutations(ctx.header().client_id, mutations)
+            .record_partition_mutations(ctx.header().client_id, mutations, now)
             .then([&resp_delay_ref](std::chrono::milliseconds delay) {
                 resp_delay_ref = std::max(delay, resp_delay_ref);
                 return delay == 0ms;
@@ -1580,9 +1643,14 @@ ss::future<response_ptr> create_acls_handler::handle(
         ss::visit(
           result,
           [&response, &results](size_t i) {
-              auto ec = map_topic_error_code(results[i]);
-              response.data.results.push_back(
-                creatable_acl_result{.error_code = ec});
+              if (results[i] == cluster::errc::feature_disabled) {
+                  response.data.results.emplace_back(
+                    error_code::invalid_config,
+                    features::enterprise_error_message::acl_with_rbac());
+              } else {
+                  response.data.results.emplace_back(
+                    map_topic_error_code(results[i]));
+              }
           },
           [&response](creatable_acl_result r) {
               response.data.results.push_back(std::move(r));

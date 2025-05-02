@@ -2,7 +2,17 @@ rp_test(
   UNIT_TEST
   BINARY_NAME test_bytes
   SOURCES iobuf_tests.cc iobuf_utils_tests.cc bytes_tests.cc
-  LIBRARIES v::seastar_testing_main v::random v::bytes absl::hash
+  LIBRARIES v::seastar_testing_main v::random v::bytes absl::hash v::test_random_bytes
+  LABELS bytes
+)
+
+rp_test(
+  UNIT_TEST
+  GTEST
+  BINARY_NAME test_bytes_multi_thread
+  SOURCES iobuf_tests_mt.cc
+  LIBRARIES v::random v::bytes v::gtest_main
+  ARGS "-- -c 8"
   LABELS bytes
 )
 

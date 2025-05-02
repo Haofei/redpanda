@@ -25,6 +25,7 @@ def seastar_cc_swagger_library(name, src, definitions = [], visibility = None):
         outs = [hh_out, cc_out],
         cmd = "$(location @seastar//:seastar-json2code) --create-cc -f " + src_abs + " -o " + hh_out_abs,
         tools = ["@seastar//:seastar-json2code"],
+        toolchains = ["@rules_python//python:current_py_toolchain"],
     )
 
     redpanda_cc_library(

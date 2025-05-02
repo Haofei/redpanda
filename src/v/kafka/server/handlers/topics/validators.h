@@ -11,9 +11,11 @@
 
 #pragma once
 #include "config/configuration.h"
+#include "datalake/partition_spec_parser.h"
 #include "kafka/protocol/schemata/create_topics_request.h"
 #include "kafka/protocol/schemata/create_topics_response.h"
 #include "kafka/server/handlers/topics/types.h"
+#include "model/fundamental.h"
 #include "model/metadata.h"
 #include "model/namespace.h"
 
@@ -275,29 +277,86 @@ struct iceberg_config_validator {
     static constexpr error_code ec = error_code::invalid_config;
 
     static bool is_valid(const creatable_topic& c) {
-        auto it = std::find_if(
+        model::iceberg_mode parsed_mode = model::iceberg_mode::disabled;
+
+        auto mode_it = std::find_if(
           c.configs.begin(),
           c.configs.end(),
           [](const createable_topic_config& cfg) {
-              return cfg.name == topic_property_iceberg_enabled;
+              return cfg.name == topic_property_iceberg_mode;
           });
-        if (it == c.configs.end() || !it->value.has_value()) {
+        if (mode_it != c.configs.end() && mode_it->value.has_value()) {
+            try {
+                parsed_mode = boost::lexical_cast<model::iceberg_mode>(
+                  mode_it->value.value());
+            } catch (...) {
+                return false;
+            }
+        }
+
+        auto pspec_it = std::find_if(
+          c.configs.begin(),
+          c.configs.end(),
+          [](const createable_topic_config& cfg) {
+              return cfg.name == topic_property_iceberg_partition_spec;
+          });
+        if (pspec_it != c.configs.end() && pspec_it->value.has_value()) {
+            auto parsed = datalake::parse_partition_spec(
+              pspec_it->value.value());
+            if (!parsed.has_value()) {
+                return false;
+            }
+        }
+        bool is_iceberg_topic = parsed_mode != model::iceberg_mode::disabled;
+        if (!is_iceberg_topic) {
+            // Not an Iceberg topic, nothing more to validate.
             return true;
         }
-        bool enabled_with_topic_override = false;
-        try {
-            enabled_with_topic_override = string_switch<bool>(it->value.value())
-                                            .match("true", true)
-                                            .match("false", false);
-        } catch (...) {
+
+        bool is_read_replica = std::find_if(
+                                 c.configs.begin(),
+                                 c.configs.end(),
+                                 [](const createable_topic_config& cfg) {
+                                     return cfg.name
+                                            == topic_property_read_replica;
+                                 })
+                               != c.configs.end();
+        if (is_read_replica) {
+            // Not yet supported: read replicas must not be Iceberg topics.
             return false;
         }
+
         // If iceberg is enabled at the cluster level, the topic can
         // be created with any override. If it is disabled
         // at the cluster level, it cannot be enabled with a topic
         // override.
-        return config::shard_local_cfg().iceberg_enabled()
-               || !enabled_with_topic_override;
+        return config::shard_local_cfg().iceberg_enabled();
+    }
+};
+
+struct iceberg_invalid_record_action_validator {
+    static constexpr const char* error_message = "Invalid property value.";
+
+    static constexpr error_code ec = error_code::invalid_config;
+
+    static bool is_valid(const creatable_topic& c) {
+        auto it = std::find_if(
+          c.configs.begin(),
+          c.configs.end(),
+          [](const createable_topic_config& cfg) {
+              return cfg.name == topic_property_iceberg_invalid_record_action;
+          });
+        if (it == c.configs.end() || !it->value.has_value()) {
+            return true;
+        }
+        try {
+            std::ignore
+              = boost::lexical_cast<model::iceberg_invalid_record_action>(
+                it->value.value());
+        } catch (const boost::bad_lexical_cast&) {
+            return false;
+        }
+        return true;
     }
 };
 
@@ -408,6 +467,68 @@ struct write_caching_configs_validator {
     static bool is_valid(const creatable_topic& c) {
         return validate_write_caching(c) && validate_flush_ms(c)
                && validate_flush_bytes(c);
+    }
+};
+
+struct delete_retention_ms_validator {
+    static constexpr const char* error_message
+      = "Unsupported delete.retention.ms configuration, cannot be enabled "
+        "at the same time as redpanda.remote.read or redpanda.remote.write.";
+    static constexpr const auto config_name
+      = topic_property_delete_retention_ms;
+    static constexpr error_code ec = error_code::invalid_config;
+
+    static bool is_valid(const creatable_topic& c) {
+        const auto config_entries = config_map(c.configs);
+        try {
+            auto delete_retention_ms
+              = get_tristate_value<std::chrono::milliseconds>(
+                config_entries, topic_property_delete_retention_ms);
+
+            auto shadow_indexing_mode = get_shadow_indexing_mode(
+              config_entries);
+            // Cannot set delete_retention_ms at the same time as any tiered
+            // storage properties.
+            if (
+              delete_retention_ms.has_optional_value()
+              && shadow_indexing_mode
+                   != model::shadow_indexing_mode::disabled) {
+                return false;
+            }
+        } catch (const boost::bad_lexical_cast&) {
+            // Caught a bad configuration exception.
+            // Return true for now- this will error out in a later stage.
+            return true;
+        }
+
+        return true;
+    }
+};
+
+struct iceberg_target_lag_ms_validator {
+    static constexpr const char* error_message
+      = "Unsupported redpanda.iceberg.target.lag.ms config";
+    static constexpr const auto config_name
+      = topic_property_iceberg_target_lag_ms;
+    static constexpr error_code ec = error_code::invalid_config;
+
+    static bool is_valid(const creatable_topic& c) {
+        if (auto it = std::ranges::find(
+              c.configs,
+              topic_property_iceberg_target_lag_ms,
+              &createable_topic_config::name);
+            it != c.configs.end() && it->value.has_value()) {
+            try {
+                using namespace std::chrono_literals;
+                auto val = boost::lexical_cast<std::chrono::milliseconds::rep>(
+                  it->value.value());
+                return val >= std::chrono::milliseconds{10s}.count()
+                       && val <= serde::max_serializable_ms.count();
+            } catch (...) {
+                return false;
+            }
+        }
+        return true;
     }
 };
 

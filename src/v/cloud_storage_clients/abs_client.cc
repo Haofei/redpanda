@@ -50,7 +50,6 @@ constexpr boost::beast::string_view delete_snapshot_name
 constexpr boost::beast::string_view is_hns_enabled_name = "x-ms-is-hns-enabled";
 constexpr boost::beast::string_view delete_snapshot_value = "include";
 constexpr boost::beast::string_view error_code_name = "x-ms-error-code";
-constexpr boost::beast::string_view content_type_name = "Content-Type";
 constexpr boost::beast::string_view expiry_option_name = "x-ms-expiry-option";
 constexpr boost::beast::string_view expiry_option_value = "RelativeToNow";
 constexpr boost::beast::string_view expiry_time_name = "x-ms-expiry-time";
@@ -73,23 +72,6 @@ bool is_error_retryable(
 } // namespace
 
 namespace cloud_storage_clients {
-
-enum class response_content_type : int8_t { unknown, xml, json };
-
-static response_content_type
-get_response_content_type(const http::client::response_header& headers) {
-    if (auto iter = headers.find(content_type_name); iter != headers.end()) {
-        if (iter->value().find("json") != std::string_view::npos) {
-            return response_content_type::json;
-        }
-
-        if (iter->value().find("xml") != std::string_view::npos) {
-            return response_content_type::xml;
-        }
-    }
-
-    return response_content_type::unknown;
-}
 
 static abs_rest_error_response
 parse_xml_rest_error_response(boost::beast::http::status result, iobuf buf) {
@@ -205,7 +187,7 @@ result<http::client::request_header> abs_request_creator::make_get_blob_request(
     if (error_code) {
         return error_code;
     }
-
+    util::url_encode_target(header);
     return header;
 }
 
@@ -235,7 +217,7 @@ result<http::client::request_header> abs_request_creator::make_put_blob_request(
     if (error_code) {
         return error_code;
     }
-
+    util::url_encode_target(header);
     return header;
 }
 
@@ -260,7 +242,7 @@ abs_request_creator::make_get_blob_metadata_request(
     if (error_code) {
         return error_code;
     }
-
+    util::url_encode_target(header);
     return header;
 }
 
@@ -286,7 +268,7 @@ abs_request_creator::make_delete_blob_request(
     if (error_code) {
         return error_code;
     }
-
+    util::url_encode_target(header);
     return header;
 }
 
@@ -336,7 +318,7 @@ abs_request_creator::make_list_blobs_request(
     if (error_code) {
         return error_code;
     }
-
+    util::url_encode_target(header);
     return header;
 }
 
@@ -355,6 +337,7 @@ abs_request_creator::make_get_account_info_request() {
     if (error_code) {
         return error_code;
     }
+    util::url_encode_target(header);
 
     return header;
 }
@@ -388,6 +371,7 @@ abs_request_creator::make_set_expiry_to_blob_request(
         error_code != std::error_code{}) {
         return error_code;
     }
+    util::url_encode_target(header);
     return header;
 }
 
@@ -414,7 +398,7 @@ abs_request_creator::make_delete_file_request(
     if (error_code) {
         return error_code;
     }
-
+    util::url_encode_target(header);
     return header;
 }
 
@@ -486,7 +470,7 @@ ss::future<> abs_client::stop() {
     vlog(abs_log.debug, "Stopped ABS client");
 }
 
-void abs_client::shutdown() { _client.shutdown(); }
+void abs_client::shutdown() { _client.shutdown_now(); }
 
 template<typename T>
 ss::future<result<T, error_outcome>> abs_client::send_request(
@@ -626,7 +610,7 @@ ss::future<http::client::response_stream_ref> abs_client::do_get_object(
               response_stream->get_headers());
         }
 
-        const auto content_type = get_response_content_type(
+        const auto content_type = util::get_response_content_type(
           response_stream->get_headers());
         auto buf = co_await util::drain_response_stream(
           std::move(response_stream));
@@ -684,7 +668,7 @@ ss::future<> abs_client::do_put_object(
     if (const auto is_no_content_and_accepted = accept_no_content
                                                 && status == no_content;
         status != created && !is_no_content_and_accepted) {
-        const auto content_type = get_response_content_type(
+        const auto content_type = util::get_response_content_type(
           response_stream->get_headers());
         auto buf = co_await util::drain_response_stream(
           std::move(response_stream));
@@ -801,7 +785,7 @@ ss::future<> abs_client::do_delete_object(
 
     const auto status = response_stream->get_headers().result();
     if (status != boost::beast::http::status::accepted) {
-        const auto content_type = get_response_content_type(
+        const auto content_type = util::get_response_content_type(
           response_stream->get_headers());
         auto buf = co_await util::drain_response_stream(
           std::move(response_stream));
@@ -858,7 +842,7 @@ ss::future<abs_client::list_bucket_result> abs_client::do_list_objects(
   std::optional<ss::sstring> marker,
   ss::lowres_clock::duration timeout,
   std::optional<char> delimiter,
-  std::optional<item_filter>) {
+  std::optional<item_filter> collect_item_if) {
     auto header = _requestor.make_list_blobs_request(
       name,
       _adls_client.has_value(),
@@ -882,7 +866,7 @@ ss::future<abs_client::list_bucket_result> abs_client::do_list_objects(
     const auto status = response_stream->get_headers().result();
 
     if (status != boost::beast::http::status::ok) {
-        const auto content_type = get_response_content_type(
+        const auto content_type = util::get_response_content_type(
           response_stream->get_headers());
         iobuf buf = co_await util::drain_response_stream(response_stream);
         throw parse_rest_error_response(content_type, status, std::move(buf));
@@ -891,8 +875,9 @@ ss::future<abs_client::list_bucket_result> abs_client::do_list_objects(
     co_return co_await ss::do_with(
       response_stream->as_input_stream(),
       xml_sax_parser{},
-      [](ss::input_stream<char>& stream, xml_sax_parser& p) mutable {
-          p.start_parse(std::make_unique<abs_parse_impl>());
+      [pred = std::move(collect_item_if)](
+        ss::input_stream<char>& stream, xml_sax_parser& p) mutable {
+          p.start_parse(std::make_unique<abs_parse_impl>(std::move(pred)));
           return ss::do_until(
                    [&stream] { return stream.eof(); },
                    [&stream, &p] {
@@ -1044,7 +1029,7 @@ ss::future<> abs_client::do_delete_file(
     if (
       status != boost::beast::http::status::accepted
       && status != boost::beast::http::status::ok) {
-        const auto content_type = get_response_content_type(
+        const auto content_type = util::get_response_content_type(
           response_stream->get_headers());
         auto buf = co_await util::drain_response_stream(
           std::move(response_stream));

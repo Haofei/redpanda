@@ -33,184 +33,15 @@
 #include <tuple>
 #include <vector>
 
-BOOST_AUTO_TEST_CASE(greedy_empty) {
-    // empty spec, expect no movement
-    BOOST_REQUIRE(no_movement({}));
-}
-
-BOOST_AUTO_TEST_CASE(greedy_balanced) {
-    // single node is already balanced, expect no movement
-    BOOST_REQUIRE(no_movement({
-      {{1, 2, 3}, {}},
-    }));
-    BOOST_REQUIRE(no_movement({
-      {{1}, {2}},
-      {{2}, {1}},
-    }));
-
-    // not exactly balanced, but as balanced as possible,
-    // i.e., lead loaded node has 1 less than the most loaded node
-    BOOST_REQUIRE(no_movement({
-      {{1, 3}, {2}},
-      {{2}, {1, 3}},
-    }));
-}
-
-BOOST_AUTO_TEST_CASE(greedy_movement) {
-    // 10 nodes
-    // 2 cores x node
-    // 10 partitions per shard
-    // r=3 (3 replicas)
-    auto index = leader_balancer_test_utils::make_cluster_index(10, 2, 10, 3);
-    auto shard_index = lbt::shard_index(
-      leader_balancer_test_utils::copy_cluster_index(index));
-    auto mute_index = lbt::muted_index({}, {});
-
-    auto greed = lbt::even_shard_load_constraint(shard_index, mute_index);
-    BOOST_REQUIRE_EQUAL(greed.error(), 0);
-
-    // new groups on shard {2, 0}
-    auto shard20 = model::broker_shard{model::node_id{2}, 0};
-    index[shard20][raft::group_id(20)] = index[shard20][raft::group_id(3)];
-    index[shard20][raft::group_id(21)] = index[shard20][raft::group_id(3)];
-    index[shard20][raft::group_id(22)] = index[shard20][raft::group_id(3)];
-
-    shard_index = lbt::shard_index(
-      leader_balancer_test_utils::copy_cluster_index(index));
-    auto greed2 = lbt::even_shard_load_constraint(shard_index, mute_index);
-    BOOST_REQUIRE_GT(greed2.error(), 0);
-
-    // movement should be _from_ the overloaded shard
-    auto movement = greed2.recommended_reassignment();
-    BOOST_REQUIRE(movement);
-    check_valid(shard_index.shards(), *movement);
-    BOOST_REQUIRE_EQUAL(movement->from, shard20);
-}
-
-BOOST_AUTO_TEST_CASE(greedy_obeys_replica) {
-    // unbalanced, but the overloaded node has no replicas it can
-    // send its groups to
-    BOOST_REQUIRE(no_movement({{{1, 2, 3}, {}}, {{4}, {}}, {{}, {4}}}));
-}
-
-BOOST_AUTO_TEST_CASE(greedy_simple_movement) {
-    // simple balancing from {2, 0} leader counts to {1, 1}
-    BOOST_REQUIRE_EQUAL(
-      expect_movement(
-        {
-          // clang-format off
-          {{1, 2}, {}},
-          {{}, {1, 2}}
-          // clang-format on
-        },
-        re(1, 0, 1)),
-      "");
-}
-
-BOOST_AUTO_TEST_CASE(greedy_highest_to_lowest) {
-    // balancing should occur from the most to least loaded node if that is
-    // possible
-    BOOST_REQUIRE_EQUAL(
-      expect_movement(
-        {
-          // clang-format off
-            {{1, 2},    {-1}},
-            {{3, 4, 5}, {-1}},                  // from 1
-            {{6, 7},    {-1}},
-            {{},        {1, 2, 3, 4, 5, 6, 7}}  // to 3
-
-          // clang-format on
-        },
-        re(3, 1, 3)),
-      "");
-
-    // like the previous case but group 3 is not replicated on the to node, so
-    // we check that group 4 goes instead
-    BOOST_REQUIRE_EQUAL(
-      expect_movement(
-        {
-          // clang-format off
-          {{1, 2},    {-1}},
-          {{3, 4, 5}, {-1}}, // from 1
-          {{6, 7},    {-1}},
-          {{},        {1, 2, 4, 5, 6, 7}} // to 3
-
-          // clang-format on
-        },
-        re(4, 1, 3)),
-      "");
-}
-
-BOOST_AUTO_TEST_CASE(greedy_low_to_lower) {
-    // balancing can occur even from a shard with less than average load,
-    // if there is a shard with even lower load and the higher loaded shards
-    // cannot be rebalanced from because of a lack of replicas for their
-    // groups on the lower load nodes
-    BOOST_REQUIRE_EQUAL(
-      expect_movement(
-        {
-          // clang-format off
-          {{1, 2, 3, 10}, {}},
-          {{4, 5, 6, 11}, {}},
-          {{7, 8},        {}},  // from 2
-          {{},            {8}}  // to 3
-
-          // clang-format on
-        },
-        re(8, 2, 3)),
-      "");
-}
-
-BOOST_AUTO_TEST_CASE(greedy_muted) {
-    // base spec without high, medium and low (zero) load nodes
-    auto spec = cluster_spec{
-      // clang-format off
-      {{1, 2, 3, 4}, {-1}},
-      {{5, 6},       {-1}},
-      {{},           {-1}},
-      // clang-format on
-    };
-
-    // base case, move from high to low
-    BOOST_REQUIRE_EQUAL(expect_movement(spec, re(1, 0, 2)), "");
-
-    // mute from the "from" node (high), so moves from mid to low
-    BOOST_REQUIRE_EQUAL(expect_movement(spec, re(5, 1, 2), {0}), "");
-
-    // mute from the "to" node (low), so moves from high to mid
-    BOOST_REQUIRE_EQUAL(expect_movement(spec, re(1, 0, 1), {2}), "");
-
-    // mute any 2 nodes and there should be no movement
-    BOOST_REQUIRE(no_movement(spec, {0, 1}));
-    BOOST_REQUIRE(no_movement(spec, {0, 2}));
-    BOOST_REQUIRE(no_movement(spec, {1, 2}));
-}
-
-BOOST_AUTO_TEST_CASE(greedy_skip) {
-    // base spec without high, medium and low load nodes
-
-    auto spec = cluster_spec{
-      // clang-format off
-      {{1, 2, 3, 4}, {-1}},
-      {{5, 6},       {-1}},
-      {{},           {-1}},
-      // clang-format on
-    };
-
-    // base case, move from high to low
-    BOOST_REQUIRE_EQUAL(expect_movement(spec, re(1, 0, 2)), "");
-
-    // skip group 1, we move group 2 instead from same node
-    BOOST_REQUIRE_EQUAL(expect_movement(spec, re(2, 0, 2), {}, {1}), "");
-
-    // skip all groups on node 0, we move mid to low
-    BOOST_REQUIRE_EQUAL(
-      expect_movement(spec, re(5, 1, 2), {}, {1, 2, 3, 4}), "");
-
-    // mute node 0 and skip all groups on node 1, no movement
-    absl::flat_hash_set<raft::group_id> skip{
-      raft::group_id(5), raft::group_id(6)};
-    BOOST_REQUIRE(no_movement(spec, {0}, skip));
+/**
+ * @brief Helper to create a reassignment from group, from and to passed as
+ * integers.
+ */
+inline reassignment re(unsigned group, int from, int to) {
+    return {
+      raft::group_id(group),
+      model::broker_shard{model::node_id(from)},
+      model::broker_shard{model::node_id(to)}};
 }
 
 BOOST_AUTO_TEST_CASE(even_topic_distribution_empty) {
@@ -397,7 +228,6 @@ BOOST_AUTO_TEST_CASE(even_topic_no_error_even_shard_error) {
       std::move(g_id_to_t_id), shard_index, muted_index);
 
     BOOST_REQUIRE(even_shard_con.error() > 0);
-    BOOST_REQUIRE(even_shard_con.recommended_reassignment().has_value());
 }
 
 #include "cluster/scheduling/leader_balancer_random.h"
@@ -516,4 +346,75 @@ BOOST_AUTO_TEST_CASE(topic_skew_error) {
 
     BOOST_REQUIRE(post_topic_error <= pre_topic_error);
     BOOST_REQUIRE(post_shard_error <= pre_shard_error);
+}
+
+BOOST_AUTO_TEST_CASE(even_shard_uneven_node_load) {
+    index_type idx;
+    cluster::leader_balancer_types::group_id_to_topic_id g2topic;
+    using cluster::leader_balancer_types::topic_id_t;
+
+    // 3-node cluster, node 2 has twice as many shards as nodes 0 and 1
+    const int n_partitions = 10;
+    for (int n = 0; n < 3; ++n) {
+        uint32_t n_shards = (n <= 1 ? n_partitions : n_partitions * 2);
+        for (uint32_t s = 0; s < n_shards; ++s) {
+            idx[model::broker_shard{model::node_id(n), s}];
+        }
+    }
+
+    // 2 topics, n_partitions partitions each
+    for (int g = 0; g < n_partitions; ++g) {
+        raft::group_id group_id(g);
+        g2topic[group_id] = topic_id_t{123};
+
+        cluster::replicas_t replicas;
+        for (int n = 0; n < 3; ++n) {
+            // each partition on its own shard
+            uint32_t shard = g;
+            replicas.push_back(model::broker_shard{model::node_id{n}, shard});
+        }
+        // all leaders on on node 0
+        idx[replicas[0]][group_id] = replicas;
+    }
+
+    for (int g = n_partitions; g < 2 * n_partitions; ++g) {
+        raft::group_id group_id(g);
+        g2topic[group_id] = topic_id_t{345};
+
+        cluster::replicas_t replicas;
+        for (int n = 0; n < 3; ++n) {
+            // each partition on its own shard
+            uint32_t shard = (n <= 1 ? (g - n_partitions) : g);
+            replicas.push_back(model::broker_shard{model::node_id{n}, shard});
+        }
+        // all leaders on on node 1
+        idx[replicas[1]][group_id] = replicas;
+    }
+
+    cluster::leader_balancer_types::shard_index shard_idx(std::move(idx));
+
+    auto strategy = lbt::random_hill_climbing_strategy(
+      leader_balancer_test_utils::copy_cluster_index(shard_idx.shards()),
+      std::move(g2topic),
+      cluster::leader_balancer_types::muted_index({}, {}),
+      std::nullopt);
+
+    // If we view shards as independent, this distribution is perfectly balanced
+    // (each shard has either 1 or 0 leaders), but node 2 has 0 leaders. Check
+    // that the balancing strategy fixes this.
+
+    while (auto movement_opt = strategy.find_movement({})) {
+        strategy.apply_movement(*movement_opt);
+        shard_idx.update_index(*movement_opt);
+    }
+
+    std::map<model::node_id, size_t> node_stats;
+    for (const auto& s : strategy.stats()) {
+        node_stats[s.shard.node_id] += s.leaders;
+    }
+
+    // node 2 is twice bigger so hosts twice as many partitions.
+    BOOST_CHECK_EQUAL(node_stats[model::node_id{0}], n_partitions / 2);
+    BOOST_CHECK_EQUAL(node_stats[model::node_id{1}], n_partitions / 2);
+    BOOST_CHECK_EQUAL(node_stats[model::node_id{2}], n_partitions);
 }

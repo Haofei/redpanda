@@ -21,6 +21,20 @@ namespace datalake::coordinator {
 // Represents the state to be managed by the datalake coordinator's replicated
 // state machine.
 
+struct pending_entry
+  : public serde::
+      envelope<pending_entry, serde::version<0>, serde::compat_version<0>> {
+    auto serde_fields() { return std::tie(data, added_pending_at); }
+
+    translated_offset_range data;
+
+    // Offset of the control topic partition at which this data entry was added
+    // to the state machine as a pending entry.
+    model::offset added_pending_at;
+
+    pending_entry copy() const;
+};
+
 // State tracked per Kafka partition. Groups of files get added added to this
 // state, each group corresponding to an offset range. The ranges added to this
 // state must have no overlaps and no gaps in order to ensure exactly once
@@ -46,7 +60,7 @@ struct partition_state
     //
     // It is expected that files are only added to this list if they form a
     // contiguous offset range.
-    std::deque<translated_offset_range> pending_entries;
+    std::deque<pending_entry> pending_entries;
 
     // The last (inclusive) Kafka offset confirmed to be sent to the Iceberg
     // catalog for a given partition.
@@ -57,6 +71,8 @@ struct partition_state
     //
     // Is nullopt iff we have never committed any files to the table.
     std::optional<kafka::offset> last_committed;
+
+    partition_state copy() const;
 };
 
 // Tracks the state managed for each Kafka partition. Since data workers are
@@ -65,10 +81,35 @@ struct partition_state
 struct topic_state
   : public serde::
       envelope<topic_state, serde::version<0>, serde::compat_version<0>> {
-    auto serde_fields() { return std::tie(pid_to_pending_files); }
+    auto serde_fields() {
+        return std::tie(revision, pid_to_pending_files, lifecycle_state);
+    }
 
+    enum class lifecycle_state_t {
+        // ready to accept new files
+        live,
+        // topic deleted, new files can't be accepted (but already accepted
+        // files will be committed)
+        closed,
+        // all state related to this revision of the topic has been purged,
+        // files for new revisions of this topic can be accepted.
+        // TODO: GC purged topic states
+        purged,
+    };
+    friend std::ostream&
+    operator<<(std::ostream&, topic_state::lifecycle_state_t);
+
+    bool has_pending_entries() const;
+    bool has_pending_main_entries() const;
+    bool has_pending_dlq_entries() const;
+
+    // Topic revision
+    model::revision_id revision;
     // Map from Redpanda partition id to the files pending per partition.
     chunked_hash_map<model::partition_id, partition_state> pid_to_pending_files;
+    lifecycle_state_t lifecycle_state = lifecycle_state_t::live;
+
+    topic_state copy() const;
 
     // TODO: add table-wide metadata like Kafka schema id, Iceberg table uuid,
     // etc.
@@ -83,6 +124,8 @@ struct topics_state
     // Map from the Redpanda topic to the state managed per topic, e.g. pending
     // files per partition.
     chunked_hash_map<model::topic, topic_state> topic_to_state;
+
+    topics_state copy() const;
 
     // Returns the state for the given partition.
     std::optional<std::reference_wrapper<const partition_state>>

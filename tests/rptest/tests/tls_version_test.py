@@ -20,7 +20,7 @@ from rptest.services.admin import Admin
 from rptest.services.cluster import cluster
 from rptest.services.redpanda import TLSProvider, SecurityConfig
 from rptest.services.redpanda_installer import RedpandaInstaller
-from rptest.services.tls import Certificate, CertificateAuthority, TLSCertManager
+from rptest.services.tls import Certificate, CertificateAuthority, TLSCertManager, TLSKeyType
 from rptest.tests.redpanda_test import RedpandaTest
 
 
@@ -42,7 +42,8 @@ class TLSVersionTestProvider(TLSProvider):
 
 
 PERMITTED_ERROR_MESSAGE = [
-    "seastar::tls::verification_error", "SSL routines::unsupported protocol"
+    "seastar::tls::verification_error", "SSL routines::unsupported protocol",
+    "sslv3 alert handshake failure"
 ]
 
 
@@ -83,10 +84,10 @@ class TLSVersionTestBase(RedpandaTest):
     """
     Base test class that sets up TLS on the Kafka API interface
     """
-    def __init__(self, test_context):
+    def __init__(self, test_context, key_type: TLSKeyType):
         super(TLSVersionTestBase, self).__init__(test_context=test_context)
         self.security = SecurityConfig()
-        self.tls = TLSCertManager(self.logger)
+        self.tls = TLSCertManager(self.logger, key_type=key_type)
         self.admin = Admin(self.redpanda)
         self.installer = self.redpanda._installer
 
@@ -122,8 +123,6 @@ class TLSVersionTestBase(RedpandaTest):
                 assert self._output_error(e.output.decode(
                 )), f"Output not expected for failure: {e.output.decode()}"
 
-
-class TLSVersionTest(TLSVersionTestBase):
     @cluster(num_nodes=3, log_allow_list=PERMITTED_ERROR_MESSAGE)
     @matrix(version=[0, 1, 2, 3])
     def test_change_version(self, version: int):
@@ -150,3 +149,65 @@ class TLSVersionTest(TLSVersionTestBase):
                 self.verify_tls_version(node=n,
                                         tls_version=v,
                                         expect_fail=expect_failure)
+
+
+class TLSVersionTestRSA(TLSVersionTestBase):
+    def __init__(self, test_context):
+        super(TLSVersionTestRSA, self).__init__(test_context=test_context,
+                                                key_type=TLSKeyType.RSA)
+
+
+class TLSVersionTestECDSA(TLSVersionTestBase):
+    def __init__(self, test_context):
+        super(TLSVersionTestECDSA, self).__init__(test_context=test_context,
+                                                  key_type=TLSKeyType.ECDSA)
+
+
+class TLSRenegotiationTest(RedpandaTest):
+    def __init__(self, test_context):
+        super(TLSRenegotiationTest, self).__init__(test_context=test_context)
+        self.security = SecurityConfig()
+        self.tls = TLSCertManager(self.logger)
+        self.admin = Admin(self.redpanda)
+
+    def setUp(self):
+        self.security.tls_provider = TLSVersionTestProvider(tls=self.tls)
+        self.redpanda.set_security_settings(self.security)
+        super().setUp()
+
+    def verify_tls_renegotiation(self, node: ClusterNode, expect_fail: bool):
+        cmd = f"openssl s_client -tls1_2 -CAfile {self.tls.ca.crt} -cert {self.tls.ca.crt} -key {self.tls.ca.key} -connect {node.name}:9092"
+        self.logger.debug(f"Running: {cmd}")
+        # Run command send send "R\n".  This tells s_client to attempt a client initiated renegotiation
+        process = subprocess.run(cmd.split(),
+                                 input="R\n",
+                                 text=True,
+                                 stdout=subprocess.PIPE,
+                                 stderr=subprocess.STDOUT)
+
+        self.logger.debug(f"stdout: {process.stdout}")
+        self.logger.debug(f"stderr: {process.stderr}")
+        if expect_fail:
+            assert process.returncode != 0, f"Expected openssl s_client to fail {process.returncode}"
+        else:
+            assert process.returncode == 0, f"Expected openssl s_client to succeed {process.returncode}"
+
+    @cluster(num_nodes=3, log_allow_list=PERMITTED_ERROR_MESSAGE)
+    @matrix(enable_renegotiation=[True, False])
+    def test_tls_renegotiation(self, enable_renegotiation: bool):
+        cluster_cfg = self.admin.get_cluster_config(
+            key="tls_enable_renegotiation")
+        # It should always start false
+        assert cluster_cfg[
+            "tls_enable_renegotiation"] == False, f"Invalid cluster config: {cluster_cfg['tls_enable_renegotiation']} != False"
+        self.redpanda.set_cluster_config(
+            admin_client=self.admin,
+            values={"tls_enable_renegotiation": enable_renegotiation},
+            expect_restart=True)
+        cluster_cfg = self.admin.get_cluster_config(
+            key="tls_enable_renegotiation")
+        assert cluster_cfg[
+            "tls_enable_renegotiation"] == enable_renegotiation, f"Invalid cluster config: {cluster_cfg['tls_enable_renegotiation']} != {enable_renegotiation}"
+        for n in self.redpanda.nodes:
+            self.verify_tls_renegotiation(node=n,
+                                          expect_fail=not enable_renegotiation)

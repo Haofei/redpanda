@@ -109,6 +109,8 @@ std::ostream& operator<<(std::ostream& os, candidate_creation_error err) {
         return os << "failed to get file range for candidate";
     case candidate_creation_error::zero_content_length:
         return os << "candidate has no content";
+    case candidate_creation_error::concurrency_error:
+        return os << "collected segments are modified concurrently";
     }
 }
 
@@ -122,6 +124,7 @@ ss::log_level log_level_for_error(const candidate_creation_error& error) {
     case candidate_creation_error::no_segment_for_begin_offset:
     case candidate_creation_error::failed_to_get_file_range:
     case candidate_creation_error::zero_content_length:
+    case candidate_creation_error::concurrency_error:
         return ss::log_level::debug;
     case candidate_creation_error::offset_inside_batch:
     case candidate_creation_error::missing_ntp_config:
@@ -280,11 +283,7 @@ archival_policy::lookup_result archival_policy::find_segment(
     return {.segment = *it, .ntp_conf = &ntp_conf, .forced = force_upload};
 }
 
-/// This function computes offsets for the upload (inc. file offets)
-/// If the full segment is uploaded the segment is not scanned.
-/// If the upload is partial, the partial scan will be performed if
-/// the segment has the index and full scan otherwise.
-static ss::future<std::optional<std::error_code>> get_file_range(
+ss::future<std::optional<std::error_code>> get_file_range(
   model::offset begin_inclusive,
   std::optional<model::offset> end_inclusive,
   ss::lw_shared_ptr<storage::segment> segment,
@@ -305,7 +304,7 @@ static ss::future<std::optional<std::error_code>> get_file_range(
       !end_inclusive
       && segment->offsets().get_base_offset() == begin_inclusive) {
         // Fast path, the upload is started at the begining of the segment
-        // and not truncted at the end.
+        // and not truncated at the end.
         vlog(
           archival_log.debug,
           "Full segment upload {}, file size: {}",
@@ -320,6 +319,25 @@ static ss::future<std::optional<std::error_code>> get_file_range(
             co_return seek_result.error();
         }
         auto seek = seek_result.value();
+        vlog(
+          archival_log.debug,
+          "Found offset {} when looking for target {}",
+          seek.offset,
+          begin_inclusive);
+        if (seek.offset < begin_inclusive) {
+            // `convert_begin_offset_to_file_pos` may return a lower value than
+            // the target, e.g. if the target was compacted away.
+            //
+            // [...][10, 20][40, 50][...]
+            // Target offset: 30
+            // Seek result offset: 21
+            //
+            // If so, the upload will still logically contain offset 30 if we
+            // return bytes starting at offset 21, but we need to lie about the
+            // offsets because the caller expects the returned metadata to
+            // align with the target.
+            seek.offset = begin_inclusive;
+        }
         upl->starting_offset = seek.offset;
         upl->file_offset = seek.bytes;
         upl->base_timestamp = seek.ts;
@@ -343,10 +361,14 @@ static ss::future<std::optional<std::error_code>> get_file_range(
         upl->max_timestamp = seek.ts;
     }
     // Recompute content_length based on file offsets
-    vassert(
-      upl->file_offset <= upl->final_file_offset,
-      "Invalid upload candidate {}",
-      upl);
+    if (upl->file_offset > upl->final_file_offset) {
+        // This could potentially happen if the log was truncated after
+        // file_offset is set. In this case the index could become empty which
+        // will trigger the condition above. The operation could be retried
+        // later so throwing makes more sense then the assertion.
+        throw std::runtime_error(
+          fmt_with_ctx(fmt::format, "Invalid upload candidate {}", upl));
+    }
     upl->content_length = upl->final_file_offset - upl->file_offset;
     if (upl->content_length > segment->reader().file_size()) {
         throw std::runtime_error(fmt_with_ctx(
