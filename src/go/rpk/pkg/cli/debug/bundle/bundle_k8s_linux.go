@@ -135,6 +135,7 @@ func executeK8SBundle(ctx context.Context, bp bundleParams) error {
 		if err != nil {
 			errs = multierror.Append(errs, err)
 		}
+		errs.ErrorFormat = errorFormat
 		fmt.Println(errs.Error())
 	}
 
