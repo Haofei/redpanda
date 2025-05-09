@@ -1,9 +1,7 @@
 #include "cluster/rm_stm.h"
 #include "cluster/tests/rm_stm_test_fixture.h"
-#include "config/config_store.h"
-#include "storage/tests/utils/disk_log_builder.h"
+#include "cluster/tests/tx_compaction_utils.h"
 #include "test_utils/scoped_config.h"
-#include "tx_compaction_utils.h"
 
 #include <seastar/util/defer.hh>
 

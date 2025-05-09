@@ -1206,3 +1206,37 @@ redpanda_cc_btest(
         "@seastar//:testing",
     ],
 )
+
+redpanda_test_cc_library(
+    name = "tx_compaction_utils",
+    hdrs = [
+        "tx_compaction_utils.h",
+    ],
+    include_prefix = "cluster/tests",
+    visibility = ["//visibility:public"],
+    deps = [
+        "//src/v/cluster",
+        "//src/v/storage/tests:storage_test_fixture",
+        "//src/v/test_utils:seastar_boost",
+    ],
+)
+
+redpanda_cc_btest(
+    name = "tx_compaction_tests",
+    timeout = "short",
+    srcs = [
+        "tx_compaction_tests.cc",
+    ],
+    deps = [
+        ":rm_stm_test_fixture",
+        ":tx_compaction_utils",
+        "//src/v/cluster",
+        "//src/v/config",
+        "//src/v/model",
+        "//src/v/raft",
+        "//src/v/test_utils:scoped_config",
+        "//src/v/test_utils:seastar_boost",
+        "@boost//:test",
+        "@seastar",
+    ],
+)
