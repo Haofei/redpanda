@@ -7,12 +7,12 @@ package(default_visibility = [
 ])
 
 redpanda_cc_library(
-    name = "placeholder_extent",
+    name = "materialized_extent",
     srcs = [
-        "placeholder_extent.cc",
+        "materialized_extent.cc",
     ],
     hdrs = [
-        "placeholder_extent.h",
+        "materialized_extent.h",
     ],
     include_prefix = "cloud_topics/read_path",
     deps = [
@@ -23,6 +23,7 @@ redpanda_cc_library(
         "//src/v/cloud_io:basic_cache_service_api",
         "//src/v/cloud_io:io_result",
         "//src/v/cloud_io:remote",
+        "//src/v/cloud_topics:extent_meta",
         "//src/v/cloud_topics:logger",
         "//src/v/cloud_topics:placeholder",
         "//src/v/cloud_topics:types",
@@ -56,7 +57,7 @@ redpanda_cc_library(
         "//src/v/cloud_topics:logger",
         "//src/v/cloud_topics:placeholder",
         "//src/v/cloud_topics:types",
-        "//src/v/cloud_topics/read_path:placeholder_extent",
+        "//src/v/cloud_topics/read_path:materialized_extent",
         "//src/v/config",
         "//src/v/container:chunked_circular_buffer",
         "//src/v/model",
