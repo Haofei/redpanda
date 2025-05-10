@@ -122,3 +122,24 @@ redpanda_cc_gtest(
         "@seastar",
     ],
 )
+
+redpanda_cc_gtest(
+    name = "offsets_lookup_batcher_test",
+    timeout = "short",
+    srcs = [
+        "offsets_lookup_batcher_test.cc",
+    ],
+    cpu = 1,
+    deps = [
+        "//src/v/cloud_io/tests:s3_imposter",
+        "//src/v/cluster",
+        "//src/v/cluster:offsets_lookup",
+        "//src/v/cluster/tests:cluster_test_fixture",
+        "//src/v/model",
+        "//src/v/redpanda:application",
+        "//src/v/redpanda/tests:fixture",
+        "//src/v/test_utils:gtest",
+        "@googletest//:gtest",
+        "@seastar",
+    ],
+)
