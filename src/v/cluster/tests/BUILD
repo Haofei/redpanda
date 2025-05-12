@@ -385,6 +385,23 @@ redpanda_cc_btest(
 )
 
 redpanda_cc_btest(
+    name = "partition_balancer_simulator_test",
+    timeout = "long",
+    srcs = [
+        "partition_balancer_simulator_test.cc",
+    ],
+    deps = [
+        ":partition_balancer_planner_fixture",
+        "//src/v/base",
+        "//src/v/cluster",
+        "//src/v/model",
+        "//src/v/random:generators",
+        "//src/v/test_utils:seastar_boost",
+        "@seastar//:testing",
+    ],
+)
+
+redpanda_cc_btest(
     name = "simple_batch_builder_test",
     timeout = "short",
     srcs = [
