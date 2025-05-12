@@ -654,6 +654,25 @@ redpanda_cc_btest(
     ],
 )
 
+redpanda_cc_btest(
+    name = "replicas_rebalancing_test",
+    timeout = "moderate",
+    srcs = [
+        "replicas_rebalancing_tests.cc",
+    ],
+    cpu = 1,
+    deps = [
+        ":rebalancing_tests_fixture",
+        "//src/v/cluster",
+        "//src/v/model",
+        "//src/v/ssx:future_util",
+        "//src/v/test_utils:seastar_boost",
+        "@abseil-cpp//absl/container:node_hash_map",
+        "@boost//:test",
+        "@seastar",
+    ],
+)
+
 redpanda_cc_gtest(
     name = "manual_log_deletion_test",
     timeout = "short",
