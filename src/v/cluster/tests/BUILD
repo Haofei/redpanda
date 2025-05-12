@@ -693,6 +693,25 @@ redpanda_cc_btest(
     ],
 )
 
+redpanda_cc_btest(
+    name = "cluster_tests",
+    timeout = "short",
+    srcs = ["cluster_tests.cc"],
+    deps = [
+        ":cluster_test_fixture",
+        "//src/v/base",
+        "//src/v/cluster",
+        "//src/v/features",
+        "//src/v/model",
+        "//src/v/raft",
+        "//src/v/test_utils:seastar_boost",
+        "@boost//:test",
+        "@fmt",
+        "@seastar",
+        "@seastar//:testing",
+    ],
+)
+
 redpanda_cc_bench(
     name = "health_report_rpbench",
     srcs = ["health_bench.cc"],
