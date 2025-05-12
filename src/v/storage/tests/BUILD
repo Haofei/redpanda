@@ -132,7 +132,7 @@ redpanda_test_cc_library(
         "//src/v/features",
         "//src/v/model/tests:random",
         "//src/v/storage",
-        "//src/v/test_utils:seastar_boost",
+        "//src/v/test_utils:fixture",
     ],
 )
 
