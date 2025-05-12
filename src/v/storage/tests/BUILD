@@ -783,6 +783,25 @@ redpanda_cc_btest(
     ],
 )
 
+redpanda_cc_gtest(
+    name = "compaction_reducer_fixture_test",
+    timeout = "short",
+    srcs = [
+        "compaction_reducer_fixture_test.cc",
+    ],
+    cpu = 1,
+    deps = [
+        "//src/v/model",
+        "//src/v/storage",
+        "//src/v/storage:key_offset_map",
+        "//src/v/storage/tests:storage_test_fixture",
+        "//src/v/test_utils:gtest",
+        "@googletest//:gtest",
+        "@seastar",
+        "@seastar//:testing",
+    ],
+)
+
 redpanda_cc_btest(
     name = "batch_consumer_utils_test",
     timeout = "short",
