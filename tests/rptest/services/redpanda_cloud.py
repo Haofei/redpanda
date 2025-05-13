@@ -1574,14 +1574,26 @@ class CloudCluster():
         :param properties: A dictionary where each key is a property key and the value is the property value
         :return: response from the API request
         """
-        # Prepare the payload dynamically based on the key and value
-        update_resp = self.public_api._http_patch(
-            base_url=self.config.public_api_url,
-            endpoint=f"/v1/clusters/{cluster_id}",
-            json={"cluster_configuration": {
-                "custom_properties": properties
-            }})
-        return update_resp
+        self._logger.debug(
+            f"Updating cluster {cluster_id} with properties: {properties}")
+
+        payload = {"cluster_configuration": {"custom_properties": properties}}
+
+        self._logger.debug(f"Payload to be sent: {payload}")
+
+        try:
+            update_resp = self.public_api._http_patch(
+                base_url=self.config.public_api_url,
+                endpoint=f"/v1/clusters/{cluster_id}",
+                json=payload)
+
+            self._logger.debug(f"Response from API: {update_resp}")
+
+            return update_resp
+        except Exception as e:
+            self._logger.error(
+                f"Error during request to update cluster {cluster_id}: {e}")
+            raise
 
     def create_secret(self, secret_id, secret_data, scopes=None):
         """

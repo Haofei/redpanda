@@ -87,7 +87,7 @@ class IcebergCloudCatalogsTest(RedpandaCloudTest):
 
         # Parameters for creating Redpanda secret
         secret_id = "UNITY_CLIENT_SECRET"
-        
+
         #secret_data = dbx_ctx.client_secret
         # Access credentials (client_secret, client_id) from dbx_ctx.credentials
         if isinstance(dbx_ctx.credentials, OauthCredentials):
@@ -105,13 +105,19 @@ class IcebergCloudCatalogsTest(RedpandaCloudTest):
 
         # Construct the payload for the request
         properties = {
-            "iceberg_rest_catalog_endpoint": iceberg_rest_catalog_endpoint,
-            "iceberg_rest_catalog_authentication_mode": "oauth2" if isinstance(dbx_ctx.credentials, OauthCredentials) else "pat",
-            "iceberg_rest_catalog_client_id": databricks_client_id,
+            "iceberg_rest_catalog_endpoint":
+            iceberg_rest_catalog_endpoint,
+            "iceberg_rest_catalog_authentication_mode":
+            "oauth2"
+            if isinstance(dbx_ctx.credentials, OauthCredentials) else "bearer",
+            "iceberg_rest_catalog_client_id":
+            databricks_client_id,
             "iceberg_rest_catalog_client_secret":
             "${secrets.UNITY_CLIENT_SECRET}",
-            "iceberg_rest_catalog_warehouse": iceberg_rest_catalog_warehouse,
-            "iceberg_catalog_type": "rest"
+            "iceberg_rest_catalog_warehouse":
+            catalog_info.name,
+            "iceberg_catalog_type":
+            "rest"
         }
 
         # Log the constructed payload for debugging

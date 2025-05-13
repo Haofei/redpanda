@@ -93,12 +93,13 @@ class DatabricksWorkspace(Service):
                 server_hostname=self._databricks_context.server_hostname,
                 http_path=self._databricks_context.sql_warehouse_path,
                 catalog=catalog_info.name,
-                credentials_provider=self._databricks_context.credentials_provider,
+                credentials_provider=self._databricks_context.
+                credentials_provider,
             )
             self.logger.debug("SQL connection established successfully.")
         except Exception as e:
             self.logger.error(f"Error establishing SQL connection: {e}")
-            return  # Exit if the connection fails
+            raise
 
         # This is a unity catalog peculiarity. It allows schemas (iceberg
         # namespaces) to be created but tables inside it are not allowed
