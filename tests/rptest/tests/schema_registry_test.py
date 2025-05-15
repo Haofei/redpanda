@@ -3608,10 +3608,31 @@ class SchemaRegistryTestMethods(SchemaRegistryEndpoints):
         test_ids_id(2, schema_avro_def.strip(), format=bad_value)
         test_ids_id(3, json_number_schema_def.strip(), format=bad_value)
 
-        #Test unimplemented format value
-        result_raw = self._get_schemas_ids_id(2, format="resolved")
+        #Test unimplemented format value - resolved
+        resolved = "resolved"
+        test_ids_id(1, schema_proto_def.strip(), format=resolved)
+        result_raw = self._get_schemas_ids_id(2, format=resolved)
         assert result_raw.status_code == 400, \
-                f"expected {400} but got {result_raw.status_code} for id 2 and format 'resolved'"
+                f"expected {400} but got {result_raw.status_code} for id 2 and format '{resolved}'"
+        test_ids_id(3, json_number_schema_def.strip(), format=resolved)
+
+        #Test unimplemented format value - ignore extensions
+        ignore_extensions = "ignore_extensions"
+        result_raw = self._get_schemas_ids_id(1, format=ignore_extensions)
+        assert result_raw.status_code == 400, \
+                f"expected {400} but got {result_raw.status_code} for id 1 and format '{ignore_extensions}'"
+        test_ids_id(2, schema_avro_def.strip(), format=ignore_extensions)
+        test_ids_id(3,
+                    json_number_schema_def.strip(),
+                    format=ignore_extensions)
+
+        #Test unimplemented format value - ignore serialized
+        serialized = "serialized"
+        result_raw = self._get_schemas_ids_id(1, format=serialized)
+        assert result_raw.status_code == 400, \
+                f"expected {400} but got {result_raw.status_code} for id 1 and format '{serialized}'"
+        test_ids_id(2, schema_avro_def.strip(), format=serialized)
+        test_ids_id(3, json_number_schema_def.strip(), format=serialized)
 
 
 class SchemaRegistryModeNotMutableTest(SchemaRegistryEndpoints):

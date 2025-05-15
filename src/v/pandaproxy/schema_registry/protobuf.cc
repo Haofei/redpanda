@@ -648,6 +648,17 @@ ss::future<subject_schema> make_canonical_protobuf_schema(
       co_await validate_protobuf_schema(store, std::move(schema), norm)};
 }
 
+ss::future<schema_definition> format_protobuf_schema_definition(
+  sharded_store&, schema_definition schema, output_format format) {
+    switch (format) {
+    case output_format::ignore_extensions:
+    case output_format::serialized:
+        throw as_exception(format_not_supported(format));
+    default:
+        co_return std::move(schema);
+    }
+}
+
 namespace {
 
 enum class encoding {
