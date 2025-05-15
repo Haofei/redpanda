@@ -161,6 +161,7 @@ operator<<(std::ostream& os, const skip_offset_range& skip_range) {
 }
 
 segment_collector::segment_collector(
+  segment_collector_mode mode,
   model::offset begin_inclusive,
   const cloud_storage::partition_manifest& manifest,
   const storage::log& log,
@@ -175,15 +176,18 @@ segment_collector::segment_collector(
   , _target_end_inclusive(end_inclusive)
   , _collected_size(0)
   , _end_exclusive(end_exclusive)
-  , _flush_offset(flush_offset) {}
+  , _flush_offset(flush_offset)
+  , _mode(mode) {}
 
 segment_collector::segment_collector(
+  segment_collector_mode mode,
   model::offset begin_inclusive,
   const cloud_storage::partition_manifest& manifest,
   const storage::log& log,
   size_t max_uploaded_segment_size,
   std::optional<model::offset> end_inclusive)
   : segment_collector(
+      mode,
       begin_inclusive,
       manifest,
       log,

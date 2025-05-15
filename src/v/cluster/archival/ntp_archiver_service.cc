@@ -3303,6 +3303,7 @@ ntp_archiver::find_reupload_candidate(manifest_scanner_t scanner) {
         auto log_generic = _parent.log();
         auto& log = *log_generic;
         segment_collector collector(
+          segment_collector_mode::non_compacted_reupload,
           run->meta.base_offset,
           manifest(),
           log,
