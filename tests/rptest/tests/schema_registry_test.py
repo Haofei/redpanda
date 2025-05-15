@@ -3602,10 +3602,12 @@ class SchemaRegistryTestMethods(SchemaRegistryEndpoints):
         test_ids_id(2, schema_avro_def.strip(), format="")
         test_ids_id(3, json_number_schema_def.strip(), format="")
 
-        #Test invalid format value
-        result_raw = self._get_schemas_ids_id(1, format="badvalue")
-        assert result_raw.status_code == 400, \
-                f"expected {400} but got {result_raw.status_code} for id 1 and format 'badvalue'"
+        #Test invalid format value - format should be ignored
+        bad_value = "bad_value"
+        test_ids_id(1, schema_proto_def.strip(), format=bad_value)
+        test_ids_id(2, schema_avro_def.strip(), format=bad_value)
+        test_ids_id(3, json_number_schema_def.strip(), format=bad_value)
+
         #Test unimplemented format value
         result_raw = self._get_schemas_ids_id(2, format="resolved")
         assert result_raw.status_code == 400, \

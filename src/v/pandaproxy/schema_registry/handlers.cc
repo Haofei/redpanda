@@ -336,10 +336,8 @@ get_schemas_ids_id(server::request_t rq, server::reply_t rp) {
     const auto format_str = parse::query_param<std::optional<ss::sstring>>(
                               *rq.req, "format")
                               .value_or("");
-    const auto format = from_string_view<output_format>(format_str);
-    if (!format.has_value()) {
-        throw as_exception(invalid_format(format_str));
-    }
+    const auto format = from_string_view<output_format>(format_str)
+                          .value_or(output_format::none);
 
     // With deferred schema validation, there might be a schema that
     // had invalid references. These might have already been posted, so
@@ -347,8 +345,7 @@ get_schemas_ids_id(server::request_t rq, server::reply_t rp) {
     co_await rq.service().writer().read_sync();
 
     auto def = co_await get_or_load(rq, [&rq, id, format]() {
-        return rq.service().schema_store().get_schema_definition(
-          id, format.value_or(output_format::none));
+        return rq.service().schema_store().get_schema_definition(id, format);
     });
 
     auto resp = ppj::rjson_serialize_iobuf(
