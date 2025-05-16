@@ -784,7 +784,7 @@ ss::future<> ntp_archiver::upload_until_term_change_legacy() {
         auto fence
           = _parent.archival_meta_stm()->manifest().get_applied_offset();
         vlog(
-          archival_log.debug,
+          _rtclog.debug,
           "fence value is: {}, in-sync offset: {}",
           fence,
           _parent.archival_meta_stm()->get_insync_offset());
