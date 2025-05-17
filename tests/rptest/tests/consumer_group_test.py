@@ -1686,8 +1686,9 @@ class ConsumerGroupOffsetResetTest(RedpandaTest):
             assert tp.offset == expected, f"Offset mismatch for partition {tp.topic}{tp.partition}, expected: {expected} got: {tp.offset}"
 
         olv = OfflineLogViewer(self.redpanda)
-        for n in self.redpanda.nodes:
-            summary = olv.consumer_offsets_summary(n)
+
+        def get_summary(node):
+            summary = olv.consumer_offsets_summary(node)
             for _, cg_partition_summary in summary.items():
                 assert len(
                     cg_partition_summary['raft_configurations']
@@ -1700,3 +1701,14 @@ class ConsumerGroupOffsetResetTest(RedpandaTest):
                         'committed_offset']
                     assert committed == self.consumers[p].get_last_committed(
                     ), f"On disk state mismatch, expected: {expected}, got: {expected}"
+            return True
+
+        for n in self.redpanda.nodes:
+            wait_until(
+                lambda: get_summary(n),
+                timeout_sec=60,
+                backoff_sec=1,
+                retry_on_exc=True,
+                err_msg=
+                f"Failed to get consumer offsets summary for node {n.account.hostname}"
+            )
