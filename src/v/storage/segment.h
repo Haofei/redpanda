@@ -282,6 +282,10 @@ public:
     /// appear to be invalid (e.g. too far in the future)
     ss::future<model::timestamp> get_file_timestamp() const;
 
+    // For use in testing. _gate.close() is called during segment::close()
+    // and is used to ensure release_appender_in_background() safely completes.
+    ss::gate& gate() { return _gate; }
+
 private:
     void set_close();
     void cache_truncate(model::offset offset);

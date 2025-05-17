@@ -21,6 +21,7 @@
 #include "model/timeout_clock.h"
 #include "random/generators.h"
 #include "redpanda/tests/fixture.h"
+#include "storage/log_reader.h"
 #include "storage/segment.h"
 #include "storage/segment_set.h"
 #include "storage/segment_utils.h"
@@ -29,6 +30,7 @@
 #include "test_utils/async.h"
 #include "test_utils/scoped_config.h"
 #include "test_utils/test.h"
+#include "utils/adjustable_semaphore.h"
 #include "utils/directory_walker.h"
 
 #include <seastar/core/sleep.hh>
@@ -1817,4 +1819,195 @@ TEST_F(CompactionFixtureTest, TestAdjacentCompactionMultipleRanges) {
         }
         ASSERT_EQ(consumed_kvs.size(), latest_kv_map.size());
     }
+}
+
+TEST_F(
+  CompactionFixtureTest, TestAdjacentCompactionSimulateCrashDuringFileRemoval) {
+    auto num_segments = 5;
+    auto cardinality = 10;
+    auto batches_per_segment = 100;
+    auto records_per_batch = 100;
+
+    generate_data(
+      num_segments, cardinality, batches_per_segment, records_per_batch)
+      .get();
+
+    auto* disk_log = dynamic_cast<storage::disk_log_impl*>(log);
+
+    // All but the active segment.
+    auto segment_count_before = disk_log->segment_count() - 1;
+
+    auto do_adjacent_compact = [](const auto& l) {
+        ss::abort_source never_abort;
+        storage::compaction_config cfg(
+          model::offset::max(), std::nullopt, never_abort);
+
+        const auto closed_segment_filter = [](const auto& s) -> bool {
+            return !s->has_appender();
+        };
+
+        storage::segment_set::underlying_t filtered_segs;
+        for (const auto& segment :
+             l->segments() | std::views::filter(closed_segment_filter)) {
+            filtered_segs.push_back(segment);
+        }
+
+        storage::segment_set filtered_seg_set(std::move(filtered_segs));
+        l->adjacent_merge_compact(filtered_seg_set, cfg).get();
+        // Including the active segment
+        ASSERT_EQ(l->segment_count(), 2);
+    };
+
+    // This test uses 5 (+1 active) segments, which will be adjacently compacted
+    // like so: [0][1][2][3][4][A] -> [0`][A]
+    // We are going to simulate a "crash" during segment removal, in which some
+    // of the segments which were concatenated are left on disk after a restart
+    // like so: [0`][2][3][4][A].
+    // Then, using various consumers/readers of segment data, we will see the
+    // effects of what happens when segments with redundant data are left on
+    // disk.
+    {
+        // Hold the gate for one of the segments in order to block
+        // segment::close().
+        auto& seg = disk_log->segments()[2];
+        auto holder = seg->gate().hold();
+        auto adjacent_compact_fut = [&]() {
+            try {
+                do_adjacent_compact(disk_log);
+            } catch (...) {
+            }
+        };
+
+        // A future which breaks the inflight close semaphore and then releases
+        // the held gate, causing segment::close() to throw exceptions while
+        // attempting to close segments [2][3][4] as seen above.
+        auto break_close_fut
+          = ss::sleep(2s)
+              .then([&disk_log]() {
+                  auto& resources = disk_log->resources();
+                  storage::testing_details::storage_resources_accessor::
+                    inflight_close_flush_sem(resources)
+                      .broken();
+              })
+              .finally([h = std::move(holder)]() {});
+
+        ss::when_all(
+          std::move(adjacent_compact_fut), std::move(break_close_fut))
+          .get();
+
+        // Reset close semaphore.
+        auto& resources = disk_log->resources();
+        storage::testing_details::storage_resources_accessor::
+          inflight_close_flush_sem(resources)
+          = adjustable_semaphore(1);
+    }
+
+    restart(should_wipe::no);
+    wait_for_leader(ntp).get();
+    partition = app.partition_manager.local().get(ntp).get();
+    log = partition->log().get();
+    disk_log = dynamic_cast<storage::disk_log_impl*>(log);
+
+    // Some of the concatenated segments will have been left on disk.
+    auto segment_count_after = disk_log->segment_count();
+    ASSERT_EQ(segment_count_before, segment_count_after);
+
+    // Read log with a Kafka consumer.
+    auto make_kafka_consumer = [&]() {
+        tests::kafka_consume_transport consumer(make_kafka_client().get());
+        consumer.start().get();
+        auto kvs = consumer
+                     .consume_from_partition(
+                       topic_name, model::partition_id(0), model::offset(0))
+                     .get();
+        return kvs;
+    };
+
+    // Read log with a log reader.
+    auto make_log_reader = [&]() {
+        auto reader_cfg = storage::log_reader_config(
+          model::offset{0}, model::offset::max());
+
+        reader_cfg.skip_readers_cache = true;
+        reader_cfg.skip_batch_cache = true;
+
+        auto batches = model::consume_reader_to_chunked_vector(
+                         log->make_reader(reader_cfg).get(), model::no_timeout)
+                         .get();
+
+        return batches;
+    };
+
+    // Read raw log data on disk using a log_segment_batch_reader.
+    auto make_log_segment_batch_reader = [&]() {
+        chunked_vector<model::record_batch> all_batches;
+        for (auto& seg : log->segments()) {
+            if (seg->has_appender()) {
+                break;
+            }
+            auto reader_cfg = storage::log_reader_config(
+              model::offset{0}, model::offset::max());
+
+            reader_cfg.skip_readers_cache = true;
+            reader_cfg.skip_batch_cache = true;
+
+            auto rdr = storage::log_segment_batch_reader(
+              *seg, reader_cfg, log->get_probe());
+            auto recs = rdr.read_some(model::no_timeout).get();
+            while (recs.has_value() && !recs.value().empty()) {
+                auto& batches = recs.value();
+                for (auto& batch : batches) {
+                    all_batches.push_back(std::move(batch));
+                }
+                recs = rdr.read_some(model::no_timeout).get();
+            }
+            rdr.close().get();
+        }
+        return all_batches;
+    };
+
+    // Get total number of data records from a collection of batches.
+    auto num_data_records = [](const auto& batches) {
+        int record_count = 0;
+        for (const auto& batch : batches) {
+            record_count += (batch.header().type
+                             == model::record_batch_type::raft_data)
+                              ? batch.record_count()
+                              : 0;
+        }
+        return record_count;
+    };
+
+    // Kafka consumer
+    auto consumed_kvs_before = make_kafka_consumer();
+    ASSERT_EQ(consumed_kvs_before.size(), cardinality);
+
+    // Log reader
+    auto log_reader_batches_before = make_log_reader();
+    ASSERT_EQ(num_data_records(log_reader_batches_before), cardinality);
+
+    // Raw batches on disk in segment files
+    // We will see that the old data is actually still around.
+    auto on_disk_batches_before = make_log_segment_batch_reader();
+    ASSERT_EQ(
+      num_data_records(on_disk_batches_before),
+      cardinality * (segment_count_after - 1));
+
+    // One more adjacent compact. There should be no differences in batches
+    // processed by the log reader or kafka consumer after this compaction.
+    // However, expect the redundant data on disk to be removed.
+    do_adjacent_compact(disk_log);
+
+    // Kafka consumer
+    auto consumed_kvs_after = make_kafka_consumer();
+    ASSERT_EQ(consumed_kvs_before.size(), consumed_kvs_after.size());
+
+    // Log reader
+    auto log_reader_batches_after = make_log_reader();
+    ASSERT_EQ(log_reader_batches_before, log_reader_batches_after);
+
+    // Raw batches on disk in segment files.
+    auto on_disk_batches_after = make_log_segment_batch_reader();
+    ASSERT_EQ(num_data_records(on_disk_batches_after), cardinality);
+    ASSERT_NE(on_disk_batches_before, on_disk_batches_after);
 }
