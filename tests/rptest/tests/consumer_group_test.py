@@ -17,6 +17,7 @@ from typing import Dict, List
 
 from rptest.clients.default import DefaultClient
 from rptest.clients.offline_log_viewer import OfflineLogViewer
+from rptest.services.redpanda import LoggingConfig
 from rptest.services.admin import Admin
 from rptest.services.cluster import cluster
 
@@ -1584,9 +1585,9 @@ class OffsetCommitter:
 
 class ConsumerGroupOffsetResetTest(RedpandaTest):
     """
-    This tests simulates a large number of consumers trying to commit consumer 
-    group offsets. The test doesn't produce or fetch any messages, 
-    it just stress tests OffsetCommit requests and validates the final 
+    This tests simulates a large number of consumers trying to commit consumer
+    group offsets. The test doesn't produce or fetch any messages,
+    it just stress tests OffsetCommit requests and validates the final
     state of the consumer group.
     """
     def __init__(self, test_context):
@@ -1598,7 +1599,15 @@ class ConsumerGroupOffsetResetTest(RedpandaTest):
                                  "compacted_log_segment_size": 1024 * 1024,
                                  "log_compaction_interval_ms": 1000,
                                  "group_offset_retention_sec": 20,
-                             })
+                             },
+                             log_config=LoggingConfig(
+                                 'info', {
+                                     'storage': 'warn',
+                                     'storage-resources': 'warn',
+                                     'storage-gc': 'warn',
+                                     'raft': 'debug',
+                                     'cluster': 'debug',
+                                 }))
 
     def get_group_description(self):
         description = self.admin_client.describe_consumer_groups(
