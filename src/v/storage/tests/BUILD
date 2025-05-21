@@ -405,7 +405,7 @@ redpanda_cc_gtest(
     ],
 )
 
-redpanda_cc_btest(
+redpanda_cc_gtest(
     name = "record_batch_builder_test",
     timeout = "short",
     srcs = [
@@ -418,10 +418,9 @@ redpanda_cc_btest(
         "//src/v/random:generators",
         "//src/v/reflection:adl",
         "//src/v/storage:record_batch_builder",
-        "//src/v/test_utils:seastar_boost",
+        "//src/v/test_utils:gtest",
         "@abseil-cpp//absl/container:btree",
-        "@boost//:test",
-        "@seastar//:testing",
+        "@googletest//:gtest",
     ],
 )
 
