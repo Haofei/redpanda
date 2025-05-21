@@ -75,6 +75,12 @@ parse_schema_version(const ss::sstring& ver) {
              : parse_numerical_schema_version(ver).value();
 }
 
+output_format parse_output_format(const ss::http::request& req) {
+    return parse::query_param<std::optional<ss::sstring>>(req, "format")
+      .and_then(&from_string_view<output_format>)
+      .value_or(output_format::none);
+}
+
 template<ppj::impl::RjsonParseHandler Handler>
 typename ss::future<typename Handler::rjson_parse_result>
 rjson_parse(ss::http::request& req, Handler handler) {
@@ -333,11 +339,7 @@ get_schemas_ids_id(server::request_t rq, server::reply_t rp) {
     parse_accept_header(rq, rp);
     auto id = parse::request_param<schema_id>(*rq.req, "id");
 
-    const auto format_str = parse::query_param<std::optional<ss::sstring>>(
-                              *rq.req, "format")
-                              .value_or("");
-    const auto format = from_string_view<output_format>(format_str)
-                          .value_or(output_format::none);
+    const auto format = parse_output_format(*rq.req);
 
     // With deferred schema validation, there might be a schema that
     // had invalid references. These might have already been posted, so
