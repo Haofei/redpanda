@@ -821,7 +821,6 @@ redpanda_cc_gtest(
         "//src/v/test_utils:gtest",
         "@googletest//:gtest",
         "@seastar",
-        "@seastar//:testing",
     ],
 )
 
