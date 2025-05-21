@@ -943,7 +943,7 @@ class SchemaRegistryEndpoints(RedpandaTest):
 
         # Error codes that may appear during normal API operation, do not
         # indicate an issue with the service
-        acceptable_errors = {409, 422, 404}
+        acceptable_errors = {409, 422, 404, 501}
 
         def accept_response(resp):
             return 200 <= resp.status_code < 300 or resp.status_code in acceptable_errors
@@ -3612,15 +3612,15 @@ class SchemaRegistryTestMethods(SchemaRegistryEndpoints):
         resolved = "resolved"
         test_ids_id(1, schema_proto_def.strip(), format=resolved)
         result_raw = self._get_schemas_ids_id(2, format=resolved)
-        assert result_raw.status_code == 400, \
-                f"expected {400} but got {result_raw.status_code} for id 2 and format '{resolved}'"
+        assert result_raw.status_code == 501, \
+                f"expected {501} but got {result_raw.status_code} for id 2 and format '{resolved}'"
         test_ids_id(3, json_number_schema_def.strip(), format=resolved)
 
         #Test unimplemented format value - ignore extensions
         ignore_extensions = "ignore_extensions"
         result_raw = self._get_schemas_ids_id(1, format=ignore_extensions)
-        assert result_raw.status_code == 400, \
-                f"expected {400} but got {result_raw.status_code} for id 1 and format '{ignore_extensions}'"
+        assert result_raw.status_code == 501, \
+                f"expected {501} but got {result_raw.status_code} for id 1 and format '{ignore_extensions}'"
         test_ids_id(2, schema_avro_def.strip(), format=ignore_extensions)
         test_ids_id(3,
                     json_number_schema_def.strip(),
@@ -3629,8 +3629,8 @@ class SchemaRegistryTestMethods(SchemaRegistryEndpoints):
         #Test unimplemented format value - ignore serialized
         serialized = "serialized"
         result_raw = self._get_schemas_ids_id(1, format=serialized)
-        assert result_raw.status_code == 400, \
-                f"expected {400} but got {result_raw.status_code} for id 1 and format '{serialized}'"
+        assert result_raw.status_code == 501, \
+                f"expected {501} but got {result_raw.status_code} for id 1 and format '{serialized}'"
         test_ids_id(2, schema_avro_def.strip(), format=serialized)
         test_ids_id(3, json_number_schema_def.strip(), format=serialized)
 

@@ -140,7 +140,7 @@ struct error_category final : std::error_category {
         case error_code::version_exhausted:
             return reply_error_code::internal_server_error; // 500
         case error_code::format_not_supported:
-            return reply_error_code::bad_request; // 400
+            return reply_error_code::not_implemented; // 501
         }
         return {};
     }
