@@ -438,6 +438,7 @@ redpanda_cc_btest(
         ":disk_log_builder",
         "//src/v/model",
         "//src/v/test_utils:seastar_boost",
+        "@boost//:range",
         "@seastar//:testing",
     ],
 )
@@ -512,6 +513,7 @@ redpanda_cc_btest(
         "//src/v/storage:record_batch_builder",
         "//src/v/test_utils:random_bytes",
         "//src/v/test_utils:seastar_boost",
+        "@boost//:range",
         "@boost//:test",
         "@seastar",
         "@seastar//:testing",

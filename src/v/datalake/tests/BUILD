@@ -333,6 +333,7 @@ redpanda_cc_gtest(
         "//src/v/model",
         "//src/v/storage:record_batch_builder",
         "//src/v/test_utils:gtest",
+        "@boost//:range",
         "@fmt",
         "@googletest//:gtest",
         "@seastar",

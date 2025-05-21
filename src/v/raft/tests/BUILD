@@ -468,6 +468,7 @@ redpanda_cc_btest(
         "//src/v/raft",
         "//src/v/test_utils:fixture",
         "//src/v/test_utils:seastar_boost",
+        "@boost//:range",
         "@boost//:test",
         "@seastar",
         "@seastar//:testing",

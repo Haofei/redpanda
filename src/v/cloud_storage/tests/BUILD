@@ -508,6 +508,7 @@ redpanda_cc_gtest(
         "//src/v/utils:lazy_abort_source",
         "//src/v/utils:retry_chain_node",
         "//src/v/utils:stream_provider",
+        "@boost//:range",
         "@googletest//:gtest",
         "@seastar",
         "@seastar//:testing",
