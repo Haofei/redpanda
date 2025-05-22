@@ -28,6 +28,7 @@
 
 #include <seastar/util/defer.hh>
 
+#include <boost/range/irange.hpp>
 #include <gmock/gmock.h>
 #include <gtest/gtest.h>
 

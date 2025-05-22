@@ -23,6 +23,7 @@
 #include <seastar/core/gate.hh>
 #include <seastar/core/sharded.hh>
 
+#include <boost/range/irange.hpp>
 #include <boost/test/tools/old/interface.hpp>
 
 #include <utility>
