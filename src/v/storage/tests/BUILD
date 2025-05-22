@@ -40,7 +40,7 @@ redpanda_test_cc_library(
         "//src/v/features",
         "//src/v/random:generators",
         "//src/v/storage",
-        "//src/v/test_utils:seastar_boost",
+        "@googletest//:gtest",
     ],
 )
 
@@ -310,7 +310,7 @@ redpanda_cc_gtest(
     ],
 )
 
-redpanda_cc_btest(
+redpanda_cc_gtest(
     name = "kvstore_test",
     timeout = "short",
     srcs = [
@@ -322,10 +322,10 @@ redpanda_cc_btest(
         "//src/v/random:generators",
         "//src/v/reflection:adl",
         "//src/v/storage",
+        "//src/v/test_utils:gtest",
         "//src/v/test_utils:random_bytes",
-        "//src/v/test_utils:seastar_boost",
+        "@googletest//:gtest",
         "@seastar",
-        "@seastar//:testing",
     ],
 )
 
