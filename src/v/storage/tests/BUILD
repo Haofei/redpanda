@@ -499,7 +499,7 @@ redpanda_cc_gtest(
     ],
 )
 
-redpanda_cc_btest(
+redpanda_cc_gtest(
     name = "offset_translator_tests",
     timeout = "moderate",
     srcs = [
@@ -513,10 +513,10 @@ redpanda_cc_btest(
         "//src/v/random:generators",
         "//src/v/storage",
         "//src/v/storage:record_batch_builder",
+        "//src/v/test_utils:gtest",
         "//src/v/test_utils:random_bytes",
-        "//src/v/test_utils:seastar_boost",
-        "@boost//:range",
-        "@boost//:test",
+        "@fmt",
+        "@googletest//:gtest",
         "@seastar",
         "@seastar//:testing",
     ],
