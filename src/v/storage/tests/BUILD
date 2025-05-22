@@ -345,7 +345,7 @@ redpanda_cc_btest(
     ],
 )
 
-redpanda_cc_btest(
+redpanda_cc_gtest(
     name = "backlog_controller_test",
     timeout = "short",
     srcs = [
@@ -354,7 +354,8 @@ redpanda_cc_btest(
     deps = [
         "//src/v/base",
         "//src/v/storage",
-        "//src/v/test_utils:seastar_boost",
+        "//src/v/test_utils:gtest",
+        "@googletest//:gtest",
         "@seastar",
     ],
 )
