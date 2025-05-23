@@ -826,7 +826,7 @@ redpanda_cc_gtest(
     ],
 )
 
-redpanda_cc_btest(
+redpanda_cc_gtest(
     name = "batch_consumer_utils_test",
     timeout = "short",
     srcs = [
@@ -838,10 +838,9 @@ redpanda_cc_btest(
         "//src/v/storage",
         "//src/v/storage/tests:disk_log_builder",
         "//src/v/test_utils:fixture",
-        "//src/v/test_utils:seastar_boost",
-        "@boost//:test",
+        "//src/v/test_utils:gtest",
+        "@googletest//:gtest",
         "@seastar",
-        "@seastar//:testing",
     ],
 )
 
