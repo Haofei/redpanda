@@ -110,7 +110,8 @@ controller::controller(
   ss::sharded<cloud_storage::remote>& cloud_storage_api,
   ss::sharded<cloud_storage::cache>& cloud_cache,
   ss::sharded<node_status_table>& node_status_table,
-  ss::sharded<cluster::metadata_cache>& metadata_cache)
+  ss::sharded<cluster::metadata_cache>& metadata_cache,
+  ss::scheduling_group scheduling_group)
   : _config_preload(std::move(config_preload))
   , _connections(ccache)
   , _partition_manager(pm)
@@ -129,7 +130,8 @@ controller::controller(
   , _cloud_cache(cloud_cache)
   , _node_status_table(node_status_table)
   , _metadata_cache(metadata_cache)
-  , _probe(*this) {}
+  , _probe(*this)
+  , _scheduling_group(scheduling_group) {}
 
 // Explicit destructor in the .cc file just to avoid bloating the header with
 // includes for destructors of all its members (e.g. the metadata uploader).

@@ -1713,7 +1713,8 @@ void application::wire_up_redpanda_services(
       std::ref(cloud_storage_api),
       std::ref(shadow_index_cache),
       std::ref(node_status_table),
-      std::ref(metadata_cache));
+      std::ref(metadata_cache),
+      sched_groups.cluster_sg());
     controller->wire_up().get();
 
     if (config::node().recovery_mode_enabled()) {
