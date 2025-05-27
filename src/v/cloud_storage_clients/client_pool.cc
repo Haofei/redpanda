@@ -540,7 +540,13 @@ void client_pool::populate_client_pool() {
         _pool.emplace_back(make_client());
     }
 
-    _cvar.signal();
+    // Be defensive in checking that we properly synchronized access to `_pool`
+    // and `_cvar`. Before populate_client_pool() is called, we do not expect
+    // anyone to check the size of the pool or wait on the condition variable.
+    vassert(
+      !_cvar.has_waiters(),
+      "This is a bug: _cvar is not expected to have waiters at this point. "
+      "Missing synchronization?");
 }
 
 client_pool::http_client_ptr client_pool::make_client() const noexcept {
