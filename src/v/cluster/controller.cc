@@ -207,8 +207,9 @@ ss::future<> controller::wire_up() {
             }));
       })
       .then([this] {
-          return _tp_state.start(ss::sharded_parameter(
-            [this] { return std::ref(_data_migrated_resources.local()); }));
+          return _tp_state.start(ss::sharded_parameter([this] {
+              return std::ref(_data_migrated_resources.local());
+          }));
       })
       .then([this] {
           return _partition_balancer_state.start_single(
@@ -632,7 +633,6 @@ ss::future<> controller::start(
       std::ref(_tp_state),
       std::ref(_shard_table),
       std::ref(_connections),
-      std::ref(_hm_frontend),
       std::ref(_members_table),
       std::ref(_partition_balancer),
       std::ref(_partition_manager),
