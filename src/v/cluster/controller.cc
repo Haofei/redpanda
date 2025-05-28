@@ -655,7 +655,6 @@ ss::future<> controller::start(
       config::shard_local_cfg().partition_autobalancing_concurrent_moves.bind(),
       std::ref(_tp_state),
       std::ref(_tp_frontend),
-      std::ref(_partition_allocator),
       std::ref(_partition_leaders),
       std::ref(_members_table),
       std::ref(_as));
