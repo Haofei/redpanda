@@ -284,7 +284,6 @@ ss::future<> controller::start(
     co_await _recovery_manager.start_single(
       std::ref(_as),
       std::ref(_stm),
-      std::ref(_feature_table),
       std::ref(_cloud_storage_api),
       std::ref(_recovery_table),
       std::ref(_storage),
