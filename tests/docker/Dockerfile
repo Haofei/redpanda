@@ -347,10 +347,6 @@ COPY --chown=0:0 --chmod=0755 tests/setup.py /root/tests/
 RUN python3 -m pip install --upgrade --force pip && \
     python3 -m pip install --force --no-cache-dir --no-binary confluent-kafka -e /root/tests/
 
-# seastar addrress to line utility depends on 'file' pkg
-RUN apt update && \
-    apt install -y file && \
-    rm -rf /var/lib/apt/lists/*
 COPY --chown=0:0 --chmod=0755 tests/docker/ducktape-deps/addr2line /
 RUN /addr2line && \
     rm /addr2line
