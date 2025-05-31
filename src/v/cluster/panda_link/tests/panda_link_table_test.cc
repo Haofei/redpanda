@@ -12,6 +12,7 @@
 #include "cluster/controller_snapshot.h"
 #include "cluster/panda_link/table.h"
 #include "cluster/panda_link/tests/utils.h"
+#include "cluster/types.h"
 #include "panda_link/model/types.h"
 #include "test_utils/test.h"
 
@@ -65,6 +66,12 @@ TEST_F_CORO(panda_link_table_test, reset_links) {
     cluster::controller_snapshot snap2;
     co_await _table.local().fill_snapshot(snap2);
     EXPECT_EQ(snap2.panda_links.links, links);
+
+    chunked_vector<id_t> expected_ids = {id_t(1), id_t(2)};
+    std::ranges::sort(expected_ids);
+    auto all_ids = _table.local().get_all_link_ids();
+    std::ranges::sort(all_ids);
+    EXPECT_EQ(all_ids, expected_ids);
 }
 
 TEST_F_CORO(panda_link_table_test, reset_links_duplicate_name) {

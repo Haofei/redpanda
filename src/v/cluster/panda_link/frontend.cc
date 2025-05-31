@@ -15,9 +15,12 @@
 #include "cluster/logger.h"
 #include "cluster/partition_leaders_table.h"
 #include "rpc/connection_cache.h"
-#include "strings/utf8.h"
 
 namespace cluster::panda_link {
+
+using ::panda_link::model::id_t;
+using ::panda_link::model::metadata;
+using ::panda_link::model::name_t;
 
 using mutation_result = frontend::mutation_result;
 
@@ -98,6 +101,20 @@ frontend::register_for_updates(notification_callback cb) {
 
 void frontend::unregister_for_updates(notification_id id) {
     _table->unregister_for_updates(id);
+}
+
+std::optional<std::reference_wrapper<const metadata>>
+frontend::find_link_by_id(id_t id) const {
+    return _table->find_link_by_id(id);
+}
+
+std::optional<std::reference_wrapper<const metadata>>
+frontend::find_link_by_name(const name_t& name) const {
+    return _table->find_link_by_name(name);
+}
+
+chunked_vector<id_t> frontend::get_all_link_ids() const {
+    return _table->get_all_link_ids();
 }
 
 ss::future<mutation_result> frontend::do_mutation(

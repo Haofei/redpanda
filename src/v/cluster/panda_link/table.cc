@@ -106,6 +106,14 @@ std::optional<id_t> table::find_id_by_name(const name_t& name) const {
     return it->second;
 }
 
+chunked_vector<id_t> table::get_all_link_ids() const {
+    auto keys = _link_metadata | std::views::transform([](const auto& pair) {
+                    return pair.first;
+                });
+
+    return {keys.begin(), keys.end()};
+}
+
 bool table::is_batch_applicable(const model::record_batch& b) const {
     return b.header().type == model::record_batch_type::panda_link;
 }

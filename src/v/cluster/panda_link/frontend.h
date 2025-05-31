@@ -56,6 +56,14 @@ public:
     notification_id register_for_updates(notification_callback);
     void unregister_for_updates(notification_id);
 
+    std::optional<std::reference_wrapper<const ::panda_link::model::metadata>>
+    find_link_by_id(::panda_link::model::id_t id) const;
+
+    std::optional<std::reference_wrapper<const ::panda_link::model::metadata>>
+    find_link_by_name(const ::panda_link::model::name_t& name) const;
+
+    chunked_vector<::panda_link::model::id_t> get_all_link_ids() const;
+
 private:
     ss::future<mutation_result>
       do_mutation(panda_link_cmd, model::timeout_clock::time_point);

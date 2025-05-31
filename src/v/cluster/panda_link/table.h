@@ -52,6 +52,9 @@ public:
     std::optional<::panda_link::model::id_t>
     find_id_by_name(const ::panda_link::model::name_t& name) const;
 
+    /// Returns a list of all link IDs in the table
+    chunked_vector<::panda_link::model::id_t> get_all_link_ids() const;
+
     bool is_batch_applicable(const model::record_batch&) const;
     ss::future<std::error_code> apply_update(model::record_batch);
 
