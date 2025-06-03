@@ -1371,9 +1371,12 @@ ss::future<> disk_log_impl::housekeeping(housekeeping_config cfg) {
 ss::future<> disk_log_impl::do_compact(
   compaction_config compact_cfg,
   std::optional<model::offset> new_start_offset) {
-    if (
-      !config::shard_local_cfg().log_compaction_use_sliding_window()
-      || (compact_cfg.hash_key_map && compact_cfg.hash_key_map->capacity() == 0)) {
+    auto use_adjacent_merge
+      = !config::shard_local_cfg().log_compaction_use_sliding_window()
+        || config::shard_local_cfg().log_compaction_pause_use_sliding_window()
+        || (compact_cfg.hash_key_map && compact_cfg.hash_key_map->capacity() == 0);
+
+    if (use_adjacent_merge) {
         co_return co_await adjacent_merge_compact(
           compact_cfg, new_start_offset);
     }
