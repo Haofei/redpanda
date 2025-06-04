@@ -70,10 +70,14 @@ void serialize_json_string(Iter it, Iter end, iobuf* buf) {
             return static_cast<unsigned char>(*it++);
         };
         // NOLINTBEGIN(*-magic-numbers)
+        auto is_utf8_continuation = [](unsigned char c) {
+            // Check that the byte follows the pattern (10xxxxxx)
+            return (c & 0xC0u) == 0x80;
+        };
         // 2-byte sequence (110xxxxx 10xxxxxx)
         if ((c & 0xE0u) == 0xC0) {
             unsigned char c1 = next_char_or_invalid_utf8();
-            if ((c1 & 0xC0u) == 0x80) {
+            if (is_utf8_continuation(c1)) {
                 codepoint = ((c & 0x1Fu) << 6u) | (c1 & 0x3Fu);
                 // Check for overlong encoding
                 valid = codepoint >= 0x80;
@@ -82,7 +86,7 @@ void serialize_json_string(Iter it, Iter end, iobuf* buf) {
         } else if ((c & 0xF0u) == 0xE0) {
             unsigned char c1 = next_char_or_invalid_utf8();
             unsigned char c2 = next_char_or_invalid_utf8();
-            if ((c1 & 0xC0u) == 0x80 && (c2 & 0xC0u) == 0x80) {
+            if (is_utf8_continuation(c1) && is_utf8_continuation(c2)) {
                 codepoint = ((c & 0x0Fu) << 12u) | ((c1 & 0x3Fu) << 6u)
                             | (c2 & 0x3Fu);
                 // Check for UTF-16 surrogates or overlong encoding
@@ -95,8 +99,8 @@ void serialize_json_string(Iter it, Iter end, iobuf* buf) {
             unsigned char c2 = next_char_or_invalid_utf8();
             unsigned char c3 = next_char_or_invalid_utf8();
             if (
-              (c1 & 0xC0u) == 0x80 && (c2 & 0xC0u) == 0x80
-              && (c3 & 0xC0u) == 0x80) {
+              is_utf8_continuation(c1) && is_utf8_continuation(c2)
+              && is_utf8_continuation(c3)) {
                 codepoint = ((c & 0x07u) << 18u) | ((c1 & 0x3Fu) << 12u)
                             | ((c2 & 0x3Fu) << 6u) | (c3 & 0x3Fu);
                 // Check for valid range (u+10000 through u+10FFFF)
