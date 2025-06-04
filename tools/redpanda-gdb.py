@@ -591,42 +591,35 @@ def absl_get_nodes(val):
 
 
 class absl_flat_hash_map:
-    signed_byte_t = gdb.lookup_type('int8_t')
-
+    """
+    This is based off of absl::lts_20230802. This can be inspected dynamically
+    by looking at the container type derived in the constructor and then we can
+    use that to dynamically select different implementations when it comes time
+    to revise this implementation for a newer version of abseil.
+    """
     def __init__(self, p):
         self.map = p
-        container_type = self.map.type.strip_typedefs()
-        self.kt = container_type.template_argument(0)
-        self.vt = container_type.template_argument(1)
-        self._begin()
+        self.container_type = self.map.type.strip_typedefs()
+        self.kt = self.container_type.template_argument(0)
+        self.vt = self.container_type.template_argument(1)
+        self.settings = self.map["settings_"]["value"]
 
     def capacity(self):
-        return self.map["capacity_"]
+        return self.settings["capacity_"]
 
     def __len__(self):
-        return self.map["size_"]
-
-    def _begin(self):
-        self.it_ctrl = self.map["settings_"]
-        self.it_slot = self.map["slots_"]
-        self._skip_empty_or_deleted()
+        return self.settings["compressed_tuple_"]["value"]
 
     def __iter__(self):
-        while self.it_ctrl != (self.map["ctrl_"] + self.map["capacity_"]):
-            value = self.it_slot["value"]
-            yield value["first"], value["second"]
-            self.it_ctrl += 1
-            self.it_slot += 1
-            self._skip_empty_or_deleted()
+        slot_type = lookup_type(f"{self.container_type}::slot_type").strip_typedefs()
+        control = self.settings["control_"]
+        slots = self.settings["slots_"].cast(slot_type.pointer())
 
-    def _skip_empty_or_deleted(self):
-        while self._ctrl_value() < -1:
-            self.it_ctrl += 1
-            self.it_slot += 1
-
-    def _ctrl_value(self):
-        return self.it_ctrl.cast(self.signed_byte_t.pointer()).dereference()
-
+        for i in range(self.capacity()):
+            if int(control[i]) < 0:
+                continue
+            slot = slots[i]
+            yield slot["value"]["first"], slot["value"]["second"]
 
 def has_enable_lw_shared_from_this(type):
     for f in type.fields():
