@@ -1817,8 +1817,9 @@ class redpanda_partitions(gdb.Command):
         gdb.Command.__init__(self, 'redpanda partitions', gdb.COMMAND_USER,
                              gdb.COMPLETE_COMMAND)
 
-    def print_partitions(self):
-        for i in range(cpus()):
+    def print_partitions(self, cpu=None):
+        cpu_list = range(cpus()) if cpu is None else [int(cpu)]
+        for i in cpu_list:
             print(f"# Partitions on shard {i}")
             pm_ptr = find_partition_manager(i)
 
@@ -1835,7 +1836,7 @@ class redpanda_partitions(gdb.Command):
                     print("Skipping ntp {}: {}".format(model_ntp(ntp), e))
 
     def invoke(self, arg, from_tty):
-        self.print_partitions()
+        self.print_partitions(arg)
 
 
 class redpanda_cloud_clients(gdb.Command):
