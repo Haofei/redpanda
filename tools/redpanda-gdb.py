@@ -657,6 +657,15 @@ class seastar_lw_shared_ptr():
             return self.ref['_p'].cast(self._no_esft_type())['_value'].address
 
 
+class seastar_basic_rwlock():
+    def __init__(self, ref):
+        self.ref = ref
+        self.count = ref["_sem"]["_count"]
+
+    def __repr__(self):
+        return f"basic_rwlock(count={self.count})"
+
+
 class seastar_shared_ptr():
     def __init__(self, ref):
         self.ref = ref
