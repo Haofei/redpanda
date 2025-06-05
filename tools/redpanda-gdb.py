@@ -1690,9 +1690,11 @@ class ntp_archiver:
         self.last_marked_clean_time = time_point(
             ref['_last_marked_clean_time'])
         self.gate_count = ref['_gate']['_count']
+        self.paused = ref["_paused"]
 
     def __repr__(self):
-        return f"ntp_archiver(mutex={self.mutex}, last_upload_time={self.last_upload_time}, uploads_active={self.uploads_active}, last_marked_clean_time={self.last_marked_clean_time}, gate_count={self.gate_count})"
+        return f"ntp_archiver(mutex={self.mutex}, last_upload_time={self.last_upload_time}, uploads_active={self.uploads_active}, last_marked_clean_time={self.last_marked_clean_time}, gate_count={self.gate_count}, paused={self.paused})"
+
 
 
 class redpanda_partition:
