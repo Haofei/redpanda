@@ -35,6 +35,54 @@ static constexpr uint16_t max_retry_count = std::numeric_limits<uint16_t>::max()
                                             - 1;
 
 template<class Clock>
+basic_retry_chain_node<Clock>::basic_retry_chain_node(
+  basic_retry_chain_context<Clock>& ctx)
+  : _id(fiber_count++) // generate new head id
+  , _backoff{0}
+  , _deadline{time_point::min()}
+  , _parent(&ctx) {}
+
+template<class Clock>
+basic_retry_chain_node<Clock>::basic_retry_chain_node(
+  basic_retry_chain_context<Clock>& ctx,
+  time_point deadline,
+  duration backoff)
+  : _id(fiber_count++) // generate new head id
+  , _backoff{std::chrono::duration_cast<std::chrono::milliseconds>(backoff)}
+  , _deadline{deadline}
+  , _parent(&ctx) {
+    vassert(
+      backoff <= milliseconds_uint16_t::max(),
+      "Initial backoff {} is too large",
+      backoff);
+}
+
+template<class Clock>
+basic_retry_chain_node<Clock>::basic_retry_chain_node(
+  basic_retry_chain_context<Clock>& ctx,
+  time_point deadline,
+  duration backoff,
+  retry_strategy retry_strategy)
+  : basic_retry_chain_node(ctx, deadline, backoff) {
+    _retry_strategy = retry_strategy;
+}
+
+template<class Clock>
+basic_retry_chain_node<Clock>::basic_retry_chain_node(
+  basic_retry_chain_context<Clock>& ctx, duration timeout, duration backoff)
+  : basic_retry_chain_node(ctx, Clock::now() + timeout, backoff) {}
+
+template<class Clock>
+basic_retry_chain_node<Clock>::basic_retry_chain_node(
+  basic_retry_chain_context<Clock>& ctx,
+  duration timeout,
+  duration backoff,
+  retry_strategy retry_strategy)
+  : basic_retry_chain_node(ctx, timeout, backoff) {
+    _retry_strategy = retry_strategy;
+}
+
+template<class Clock>
 basic_retry_chain_node<Clock>::basic_retry_chain_node(ss::abort_source& as)
   : _id(fiber_count++) // generate new head id
   , _backoff{0}
@@ -195,6 +243,8 @@ template<class Clock>
 ss::abort_source* basic_retry_chain_node<Clock>::get_abort_source() {
     if (std::holds_alternative<ss::abort_source*>(_parent)) {
         return std::get<ss::abort_source*>(_parent);
+    } else if (std::holds_alternative<context_t*>(_parent)) {
+        return &std::get<context_t*>(_parent)->as();
     }
     return nullptr;
 }
@@ -204,6 +254,8 @@ const ss::abort_source*
 basic_retry_chain_node<Clock>::get_abort_source() const {
     if (std::holds_alternative<ss::abort_source*>(_parent)) {
         return std::get<ss::abort_source*>(_parent);
+    } else if (std::holds_alternative<context_t*>(_parent)) {
+        return &std::get<context_t*>(_parent)->as();
     }
     return nullptr;
 }
@@ -296,6 +348,13 @@ typename Clock::duration
 basic_retry_chain_node<Clock>::get_poll_interval() const {
     duration jitter(fast_prng_source() % _backoff.count());
     return _backoff + jitter;
+}
+
+template<class Clock>
+bool basic_retry_chain_node<Clock>::has_retry_chain_context() const {
+    auto root = get_root();
+    return std::holds_alternative<basic_retry_chain_context<Clock>*>(
+      root->_parent);
 }
 
 template<class Clock>
@@ -395,6 +454,16 @@ void basic_retry_chain_node<Clock>::check_abort() const {
     if (as) {
         as->check();
     }
+}
+
+template<class Clock>
+void basic_retry_chain_node<Clock>::maybe_add_trace(
+  const ss::sstring& s) const {
+    auto root = get_root();
+    if (!root->has_retry_chain_context()) {
+        return;
+    }
+    std::get<context_t*>(root->_parent)->add_trace(s);
 }
 
 template<class Clock>

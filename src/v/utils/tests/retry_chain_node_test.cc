@@ -184,3 +184,79 @@ SEASTAR_THREAD_TEST_CASE(check_node_comparison) {
     BOOST_REQUIRE(!r1.same_root(c21));
     BOOST_REQUIRE(!c11.same_root(c21));
 }
+
+SEASTAR_THREAD_TEST_CASE(check_tracing) {
+    ss::logger test_log("rtc_test_log");
+
+    ss::abort_source as;
+    retry_chain_context ctx1("test", as, 0x100);
+
+    retry_chain_node rtc1(ctx1);
+    retry_chain_logger rtc_log1(test_log, rtc1);
+
+    // check that the message is printed if logger is
+    // on trace
+    test_log.set_level(ss::log_level::trace);
+    rtc_log1.trace("first message");
+
+    auto found = ctx1.get_trace_log().find("first message")
+                 != std::string_view::npos;
+    BOOST_REQUIRE(found);
+
+    // check that the message is printed even if the logger is
+    // on info but the message is printed on trace
+    test_log.set_level(ss::log_level::info);
+    rtc_log1.trace("second message");
+
+    found = ctx1.get_trace_log().find("second message")
+            != std::string_view::npos;
+    BOOST_REQUIRE(found);
+
+    std::vector<ss::sstring> actual;
+    std::vector<ss::sstring> expected = {
+      "first message",
+      "second message",
+    };
+    for (const auto& trace : ctx1.traces()) {
+        actual.push_back(trace);
+    }
+    BOOST_REQUIRE_EQUAL_COLLECTIONS(
+      actual.begin(), actual.end(), expected.begin(), expected.end());
+
+    // check that bypass_tracing method works correctly
+    rtc_log1.bypass_tracing([&] {
+        // this shouldn't be added to the trace
+        rtc_log1.trace("unexpected message");
+    });
+
+    found = ctx1.get_trace_log().find("unexpected message")
+            != std::string_view::npos;
+    BOOST_REQUIRE(!found);
+
+    // check that reset works
+    ctx1.reset();
+    found = ctx1.get_trace_log().find("message") != std::string_view::npos;
+    BOOST_REQUIRE(!found);
+
+    // check nested rtc
+    {
+        retry_chain_node rtc2(&rtc1);
+        retry_chain_logger rtc_log2(test_log, rtc2);
+
+        rtc_log2.trace("third message");
+    }
+    found = ctx1.get_trace_log().find("third message")
+            != std::string_view::npos;
+    BOOST_REQUIRE(found);
+
+    // check truncation
+    for (int i = 0; i < 20; i++) {
+        rtc_log1.trace("long message");
+    }
+    found = ctx1.get_trace_log().find("truncated") != std::string_view::npos;
+    BOOST_REQUIRE(found);
+
+    // check abort source functionality
+    ctx1.as().request_abort();
+    BOOST_REQUIRE_THROW(rtc1.check_abort(), ss::abort_requested_exception);
+}
