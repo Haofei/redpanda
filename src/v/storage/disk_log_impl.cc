@@ -530,7 +530,7 @@ ss::future<> disk_log_impl::adjacent_merge_compact(
             return false;
         }
 
-        if (s.has_compactible_offsets(cfg)) {
+        if (s.is_compactible(cfg)) {
             vlog(
               gclog.debug,
               "[{}] segment {} stable offs {}, max compactible {}, "
@@ -633,11 +633,11 @@ segment_set disk_log_impl::find_sliding_range(
         _last_compaction_window_start_offset.reset();
     }
 
-    // Collect all segments that have stable data.
+    // Collect all segments that are compactible.
     segment_set::underlying_t buf;
     for (const auto& seg : _segs) {
-        if (seg->has_appender() || !seg->has_compactible_offsets(cfg)) {
-            // Stop once we get to an unstable segment.
+        if (seg->has_appender() || !seg->is_compactible(cfg)) {
+            // Stop once we get to an uncompactible segment.
             break;
         }
         if (
@@ -962,7 +962,7 @@ disk_log_impl::find_adjacent_compaction_range(const compaction_config& cfg) {
     const auto unstable = std::any_of(
       range.first, range.second, [&cfg](ss::lw_shared_ptr<segment>& seg) {
           return !seg->finished_self_compaction() || seg->has_appender()
-                 || !seg->has_compactible_offsets(cfg);
+                 || !seg->is_compactible(cfg);
       });
     if (unstable) {
         return std::nullopt;
@@ -1341,7 +1341,7 @@ ss::future<> disk_log_impl::housekeeping(housekeeping_config cfg) {
     auto new_start_offset = co_await do_gc(cfg.gc);
 
     /*
-     * comapction. could factor out into a public interface like gc/retention if
+     * Compaction. Could factor out into a public interface like gc/retention if
      * there is a need to run it separately.
      */
     if (config().is_compacted() && !_segs.empty()) {
