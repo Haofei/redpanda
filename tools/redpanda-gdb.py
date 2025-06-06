@@ -1321,7 +1321,7 @@ class boost_intrusive_list:
 
     def __len__(self):
         return len(list(iter(self)))
-    
+
     def __repr__(self):
         return ",".join([str(x) for x in self])
 
@@ -1693,14 +1693,16 @@ class time_point:
     def __repr__(self):
         return f"time_point(value={self.value}, time_from_now={self.time_from_now/1000000}ms)"
 
-class cloud_storage_remote:
 
+class cloud_storage_remote:
     def __init__(self, ref):
         self.ref = ref
         self.gate_count = ref['_gate']['_count']
 
     def __repr__(self):
         return f"cloud_storage_remote(gate_count={self.gate_count})"
+
+
 class ntp_archiver:
     def __init__(self, ref, shard=None):
         self.ref = ref
@@ -1714,8 +1716,7 @@ class ntp_archiver:
         self.leader_cond = condition_variable(ref['_leader_cond'])
         self.flush_cond = condition_variable(ref['_flush_cond'])
         self.remote = cloud_storage_remote(ref['_remote'].referenced_value())
-    
-    
+
     def __repr__(self):
         return f"ntp_archiver(mutex={self.mutex}, last_upload_time={self.last_upload_time}, uploads_active={self.uploads_active}, last_marked_clean_time={self.last_marked_clean_time}, gate_count={self.gate_count}, paused={self.paused}, leader_cond={self.leader_cond}, flush_cond={self.flush_cond}, remote={self.remote})"
 
@@ -1740,18 +1741,22 @@ class rm_stm:
     def __repr__(self):
         return f"rm_stm(state_lock={self.state_lock}, last_known_lso={self.last_known_lso})"
 
+
 class consensus:
     def __init__(self, ref):
         self.ref = ref
         self.term = ref['_term']
         self.confirmed_term = ref['_confirmed_term']
         self.v_state = ref['_vstate']
+
     # vote state reference: leader = 2, follower = 1, candidate = 0
     def is_leader(self):
         return self.v_state == 2 and self.term == self.confirmed_term
-    
+
     def __repr__(self):
         return f"consensus(term={self.term}, confirmed_term={self.confirmed_term}, v_state={self.v_state}, is_leader={self.is_leader()})"
+
+
 class redpanda_partition:
     def __init__(self, ptr):
         self.ptr = ptr
@@ -1781,7 +1786,8 @@ class redpanda_partitions(gdb.Command):
                     p = redpanda_partition(
                         seastar_lw_shared_ptr(v['value']['second']).get())
                     print("ntp: {}\n {}\n, {}\n, {}\n {}\n".format(
-                        model_ntp(ntp), p.archiver, p.archival_meta, p.rm, p.raft))
+                        model_ntp(ntp), p.archiver, p.archival_meta, p.rm,
+                        p.raft))
                 except Exception as e:
                     ntp = v['value']['first']
                     print("Skipping ntp {}: {}".format(model_ntp(ntp), e))
