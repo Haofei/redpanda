@@ -1083,6 +1083,13 @@ def find_partition_manager(shard=None):
         '__begin_'][shard]['service']['_p']
 
 
+def find_cloud_storage_clients(shard=None):
+    if shard is None:
+        shard = current_shard()
+    return gdb.parse_and_eval('debug::app')['cloud_storage_clients'][
+        '_instances']['__begin_'][shard]['service']['_p']
+
+
 class index_state:
     def __init__(self, ref):
         self.ref = ref
@@ -1694,6 +1701,40 @@ class time_point:
         return f"time_point(value={self.value}, time_from_now={self.time_from_now/1000000}ms)"
 
 
+class cloud_client_ptr:
+    def __init__(self, shared_ptr):
+        self.client_raw_ptr = seastar_shared_ptr(shared_ptr).get()
+        self.client = self.client_raw_ptr.dereference()
+
+    def __repr__(self):
+
+        return f"client({self.client_raw_ptr}, {self.client})"
+
+
+class cloud_client_lease:
+    def __init__(self, ref):
+        self.ref = ref
+        self.client = cloud_client_ptr(ref['client'])
+
+    def __repr__(self):
+        return f"lease(client={self.client})"
+
+
+class cloud_client_pool:
+    def __init__(self, ref):
+        self.ref = ref
+        self.pool = [
+            cloud_client_ptr(c) for c in seastar_circular_buffer(ref['_pool'])
+        ]
+        self.leased = [
+            cloud_client_lease(l)
+            for l in boost_intrusive_list(ref['_leased'], "_hook")
+        ]
+
+    def __repr__(self):
+        return f"client_pool(pool={self.pool}, leased={self.leased})"
+
+
 class cloud_storage_remote:
     def __init__(self, ref):
         self.ref = ref
@@ -1794,6 +1835,24 @@ class redpanda_partitions(gdb.Command):
 
     def invoke(self, arg, from_tty):
         self.print_partitions()
+
+
+class redpanda_cloud_clients(gdb.Command):
+    def __init__(self):
+        gdb.Command.__init__(self, 'redpanda cloud-clients', gdb.COMMAND_USER,
+                             gdb.COMPLETE_NONE, True)
+
+    def invoke(self, arg, from_tty):
+        for i in range(cpus()):
+            client_pool_ref = find_cloud_storage_clients(i)
+            client_pool = cloud_client_pool(client_pool_ref)
+            print(f"Client pool on shard {i}")
+            print(f"  Available clients ({len(client_pool.pool)}):")
+            for c in client_pool.pool:
+                print(f"    {c}")
+            print(f"  Leased ({len(client_pool.leased)}):")
+            for l in client_pool.leased:
+                print(f"    {l}")
 
 
 class iobuf:
@@ -2761,3 +2820,4 @@ redpanda_task_histogram()
 redpanda_tasks()
 redpanda_heapprof()
 redpanda_partitions()
+redpanda_cloud_clients()
