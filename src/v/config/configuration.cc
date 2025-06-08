@@ -370,6 +370,14 @@ configuration::configuration()
       "progress.",
       {.needs_restart = needs_restart::no, .visibility = visibility::tunable},
       30s)
+  , topic_label_aggregation_limit(
+      *this,
+      "topic_label_aggregation_limit",
+      "When the number of topics exceeds this limit, the topic label in "
+      "generated metrics will be aggregated. If `nullopt`, then there is no "
+      "limit.",
+      {.needs_restart = needs_restart::no, .visibility = visibility::tunable},
+      std::nullopt)
   , admin_api_require_auth(
       *this,
       "admin_api_require_auth",

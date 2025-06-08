@@ -156,6 +156,7 @@ struct configuration final : public config_store {
     bounded_property<uint32_t> topic_partitions_memory_allocation_percent;
     property<std::chrono::milliseconds>
       partition_manager_shutdown_watchdog_timeout;
+    property<std::optional<size_t>> topic_label_aggregation_limit;
 
     // Admin API
     property<bool> admin_api_require_auth;
