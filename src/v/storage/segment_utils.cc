@@ -37,6 +37,7 @@
 #include "storage/scoped_file_tracker.h"
 #include "storage/segment.h"
 #include "storage/types.h"
+#include "utils/file_io.h"
 
 #include <seastar/core/coroutine.hh>
 #include <seastar/core/do_with.hh>
@@ -820,17 +821,19 @@ make_concatenated_segment(
         }
     }
 
+    auto index_path = path.to_index();
     auto compacted_idx_path = path.to_compacted_index();
-    if (co_await ss::file_exists(ss::sstring(compacted_idx_path))) {
-        co_await ss::remove_file(ss::sstring(compacted_idx_path));
-    }
+
+    // Remove the segment, index, and compacted index (ignoring failures if they
+    // do not exist)
+    co_await ss::when_all_succeed(
+      maybe_remove_file(path.string()),
+      maybe_remove_file(index_path.string()),
+      maybe_remove_file(compacted_idx_path.string()));
+
     co_await write_concatenated_compacted_index(
       compacted_idx_path, segments, cfg, resources);
 
-    // concatenation process
-    if (co_await ss::file_exists(path.string())) {
-        co_await ss::remove_file(path.string());
-    }
     auto writer = co_await make_writer_handle(path, cfg.sanitizer_config);
     auto output = co_await ss::make_file_output_stream(std::move(writer));
     for (auto& segment : segments) {
@@ -865,11 +868,6 @@ make_concatenated_segment(
       cfg.sanitizer_config);
     co_await reader->load_size();
 
-    // build an empty index for the segment
-    auto index_name = path.to_index();
-    if (co_await ss::file_exists(index_name.string())) {
-        co_await ss::remove_file(index_name.string());
-    }
     // start the new index with the newest of the broker_timestamps from the
     // segments
     auto new_broker_timestamp = [&]() -> std::optional<model::timestamp> {
@@ -921,7 +919,7 @@ make_concatenated_segment(
       [](const auto& s) { return s->index().may_have_tombstone_records(); });
 
     segment_index index(
-      index_name,
+      index_path,
       offsets.get_base_offset(),
       segment_index::default_data_buffer_step,
       feature_table,

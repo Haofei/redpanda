@@ -1085,17 +1085,13 @@ ss::future<compaction_result> disk_log_impl::do_compact_adjacent_segments(
     vlog(gclog.debug, "Final compacted segment {}", replacement);
 
     /*
-     * remove index files. they will be rebuilt by the single segment compaction
-     * operation, and also ensures we examine segments correctly on recovery.
+     * remove index files (ignoring failures if they do not exist). they will be
+     * rebuilt by the single segment compaction operation, and also ensures we
+     * examine segments correctly on recovery.
      */
-    if (co_await ss::file_exists(target->index().path().string())) {
-        co_await ss::remove_file(target->index().path().string());
-    }
-
-    auto compact_index = target->reader().path().to_compacted_index();
-    if (co_await ss::file_exists(compact_index.string())) {
-        co_await ss::remove_file(compact_index.string());
-    }
+    co_await ss::when_all_succeed(
+      maybe_remove_file(target->index().path().string()),
+      maybe_remove_file(target->reader().path().to_compacted_index().string()));
 
     // Evict segment readers and prevent new ones from being added to the cache.
     std::vector<ss::future<readers_cache::range_lock_holder>> holder_futs;
