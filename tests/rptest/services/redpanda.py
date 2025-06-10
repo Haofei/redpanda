@@ -4048,6 +4048,7 @@ class RedpandaService(RedpandaServiceBase):
             self.logger.info(
                 f"Decoding backtraces on {node.account.hostname}.")
             cmd = '/opt/scripts/seastar-addr2line'
+            cmd += f" -a /opt/llvm/llvm-addr2line"
             cmd += f" -e {self.find_raw_binary('redpanda')}"
             cmd += f" -f {RedpandaService.STDOUT_STDERR_CAPTURE}"
             cmd += f" > {RedpandaService.BACKTRACE_CAPTURE} 2>&1"
