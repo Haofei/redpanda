@@ -407,13 +407,26 @@ operator<<(std::ostream& os, const resource_pattern_filter::pattern_match&) {
     return os;
 }
 
+std::ostream&
+operator<<(std::ostream& os, resource_pattern_filter::resource_subsystem s) {
+    using resource_subsystem = resource_pattern_filter::resource_subsystem;
+    switch (s) {
+    case resource_subsystem::kafka:
+        return os << "kafka";
+    case resource_subsystem::schema_registry:
+        return os << "schema_registry";
+    }
+    __builtin_unreachable();
+}
+
 std::ostream& operator<<(std::ostream& o, const resource_pattern_filter& f) {
     fmt::print(
       o,
-      "{{ resource: {} name: {} pattern: {} }}",
+      "{{ resource: {} name: {} pattern: {} subsystem: {}}}",
       f._resource,
       f._name,
-      f._pattern);
+      f._pattern,
+      f._subsystem);
     return o;
 }
 
@@ -496,6 +509,19 @@ resource_pattern_filter::to_resource_patterns() const {
 bool resource_pattern_filter::matches(const resource_pattern& pattern) const {
     if (_resource && *_resource != pattern.resource()) {
         return false;
+    }
+
+    switch (_subsystem) {
+    case resource_subsystem::kafka:
+        if (pattern.resource() > resource_type::transactional_id) {
+            return false;
+        }
+        break;
+    case resource_subsystem::schema_registry:
+        if (pattern.resource() <= resource_type::transactional_id) {
+            return false;
+        }
+        break;
     }
 
     if (
