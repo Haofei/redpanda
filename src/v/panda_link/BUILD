@@ -49,3 +49,28 @@ redpanda_cc_library(
     include_prefix = "panda_link",
     visibility = ["//visibility:public"],
 )
+
+redpanda_cc_library(
+    name = "panda_link",
+    srcs = [
+        "service.cc",
+    ],
+    hdrs = [
+        "service.h",
+    ],
+    implementation_deps = [
+        ":impl",
+        ":logger",
+        "//src/v/panda_link/model",
+    ],
+    include_prefix = "panda_link",
+    visibility = ["//visibility:public"],
+    deps = [
+        ":fwd",
+        "//src/v/base",
+        "//src/v/cluster",
+        "//src/v/model",
+        "//src/v/raft",
+        "@seastar",
+    ],
+)
