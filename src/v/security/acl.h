@@ -475,8 +475,8 @@ class acl_host
       envelope<acl_host, serde::version<0>, serde::compat_version<0>> {
 public:
     acl_host() = default;
-    explicit acl_host(const ss::sstring& host)
-      : _addr(host) {}
+    explicit acl_host(ss::sstring host)
+      : _addr(std::move(host)) {}
 
     explicit acl_host(ss::net::inet_address host)
       : _addr(host) {}
