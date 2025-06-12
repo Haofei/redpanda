@@ -526,7 +526,7 @@ bool resource_pattern_filter::matches(const resource_pattern& pattern) const {
     __builtin_unreachable();
 }
 
-void read_nested(
+void read_nested_v0(
   iobuf_parser& in,
   resource_pattern_filter& filter,
   const size_t bytes_left_limit) {
@@ -560,7 +560,7 @@ void read_nested(
     }
 }
 
-void write(iobuf& out, resource_pattern_filter filter) {
+void write_v0(iobuf& out, resource_pattern_filter filter) {
     using serde::write;
 
     using serialized_pattern_type
@@ -581,6 +581,64 @@ void write(iobuf& out, resource_pattern_filter filter) {
     write(out, filter._resource);
     write(out, filter._name);
     write(out, pattern);
+}
+
+namespace {
+[[maybe_unused]] void write_v0_dummy_resource_pattern_filter(iobuf& out) {
+    using serde::write;
+
+    write<std::optional<resource_type>>(out, std::nullopt);
+    write<std::optional<ss::sstring>>(out, std::nullopt);
+    write<std::optional<resource_pattern_filter::serialized_pattern_type>>(
+      out, std::nullopt);
+}
+} // namespace
+
+void acl_binding_filter::serde_write(iobuf& out) const {
+    using serde::write;
+
+    // Wire format for backwards/forwards compatibility:
+    // clang-format off
+    // V0: | serde header | raw resource_pattern_filter | enveloped acl_entry_filter |
+    // V1: | serde header | raw resource_pattern_filter | enveloped acl_entry_filter | enveloped resource_pattern_filter |
+    // V?: | serde header | dummy resource_pattern_filter | enveloped acl_entry_filter | enveloped resource_pattern_filter |
+    // clang-format on
+    //
+    // V1 duplicates resource_pattern_filter (raw + enveloped) to support
+    // migration:
+    // - V0 readers can read the raw field and ignore the enveloped fields
+    // - V1+ readers ignore the raw field and use the enveloped fields
+    // Future version will replace raw field with 3-byte dummy once V0
+    // compatibility is dropped
+
+    // Write actual V0 data for backwards compatibility with old readers
+    write_v0(out, _pattern);
+    // TODO: Switch to dummy write once old readers are no longer supported
+    // (earliest_logical_version > 25.2.1):
+    // write_v0_dummy_resource_pattern_filter(out);
+
+    write(out, _acl);
+    write(out, _pattern);
+}
+
+void acl_binding_filter::serde_read(iobuf_parser& in, const serde::header& h) {
+    using serde::read_nested;
+
+    if (h._version == 0) {
+        // V0: read actual data from the V0 field
+        read_nested_v0(in, _pattern, h._bytes_left_limit);
+    } else {
+        // V1+: read and discard V0 field (written for old reader compatibility)
+        resource_pattern_filter ignored;
+        read_nested_v0(in, ignored, h._bytes_left_limit);
+    }
+
+    _acl = read_nested<decltype(_acl)>(in, h._bytes_left_limit);
+
+    if (h._version >= 1) {
+        // V1+: read actual data from new enveloped field
+        _pattern = read_nested<decltype(_pattern)>(in, h._bytes_left_limit);
+    }
 }
 
 } // namespace security

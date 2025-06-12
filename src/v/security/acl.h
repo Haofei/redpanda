@@ -15,8 +15,12 @@
 #include "model/fundamental.h"
 #include "serde/envelope.h"
 #include "serde/rw/enum.h"
+#include "serde/rw/envelope.h"
+#include "serde/rw/inet_address.h"
+#include "serde/rw/named_type.h"
 #include "serde/rw/optional.h"
 #include "serde/rw/rw.h"
+#include "serde/rw/variant.h"
 #include "utils/named_type.h"
 
 #include <seastar/core/sstring.hh>
@@ -403,12 +407,15 @@ private:
 
 /*
  * A filter for matching resources.
+ *
+ * Note: See acl_binding_filter::serde_write or write_v0 for history on how
+ * serde version 0 of this field was serialized
  */
 class resource_pattern_filter
   : public serde::envelope<
       resource_pattern_filter,
-      serde::version<0>,
-      serde::compat_version<0>> {
+      serde::version<1>,
+      serde::compat_version<1>> {
 public:
     enum class serialized_pattern_type {
         literal = 0,
@@ -426,13 +433,17 @@ public:
         __builtin_unreachable();
     }
 
-    struct pattern_match {
+    struct pattern_match
+      : public serde::
+          envelope<pattern_match, serde::version<0>, serde::compat_version<0>> {
         friend bool operator==(const pattern_match&, const pattern_match&)
           = default;
 
         friend std::ostream& operator<<(std::ostream&, const pattern_match&);
+
+        auto serde_fields() { return std::tie(); }
     };
-    using pattern_filter_type = std::variant<pattern_type, pattern_match>;
+    using pattern_filter_type = serde::variant<pattern_type, pattern_match>;
 
     resource_pattern_filter() = default;
 
@@ -474,12 +485,12 @@ public:
         return H::combine(std::move(h), f._resource, f._name, f._pattern);
     }
 
-    friend void read_nested(
+    friend void read_nested_v0(
       iobuf_parser& in,
       resource_pattern_filter& filter,
       const size_t bytes_left_limit);
 
-    friend void write(iobuf& out, resource_pattern_filter filter);
+    friend void write_v0(iobuf& out, resource_pattern_filter filter);
 
     friend bool
     operator==(const resource_pattern_filter&, const resource_pattern_filter&)
@@ -487,6 +498,8 @@ public:
 
     friend std::ostream&
     operator<<(std::ostream&, const resource_pattern_filter&);
+
+    auto serde_fields() { return std::tie(_resource, _name, _pattern); }
 
 private:
     std::optional<resource_type> _resource;
@@ -563,11 +576,14 @@ private:
 
 /*
  * A filter for matching ACL bindings.
+ *
+ * Note: see acl_binding_filter::serde_write for context on serde version
+ * history
  */
 class acl_binding_filter
   : public serde::envelope<
       acl_binding_filter,
-      serde::version<0>,
+      serde::version<1>,
       serde::compat_version<0>> {
 public:
     acl_binding_filter() = default;
@@ -602,7 +618,8 @@ public:
 
     friend std::ostream& operator<<(std::ostream&, const acl_binding_filter&);
 
-    auto serde_fields() { return std::tie(_pattern, _acl); }
+    void serde_write(iobuf&) const;
+    void serde_read(iobuf_parser&, const serde::header&);
 
 private:
     resource_pattern_filter _pattern;

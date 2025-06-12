@@ -95,9 +95,7 @@ inline security::resource_pattern_filter random_resource_pattern_filter() {
       [] { return random_generators::gen_alphanum_string(14); });
 
     auto pattern = tests::random_optional([] {
-        using ret_t = std::variant<
-          security::pattern_type,
-          security::resource_pattern_filter::pattern_match>;
+        using ret_t = security::resource_pattern_filter::pattern_filter_type;
         if (tests::random_bool()) {
             return ret_t(random_pattern_type());
         } else {
