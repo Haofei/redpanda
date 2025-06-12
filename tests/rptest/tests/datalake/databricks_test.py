@@ -15,6 +15,7 @@ from confluent_kafka.avro import AvroProducer
 from databricks.sql.types import Row
 from ducktape.mark import matrix
 
+from rptest.clients.rpk import RpkTool
 from rptest.context.databricks import DatabricksContext as DatabricksContext
 from rptest.services.catalog_service import CatalogType
 from rptest.services.cluster import cluster
@@ -230,6 +231,91 @@ class DatabricksTest(RedpandaTest):
                 assert actual_schema == tc.dbx_schema, \
                     f"Expected DBX schema {tc.dbx_schema} but got {actual_schema}"
 
+    @cluster(num_nodes=2)
+    @matrix(cloud_storage_type=supported_storage_types())
+    def test_e2e_with_partition_evolution(self, cloud_storage_type):
+        # TODO: Move this in the matrix decorator. Somehow.
+        if not DatabricksContext.available(self.test_context):
+            self.logger.warning(
+                "Skipping test because Databricks context is not available")
+            cleanup_on_early_exit(self)
+            return
+
+        if get_cloud_provider() != "aws":
+            self.logger.warning(
+                f"Skipping test because it is only supported on AWS, but the current cloud provider is {get_cloud_provider()}"
+            )
+            cleanup_on_early_exit(self)
+            return
+
+        with DatalakeServices(
+                self.test_context,
+                redpanda=self.redpanda,
+                include_query_engines=[QueryEngineType.DATABRICKS_SQL],
+                catalog_type=CatalogType.DATABRICKS_UNITY) as dl:
+
+            dl.create_iceberg_enabled_topic(
+                self.topic_name,
+                config={"redpanda.iceberg.partition.spec": "()"})
+
+            produced_total = 0
+
+            def produce_some_and_wait_for_translation():
+                num_msgs = 100
+                nonlocal produced_total
+
+                dl.produce_to_topic(self.topic_name, 1024, num_msgs)
+                produced_total += num_msgs
+
+                dl.wait_for_translation(self.topic_name,
+                                        msg_count=produced_total,
+                                        timeout=60)
+
+            self.logger.info(
+                "Producing data to the topic with no partitioning")
+            produce_some_and_wait_for_translation()
+
+            rpk = RpkTool(self.redpanda)
+
+            self.logger.info(
+                "Producing data to the topic with partitioning by hour and bucket"
+            )
+            rpk.alter_topic_config(
+                self.topic_name, "redpanda.iceberg.partition.spec",
+                "(hour(redpanda.timestamp), bucket(4, redpanda.offset))")
+            produce_some_and_wait_for_translation()
+
+            self.logger.info(
+                "Producing data to the topic with partitioning by bucket only")
+            rpk.alter_topic_config(self.topic_name,
+                                   "redpanda.iceberg.partition.spec",
+                                   "(bucket(4, redpanda.offset))")
+
+            produce_some_and_wait_for_translation()
+
+            actual_schema = fetch_dbx_schema(dl, f"redpanda.{self.topic_name}")
+            expected_schema = [
+                Row(col_name='redpanda',
+                    data_type=
+                    'struct<partition:int,offset:bigint,timestamp:timestamp_ntz,headers:array<struct<key:binary,value:binary>>,key:binary>',
+                    comment=None),
+                Row(col_name='value', data_type='binary', comment=None),
+                Row(col_name='# Clustering Information',
+                    data_type='',
+                    comment=''),
+                Row(col_name='# col_name',
+                    data_type='data_type',
+                    comment='comment'),
+                Row(col_name='redpanda.offset',
+                    data_type='bigint',
+                    comment=None)
+            ]
+            assert actual_schema == expected_schema, \
+                f"Expected DBX schema {expected_schema} but got {actual_schema}"
+
+            DatalakeVerifier.oneshot(
+                self.redpanda, self.topic_name,
+                dl.query_engine(QueryEngineType.DATABRICKS_SQL))
 
     # This test does not work because Iceberg tables in the managed catalog
     # w/ their databricks sql engine are read only. I.e. there is no support
