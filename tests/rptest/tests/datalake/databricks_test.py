@@ -15,6 +15,7 @@ from confluent_kafka.avro import AvroProducer
 from databricks.sql.types import Row
 from ducktape.mark import matrix
 from ducktape.mark._mark import Mark
+from pyiceberg.table import InspectTable
 
 from rptest.clients.rpk import RpkTool
 from rptest.context.databricks import DatabricksContext as DatabricksContext
@@ -349,3 +350,74 @@ class DatabricksTest(RedpandaTest):
             count_after_produce = query_engine.count_table(
                 "redpanda", self.topic_name)
             assert count_after_produce == count, f"{count_after_produce} rows, expected {count}"
+
+    @databricks_only_test
+    @cluster(num_nodes=2)
+    @matrix(cloud_storage_type=supported_storage_types())
+    def test_upload_after_external_maintenance(self, cloud_storage_type):
+        """
+        Goals of this test:
+            a) Test that redpanda continues to work after an external maintenance operation
+            (e.g. OPTIMIZE) is performed on the table.
+            b) Test that external maintenance operations (e.g. OPTIMIZE) actually
+            optimizes the table and reduces the number of parquet files.
+        """
+        table_name = f"redpanda.{self.topic_name}"
+        with DatalakeServices(self.test_context,
+                              redpanda=self.redpanda,
+                              include_query_engines=[
+                                  QueryEngineType.DATABRICKS_SQL,
+                              ],
+                              catalog_type=CatalogType.DATABRICKS_UNITY) as dl:
+
+            num_partitions = 2
+            num_produced = 0
+            dl.create_iceberg_enabled_topic(
+                self.topic_name,
+                partitions=num_partitions,
+                config={
+                    # Partitioning breaks optimization, so we disable it
+                    # for this test.
+                    # See https://redpandadata.atlassian.net/browse/CORE-12335
+                    "redpanda.iceberg.partition.spec": "()",
+                })
+
+            # Produce data in multiple iterations and wait for it to arrive
+            # in the catalog. This will ensure that we have multiple commits
+            # and a good amount of parquet files (num_partitions * num_iterations).
+            num_iterations = 5
+            for i in range(num_iterations):
+                self.logger.info(
+                    f"Producing data to the topic, iteration {i + 1}")
+                num_produced += 100
+                dl.produce_to_topic(self.topic_name, 1024, 100)
+                dl.wait_for_translation(self.topic_name,
+                                        num_produced,
+                                        timeout=60)
+
+            table = dl.catalog_client().load_table(table_name)
+            files_before = len(InspectTable(table).files())
+            self.logger.info(f"Files before optimization: {files_before}")
+
+            query_engine = dl.query_engine(QueryEngineType.DATABRICKS_SQL)
+            query_engine.optimize_parquet_files("redpanda", self.topic_name)
+
+            files_after = len(InspectTable(table.refresh()).files())
+            self.logger.info(
+                f"Files before optimization: {files_before}, after: {files_after}"
+            )
+            assert files_after < files_before, \
+                f"Expected {files_after=} < {files_before=}"
+
+            self.logger.info(
+                "Producing more data to the topic after optimization")
+            dl.produce_to_topic(self.topic_name, 1024, 10)
+            dl.wait_for_translation(self.topic_name,
+                                    num_produced + 10,
+                                    timeout=60)
+
+            self.logger.info(
+                "Verifying that all data is accessible after optimization")
+            DatalakeVerifier.oneshot(
+                self.redpanda, self.topic_name,
+                dl.query_engine(QueryEngineType.DATABRICKS_SQL))
