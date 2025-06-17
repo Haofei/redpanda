@@ -34,7 +34,8 @@ class ProducerSwarm(ClientSwarmBase):
                  keys: Optional[int] = None,
                  unique_topics: Optional[bool] = False,
                  messages_per_second_per_producer: Optional[int] = None,
-                 message_period: Optional[str] = None):
+                 message_period: Optional[str] = None,
+                 topics_per_client: Optional[int] = None):
         super().__init__(context, redpanda, topic, log_level, properties)
 
         assert not (messages_per_second_per_producer and
@@ -52,6 +53,7 @@ class ProducerSwarm(ClientSwarmBase):
         self._keys = assert_int_or_none(keys)
         self._unique_topics = unique_topics
         self._message_period = message_period
+        self._topics_per_client = topics_per_client
 
     def _additional_args(self) -> str:
         cmd = ""
@@ -86,6 +88,9 @@ class ProducerSwarm(ClientSwarmBase):
 
         if self._message_period is not None:
             cmd += f" --message-period {self._message_period}"
+
+        if self._topics_per_client:
+            cmd += f" --topics-per-client {self._topics_per_client}"
 
         return cmd
 
