@@ -719,6 +719,12 @@ public:
 
     void set_lag_metrics(consumer_lag_metrics lag_metrics);
 
+    /*
+     *  If expired_only is false aborts all TXes.
+     *  If expired_only is true aborts only expired TXes.
+     */
+    ss::future<cluster::tx::errc> abort_txes(bool expired_only);
+
 private:
     using member_map = absl::node_hash_map<kafka::member_id, member_ptr>;
     using protocol_support = absl::node_hash_map<kafka::protocol_name, int>;

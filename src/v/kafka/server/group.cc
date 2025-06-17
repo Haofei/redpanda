@@ -3241,36 +3241,42 @@ void group::maybe_rearm_timer() {
 }
 
 ss::future<> group::do_abort_old_txes() {
-    auto unit = _catchup_lock->attempt_read_lock();
-    if (!unit) {
-        co_return;
-    }
-
-    absl::btree_set<model::producer_identity> expired;
-
-    for (auto& [pid, producer] : _producers) {
-        if (
-          producer.transaction == nullptr
-          || !producer.transaction->is_expired()) {
-            continue;
-        }
-
-        expired.insert(model::producer_identity{pid, producer.epoch});
-    }
-    bool has_error = false;
-    for (auto pid : expired) {
-        auto ec = co_await try_abort_old_tx(pid);
-        if (ec != cluster::tx::errc::none) {
-            has_error = true;
-        }
-    }
-
-    if (!has_error) {
+    if (co_await abort_txes(true) == cluster::tx::errc::none) {
         // if no error was triggered during abort of transaction we may try to
         // schedule a next expiration earlier if there are transactions pending
         // to be expired
         maybe_rearm_timer();
     }
+}
+
+ss::future<cluster::tx::errc> group::abort_txes(bool expired_only) {
+    auto unit = _catchup_lock->attempt_read_lock();
+    if (!unit) {
+        vlog(
+          _ctx_txlog.trace, "can't abort txes: coordinator_load_in_progress");
+        co_return cluster::tx::errc::stale;
+    }
+
+    absl::btree_set<model::producer_identity> to_abort;
+
+    for (auto& [pid, producer] : _producers) {
+        if (
+          producer.transaction == nullptr
+          || (expired_only && !producer.transaction->is_expired())) {
+            continue;
+        }
+
+        to_abort.insert(model::producer_identity{pid, producer.epoch});
+    }
+    auto last_error = cluster::tx::errc::none;
+    for (auto pid : to_abort) {
+        auto ec = co_await try_abort_old_tx(pid);
+        if (ec != cluster::tx::errc::none) {
+            last_error = ec;
+        }
+    }
+
+    co_return last_error;
 }
 
 ss::future<cluster::tx::errc>
