@@ -642,8 +642,8 @@ ss::future<> state_machine_manager::background_apply_fiber(
                 // do not log known shutdown exceptions as errors
                 if (!ssx::is_shutdown_exception(e)) {
                     vlog(_log.error, "error applying raft snapshot - {}", e);
+                    co_await ss::sleep_abortable(100ms, _as);
                 }
-                std::rethrow_exception(e);
             }
             continue;
         }
