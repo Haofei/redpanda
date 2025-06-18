@@ -521,7 +521,8 @@ ss::future<> do_swap_data_file_handles(
   std::filesystem::path compacted,
   ss::lw_shared_ptr<storage::segment> s,
   storage::compaction_config cfg,
-  probe& pb) {
+  probe& pb,
+  std::optional<size_t> new_cmp_idx_size) {
     co_await s->reader().close();
 
     ss::sstring old_name = compacted.string();
@@ -540,6 +541,11 @@ ss::future<> do_swap_data_file_handles(
       config::shard_local_cfg().storage_read_readahead_count(),
       cfg.sanitizer_config);
     co_await r->load_size();
+
+    // We know the size of the segment and compacted index files. To save on
+    // future file_stat() calls due to these values being unset, set the cached
+    // disk usage here.
+    s->set_cached_disk_usage(r->file_size(), new_cmp_idx_size);
 
     // update partition size probe
     pb.delete_segment(*s.get());
@@ -616,7 +622,8 @@ ss::future<compaction_result> do_self_compact_segment(
     co_await s->index().drop_all_data();
 
     auto compacted_file = s->reader().path().to_staging();
-    co_await do_swap_data_file_handles(compacted_file, s, cfg, pb);
+    co_await do_swap_data_file_handles(
+      compacted_file, s, cfg, pb, cmp_idx_size);
     staging_to_clean.clear();
 
     s->index().swap_index_state(std::move(idx));
@@ -1078,14 +1085,16 @@ ss::future<chunked_vector<ss::rwlock::holder>> transfer_segment(
   ss::lw_shared_ptr<segment> from,
   compaction_config cfg,
   probe& probe,
-  chunked_vector<ss::rwlock::holder> locks) {
+  chunked_vector<ss::rwlock::holder> locks,
+  std::optional<size_t> new_cmp_idx_size) {
     co_await from->close();
 
     co_await to->index().drop_all_data();
 
     // segment data file
     auto from_path = from->reader().path();
-    co_await do_swap_data_file_handles(from_path, to, cfg, probe);
+    co_await do_swap_data_file_handles(
+      from_path, to, cfg, probe, new_cmp_idx_size);
 
     // offset index
     to->index().swap_index_state(
@@ -1203,9 +1212,9 @@ ss::future<compaction_result> concatenate_and_rebuild_target_segment(
     }
 
     pb.delete_segment(*replacement.get());
-    // transfer segment state from replacement to target
+    // transfer segment state from replacement to target.
     locks = co_await internal::transfer_segment(
-      target, replacement, cfg, pb, std::move(locks));
+      target, replacement, cfg, pb, std::move(locks), ret.cmp_idx_size_after);
 
     locks.clear();
     holders.clear();

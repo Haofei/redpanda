@@ -1661,7 +1661,8 @@ ss::future<> disk_log_impl::rewrite_segment_with_offset_map(
     co_await seg->index().drop_all_data();
 
     // Rename the data file.
-    co_await internal::do_swap_data_file_handles(tmpname, seg, cfg, *_probe);
+    co_await internal::do_swap_data_file_handles(
+      tmpname, seg, cfg, *_probe, compacted_idx_writer->size_bytes());
 
     // Persist the state of our indexes in their new names.
     seg->index().swap_index_state(std::move(new_idx));
