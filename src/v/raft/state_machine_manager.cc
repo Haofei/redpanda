@@ -569,7 +569,7 @@ ss::future<> state_machine_manager::try_apply_in_foreground() {
     }
 }
 
-ss::future<> state_machine_manager::apply() {
+ss::future<> state_machine_manager::apply() noexcept {
     /**
      * If any of the state machine is behind, dispatch background apply fibers
      */
