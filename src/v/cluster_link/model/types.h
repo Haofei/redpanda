@@ -176,6 +176,49 @@ struct metadata
 
     metadata copy() const;
 };
+
+/// \brief Command used to add a mirror topic to a cluster link
+///
+/// This command will be used either via the auto topic creation task via a user
+/// action when a new topic is to be created and used as a mirror topic
+struct add_mirror_topic_cmd
+  : serde::envelope<
+      add_mirror_topic_cmd,
+      serde::version<0>,
+      serde::compat_version<0>> {
+    /// Name of the topic
+    ::model::topic topic;
+    /// Initial state of the topic
+    mirror_topic_metadata metadata;
+
+    friend bool
+    operator==(const add_mirror_topic_cmd&, const add_mirror_topic_cmd&)
+      = default;
+
+    auto serde_fields() { return std::tie(topic, metadata); }
+};
+
+/// \brief Command used to update the state of a mirror topic
+///
+/// Will be used by the cluster linking mirroring task to change the state of
+/// mirroring for the topic
+struct update_mirror_topic_state_cmd
+  : serde::envelope<
+      update_mirror_topic_state_cmd,
+      serde::version<0>,
+      serde::compat_version<0>> {
+    /// Name of the topic
+    ::model::topic topic;
+    /// New state of the topic
+    mirror_topic_state state{mirror_topic_state::active};
+
+    friend bool operator==(
+      const update_mirror_topic_state_cmd&,
+      const update_mirror_topic_state_cmd&)
+      = default;
+
+    auto serde_fields() { return std::tie(topic, state); }
+};
 } // namespace cluster_link::model
 
 template<>
@@ -249,4 +292,20 @@ struct fmt::formatter<cluster_link::model::metadata>
   : fmt::formatter<string_view> {
     auto format(const cluster_link::model::metadata& m, format_context& ctx)
       -> decltype(ctx.out());
+};
+
+template<>
+struct fmt::formatter<cluster_link::model::add_mirror_topic_cmd>
+  : fmt::formatter<string_view> {
+    auto format(
+      const cluster_link::model::add_mirror_topic_cmd& m, format_context& ctx)
+      -> decltype(ctx.out());
+};
+
+template<>
+struct fmt::formatter<cluster_link::model::update_mirror_topic_state_cmd>
+  : fmt::formatter<string_view> {
+    auto format(
+      const cluster_link::model::update_mirror_topic_state_cmd& m,
+      format_context& ctx) -> decltype(ctx.out());
 };
