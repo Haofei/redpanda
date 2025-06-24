@@ -246,3 +246,20 @@ redpanda_cc_gtest(
         "@seastar",
     ],
 )
+
+redpanda_cc_gtest(
+    name = "depth_limit_test",
+    timeout = "short",
+    srcs = [
+        "depth_limit_test.cc",
+    ],
+    cpu = 1,
+    deps = [
+        "//src/v/bytes:iobuf",
+        "//src/v/serde/json:parser",
+        "//src/v/test_utils:gtest",
+        "@googletest//:gtest",
+        "@googletest//:gtest_main",
+        "@seastar",
+    ],
+)

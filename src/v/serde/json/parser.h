@@ -22,6 +22,14 @@
 
 namespace experimental::serde::json {
 
+struct parser_config {
+    /// Default max depth is very liberal.
+    static constexpr auto default_max_depth = 1000;
+
+    /// Maximum depth of nested structures (arrays and objects).
+    size_t max_depth = default_max_depth;
+};
+
 enum class token {
     error,
     value_null,
@@ -76,7 +84,7 @@ inline std::ostream& operator<<(std::ostream& os, token t) {
 
 class parser {
 public:
-    explicit parser(iobuf buf);
+    explicit parser(iobuf buf, parser_config config = {});
     ~parser();
 
     /// Advance the parser to the next token. Returns true if the parser

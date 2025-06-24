@@ -141,8 +141,9 @@ class parser::impl {
     using token = experimental::serde::json::token;
 
 public:
-    explicit impl(iobuf&& buf)
-      : _buf(std::move(buf)) {}
+    explicit impl(iobuf&& buf, parser_config config)
+      : _buf(std::move(buf))
+      , _config(config) {}
 
     // The parser will suspend upon parsing a token that must be signaled to
     // the caller.
@@ -244,6 +245,11 @@ public:
     token parse_array() {
         TRACE("parse_array\n");
         dassert(_buf.peek() == '[', "expected '[' but got {}", _buf.peek());
+
+        if (_suspension_stack.size() >= _config.max_depth) {
+            return fuse_with_failure();
+        }
+
         ++_buf; // consume '['
         _suspension_stack.push_back(suspension_point::first_array_member);
         return suspend_with_token(token::start_array);
@@ -275,6 +281,11 @@ public:
     token parse_object() {
         TRACE("parse_object\n");
         dassert(_buf.peek() == '{', "expected '{{' but got {}", _buf.peek());
+
+        if (_suspension_stack.size() >= _config.max_depth) {
+            return fuse_with_failure();
+        }
+
         ++_buf; // consume '{'
         _suspension_stack.push_back(suspension_point::first_object_key);
         return suspend_with_token(token::start_object);
@@ -506,10 +517,12 @@ private:
     };
 
     std::variant<std::monostate, iobuf, int64_t, double> _current_value;
+
+    parser_config _config;
 };
 
-parser::parser(iobuf buf)
-  : _impl(std::make_unique<impl>(std::move(buf))) {};
+parser::parser(iobuf buf, parser_config config)
+  : _impl(std::make_unique<impl>(std::move(buf), config)) {};
 
 parser::~parser() = default;
 

@@ -32,7 +32,11 @@ TEST_P_CORO(json_checker_test, all) {
     vassert(test_case_path.has_value(), "Failed to get test case path");
 
     auto contents = co_await read_fully(test_case_path.value());
-    auto parser = experimental::serde::json::parser(std::move(contents));
+    // Use depth limit of 19 to properly fail fail18.json (20 levels) while
+    // allowing pass2.json (19 levels, "Not too deep") to succeed
+    auto config = parser_config{.max_depth = 19};
+    auto parser = experimental::serde::json::parser(
+      std::move(contents), config);
 
     while (co_await parser.next()) {
         // Do nothing, just drain the parser.
