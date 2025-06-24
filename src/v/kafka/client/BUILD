@@ -238,6 +238,7 @@ redpanda_cc_library(
     visibility = ["//visibility:public"],
     deps = [
         ":brokers",
+        ":cluster",
         ":configuration",
         ":exceptions",
         ":logger",
@@ -280,7 +281,6 @@ redpanda_cc_library(
         "//src/v/model",
         "//src/v/net",
         "//src/v/random:generators",
-        "//src/v/rpc",
         "//src/v/security",
         "//src/v/ssx:future_util",
         "//src/v/ssx:semaphore",
