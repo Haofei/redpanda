@@ -8,13 +8,14 @@
  * https://github.com/redpanda-data/redpanda/blob/master/licenses/rcl.md
  */
 
+#include "cloud_topics/read_path/materialized_extent.h"
+
 #include "bytes/iostream.h"
 #include "cloud_io/basic_cache_service_api.h"
 #include "cloud_io/io_result.h"
 #include "cloud_topics/errc.h"
 #include "cloud_topics/extent_meta.h"
 #include "cloud_topics/logger.h"
-#include "cloud_topics/read_path/materialized_extent.h"
 #include "storage/record_batch_utils.h"
 #include "utils/retry_chain_node.h"
 

@@ -29,6 +29,8 @@ using namespace std::chrono_literals;
 
 namespace experimental::cloud_topics {
 
+namespace {
+
 ss::future<result<chunked_vector<materialized_extent>>> materialize_sorted_run(
   chunked_vector<extent_meta> query,
   cloud_storage_clients::bucket_name bucket,
@@ -57,6 +59,8 @@ ss::future<result<chunked_vector<materialized_extent>>> materialize_sorted_run(
     }
     co_return std::move(extents);
 }
+
+} // namespace
 
 ss::future<chunked_vector<model::record_batch>> materialize_placeholders(
   cloud_storage_clients::bucket_name bucket,

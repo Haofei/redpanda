@@ -29,6 +29,7 @@ struct serializing_consumer {
         // The offset is supposed to be translated but it's still
         // represented using model::offset instead of kafka::offset.
         auto base = model::offset_cast(batch.base_offset());
+        auto last = model::offset_cast(batch.last_offset());
         // vlog(cd_log.trace, "serializing consumer batch: {}", batch);
         auto hdr_iobuf = storage::batch_header_to_disk_iobuf(batch.header());
         auto rec_iobuf = std::move(batch).release_data();
@@ -47,7 +48,7 @@ struct serializing_consumer {
           .first_byte_offset = first_byte_offset_t(offset),
           .byte_range_size = byte_range_size_t(extent_size),
           .base_offset = base,
-          .last_offset = kafka::offset(batch.last_offset()),
+          .last_offset = last,
         });
 
         return ss::make_ready_future<ss::stop_iteration>(
