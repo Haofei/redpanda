@@ -36,24 +36,34 @@ namespace experimental::cloud_topics::l1 {
 // [Partition 1 Marker][Partition 1 Data][Partition 2 Marker][Partition 2 Data]...[Footer][Footer Size]
 //
 // Components:
-// 1. Partition Marker: A metadata record batch containing:
-//    - Key: "pm" (partition_marker_key)
-//    - Value: Serialized model::ntp identifying the partition
-//    - Type: cloud_topics_l1_metadata
+// 1. Partition Marker: A data type delimiter (1 byte) + size (4 bytes) + serialized model::ntp
+//    - Delimiter: 0x01 (data_type::partition_marker)
+//    - Size: uint32_t size of the serialized ntp data
+//    - Data: Serialized model::ntp identifying the partition
 //
-// 2. Partition Data: Sequence of raft_data record batches for the partition,
+// 2. Partition Data: Sequence of kafka record batches for the partition,
 //    with offsets strictly increasing within each partition
+//    - Each batch prefixed with delimiter 0x00 (data_type::kafka_batch)
+//    - Followed by fixed-width batch header (all header fields in order)
+//    - Followed by batch data (variable size recorded in the header)
 //
-// 3. Footer: A metadata record batch containing:
-//    - Key: "f" (footer_key) 
-//    - Value: Serialized object_index with all partition metadata
-//    - Type: cloud_topics_l1_metadata
+// 3. Footer: A data type delimiter (1 byte) + size (4 bytes) + serialized object_index
+//    - Delimiter: 0x02 (data_type::footer)
+//    - Size: uint32_t size of the serialized object_index data
+//    - Data: Serialized object_index with all partition metadata
 //
-// 4. Footer Size: Final 4 bytes containing uint32_t size of the footer record batch
+// 4. Footer Size: Final 4 bytes containing uint32_t size of the footer data
+//    (including the delimiter byte and size field)
 //
-// Each record batch is prefixed with a uint32_t size field for efficient parsing.
-// Index entries are created approximately every 4MiB within each partition to
-// enable efficient seeking by offset or timestamp.
+// Data type delimiters:
+// - 0x00: kafka_batch - Standard kafka record batch
+// - 0x01: partition_marker - Marks start of new partition
+// - 0x02: footer - Contains object index metadata
+//
+// Index entries are created approximately every 4MiB to enable efficient seeking by
+// offset or timestamp within a partition. The index entries are recorded within the
+// footer.
+//
 // clang-format on
 
 // This file defines the metadata/indexing structure for level one objects. It's
@@ -72,16 +82,15 @@ struct object_index
 
         struct index_entry
           : serde::envelope<index_entry, serde::version<0>, serde::version<0>> {
-            // This file_position is the offset in the file where the batch for
-            // this index entry is located.
+            // This file_position is the offset in the file where the data batch
+            // that corresponds to this index entry is located.
             size_t file_position = 0;
-            // The kafka base_offset of the record batch in this partition at
-            // this position.
+            // The kafka base_offset of the kafka batch that is located at
+            // `file_position`.
             kafka::offset kafka_offset;
             // The maximum timestamp seen so far (inclusive of the batch that
-            // generated this index entry) of raft data batches within the
-            // partition, other batch types are ignored for the purposes of
-            // these timestamps.
+            // generated this index entry) of the kafka batches within the
+            // partition.
             model::timestamp max_timestamp;
 
             auto serde_fields() {
@@ -90,9 +99,12 @@ struct object_index
             bool operator==(const index_entry&) const = default;
         };
         // Index information for l1 data, this is a snapshot of the state at a
-        // periodic interval within the partition data. For example, we can have
-        // an index entry every ~4MiB within the partition, since we're working
-        // with variably sized batches, it may not be precisely every 4MiB.
+        // periodic interval within the partition data. For example, we can
+        // generate an index entry every ~4MiB within the partition, and store
+        // it here in the footer.
+        //
+        // NOTE: we're working with variably sized batches, it may not be
+        // precisely every 4MiB.
         //
         // NOTE: The index entries here are sorted by `file_position` and
         // `kafka_offset`.
