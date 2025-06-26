@@ -119,8 +119,7 @@ void WasmTestFixture::load_wasm(std::string_view filename) {
                   std::string(
                     std::filesystem::path(
                       "src/transform-sdk/go/transform/internal/testdata")
-                    / file.stem() / file.filename()))
-                  .value_or(std::string(filename));
+                    / file.stem() / file.filename()));
     auto wasm_file = ss::util::read_entire_file(path).get();
     auto buf = model::wasm_binary_iobuf(std::make_unique<iobuf>());
     for (auto& chunk : wasm_file) {

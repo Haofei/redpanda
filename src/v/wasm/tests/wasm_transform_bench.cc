@@ -81,8 +81,7 @@ public:
                   std::string(
                     std::filesystem::path(
                       "src/transform-sdk/go/transform/internal/testdata")
-                    / file.stem() / file.filename()))
-                  .value_or(std::string(file));
+                    / file.stem() / file.filename()));
             fmt::print(std::cerr, "Loading wasm file: {}\n", path);
             auto data = co_await ss::util::read_entire_file_contiguous(path);
             wasm_binary()->append(data.data(), data.size());
