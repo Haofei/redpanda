@@ -1122,6 +1122,32 @@ class DatalakeDelayedEnablementTest(RedpandaTest):
         return True
 
     def estimate_total_disk_bytes_read(self):
+        max_samples = 30
+        current_value = 0
+        stable_values = 0
+        expected_stable_values = 5
+        for s in range(max_samples):
+            total = self.do_estimate_total_disk_bytes_read()
+            if total is not None:
+                self.logger.debug(
+                    f"Estimated total disk bytes read: {total} bytes sample {s}"
+                )
+                if total == current_value:
+                    stable_values += 1
+                    if stable_values >= expected_stable_values:
+                        self.logger.debug(
+                            f"Stable value reached: {current_value} bytes after {s} samples"
+                        )
+                        break
+                else:
+                    stable_values = 0
+                    current_value = total
+
+            time.sleep(0.5)
+
+        return current_value
+
+    def do_estimate_total_disk_bytes_read(self):
         try:
             samples = self.redpanda.metrics_sample(
                 "vectorized_io_queue_total_read_bytes_total",
