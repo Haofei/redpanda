@@ -14,7 +14,6 @@
 #include "bytes/iostream.h"
 #include "model/fundamental.h"
 #include "model/record.h"
-#include "model/record_batch_types.h"
 #include "reflection/type_traits.h"
 #include "serde/rw/rw.h"
 #include "serde/rw/vector.h"
@@ -30,13 +29,18 @@
 #include <bit>
 #include <cstring>
 #include <type_traits>
+#include <utility>
 
 namespace experimental::cloud_topics::l1 {
 
 namespace {
 
-constexpr static std::string_view partition_marker_key = "pm";
-constexpr static std::string_view footer_key = "f";
+// the delimiter for what kind of data is next in the object.
+enum class data_type : uint8_t {
+    kafka_batch = 0,
+    partition_marker = 1,
+    footer = 2,
+};
 
 template<typename T>
 requires std::is_integral_v<T> || std::is_scoped_enum_v<T>
@@ -203,44 +207,21 @@ std::variant<object_index, size_t> object_index::read_footer(iobuf buf) {
     if (buf.size_bytes() >= (footer_size + sizeof(uint32_t))) {
         iobuf_parser p(buf.share(
           buf.size_bytes() - sizeof(uint32_t) - footer_size, footer_size));
-        if (p.bytes_left() < batch_header_size) {
+        auto dt = static_cast<data_type>(
+          p.consume_type<std::underlying_type_t<data_type>>());
+        if (dt != data_type::footer) {
             throw std::runtime_error(fmt::format(
-              "expected at least {} bytes, got {}",
-              batch_header_size,
-              p.bytes_left()));
+              "expected footer data type, got: {}", std::to_underlying(dt)));
         }
-        model::record_batch_header hdr;
-        for_each_batch_header_field(hdr, [&p](auto& field) {
-            constinit static size_t field_size = sizeof(as_bytes(field));
-            using T = std::remove_reference_t<decltype(field)>;
-            auto b = p.read_bytes(field_size);
-            field = from_bytes<T>(b.data());
-        });
-        auto records = p.share(
-          hdr.size_bytes - model::packed_record_batch_header_size);
-        auto footer_batch = model::record_batch(
-          hdr, std::move(records), model::record_batch::tag_ctor_ng{});
-        if (
-          footer_batch.header().type
-          != model::record_batch_type::cloud_topics_l1_metadata) {
+        auto size = p.consume_type<uint32_t>();
+        if (size != p.bytes_left()) {
             throw std::runtime_error(fmt::format(
-              "expected cloud_topics_l1_metadata batch, got: {}",
-              footer_batch.header().type));
+              "expected footer size to match the remaining bytes, "
+              "got: {}, expected: {}",
+              p.bytes_left(),
+              size));
         }
-        if (footer_batch.record_count() != 1) {
-            throw std::runtime_error(fmt::format(
-              "expected 1 record in footer, got: {}",
-              footer_batch.record_count()));
-        }
-        auto footer_record = std::move(footer_batch.copy_records().front());
-        if (footer_record.key() != footer_key) {
-            constexpr size_t key_dump_size = 32;
-            throw std::runtime_error(fmt::format(
-              "expected footer key to be '{}', got: {}",
-              footer_key,
-              footer_record.key().hexdump(key_dump_size)));
-        }
-        return serde::from_iobuf<object_index>(footer_record.release_value());
+        return serde::read<object_index>(p);
     }
     return (footer_size + sizeof(uint32_t)) - buf.size_bytes();
 }
@@ -254,11 +235,7 @@ public:
 
     ss::future<> start_partition(model::ntp ntp) final {
         end_partition();
-        storage::record_batch_builder builder(
-          model::record_batch_type::cloud_topics_l1_metadata, model::offset(0));
-        builder.add_raw_kv(
-          iobuf::from(partition_marker_key), serde::to_iobuf(ntp));
-        co_await serde_write_to_stream(std::move(builder).build());
+        co_await serde_write_to_stream(data_type::partition_marker, ntp);
         _current_partition = {
           .ntp = std::move(ntp),
           .file_position = _offset,
@@ -303,18 +280,13 @@ public:
                 .kafka_offset = model::offset_cast(batch.header().base_offset),
                 .max_timestamp = _current_partition.max_timestamp});
         }
-        co_await serde_write_to_stream(std::move(batch));
+        co_await write_batch_to_stream(std::move(batch));
     }
 
     ss::future<object_info> finish() final {
         end_partition();
-        storage::record_batch_builder builder(
-          model::record_batch_type::cloud_topics_l1_metadata, model::offset(0));
-        builder.add_raw_kv(
-          iobuf::from(footer_key),
-          serde::to_iobuf<object_index>(_index.copy()));
         auto footer_start = _offset;
-        co_await serde_write_to_stream(std::move(builder).build());
+        co_await serde_write_to_stream(data_type::footer, _index.copy());
         object_info info{
           .index = std::move(_index),
           .footer_offset = footer_start,
@@ -337,8 +309,20 @@ private:
         _index.partitions.push_back(std::exchange(_current_partition, {}));
     }
 
-    ss::future<> serde_write_to_stream(model::record_batch batch) {
+    template<typename T>
+    ss::future<> serde_write_to_stream(data_type dt, T&& data) {
         iobuf b;
+        b.append(as_bytes(dt));
+        auto serialized = serde::to_iobuf(std::forward<T>(data));
+        b.append(as_bytes<uint32_t>(serialized.size_bytes()));
+        b.append(std::move(serialized));
+        _offset += b.size_bytes();
+        return write_iobuf_to_output_stream(std::move(b), _output);
+    }
+
+    ss::future<> write_batch_to_stream(model::record_batch batch) {
+        iobuf b;
+        b.append(as_bytes(data_type::kafka_batch));
         for_each_batch_header_field(
           batch.header(), [&b](auto arg) { b.append(as_bytes(arg)); });
         b.append(std::move(batch).release_data());
@@ -368,33 +352,39 @@ public:
       : _input(std::move(input)) {}
 
     ss::future<result> read_next() final {
-        auto batch = co_await read_next_batch();
-        if (
-          batch.header().type
-          != model::record_batch_type::cloud_topics_l1_metadata) {
-            co_return batch;
-        }
-        vassert(
-          batch.record_count() == 1,
-          "expected a single record in l1 metadata batch, got: {}",
-          batch.record_count());
-        model::record r = std::move(batch.copy_records().front());
-        auto parser = iobuf_parser(r.release_value());
-        if (r.key() == partition_marker_key) {
-            co_return serde::read<model::ntp>(parser);
-        } else if (r.key() == footer_key) {
-            co_return serde::read<object_index>(parser);
-        } else {
-            constexpr static size_t max_key_size = 32;
+        auto dt_buf = co_await _input.read_exactly(1);
+        if (dt_buf.empty()) {
             throw std::runtime_error(fmt::format(
-              "unexpected key in l1 metadata batch: {}",
-              r.key().hexdump(max_key_size)));
+              "expected 1 byte for data type, got: {}", dt_buf.size()));
+        }
+        switch (static_cast<data_type>(dt_buf[0])) {
+        case data_type::kafka_batch:
+            co_return co_await read_next_batch();
+        case data_type::partition_marker:
+            co_return co_await read_next_serde<model::ntp>();
+        case data_type::footer:
+            co_return co_await read_next_serde<object_index>();
         }
     }
 
     ss::future<> close() final { return _input.close(); }
 
 private:
+    template<typename T>
+    ss::future<T> read_next_serde() {
+        ss::temporary_buffer<char> size_prefix_buf
+          = co_await _input.read_exactly(sizeof(uint32_t));
+        if (size_prefix_buf.size() != sizeof(uint32_t)) {
+            throw std::runtime_error(fmt::format(
+              "expected {} bytes, got {}",
+              sizeof(uint32_t),
+              size_prefix_buf.size()));
+        }
+        auto size = from_bytes<uint32_t>(size_prefix_buf.get());
+        auto buf = co_await read_iobuf_exactly(_input, size);
+        co_return serde::from_iobuf<T>(std::move(buf));
+    }
+
     ss::future<model::record_batch> read_next_batch() {
         ss::temporary_buffer<char> hdr_buf = co_await _input.read_exactly(
           batch_header_size);

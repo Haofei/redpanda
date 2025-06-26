@@ -61,8 +61,7 @@ enum class record_batch_type : int8_t {
     datalake_translation_state = 38, // maintains state for translation progress
     cluster_link = 39,               // cluster link update batches
     group_block = 40, // (un)blocks group names in a consumer offsets partition
-    cloud_topics_l1_metadata = 41, // markers/indexes for L1 objects
-    MAX = cloud_topics_l1_metadata,
+    MAX = group_block,
 };
 
 std::ostream& operator<<(std::ostream& o, record_batch_type bt);

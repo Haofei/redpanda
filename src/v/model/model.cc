@@ -406,8 +406,6 @@ std::ostream& operator<<(std::ostream& o, record_batch_type bt) {
         return o << "cluster_link";
     case record_batch_type::group_block:
         return o << "group_block";
-    case record_batch_type::cloud_topics_l1_metadata:
-        return o << "cloud_topics_l1_metadata";
     }
 
     return o << "batch_type::unknown{" << static_cast<int>(bt) << "}";
