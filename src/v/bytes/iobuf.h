@@ -81,11 +81,7 @@ public:
         return i;
     }
 
-    // NOLINTNEXTLINE
-    iobuf() noexcept {
-        // nothing allocates memory, but boost intrusive list is not marked as
-        // noexcept
-    }
+    iobuf() noexcept = default;
     ~iobuf() noexcept;
     iobuf(iobuf&& x) noexcept
       : _frags(std::move(x._frags))
