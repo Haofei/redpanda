@@ -782,7 +782,7 @@ ss::future<compaction_result> self_compact_segment(
     // force_compaction will not invalidate max_removable_local_log_offset.
     auto segment_needs_compaction
       = s->is_compactible(cfg)
-        && (!s->finished_self_compaction() || should_force_compaction);
+        && (!s->has_self_compact_timestamp() || should_force_compaction);
     if (!segment_needs_compaction) {
         co_return compaction_result{s->size_bytes()};
     }
@@ -800,7 +800,7 @@ ss::future<compaction_result> self_compact_segment(
           gclog.debug,
           "detected {} is already compacted",
           s->path().to_compacted_index());
-        s->mark_as_finished_self_compaction();
+        co_await internal::mark_segment_as_finished_self_compaction(s, pb);
         co_return compaction_result{s->size_bytes()};
     }
 
@@ -821,10 +821,9 @@ ss::future<compaction_result> self_compact_segment(
       feature_table);
 
     if (res.did_compact()) {
-        pb.segment_compacted();
         pb.add_compaction_removed_bytes(
           ssize_t(res.size_before) - ssize_t(res.size_after));
-        s->mark_as_finished_self_compaction();
+        co_await internal::mark_segment_as_finished_self_compaction(s, pb);
     }
 
     co_return res;
@@ -1345,7 +1344,6 @@ bool may_have_removable_tombstones(
 
 ss::future<bool> mark_segment_as_finished_self_compaction(
   ss::lw_shared_ptr<segment> seg, probe& pb) {
-    seg->mark_as_finished_self_compaction();
     bool did_set = seg->index().maybe_set_self_compact_timestamp(
       model::timestamp::now());
     if (did_set) {
