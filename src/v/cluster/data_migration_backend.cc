@@ -25,6 +25,7 @@
 #include "model/fundamental.h"
 #include "model/ktp.h"
 #include "model/metadata.h"
+#include "model/namespace.h"
 #include "model/timeout_clock.h"
 #include "model/timestamp.h"
 #include "ssx/async_algorithm.h"
@@ -511,6 +512,9 @@ ss::future<errc> backend::do_topic_work(
   tsws_lwptr_t tsws) {
     auto& rcn = tsws->rcn();
     // this switch should be in accordance to the logic in get_work_scope
+    if (nt == model::kafka_consumer_offsets_nt) {
+        co_return errc::success;
+    }
     switch (sought_state) {
     case state::prepared:
         co_return co_await retry_loop(rcn, [this, &nt, &itwi, &rcn] {
@@ -557,6 +561,9 @@ ss::future<errc> backend::do_topic_work(
     // this switch should be in accordance to the logic in get_work_scope
     switch (sought_state) {
     case state::finished: {
+        if (nt == model::kafka_consumer_offsets_nt) {
+            co_return errc::success;
+        }
         // unmount first
         auto unmount_res = co_await unmount_topic(nt, rcn);
         if (unmount_res != errc::success) {
@@ -1410,6 +1417,11 @@ const inbound_topic& backend::get_inbound_topic(
 
 inbound_partition_work_info backend::get_partition_work_info(
   const model::ntp& ntp, const inbound_migration& im, id migration_id) const {
+    if (model::topic_namespace_view{ntp} == model::kafka_consumer_offsets_nt) {
+        const auto& mrstate = _migration_states.find(migration_id)->second;
+        return {
+          .groups = mrstate.partition_group_map->at(ntp.tp.partition).copy()};
+    }
     const auto& inbound_topic = get_inbound_topic(
       {ntp.ns, ntp.tp.topic}, im, migration_id);
     return {
@@ -1418,8 +1430,15 @@ inbound_partition_work_info backend::get_partition_work_info(
 }
 
 outbound_partition_work_info backend::get_partition_work_info(
-  const model::ntp&, const outbound_migration& om, id) const {
-    return {om.copy_to};
+  const model::ntp& ntp, const outbound_migration& om, id migration_id) const {
+    outbound_partition_work_info ret = {.copy_to = om.copy_to};
+
+    if (model::topic_namespace_view{ntp} == model::kafka_consumer_offsets_nt) {
+        const auto& mrstate = _migration_states.find(migration_id)->second;
+        ret.groups = mrstate.partition_group_map->at(ntp.tp.partition).copy();
+    }
+
+    return ret;
 }
 
 partition_work_info backend::get_partition_work_info(
@@ -1435,6 +1454,9 @@ inbound_topic_work_info backend::get_topic_work_info(
   const model::topic_namespace& nt,
   const inbound_migration& im,
   id migration_id) const {
+    if (nt == model::kafka_consumer_offsets_nt) {
+        return {};
+    }
     const auto& inbound_topic = get_inbound_topic(nt, im, migration_id);
 
     return {

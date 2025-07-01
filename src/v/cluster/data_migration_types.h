@@ -308,9 +308,13 @@ data_migration copy_migration(const data_migration& migration);
 struct inbound_partition_work_info {
     std::optional<model::topic_namespace> source;
     std::optional<cloud_storage_location> cloud_storage_location;
+    chunked_vector<consumer_group>
+      groups; // not empty iff partition of consumer offsets topic
 };
 struct outbound_partition_work_info {
     std::optional<copy_target> copy_to;
+    chunked_vector<consumer_group>
+      groups; // not empty iff partition of consumer offsets topic
 };
 using partition_work_info
   = std::variant<inbound_partition_work_info, outbound_partition_work_info>;
