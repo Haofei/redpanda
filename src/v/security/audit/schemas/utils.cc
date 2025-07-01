@@ -516,6 +516,30 @@ api_activity api_activity::construct(
 }
 
 api_activity api_activity::construct(
+  std::string_view svc_name,
+  ss::httpd::const_req req,
+  std::string_view operation_name,
+  const auth_result& auth_result) {
+    return {
+      op_to_crud(auth_result.operation),
+      result_to_actor(auth_result),
+      api{
+        .operation = ss::sstring{operation_name},
+        .service = {.name = ss::sstring{svc_name}}},
+      from_ss_endpoint(req.get_server_address(), svc_name),
+      from_ss_http_request(req),
+      {resource_detail{
+        .name = auth_result.resource_name,
+        .type = fmt::format("{}", auth_result.resource_type)}},
+      severity_id::informational,
+      from_ss_endpoint(req.get_client_address()),
+      auth_result.is_authorized() ? api_activity::status_id::success
+                                  : api_activity::status_id::failure,
+      create_timestamp_t(),
+      unmapped_data(auth_result)};
+}
+
+api_activity api_activity::construct(
   ss::httpd::const_req req,
   const ss::sstring& user,
   const ss::sstring& svc_name) {

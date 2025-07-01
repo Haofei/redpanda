@@ -130,6 +130,20 @@ size_t api_activity::hash(
       req.get_client_address().addr());
 }
 
+size_t api_activity::hash(
+  std::string_view svc_name,
+  ss::httpd::const_req req,
+  std::string_view operation_name,
+  const auth_result& auth_result) {
+    auto h = api_activity_event_base_hash(
+      operation_name,
+      auth_result,
+      req.get_server_address().addr(),
+      svc_name,
+      req.get_client_address().addr());
+    return hash::combine(h, http_request_hash(req));
+}
+
 size_t application_lifecycle::hash(
   application_lifecycle::activity_id activity_id,
   const std::optional<ss::sstring>& feature_name) {

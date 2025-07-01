@@ -114,6 +114,12 @@ public:
       const ss::sstring& user,
       const ss::sstring& svc_name);
 
+    static size_t hash(
+      std::string_view svc_name,
+      ss::httpd::const_req req,
+      std::string_view operation_name,
+      const auth_result& auth_result);
+
     template<typename T>
     static api_activity construct(
       std::string_view operation_name,
@@ -166,6 +172,12 @@ public:
       ss::httpd::const_req req,
       const ss::sstring& user,
       const ss::sstring& svc_name);
+
+    static api_activity construct(
+      std::string_view svc_name,
+      ss::httpd::const_req req,
+      std::string_view operation_name,
+      const auth_result& auth_result);
 
     static constexpr api_activity::activity_id
     op_to_crud(security::acl_operation op) {

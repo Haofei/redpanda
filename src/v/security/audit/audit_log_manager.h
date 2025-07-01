@@ -138,6 +138,20 @@ public:
           std::vector<model::topic>());
     }
 
+    bool enqueue_authz_audit_event(
+      event_type event_type,
+      std::string_view svc_name,
+      ss::httpd::const_req req,
+      std::string_view operation_name,
+      security::auth_result&& result) {
+        if (auto val = should_enqueue_audit_event(event_type, result.principal);
+            val.has_value()) {
+            return (bool)*val;
+        }
+        return do_enqueue_audit_event<api_activity>(
+          svc_name, req, operation_name, std::move(result));
+    }
+
     bool enqueue_authn_event(authentication_event_options options) {
         if (auto val = should_enqueue_audit_event(
               event_type::authenticate, options.user);
