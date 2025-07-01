@@ -830,6 +830,6 @@ TEST(JsonConversionIr, StructFieldIndex) {
     auto result = to_iceberg_ir(schema);
     ASSERT_TRUE(result.has_value()) << result.error().what();
 
-    ASSERT_EQ(result.value().struct_field_index().at("field1").field_pos, 0);
-    ASSERT_EQ(result.value().struct_field_index().at("field2").field_pos, 1);
+    ASSERT_EQ(result.value().struct_field_map().at("field1").field_pos, 0);
+    ASSERT_EQ(result.value().struct_field_map().at("field2").field_pos, 1);
 }
