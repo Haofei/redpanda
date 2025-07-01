@@ -23,8 +23,6 @@
 
 namespace pandaproxy::schema_registry {
 
-static constexpr auto audit_svc_name = "Redpanda Schema Registry Service";
-
 namespace {
 
 using server = pandaproxy::ctx_server<pandaproxy::schema_registry::service>;

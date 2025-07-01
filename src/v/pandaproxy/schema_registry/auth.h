@@ -22,6 +22,8 @@ namespace pandaproxy::schema_registry {
 
 using server = ctx_server<service>;
 
+constexpr auto audit_svc_name = "Redpanda Schema Registry Service";
+
 class auth {
 public:
     enum class level {
