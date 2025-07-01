@@ -32,6 +32,25 @@ redpanda_test_cc_library(
     ],
 )
 
+redpanda_test_cc_library(
+    name = "cluster_mock",
+    srcs = [
+        "cluster_mock.cc",
+    ],
+    hdrs = [
+        "cluster_mock.h",
+    ],
+    implementation_deps = [
+        "//src/v/random:generators",
+    ],
+    include_prefix = "kafka/client/test",
+    visibility = ["//visibility:public"],
+    deps = [
+        "//src/v/kafka/client:brokers",
+        "//src/v/kafka/client:logger",
+    ],
+)
+
 redpanda_cc_btest(
     name = "partitioners_test",
     timeout = "short",
