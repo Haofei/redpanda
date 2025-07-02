@@ -263,9 +263,7 @@ namespace {
 std::unique_ptr<adjacent_segment_merger> maybe_make_adjacent_segment_merger(
   ntp_archiver& self, const storage::ntp_config& cfg) {
     std::unique_ptr<adjacent_segment_merger> result = nullptr;
-    if (
-      cfg.is_archival_enabled() && !cfg.is_compacted()
-      && !cfg.is_read_replica_mode_enabled()) {
+    if (cfg.is_archival_enabled() && !cfg.is_read_replica_mode_enabled()) {
         result = std::make_unique<adjacent_segment_merger>(
           self,
           true,
@@ -557,11 +555,15 @@ ss::future<> ntp_archiver::upload_until_abort() {
         }
 
         if (_local_segment_merger) {
-            vlog(
-              _rtclog.debug,
-              "Enable adjacent segment merger in term {}",
-              _start_term);
-            _local_segment_merger->set_enabled(true);
+            auto is_compacted = _parent.log()->config().is_compacted();
+            if (!is_compacted) {
+                vlog(
+                  _rtclog.debug,
+                  "Enable adjacent segment merger in term {}, log config: {}",
+                  _start_term,
+                  _parent.log()->config());
+                _local_segment_merger->set_enabled(true);
+            }
         }
         if (_scrubber) {
             vlog(_rtclog.debug, "Enable scrubber in term {}", _start_term);
