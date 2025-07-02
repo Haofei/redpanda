@@ -14,6 +14,7 @@
 #include "pandaproxy/schema_registry/service.h"
 #include "pandaproxy/schema_registry/types.h"
 #include "security/acl.h"
+#include "security/audit/audit_log_manager.h"
 #include "security/authorizer.h"
 
 #include <seastar/util/variant_utils.hh>
@@ -60,6 +61,23 @@ void throw_unauthorized() {
       ss::http::reply::status_type::forbidden);
 }
 
+template<typename... Args>
+void audit_authz(
+  const server::request_t& rq,
+  std::string_view operation_name,
+  Args&&... args) {
+    if (!rq.service().audit_mgr().enqueue_authz_audit_event(
+          security::audit::event_type::schema_registry,
+          audit_svc_name,
+          *rq.req,
+          operation_name,
+          std::forward<Args>(args)...)) {
+        throw ss::httpd::base_exception(
+          "Failed to audit authorization request",
+          ss::http::reply::status_type::service_unavailable);
+    }
+}
+
 void check_authenticated(request_auth_result& auth_result) {
     try {
         auth_result.require_authenticated();
@@ -73,7 +91,7 @@ void check_authenticated(request_auth_result& auth_result) {
 
 void handle_authz(
   const server::request_t& rq,
-  std::string_view,
+  std::string_view operation_name,
   const auth& auth,
   request_auth_result& auth_result) {
     auto params = detail::auth_params{rq};
@@ -98,10 +116,11 @@ void handle_authz(
             params.principal, params.host, op, registry_resource{});
       });
 
-    if (authz_result.is_authorized()) {
-        // TODO(CORE-12275): audit success
-    } else {
-        // TODO(CORE-12275): audit failure
+    const bool is_authorized = authz_result.is_authorized();
+
+    audit_authz(rq, operation_name, std::move(authz_result));
+
+    if (!is_authorized) {
         throw_unauthorized();
     }
 }

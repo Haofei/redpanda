@@ -6167,6 +6167,10 @@ class ACLTestEndpoint:
         """Execute the actual HTTP request"""
         raise NotImplementedError
 
+    def requests_per_request(self) -> int:
+        """The number of requests made per make_request call"""
+        return 1
+
     def create_acl(self) -> dict:
         """Create the ACL required for this endpoint"""
         raise NotImplementedError
@@ -6454,6 +6458,14 @@ class GetSubjectVersionsVersionReferencedBy(ACLTestEndpoint):
 
     def create_acl(self):
         return self.test._create_acl("*", "REGISTRY", "LITERAL", "DESCRIBE")
+
+    def requests_per_request(self) -> int:
+        """
+        sr_client.get_subjects_subject_versions_version_referenced_by makes 2 requests:
+        /subjects/{self.test.subject}/versions/1/referencedby
+        /subjects/{self.test.subject}/versions/1/referencedBy (deprecated)
+        """
+        return 2
 
 
 class DeleteSubject(ACLTestEndpoint):
