@@ -2069,7 +2069,7 @@ class AuditLogTestOauth(AuditLogTestBase):
             ip_set), f"Expected one record but received {len(records)}"
 
 
-class AuditLogTestSchemaRegistry(AuditLogTestBase):
+class AuditLogTestSchemaRegistryBase(AuditLogTestBase):
     """
     Validates schema registry auditing
     """
@@ -2081,7 +2081,7 @@ class AuditLogTestSchemaRegistry(AuditLogTestBase):
     def __init__(self, test_context):
         sr_config = SchemaRegistryConfig()
         sr_config.authn_method = 'http_basic'
-        super(AuditLogTestSchemaRegistry, self).__init__(
+        super(AuditLogTestSchemaRegistryBase, self).__init__(
             test_context=test_context,
             audit_log_config=AuditLogConfig(
                 num_partitions=1,
@@ -2139,6 +2139,11 @@ class AuditLogTestSchemaRegistry(AuditLogTestBase):
 
         wait_until(user_exists, timeout_sec=10, backoff_sec=1)
 
+
+class AuditLogTestSchemaRegistry(AuditLogTestSchemaRegistryBase):
+    """
+    Validates schema registry auditing
+    """
     @skip_fips_mode
     @cluster(num_nodes=5)
     def test_sr_audit(self):
