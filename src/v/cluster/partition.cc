@@ -368,7 +368,8 @@ ss::shared_ptr<cluster::rm_stm> partition::rm_stm() {
     return _rm_stm;
 }
 
-ss::shared_ptr<experimental::cloud_topics::ctp_stm_api> partition::ctp_stm_api() {
+ss::shared_ptr<experimental::cloud_topics::ctp_stm_api>
+partition::ctp_stm_api() {
     return _ctp_stm_api;
 }
 

@@ -7,8 +7,8 @@
 // the Business Source License, use of this software will be governed
 // by the Apache License, Version 2.0
 
-#include "cloud_topics/level_zero/ctp_stm_state.h"
 #include "cloud_topics/dl_version.h"
+#include "cloud_topics/level_zero/ctp_stm_state.h"
 #include "gmock/gmock.h"
 #include "gtest/gtest.h"
 #include "random/generators.h"
