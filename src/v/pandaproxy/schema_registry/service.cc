@@ -86,10 +86,7 @@ public:
               },
               [&](const auth::deferred_function_handler& h) {
                   return h(
-                    std::move(rq),
-                    std::move(rp),
-                    _auth,
-                    std::move(auth_result));
+                    std::move(rq), std::move(rp), std::move(auth_result));
               });
         } catch (const kafka::client::partition_error& ex) {
             if (
