@@ -75,7 +75,10 @@ redpanda_cc_gtest(
             "json_checker_test.cc",
         ],
     cpu = 1,
-    data = glob(["testdata/jsonchecker/*"]),
+    data = glob([
+        "testdata/jsonchecker/*",
+        "testdata/samples/*",
+    ]),
     deps = [
         "//src/v/bytes:iobuf",
         "//src/v/serde/json:parser",
