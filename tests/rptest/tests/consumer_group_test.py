@@ -1559,6 +1559,7 @@ class OffsetCommitter:
                 'auto.offset.reset': 'earliest',
                 'enable.auto.offset.store': True,
                 'enable.auto.commit': False,
+                'fetch.wait.max.ms': 50,
             },
             logger=self.logger)
 
