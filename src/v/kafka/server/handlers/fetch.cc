@@ -251,12 +251,12 @@ static read_result::memory_units_t reserve_memory_units(
   ssx::semaphore& memory_sem,
   ssx::semaphore& memory_fetch_sem,
   const size_t max_bytes,
+  const size_t max_batch_size,
   const bool obligatory_batch_read) {
     read_result::memory_units_t memory_units;
     const size_t memory_kafka_now = memory_sem.current();
     const size_t memory_fetch = memory_fetch_sem.current();
-    const size_t batch_size_estimate
-      = config::shard_local_cfg().kafka_memory_batch_size_estimate_for_fetch();
+    const size_t batch_size_estimate = max_batch_size;
 
     if (obligatory_batch_read) {
         // cap what we want at what we have, but no further down than a single
@@ -336,6 +336,7 @@ static ss::future<read_result> do_read_from_ntp(
           memory_sem,
           memory_fetch_sem,
           ntp_config.cfg.max_bytes,
+          ntp_config.cfg.max_batch_size,
           obligatory_batch_read);
         if (!memory_units.fetch) {
             ntp_config.cfg.skip_read = true;
@@ -462,9 +463,14 @@ read_result::memory_units_t reserve_memory_units(
   ssx::semaphore& memory_sem,
   ssx::semaphore& memory_fetch_sem,
   const size_t max_bytes,
+  const size_t max_batch_size,
   const bool obligatory_batch_read) {
     return kafka::reserve_memory_units(
-      memory_sem, memory_fetch_sem, max_bytes, obligatory_batch_read);
+      memory_sem,
+      memory_fetch_sem,
+      max_bytes,
+      max_batch_size,
+      obligatory_batch_read);
 }
 
 } // namespace testing
@@ -1447,6 +1453,27 @@ class simple_fetch_planner final : public fetch_planner::impl {
                     error_code::invalid_topic_exception);
               }
 
+              const auto& topic_md = metadata_cache.get_topic_metadata_ref(
+                model::topic_namespace_view{model::kafka_namespace, topic});
+
+              if (!topic_md) {
+                  return fail_all_partitions(
+                    error_code::unknown_topic_or_partition);
+              }
+
+              const auto& topic_cfg = topic_md->get().get_configuration();
+              // Max batch size or `message.max.bytes` is a user configurable
+              // topic property that defines the max size of a batch that can be
+              // produced to any partition in the topic.
+              //
+              // It is used later in the fetch path to establish the minimum
+              // number of memory semaphore units that need to be allocated
+              // before reading a single batch from any of the topic's
+              // partitions.
+              const auto max_batch_size
+                = topic_cfg.properties.batch_max_bytes.value_or(
+                  metadata_cache.get_default_batch_max_bytes());
+
               for (const kafka::fetch_session_partition& fp : partitions) {
                   // if this is not an initial fetch we are allowed to skip
                   // partitions that already have an error or we have enough
@@ -1509,6 +1536,7 @@ class simple_fetch_planner final : public fetch_planner::impl {
                       .start_offset = fp.fetch_offset,
                       .max_offset = model::model_limits<model::offset>::max(),
                       .max_bytes = max_bytes,
+                      .max_batch_size = max_batch_size,
                       .timeout = octx.deadline.value_or(model::no_timeout),
                       .current_leader_epoch = fp.current_leader_epoch,
                       .isolation_level = octx.request.data.isolation_level,

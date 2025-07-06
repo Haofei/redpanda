@@ -164,6 +164,7 @@ FIXTURE_TEST(read_from_ntp_max_bytes, redpanda_thread_fixture) {
           .start_offset = model::offset(0),
           .max_offset = model::model_limits<model::offset>::max(),
           .max_bytes = max_bytes,
+          .max_batch_size = 1_MiB,
           .timeout = model::no_timeout,
           .isolation_level = model::isolation_level::read_uncommitted,
         };
