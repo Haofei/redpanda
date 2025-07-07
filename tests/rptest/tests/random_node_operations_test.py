@@ -12,6 +12,11 @@ import random
 import re
 import threading
 from enum import Enum
+from typing import Any
+from logging import Logger
+
+from ducktape.cluster.cluster import ClusterNode
+from ducktape.tests.test import TestContext
 
 from ducktape.mark import matrix
 from ducktape.utils.util import wait_until
@@ -31,8 +36,10 @@ from rptest.services.kgo_verifier_services import (
 from rptest.services.redpanda import (
     CHAOS_LOG_ALLOW_LIST,
     PREV_VERSION_LOG_ALLOW_LIST,
+    CloudStorageType,
     LoggingConfig,
     PandaproxyConfig,
+    RedpandaService,
     SISettings,
     SchemaRegistryConfig,
     get_cloud_storage_type,
@@ -272,18 +279,18 @@ class RandomNodeOperationsTest(PreallocNodesTest):
     class producer_consumer:
         def __init__(
             self,
-            test_context,
-            logger,
-            topic_name,
-            redpanda,
-            nodes,
-            msg_size,
-            rate_limit_bps,
-            msg_count,
-            consumers_count,
-            compaction_enabled=False,
-            key_set_cardinality=None,
-            tolerate_data_loss=False,
+            test_context: TestContext,
+            logger: Logger,
+            topic_name: str,
+            redpanda: RedpandaService,
+            nodes: list[ClusterNode],
+            msg_size: int,
+            rate_limit_bps: int,
+            msg_count: int,
+            consumers_count: int,
+            compaction_enabled: bool = False,
+            key_set_cardinality: int | None = None,
+            tolerate_data_loss: bool = False,
         ):
             self.test_context = test_context
             self.logger = logger
@@ -319,7 +326,7 @@ class RandomNodeOperationsTest(PreallocNodesTest):
                 backoff_sec=1,
             )
 
-        def _start_consumer(self, with_logs=False):
+        def _start_consumer(self, with_logs: bool = False):
             self.consumer = KgoVerifierConsumerGroupConsumer(
                 self.test_context,
                 self.redpanda,
@@ -567,6 +574,7 @@ class RandomNodeOperationsTest(PreallocNodesTest):
         fast_producer_consumer.start()
 
         write_caching_enabled = enable_write_caching_testing()
+        write_caching_producer_consumer = None
         if write_caching_enabled:
             cleanup_policy = TopicSpec._random_cleanup_policy()
             tp_suffix = cleanup_policy.replace(",", "-")
@@ -612,7 +620,7 @@ class RandomNodeOperationsTest(PreallocNodesTest):
         )
 
         self.admin_fuzz.start()
-        self.active_node_idxs = set([self.redpanda.idx(n) for n in self.redpanda.nodes])
+        self.active_node_idxs = {self.redpanda.idx(n) for n in self.redpanda.nodes}
 
         fi = None
         if enable_failures:
