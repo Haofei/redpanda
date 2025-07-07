@@ -6605,6 +6605,40 @@ class CompatibilitySubjectVersion(ACLTestEndpoint):
                                      "READ")
 
 
+class GetSchemasTypes(ACLTestEndpoint):
+    name = "GET_SCHEMAS_TYPES"
+
+    @property
+    def path(self) -> str:
+        return f"schemas/types"
+
+    def setup(self) -> None:
+        pass
+
+    def make_request(self, auth):
+        return self.sr_client.get_schemas_types()
+
+    def create_acl(self):
+        pass
+
+
+class GetStatusReady(ACLTestEndpoint):
+    name = "SCHEMA_REGISTRY_STATUS_READY"
+
+    @property
+    def path(self) -> str:
+        return f"status/ready"
+
+    def setup(self) -> None:
+        pass
+
+    def make_request(self, auth):
+        return self.sr_client.get_status_ready()
+
+    def create_acl(self):
+        pass
+
+
 class SchemaRegistryAclAuthzTest(SchemaRegistryEndpoints):
     """
     Verify that schema registry endpoints are protected by the correct ACL resource and operation.

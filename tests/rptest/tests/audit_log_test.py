@@ -48,7 +48,7 @@ from rptest.tests.schema_registry_test import (
     GetSchemasIdsIdVersions, GetSchemasIdsIdSubjects, GetSubjectVersions,
     PostSubject, GetSubjectVersionsVersion, GetSubjectVersionsVersionSchema,
     GetSubjectVersionsVersionReferencedBy, DeleteSubject, DeleteSubjectVersion,
-    CompatibilitySubjectVersion)
+    CompatibilitySubjectVersion, GetSchemasTypes, GetStatusReady)
 from rptest.util import expect_exception, wait_until, wait_until_result
 from rptest.utils.mode_checks import skip_fips_mode
 from rptest.utils.rpk_config import read_redpanda_cfg
@@ -2259,14 +2259,14 @@ class AuditLogTestSchemaRegistryACLs(AuditLogTestSchemaRegistryBase):
         CompatibilitySubjectVersion,
 
         # Tested separately:
-        # GET_SCHEMAS_TYPES             - no ACLs required
-        # SCHEMA_REGISTRY_STATUS_READY  - no ACLs required
         # GET_SCHEMAS_IDS_ID            - custom ACL handling
         # GET_SUBJECTS                  - custom ACL handling
     ]
 
+    PUBLIC_ENDPOINTS = [GetSchemasTypes, GetStatusReady]
+
     def _get_endpoint_by_name(self, name: str) -> ACLTestEndpoint:
-        for endpoint in self.ENDPOINTS:
+        for endpoint in self.ENDPOINTS + self.PUBLIC_ENDPOINTS:
             if endpoint.name == name:
                 return endpoint(self)
         raise ValueError(f"Endpoint {name} not found")
@@ -2354,7 +2354,11 @@ class AuditLogTestSchemaRegistryACLs(AuditLogTestSchemaRegistryBase):
             )
             return False
 
-        if (record['actor']['user']['name'] != self.username):
+        requires_user = not any(
+            a.get("policy", {}).get("desc") == "authorization disabled"
+            for a in record['actor']['authorizations'])
+        if (requires_user
+                and record['actor']['user']['name'] != self.username):
             self.logger.debug(
                 f"Validating api activity record: (username): {record['actor']['user']['name']} != {self.username}"
             )
@@ -2370,6 +2374,18 @@ class AuditLogTestSchemaRegistryACLs(AuditLogTestSchemaRegistryBase):
 
         return False
 
+    def check_matching_api_record(self, endpoint, status_id: StatusID):
+        operation = endpoint.name.lower()
+        name = f'sr {operation} call'
+        records = self.find_matching_record(
+            lambda record: self.match_api_record(record,
+                                                 endpoint.path,
+                                                 status_id=status_id,
+                                                 operation=operation),
+            lambda record_count: record_count >= 1, name)
+        assert self.aggregate_count(records) == 1, \
+            f'{name}: Expected one record found for {self.aggregate_count(records)}: {records}'
+
     @skip_fips_mode
     @cluster(num_nodes=5)
     @matrix(endpoint_name=[e.name for e in ENDPOINTS])
@@ -2382,18 +2398,6 @@ class AuditLogTestSchemaRegistryACLs(AuditLogTestSchemaRegistryBase):
         # Setup any prerequisites
         endpoint.setup()
         authn_success_count = 0
-
-        def check_matching_record(status_id: StatusID):
-            operation = endpoint.name.lower()
-            name = f'sr {operation} call'
-            records = self.find_matching_record(
-                lambda record: self.match_api_record(record,
-                                                     endpoint.path,
-                                                     status_id=status_id,
-                                                     operation=operation),
-                lambda record_count: record_count >= 1, name)
-            assert self.aggregate_count(records) == 1, \
-                f'{name}: Expected one record found for {self.aggregate_count(records)}: {records}'
 
         # Invalid AuthN — should be denied
         result = endpoint.make_request(
@@ -2409,7 +2413,7 @@ class AuditLogTestSchemaRegistryACLs(AuditLogTestSchemaRegistryBase):
         self.assert_equal(result.status_code, 403)
         authn_success_count += 1
 
-        check_matching_record(StatusID.FAILURE)
+        self.check_matching_api_record(endpoint, StatusID.FAILURE)
 
         # Grant correct ACL
         acl = endpoint.create_acl()
@@ -2420,12 +2424,30 @@ class AuditLogTestSchemaRegistryACLs(AuditLogTestSchemaRegistryBase):
         self.assert_equal(result.status_code, 200)
         authn_success_count += 1
 
-        check_matching_record(StatusID.SUCCESS)
+        self.check_matching_api_record(endpoint, StatusID.SUCCESS)
 
         _ = self.find_matching_record(
             lambda record: self.match_authn_record(record, StatusID.SUCCESS),
             lambda record_count: record_count == authn_success_count *
             request_ratio, 'authn attempt in sr')
+
+    @cluster(num_nodes=5)
+    @matrix(endpoint_name=[e.name for e in PUBLIC_ENDPOINTS])
+    def test_sr_audit_public(self, endpoint_name):
+        """
+        Test schema registry public endpoints
+        """
+        self.setup_cluster()
+
+        endpoint = self._get_endpoint_by_name(endpoint_name)
+
+        # Setup any prerequisites
+        endpoint.setup()
+
+        result = endpoint.make_request(self.user_auth)
+        self.assert_equal(result.status_code, 200)
+
+        self.check_matching_api_record(endpoint, StatusID.SUCCESS)
 
 
 class AuditLogTestSanctionMode(AuditLogTestBase):

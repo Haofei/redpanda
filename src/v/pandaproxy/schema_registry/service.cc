@@ -209,7 +209,7 @@ server::routes_t get_schema_registry_routes(ss::gate& gate, one_shot& es) {
     routes.routes.emplace_back(wrap(
       ss::httpd::schema_registry_json::get_schemas_types,
       auth::level::publik,
-      std::nullopt,
+      acl_operation::read,
       auth::none{},
       get_schemas_types));
 
@@ -316,7 +316,7 @@ server::routes_t get_schema_registry_routes(ss::gate& gate, one_shot& es) {
     routes.routes.emplace_back(wrap(
       ss::httpd::schema_registry_json::schema_registry_status_ready,
       auth::level::publik,
-      std::nullopt,
+      acl_operation::read,
       auth::none{},
       status_ready));
 
