@@ -352,6 +352,32 @@ auto with_segment_reader_handle(segment_reader_handle handle, Func func) {
       });
 }
 
+// Returns `true` or `false` depending on whether the provided record/control
+// batch is instantly removable by compaction.
+// This will return `true` for:
+//   1. Compactible control batches (such as those found in the
+//      __consumer_offsets topic).
+//   2. Tombstone records past the removal horizon set by
+//      `delete.retention.ms`
+// In all other cases, return `false`.
+inline bool can_discard(
+  const model::record_batch& b,
+  const model::record& r,
+  const model::ntp& ntp,
+  bool past_tombstone_delete_horizon) {
+    // Compactible control batches are always removable
+    if (is_compactible_control_batch(ntp, b.header().type)) {
+        return true;
+    }
+
+    // Deal with tombstone record removal
+    if (r.is_tombstone() && past_tombstone_delete_horizon) {
+        return true;
+    }
+
+    return false;
+}
+
 template<typename Func>
 ss::future<bool> should_keep(
   const model::record_batch& b,
@@ -390,18 +416,21 @@ ss::future<bool> should_keep(
         co_return true;
     }
 
-    // Deal with tombstone record removal
-    if (r.is_tombstone() && past_tombstone_delete_horizon) {
-        pb.add_removed_tombstone();
-        co_return false;
-    }
-
     auto& header = b.header();
     if (!is_compactible(ntp, header)) {
         if (header.attrs.is_control()) {
             has_tx_batches = true;
         }
         co_return true;
+    }
+
+    // Before considering `is_latest_key()`, unconditionally remove
+    // records/batches which are always considered removable.
+    if (can_discard(b, r, ntp, past_tombstone_delete_horizon)) {
+        if (r.is_tombstone()) {
+            pb.add_removed_tombstone();
+        }
+        co_return false;
     }
 
     auto keep = co_await is_latest_key(b, r);
