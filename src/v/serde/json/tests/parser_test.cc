@@ -460,3 +460,14 @@ TEST_CORO(json_parser, top_level_null) {
     EXPECT_TRUE(co_await p.next());
     EXPECT_EQ(p.token(), token::eof);
 }
+
+TEST_CORO(json_parser, top_level_extra_number) {
+    auto p = parser(iobuf::from(R"("hello"42)"));
+
+    EXPECT_TRUE(co_await p.next());
+    EXPECT_EQ(p.token(), token::value_string);
+    EXPECT_EQ(p.value_string(), iobuf::from("hello"));
+
+    EXPECT_TRUE(co_await p.next());
+    EXPECT_EQ(p.token(), token::error);
+}
