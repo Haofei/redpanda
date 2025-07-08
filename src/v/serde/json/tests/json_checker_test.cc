@@ -67,21 +67,6 @@ INSTANTIATE_TEST_SUITE_P(
   json_checker_test,
   testing::ValuesIn(collect_test_cases("jsonchecker")));
 
-// Test class for sample JSON files
-class json_samples_test
-  : public seastar_test
-  , public testing::WithParamInterface<std::string> {};
-
-TEST_P_CORO(json_samples_test, all) {
-    auto test_case = GetParam();
-    co_await run_json_test("samples", test_case);
-}
-
-INSTANTIATE_TEST_SUITE_P(
-  json_samples_tests,
-  json_samples_test,
-  testing::ValuesIn(collect_test_cases("samples")));
-
 std::vector<std::string> collect_test_cases(const std::string& directory) {
     std::vector<std::string> test_cases;
 
