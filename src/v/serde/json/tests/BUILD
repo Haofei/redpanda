@@ -77,7 +77,6 @@ redpanda_cc_gtest(
     cpu = 1,
     data = glob([
         "testdata/jsonchecker/*",
-        "testdata/samples/*",
     ]),
     deps = [
         "//src/v/bytes:iobuf",

@@ -518,6 +518,8 @@ public:
                     char space = ' ';
                     ss::temporary_buffer<char> space_buf(&space, 1);
                     numeric_parser.advance(space_buf, numeric_parse_result);
+                    // If the number is done produce it, else fall through
+                    // to the incomplete case.
                     if (
                       numeric_parse_result
                       == detail::numeric_parser::result::done) {
