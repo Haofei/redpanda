@@ -29,6 +29,7 @@
 #include "kafka/protocol/schemata/list_groups_response.h"
 #include "kafka/protocol/sync_group.h"
 #include "kafka/protocol/txn_offset_commit.h"
+#include "kafka/protocol/types.h"
 #include "kafka/server/fwd.h"
 #include "kafka/server/group.h"
 #include "kafka/server/group_recovery_consumer.h"
@@ -205,8 +206,8 @@ public:
     // Returns the groups being managed by the attached partition of the given
     // NTP, returning an error if the partition is not serving groups on this
     // shard (e.g. not leader, still loading groups, etc).
-    ss::future<group_offsets_snapshot_result>
-    snapshot_groups(const model::ntp&, size_t max_num_groups_per_snap = 1000);
+    ss::future<group_offsets_snapshot_result> snapshot_groups_for_upload(
+      const model::ntp&, size_t max_num_groups_per_snap = 1000);
 
     ss::future<kafka::error_code>
       recover_offsets(cluster::group_offsets_snapshot);
@@ -296,6 +297,15 @@ private:
     ss::future<std::error_code> inject_noop(
       ss::lw_shared_ptr<cluster::partition> p,
       ss::lowres_clock::time_point timeout);
+
+    // If `group_filter` is provided the function will only succeed if all of
+    // them have been found in the partition.
+    ss::future<
+      result<std::vector<cluster::group_offsets_snapshot>, cluster::errc>>
+    do_snapshot_groups(
+      const model::ntp&,
+      size_t max_num_groups_per_snap,
+      std::optional<chunked_vector<group_id>> group_filter);
 
     ss::lw_shared_ptr<attached_partition>
     get_attached_partition(const model::ntp& ntp) {

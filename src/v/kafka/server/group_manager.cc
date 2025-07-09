@@ -52,7 +52,10 @@
 
 #include <fmt/ranges.h>
 
+#include <algorithm>
 #include <chrono>
+#include <limits>
+#include <optional>
 #include <ranges>
 #include <system_error>
 
@@ -777,11 +780,41 @@ ss::future<result<model::offset>> group_manager::set_blocked_for_groups(
 }
 
 ss::future<group_manager::group_offsets_snapshot_result>
-group_manager::snapshot_groups(
+group_manager::snapshot_groups_for_upload(
   const model::ntp& ntp, size_t max_num_groups_per_snap) {
+    auto res = co_await do_snapshot_groups(
+      ntp, max_num_groups_per_snap, std::nullopt);
+    if (res.has_value()) {
+        co_return std::move(res.assume_value());
+    }
+    switch (res.error()) {
+    case cluster::errc::partition_not_exists:
+        co_return cluster::cloud_metadata::error_outcome::ntp_not_found;
+    case cluster::errc::update_in_progress:
+    case cluster::errc::not_leader:
+        co_return cluster::cloud_metadata::error_outcome::not_ready;
+    default:
+        vlog(
+          cg_klog.error,
+          "Unexpected error while snapshotting groups: {}",
+          res.error());
+        co_return cluster::cloud_metadata::error_outcome::not_ready;
+    }
+}
+
+ss::future<result<std::vector<group_offsets_snapshot>, cluster::errc>>
+group_manager::do_snapshot_groups(
+  const model::ntp& ntp,
+  size_t max_num_groups_per_snap,
+  std::optional<chunked_vector<group_id>> group_filter) {
+    vlog(
+      cg_klog.debug,
+      "Snapshotting groups from ntp={}, filter={}",
+      ntp,
+      group_filter);
     auto it = _partitions.find(ntp);
     if (it == _partitions.end()) {
-        co_return cluster::cloud_metadata::error_outcome::ntp_not_found;
+        co_return cluster::errc::partition_not_exists;
     }
     auto attached_partition = it->second;
     // Avoid overlapping with concurrent reloads of the partition.
@@ -790,22 +823,33 @@ group_manager::snapshot_groups(
     auto& catchup = attached_partition->catchup_lock;
     auto read_lock = co_await catchup->hold_read_lock();
     if (!attached_partition->partition->is_leader()) {
-        co_return cluster::cloud_metadata::error_outcome::not_ready;
+        co_return cluster::errc::not_leader;
     }
     if (attached_partition->loading) {
-        co_return cluster::cloud_metadata::error_outcome::not_ready;
+        co_return cluster::errc::update_in_progress;
     }
-    // Make a copy of the groups that we're about to snapshot, to avoid racing
-    // with removals during iteration.
+    // Make a copy of the group lw ptrs that we're about to snapshot, to avoid
+    // racing with removals during iteration.
     chunked_vector<std::pair<group_id, group_ptr>> groups;
-    std::copy_if(
-      _groups.begin(),
-      _groups.end(),
-      std::back_inserter(groups),
-      [&ntp](auto g_pair) {
-          const auto& [group_id, group] = g_pair;
-          return group->partition()->ntp().tp.partition == ntp.tp.partition;
-      });
+    auto predicate = [&ntp](const auto& g_pair) {
+        const auto& [group_id, group] = g_pair;
+        return group->partition()->ntp().tp.partition == ntp.tp.partition;
+    };
+    if (group_filter) {
+        groups.reserve(group_filter->size());
+        for (const auto& gid : *group_filter) {
+            auto it = _groups.find(gid);
+            if (it != _groups.end() && predicate(*it)) {
+                groups.push_back(*it);
+            } else {
+                vlog(cg_klog.warn, "Cannot find group={} in ntp={}", gid, ntp);
+            }
+        }
+    } else {
+        std::ranges::copy(
+          _groups | std::views::filter(predicate), std::back_inserter(groups));
+    }
+
     std::vector<group_offsets_snapshot> snapshots;
     snapshots.emplace_back();
     auto* cur_snap = &snapshots.back();
@@ -839,7 +883,7 @@ group_manager::snapshot_groups(
         cur_snap->groups.emplace_back(std::move(go));
         co_await ss::maybe_yield();
     }
-    co_return snapshots;
+    co_return std::move(snapshots);
 }
 
 ss::future<kafka::error_code>
