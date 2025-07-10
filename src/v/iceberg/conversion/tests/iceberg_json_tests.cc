@@ -865,10 +865,6 @@ TEST(JsonConversionIr, StructFieldIndex) {
 // TODO: what to do with NULL values?
 
 TEST_CORO(IcebergValues, ValuePrimitives) {
-    // Temporarily nest primitives in an array because we can't parse primitives
-    // at root until https://redpandadata.atlassian.net/browse/CORE-12529 is
-    // done.
-
     const auto json_primitives = std::to_array<
       std::tuple<std::string_view, std::string_view, iceberg::value>>({
       {"boolean", "true", iceberg::boolean_value(true)},
@@ -884,23 +880,18 @@ TEST_CORO(IcebergValues, ValuePrimitives) {
 
         auto schema = fmt::format(
           R"({{
-          "$schema": "http://json-schema.org/draft-07/schema#",
-          "type": "array",
-          "items": {{"type": "{}"}}
+            "$schema": "http://json-schema.org/draft-07/schema#",
+            "type": "{}"
           }})",
           type);
         auto result = co_await to_iceberg_value(
-          schema, fmt::format("[{}]", value));
+          schema, fmt::format("{}", value));
 
         ASSERT_TRUE_CORO(result.has_value()) << result.error().what();
         auto result_value = std::get<std::unique_ptr<struct_value>>(
           std::move(result.value()));
 
-        const auto& list = std::get<std::unique_ptr<iceberg::list_value>>(
-          *result_value->fields[0]);
-
-        EXPECT_EQ(list->elements.at(0), expected) << fmt::format(
-          "Expected: {}, got: {}", expected, *list->elements.at(0));
+        EXPECT_EQ(*result_value->fields[0], expected);
     }
 }
 
