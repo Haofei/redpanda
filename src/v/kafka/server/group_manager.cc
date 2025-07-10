@@ -1815,7 +1815,7 @@ ss::future<std::error_code> group_manager::empty_and_delete_groups(
         g->remove_full_members();
     });
 
-    std::vector<std::pair<model::ntp, group_id>> groups_with_ntps{
+    chunked_vector<std::pair<model::ntp, group_id>> groups_with_ntps{
       std::from_range,
       groups | std::views::transform([&ntp](const group_id& group_id) {
           return std::make_pair(ntp, group_id);
@@ -1833,9 +1833,9 @@ ss::future<std::error_code> group_manager::empty_and_delete_groups(
     co_return std::error_code{*first_bad_code};
 }
 
-ss::future<std::vector<deletable_group_result>> group_manager::delete_groups(
-  std::vector<std::pair<model::ntp, group_id>> groups) {
-    std::vector<deletable_group_result> results;
+ss::future<chunked_vector<deletable_group_result>> group_manager::delete_groups(
+  chunked_vector<std::pair<model::ntp, group_id>> groups) {
+    chunked_vector<deletable_group_result> results;
 
     for (auto& group_info : groups) {
         auto error = validate_group_status(
