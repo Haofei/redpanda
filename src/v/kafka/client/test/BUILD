@@ -46,6 +46,7 @@ redpanda_test_cc_library(
     include_prefix = "kafka/client/test",
     visibility = ["//visibility:public"],
     deps = [
+        "//src/v/container:chunked_hash_map",
         "//src/v/kafka/client:brokers",
         "//src/v/kafka/client:logger",
     ],
@@ -443,3 +444,22 @@ redpanda_cc_gtest(
         "@seastar",
     ],
 )
+
+redpanda_cc_gtest(
+    name = "direct_consumer_test",
+    timeout = "short",
+    srcs = [
+        "direct_consumer_test.cc",
+    ],
+    deps = [
+        ":cluster_mock",
+        "//src/v/kafka/client:brokers",
+        "//src/v/kafka/client:cluster",
+        "//src/v/kafka/client/direct_consumer",
+        "//src/v/model/tests:random",
+        "//src/v/test_utils:gtest",
+        "@googletest//:gtest",
+        "@seastar",
+    ],
+)
+
