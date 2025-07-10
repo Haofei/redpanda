@@ -58,7 +58,6 @@
 
 using cluster::group_offsets;
 using cluster::group_offsets_snapshot;
-using cluster::group_offsets_snapshot_result;
 
 namespace kafka {
 
@@ -777,7 +776,8 @@ ss::future<result<model::offset>> group_manager::set_blocked_for_groups(
     co_return result.value().last_offset;
 }
 
-ss::future<group_offsets_snapshot_result> group_manager::snapshot_groups(
+ss::future<group_manager::group_offsets_snapshot_result>
+group_manager::snapshot_groups(
   const model::ntp& ntp, size_t max_num_groups_per_snap) {
     auto it = _partitions.find(ntp);
     if (it == _partitions.end()) {

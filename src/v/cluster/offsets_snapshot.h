@@ -104,7 +104,4 @@ struct group_offsets_snapshot
       = default;
 };
 
-using group_offsets_snapshot_result
-  = result<std::vector<group_offsets_snapshot>, cloud_metadata::error_outcome>;
-
 } // namespace cluster

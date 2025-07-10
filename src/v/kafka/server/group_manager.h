@@ -199,10 +199,13 @@ public:
       const chunked_vector<kafka::group_id>&,
       bool to_block);
 
+    using group_offsets_snapshot_result = result<
+      std::vector<cluster::group_offsets_snapshot>,
+      cluster::cloud_metadata::error_outcome>;
     // Returns the groups being managed by the attached partition of the given
     // NTP, returning an error if the partition is not serving groups on this
     // shard (e.g. not leader, still loading groups, etc).
-    ss::future<cluster::group_offsets_snapshot_result>
+    ss::future<group_offsets_snapshot_result>
     snapshot_groups(const model::ntp&, size_t max_num_groups_per_snap = 1000);
 
     ss::future<kafka::error_code>
