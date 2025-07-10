@@ -209,6 +209,9 @@ public:
     ss::future<group_offsets_snapshot_result> snapshot_groups_for_upload(
       const model::ntp&, size_t max_num_groups_per_snap = 1000);
 
+    ss::future<cluster::get_group_offsets_reply>
+      get_group_offsets(cluster::get_group_offsets_request);
+
     ss::future<kafka::error_code>
       recover_offsets(cluster::group_offsets_snapshot);
 

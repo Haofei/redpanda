@@ -802,6 +802,22 @@ group_manager::snapshot_groups_for_upload(
     }
 }
 
+ss::future<cluster::get_group_offsets_reply>
+group_manager::get_group_offsets(cluster::get_group_offsets_request req) {
+    model::ntp ntp{
+      model::kafka_namespace,
+      model::kafka_consumer_offsets_topic,
+      req.co_partition};
+    auto snap = co_await do_snapshot_groups(
+      ntp, std::numeric_limits<size_t>::max(), std::move(req.groups));
+    if (snap.has_value()) {
+        vassert(snap.assume_value().size() == 1, "Expected single snapshot");
+        co_return cluster::get_group_offsets_reply{
+          cluster::errc::success, std::move(snap.assume_value()[0].groups)};
+    }
+    co_return cluster::get_group_offsets_reply{snap.error(), {}};
+}
+
 ss::future<result<std::vector<group_offsets_snapshot>, cluster::errc>>
 group_manager::do_snapshot_groups(
   const model::ntp& ntp,
