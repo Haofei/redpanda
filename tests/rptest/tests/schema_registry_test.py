@@ -5753,9 +5753,11 @@ class SchemaRegistryACLTest(SchemaRegistryEndpoints):
     """
 
     VALID_OPERATIONS = [
-        "READ", "WRITE", "CREATE", "DELETE", "ALTER", "DESCRIBE",
-        "CLUSTER_ACTION", "DESCRIBE_CONFIGS", "ALTER_CONFIGS",
-        "IDEMPOTENT_WRITE", "ALL"
+        "ALL", "READ", "WRITE", "DELETE", "DESCRIBE", "DESCRIBE_CONFIGS",
+        "ALTER_CONFIGS"
+    ]
+    DISALLOWED_OPERATIONS = [
+        "CREATE", "ALTER", "CLUSTER_ACTION", "IDEMPOTENT_WRITE"
     ]
 
     VALID_PATTERN_TYPES = ["LITERAL", "PREFIXED"]
@@ -5952,9 +5954,12 @@ class SchemaRegistryACLTest(SchemaRegistryEndpoints):
         resp = self.sr_client.post_security_acls(invalid_pattern_acl)
         self.assert_equal(resp.status_code, 400)
 
-        invalid_operation_acl = [self._create_test_acl(operation="INVALID_OP")]
-        resp = self.sr_client.post_security_acls(invalid_operation_acl)
-        self.assert_equal(resp.status_code, 400)
+        for operation in self.DISALLOWED_OPERATIONS + ["INVALID_OP"]:
+            invalid_operation_acl = [
+                self._create_test_acl(operation=operation)
+            ]
+            resp = self.sr_client.post_security_acls(invalid_operation_acl)
+            self.assert_equal(resp.status_code, 400)
 
     @cluster(num_nodes=3)
     def test_case_handling(self):
