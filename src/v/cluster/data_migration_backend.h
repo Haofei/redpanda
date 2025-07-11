@@ -378,8 +378,8 @@ private:
     mutex _mutex{"c/data-migration-be::lock"};
     ss::timer<ss::lowres_clock> _timer{[this]() { wakeup(); }};
 
-    bool _is_raft0_leader;
-    bool _is_coordinator;
+    std::optional<model::term_id> _raft0_leader_term;
+    std::optional<model::term_id> _coordinator_term;
     migrations_table::notification_id _table_notification_id;
     cluster::notification_id_type _plt_raft0_leadership_notification_id;
     cluster::notification_id_type _topic_table_notification_id;

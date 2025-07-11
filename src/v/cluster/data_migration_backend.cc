@@ -112,18 +112,41 @@ ss::future<> backend::start() {
     vassert(
       ss::this_shard_id() == data_migrations_shard, "Called on wrong shard");
 
-    _is_raft0_leader = _is_coordinator
-      = _self == _leaders_table.get_leader(model::controller_ntp);
+    auto leader_term = _leaders_table.get_leader_term(model::controller_ntp);
+    if (leader_term && leader_term->leader == _self) {
+        _raft0_leader_term = _coordinator_term = leader_term->term;
+    }
+
     _plt_raft0_leadership_notification_id
       = _leaders_table.register_leadership_change_notification(
         model::controller_ntp,
         [this](
-          const model::ntp&, model::term_id, model::node_id leader_node_id) {
-            _is_raft0_leader = leader_node_id == _self;
-            if (_is_raft0_leader != _is_coordinator) {
-                ssx::spawn_with_gate(
-                  _gate, [this]() { return handle_raft0_leadership_update(); });
+          const model::ntp&,
+          model::term_id term,
+          model::node_id leader_node_id) {
+            std::optional<model::term_id> new_term_if_leader
+              = (leader_node_id == _self) ? std::make_optional(term)
+                                          : std::nullopt;
+            vlog(
+              dm_log.trace,
+              "_raft0_leader_term={}, new_term_if_leader={}",
+              _raft0_leader_term,
+              new_term_if_leader);
+
+            if (!new_term_if_leader && !_raft0_leader_term) {
+                // remaining a non-leader
+                return;
             }
+            if (
+              new_term_if_leader && _raft0_leader_term
+              && ((*new_term_if_leader)() - (*_raft0_leader_term)() == 1)) {
+                // remaining a leader, no other leaders between our terms
+                _raft0_leader_term = _coordinator_term = new_term_if_leader;
+                return;
+            }
+            _raft0_leader_term = new_term_if_leader;
+            ssx::spawn_with_gate(
+              _gate, [this]() { return handle_raft0_leadership_update(); });
         });
 
     _topic_table_notification_id = _topic_table.register_ntp_delta_notification(
@@ -837,24 +860,25 @@ ss::future<> backend::handle_raft0_leadership_update() {
     auto units = co_await _mutex.get_units(_as);
     vlog(
       dm_log.trace,
-      "_is_raft0_leader={}, _is_coordinator={}",
-      _is_raft0_leader,
-      _is_coordinator);
-    if (_is_raft0_leader == _is_coordinator) {
+      "_raft0_leader_term={}, _coordinator_term={}",
+      _raft0_leader_term,
+      _coordinator_term);
+    if (_raft0_leader_term == _coordinator_term) {
+        // multiple leadership updates have been handled in an earlier call
         co_return;
     }
-    _is_coordinator = _is_raft0_leader;
-    if (_is_coordinator) {
-        vlog(dm_log.debug, "stepping up as a coordinator");
-        // start coordinating
-        for (auto& [id, mrstate] : _migration_states) {
-            for (auto& [nt, tstate] : mrstate.outstanding_topics) {
-                co_await reconcile_existing_topic(
-                  nt, tstate, id, mrstate.scope, false);
-            }
-        }
-        wakeup();
-    } else {
+
+    auto old_coordinator_term = _coordinator_term;
+    _coordinator_term = _raft0_leader_term;
+
+    // We need to restart coordinating if another node have been a leader and
+    // potentially a coordinator between our coordinatorship terms.
+    // This is to recollect metadata of affected topics. While
+    // data_migrated_resources guards from topic metadata changes in presence of
+    // an active migration, another coordinator may have start or complete
+    // migrations between our terms.
+
+    if (old_coordinator_term) {
         vlog(dm_log.debug, "stepping down as a coordinator");
         // stop topic-scoped work
         co_await abort_all_topic_work();
@@ -867,6 +891,18 @@ ss::future<> backend::handle_raft0_leadership_update() {
         _nodes_to_retry.clear();
         _node_states.clear();
         _topic_work_to_retry.clear();
+    }
+
+    if (_coordinator_term) {
+        vlog(dm_log.debug, "stepping up as a coordinator");
+        // start coordinating
+        for (auto& [id, mrstate] : _migration_states) {
+            for (auto& [nt, tstate] : mrstate.outstanding_topics) {
+                co_await reconcile_existing_topic(
+                  nt, tstate, id, mrstate.scope, false);
+            }
+        }
+        wakeup();
     }
 }
 
@@ -932,7 +968,7 @@ ss::future<> backend::handle_migration_update(id id) {
         }
     }
 
-    if (new_scope.sought_state && _is_coordinator) {
+    if (new_scope.sought_state && _coordinator_term) {
         wakeup();
     }
 }
@@ -1204,7 +1240,7 @@ ss::future<> backend::reconcile_existing_topic(
   id migration,
   work_scope scope,
   bool schedule_local_partition_work) {
-    if (!schedule_local_partition_work && !_is_coordinator) {
+    if (!schedule_local_partition_work && !_coordinator_term) {
         vlog(
           dm_log.debug,
           "not tracking topic {} transition towards state {} as part of "
@@ -1217,12 +1253,12 @@ ss::future<> backend::reconcile_existing_topic(
     vlog(
       dm_log.debug,
       "tracking topic {} transition towards state {} as part of "
-      "migration {}, schedule_local_work={}, _is_coordinator={}",
+      "migration {}, schedule_local_work={}, _coordinator_term={}",
       nt,
       scope.sought_state,
       migration,
       schedule_local_partition_work,
-      _is_coordinator);
+      _coordinator_term);
     auto now = model::timeout_clock::now();
     if (scope.partition_work_needed(nt)) {
         co_await ssx::async_for_each(
@@ -1238,7 +1274,7 @@ ss::future<> backend::reconcile_existing_topic(
               auto nodes = assignment.replicas
                            | std::views::transform(
                              &model::broker_shard::node_id);
-              if (_is_coordinator) {
+              if (_coordinator_term) {
                   auto [it, ins] = tstate.outstanding_partitions.emplace(
                     std::piecewise_construct,
                     std::tuple{assignment.id},
@@ -1251,7 +1287,7 @@ ss::future<> backend::reconcile_existing_topic(
                     migration);
               }
               for (const auto& node_id : nodes) {
-                  if (_is_coordinator) {
+                  if (_coordinator_term) {
                       auto [it, ins] = _node_states[node_id].emplace(
                         ntp, migration);
                       vassert(
@@ -1311,7 +1347,7 @@ ss::future<> backend::reconcile_existing_topic(
               }
           });
     }
-    if (_is_coordinator && scope.topic_work_needed) {
+    if (_coordinator_term && scope.topic_work_needed) {
         tstate.topic_scoped_work_needed = true;
         _topic_work_to_retry.insert_or_assign(nt, now);
     }
@@ -1746,11 +1782,17 @@ chunked_vector<partition_assignment>
 backend::get_topic_assignments(const model::topic_namespace& nt, const id id) {
     auto maybe_assignments = _topic_table.get_topic_assignments(nt);
     if (!maybe_assignments) {
-        // A lagging non-coordinator may encounter a outbound migration that
+        // A lagging non-leader may encounter a outbound migration that
         // has already been completed in the cluster, and its topics are gone.
+        // If it is a controller or even a leader it will step down soon, so we
+        // are not worried we have no data.
+        // TODO: In theory, there is a race condition possible here if a new
+        // topic with the same name was created shortly after the original one
+        // was migrated away. We probably should remember topic initial
+        // revisions when creating a migration.
         vlogl(
           dm_log,
-          _is_coordinator ? ss::log_level::error : ss::log_level::warn,
+          _raft0_leader_term ? ss::log_level::error : ss::log_level::warn,
           "topic {} not found in topic table for migration {}",
           nt,
           id);
