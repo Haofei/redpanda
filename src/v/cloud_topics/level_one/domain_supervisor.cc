@@ -34,21 +34,24 @@ public:
       : _controller(controller) {}
 
     ss::future<> start() {
-        _as = {};
-        _loop = do_loop();
+        if (ss::this_shard_id() == 0) {
+            _as = {};
+            _loop = do_topic_reconciliation_loop();
+        }
+        // TODO(cloud-topics): We should also create domain supervisors if this
+        // shard owns a domain partition.
         co_return;
     }
 
     ss::future<> stop() {
-        _as.request_abort();
-        if (!_loop) {
-            co_return;
+        if (ss::this_shard_id() == 0 && _loop) {
+            _as.request_abort();
+            co_await *std::exchange(_loop, std::nullopt);
         }
-        co_await *std::exchange(_loop, std::nullopt);
     }
 
 private:
-    ss::future<> do_loop() {
+    ss::future<> do_topic_reconciliation_loop() {
         while (!_as.abort_requested()) {
             bool aborted = co_await loop_sleep();
             if (aborted) {
