@@ -938,7 +938,7 @@ private:
         }();
 
         return fmt::format(
-          "Must be one of {}{}", fmt::join(enum_values(), ","), or_null_str);
+          "Must be one of {}{}", fmt::join(enum_values(), ", "), or_null_str);
     }
 
     std::vector<T> _values;

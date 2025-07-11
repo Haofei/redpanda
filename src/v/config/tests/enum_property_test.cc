@@ -63,12 +63,12 @@ SEASTAR_THREAD_TEST_CASE(enum_property_validation) {
         verr = cfg.enum_str.validate(YAML::Load(v));
         BOOST_REQUIRE(verr.has_value());
         BOOST_REQUIRE_EQUAL(
-          verr.value().error_message(), "Must be one of foo,bar,baz");
+          verr.value().error_message(), "Must be one of foo, bar, baz");
 
         verr = cfg.opt_enum_str.validate(YAML::Load(v));
         BOOST_REQUIRE(verr.has_value());
         BOOST_REQUIRE_EQUAL(
-          verr.value().error_message(), "Must be one of foo,bar,baz or null");
+          verr.value().error_message(), "Must be one of foo, bar, baz or null");
     }
 
     // Optional variant should also always consider null to be valid.
