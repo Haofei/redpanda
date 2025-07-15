@@ -888,6 +888,11 @@ group_manager::do_snapshot_groups(
 
 ss::future<kafka::error_code>
 group_manager::recover_offsets(group_offsets_snapshot snap) {
+    return do_bulk_write_offsets(std::move(snap), false);
+}
+
+ss::future<kafka::error_code>
+group_manager::do_bulk_write_offsets(group_offsets_snapshot snap, bool merge) {
     vassert(!snap.groups.empty(), "Group data must not be empty");
     auto offsets_ntp = model::ntp{
       model::kafka_namespace,
@@ -896,7 +901,7 @@ group_manager::recover_offsets(group_offsets_snapshot snap) {
     };
     vlog(
       cg_klog.info,
-      "Received request to recover {} groups from snapshot on partition {}",
+      "Received request to restore {} groups from snapshot on partition {}",
       snap.groups.size(),
       offsets_ntp);
     auto it = _partitions.find(offsets_ntp);
@@ -916,7 +921,7 @@ group_manager::recover_offsets(group_offsets_snapshot snap) {
 
     vlog(
       cg_klog.info,
-      "Proceeding to recover {} groups on {}",
+      "Proceeding to restore {} groups on {}",
       snap.groups.size(),
       offsets_ntp);
     for (auto& g : snap.groups) {
@@ -931,12 +936,15 @@ group_manager::recover_offsets(group_offsets_snapshot snap) {
             // this is a destructive operation.
             vlog(
               cg_klog.info,
-              "Skipping restore of group {} from snapshot on {}, already "
-              "exists in state {}",
+              "Restoring group {} from snapshot on {}, group already exists in "
+              "state {}, {}",
               kafka_r.data.group_id,
               offsets_ntp,
-              group->state());
-            continue;
+              group->state(),
+              merge ? "committing offsets nevertheless" : "skipping");
+            if (!merge) {
+                continue;
+            }
         }
 
         auto& kafka_topics = kafka_data.topics;
@@ -954,7 +962,7 @@ group_manager::recover_offsets(group_offsets_snapshot snap) {
         }
         vlog(
           cg_klog.info,
-          "Recovering group {} from snapshot on {}",
+          "Restoring group {} from snapshot on {}",
           kafka_r.data.group_id,
           offsets_ntp);
         auto stages = offset_commit(std::move(kafka_r));
@@ -966,7 +974,7 @@ group_manager::recover_offsets(group_offsets_snapshot snap) {
                 if (kafka_p.error_code != kafka::error_code::none) {
                     vlog(
                       cg_klog.warn,
-                      "Error on {}/{} while recovering group {} on {}: {}",
+                      "Error on {}/{} while restoring group {} on {}: {}",
                       kafka_t.name,
                       kafka_p.partition_index,
                       kafka_r.data.group_id,

@@ -307,6 +307,11 @@ private:
       size_t max_num_groups_per_snap,
       std::optional<chunked_vector<group_id>> group_filter);
 
+    // if `merge` is true existing group offsets is saved with usual offset
+    // commit semantics, otherwise snapshot data for existing groups is ignored
+    ss::future<kafka::error_code>
+    do_bulk_write_offsets(cluster::group_offsets_snapshot, bool merge = false);
+
     ss::lw_shared_ptr<attached_partition>
     get_attached_partition(const model::ntp& ntp) {
         auto it = _partitions.find(ntp);
