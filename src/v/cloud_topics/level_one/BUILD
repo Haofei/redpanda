@@ -129,3 +129,21 @@ redpanda_cc_library(
         "@seastar",
     ],
 )
+
+redpanda_cc_library(
+    name = "offset_interval_set",
+    srcs = [
+        "offset_interval_set.cc",
+    ],
+    hdrs = [
+        "offset_interval_set.h",
+    ],
+    include_prefix = "cloud_topics/level_one",
+    deps = [
+        "//src/v/container:fragmented_vector",
+        "//src/v/container:interval_set",
+        "//src/v/model",
+        "//src/v/serde",
+        "//src/v/serde:map",
+    ],
+)

@@ -65,3 +65,17 @@ redpanda_cc_gtest(
         "@seastar",
     ],
 )
+
+redpanda_cc_gtest(
+    name = "offset_interval_set_test",
+    timeout = "short",
+    srcs = [
+        "offset_interval_set_test.cc",
+    ],
+    deps = [
+        "//src/v/bytes:iobuf",
+        "//src/v/cloud_topics/level_one:offset_interval_set",
+        "//src/v/test_utils:gtest",
+        "@googletest//:gtest",
+    ],
+)
