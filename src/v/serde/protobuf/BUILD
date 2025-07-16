@@ -64,3 +64,25 @@ redpanda_cc_library(
         "@seastar",
     ],
 )
+
+redpanda_cc_library(
+    name = "json",
+    srcs = [
+        "json.cc",
+    ],
+    hdrs = [
+        "json.h",
+    ],
+    implementation_deps = [
+        "//src/v/base",
+        "//src/v/utils:base64",
+        "@abseil-cpp//absl/strings",
+    ],
+    include_prefix = "serde/protobuf",
+    visibility = ["//visibility:public"],
+    deps = [
+        "//src/v/serde/json:parser",
+        "@fmt",
+        "@seastar",
+    ],
+)
