@@ -385,6 +385,28 @@ redpanda_cc_gtest(
     ],
 )
 
+redpanda_cc_gtest(
+    name = "protobuf_large_alloc_test",
+    timeout = "short",
+    srcs = [
+        "protobuf_large_alloc.cc",
+    ],
+    cpu = 1,
+    data = [
+        ":test_protos",
+    ],
+    memory = "256MiB",
+    deps = [
+        "//src/v/base",
+        "//src/v/pandaproxy/schema_registry:core",
+        "//src/v/pandaproxy/schema_registry/test:protobuf_utils",
+        "//src/v/test_utils:gtest",
+        "@fmt",
+        "@googletest//:gtest",
+        "@seastar",
+    ],
+)
+
 redpanda_cc_bench(
     name = "api_rpbench",
     timeout = "moderate",
