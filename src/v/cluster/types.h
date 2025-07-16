@@ -181,6 +181,7 @@ struct reset_id_allocator_reply
 
 struct kafka_result {
     kafka::offset last_offset;
+    model::term_id last_term;
 };
 struct kafka_stages {
     kafka_stages(ss::future<>, ss::future<result<kafka_result>>);

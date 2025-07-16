@@ -1033,7 +1033,9 @@ ss::future<result<kafka_result>> rm_stm::do_transactional_replicate(
         co_return tx::errc::timeout;
     }
     auto result = kafka_result{
-      .last_offset = from_log_offset(r.value().last_offset)};
+      .last_offset = from_log_offset(r.value().last_offset),
+      .last_term = r.value().last_term,
+    };
     req_ptr->set_value(result);
     co_return result;
 }
@@ -1189,7 +1191,9 @@ ss::future<result<kafka_result>> rm_stm::do_idempotent_replicate(
     }
     // translate to kafka offset.
     auto kafka_offset = from_log_offset(result.value().last_offset);
-    auto final_result = kafka_result{.last_offset = kafka_offset};
+    auto term = result.value().last_term;
+    auto final_result = kafka_result{
+      .last_offset = kafka_offset, .last_term = term};
     req_ptr->set_value(final_result);
     co_return final_result;
 }
@@ -1243,8 +1247,9 @@ ss::future<result<kafka_result>> rm_stm::replicate_msg(
         co_return ret_t(r.error());
     }
     auto old_offset = r.value().last_offset;
+    auto term = r.value().last_term;
     auto new_offset = from_log_offset(old_offset);
-    co_return ret_t(kafka_result{new_offset});
+    co_return ret_t(kafka_result{new_offset, term});
 }
 
 model::offset rm_stm::last_stable_offset() {
