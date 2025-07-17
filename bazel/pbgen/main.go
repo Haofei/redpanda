@@ -661,7 +661,8 @@ func (g *implGenerator) generateServiceRoutes(service protoreflect.ServiceDescri
 	defer w.Dedent()
 	for i := range service.Methods().Len() {
 		method := service.Methods().Get(i)
-		paths := []string{filepath.Join(string(service.FullName()), string(method.Name()))}
+		path := fmt.Sprintf("/%s", filepath.Join(string(service.FullName()), string(method.Name())))
+		paths := []string{path}
 		if alt := rpcAlternativeRoute(method); alt != "" {
 			paths = append(paths, alt)
 		}
