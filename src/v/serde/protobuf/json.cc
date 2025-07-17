@@ -87,7 +87,7 @@ ss::future<> check_next_eof(peekable_parser* parser) {
         throw std::runtime_error(
           fmt::format("next token, parser state: {}", parser->token()));
     }
-    if (parser->token() == token::eof) [[unlikely]] {
+    if (parser->token() != token::eof) [[unlikely]] {
         throw std::runtime_error(
           fmt::format("expected eof, got: {}", parser->token()));
     }

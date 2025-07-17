@@ -61,11 +61,11 @@ TEST(ProtobufCompat, RoundtripSerdeEmptyConformanceProto) {
       << "original: " << iobuf_to_string(original.to_json().get())
       << "\ndeserialized: " << iobuf_to_string(deserialized.to_json().get());
     deserialized = {};
-    auto jp = serde::pb::json::peekable_parser(original.to_json().get());
     EXPECT_NO_THROW(
-      protobuf_test_messages::editions::test_all_types_edition2023::from_json(
-        &jp, &deserialized)
-        .get());
+      deserialized
+      = protobuf_test_messages::editions::test_all_types_edition2023::from_json(
+          original.to_json().get())
+          .get());
     EXPECT_EQ(original, deserialized)
       << "original: " << iobuf_to_string(original.to_json().get())
       << "\ndeserialized: " << iobuf_to_string(deserialized.to_json().get());

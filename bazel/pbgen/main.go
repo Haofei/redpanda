@@ -509,9 +509,13 @@ func (g *headerGenerator) generateMessage(msg protoreflect.MessageDescriptor, w 
 	w.Println("seastar::future<iobuf> to_json() const;")
 	w.Printf("// Deserializes %s from a protocol buffer, in a way that will not cause stalls for large messages.\n", msg.FullName())
 	w.Printf("static seastar::future<%s> from_proto(iobuf);\n", typeName)
+	w.Println("// Note: This factory function should not be used directly, it's exposed for other protobuf parsers to use.")
+	w.Println("// Use the iobuf version instead.")
 	w.Printf("static seastar::future<> from_proto(serde::pb::wire_format_parser*, %s*);\n", typeName)
 	w.Printf("// Deserializes %s from json, in a way that will not cause stalls for large messages.\n", msg.FullName())
 	w.Printf("static seastar::future<%s> from_json(iobuf);\n", typeName)
+	w.Println("// Note: This factory function should not be used directly, it's exposed for other protobuf parsers to use.")
+	w.Println("// Use the iobuf version instead.")
 	w.Printf("static seastar::future<> from_json(serde::pb::json::peekable_parser*, %s*);\n", typeName)
 	w.Println()
 	oneofs := map[protoreflect.Name]bool{}
