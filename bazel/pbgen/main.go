@@ -726,6 +726,7 @@ func (g *implGenerator) generateServiceHandlers(service protoreflect.ServiceDesc
 		w.Dedent()
 		w.Println("} catch (...) {")
 		w.Indent()
+		w.Println(`serde::pb::rpc::logger.debug("error parsing request`, method.FullName(), `RPC: {}", std::current_exception());`)
 		w.Println(`co_return serde::pb::rpc::invalid_argument_exception("invalid request input").handle(std::move(reply));`)
 		w.Dedent()
 		w.Println("}")
