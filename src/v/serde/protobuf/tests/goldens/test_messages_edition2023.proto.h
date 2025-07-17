@@ -66,9 +66,13 @@ public:
   seastar::future<iobuf> to_json() const;
   // Deserializes protobuf_test_messages.editions.TestAllTypesEdition2023.NestedMessage from a protocol buffer, in a way that will not cause stalls for large messages.
   static seastar::future<test_all_types_edition2023_nested_message> from_proto(iobuf);
+  // Note: This factory function should not be used directly, it's exposed for other protobuf parsers to use.
+  // Use the iobuf version instead.
   static seastar::future<> from_proto(serde::pb::wire_format_parser*, test_all_types_edition2023_nested_message*);
   // Deserializes protobuf_test_messages.editions.TestAllTypesEdition2023.NestedMessage from json, in a way that will not cause stalls for large messages.
   static seastar::future<test_all_types_edition2023_nested_message> from_json(iobuf);
+  // Note: This factory function should not be used directly, it's exposed for other protobuf parsers to use.
+  // Use the iobuf version instead.
   static seastar::future<> from_json(serde::pb::json::peekable_parser*, test_all_types_edition2023_nested_message*);
   
   int32_t get_a() const;
@@ -99,9 +103,13 @@ public:
   seastar::future<iobuf> to_json() const;
   // Deserializes protobuf_test_messages.editions.TestAllTypesEdition2023.GroupLikeType from a protocol buffer, in a way that will not cause stalls for large messages.
   static seastar::future<test_all_types_edition2023_group_like_type> from_proto(iobuf);
+  // Note: This factory function should not be used directly, it's exposed for other protobuf parsers to use.
+  // Use the iobuf version instead.
   static seastar::future<> from_proto(serde::pb::wire_format_parser*, test_all_types_edition2023_group_like_type*);
   // Deserializes protobuf_test_messages.editions.TestAllTypesEdition2023.GroupLikeType from json, in a way that will not cause stalls for large messages.
   static seastar::future<test_all_types_edition2023_group_like_type> from_json(iobuf);
+  // Note: This factory function should not be used directly, it's exposed for other protobuf parsers to use.
+  // Use the iobuf version instead.
   static seastar::future<> from_json(serde::pb::json::peekable_parser*, test_all_types_edition2023_group_like_type*);
   
   int32_t get_group_int32() const;
@@ -130,9 +138,13 @@ public:
   seastar::future<iobuf> to_json() const;
   // Deserializes protobuf_test_messages.editions.TestAllTypesEdition2023 from a protocol buffer, in a way that will not cause stalls for large messages.
   static seastar::future<test_all_types_edition2023> from_proto(iobuf);
+  // Note: This factory function should not be used directly, it's exposed for other protobuf parsers to use.
+  // Use the iobuf version instead.
   static seastar::future<> from_proto(serde::pb::wire_format_parser*, test_all_types_edition2023*);
   // Deserializes protobuf_test_messages.editions.TestAllTypesEdition2023 from json, in a way that will not cause stalls for large messages.
   static seastar::future<test_all_types_edition2023> from_json(iobuf);
+  // Note: This factory function should not be used directly, it's exposed for other protobuf parsers to use.
+  // Use the iobuf version instead.
   static seastar::future<> from_json(serde::pb::json::peekable_parser*, test_all_types_edition2023*);
   
   // Singular
@@ -546,9 +558,13 @@ public:
   seastar::future<iobuf> to_json() const;
   // Deserializes protobuf_test_messages.editions.ForeignMessageEdition2023 from a protocol buffer, in a way that will not cause stalls for large messages.
   static seastar::future<foreign_message_edition2023> from_proto(iobuf);
+  // Note: This factory function should not be used directly, it's exposed for other protobuf parsers to use.
+  // Use the iobuf version instead.
   static seastar::future<> from_proto(serde::pb::wire_format_parser*, foreign_message_edition2023*);
   // Deserializes protobuf_test_messages.editions.ForeignMessageEdition2023 from json, in a way that will not cause stalls for large messages.
   static seastar::future<foreign_message_edition2023> from_json(iobuf);
+  // Note: This factory function should not be used directly, it's exposed for other protobuf parsers to use.
+  // Use the iobuf version instead.
   static seastar::future<> from_json(serde::pb::json::peekable_parser*, foreign_message_edition2023*);
   
   int32_t get_c() const;
