@@ -3,6 +3,38 @@ load("//bazel:build.bzl", "redpanda_cc_library")
 package(default_visibility = ["//src/v/cloud_topics/level_one:__subpackages__"])
 
 redpanda_cc_library(
+    name = "object_id",
+    hdrs = [
+        "object_id.h",
+    ],
+    include_prefix = "cloud_topics/level_one/common",
+    deps = [
+        "//src/v/utils:named_type",
+        "//src/v/utils:uuid",
+    ],
+)
+
+redpanda_cc_library(
+    name = "object_utils",
+    srcs = [
+        "object_utils.cc",
+    ],
+    hdrs = [
+        "object_utils.h",
+    ],
+    include_prefix = "cloud_topics/level_one/common",
+    visibility = [
+        "//src/v/cloud_topics/level_one:__subpackages__",
+        "//src/v/cloud_topics/reconciler:__subpackages__",
+    ],
+    deps = [
+        ":object_id",
+        "//src/v/cloud_storage_clients",
+        "//src/v/ssx:sformat",
+    ],
+)
+
+redpanda_cc_library(
     name = "object",
     srcs = [
         "object.cc",

@@ -7,7 +7,7 @@
  *
  * https://github.com/redpanda-data/redpanda/blob/master/licenses/rcl.md
  */
-#include "cloud_topics/object_utils.h"
+#include "cloud_topics/level_one/common/object_utils.h"
 
 #include <gmock/gmock.h>
 #include <gtest/gtest.h>
@@ -15,11 +15,9 @@
 #define UUID_REGEX                                                             \
     "[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}"
 
-TEST(ObjectPathFactory, LevelZeroPathFormat) {
+TEST(ObjectPathFactory, LevelOnePathFormat) {
     auto path
-      = experimental::cloud_topics::object_path_factory::level_zero_path(
-        experimental::cloud_topics::object_id::create(
-          experimental::cloud_topics::cluster_epoch{42}));
+      = experimental::cloud_topics::l1::object_path_factory::level_one_path();
     EXPECT_THAT(
-      path().string(), ::testing::MatchesRegex("^42/" UUID_REGEX "$"));
+      path().string(), ::testing::MatchesRegex("^l1_v0_" UUID_REGEX "$"));
 }

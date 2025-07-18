@@ -11,7 +11,7 @@ redpanda_cc_library(
     visibility = ["//visibility:public"],
     deps = [
         "//src/v/base",
-        "//src/v/cloud_topics:types",
+        "//src/v/cloud_topics/level_one/common:object_id",
         "//src/v/container:fragmented_vector",
         "//src/v/model",
         "@seastar",
@@ -51,7 +51,7 @@ redpanda_cc_library(
     include_prefix = "cloud_topics/level_one/metastore",
     deps = [
         "//src/v/base",
-        "//src/v/cloud_topics:types",
+        "//src/v/cloud_topics/level_one/common:object_id",
         "//src/v/container:chunked_hash_map",
         "//src/v/model",
         "//src/v/serde",

@@ -10,9 +10,8 @@
 #pragma once
 
 #include "cloud_storage_clients/types.h"
-#include "cloud_topics/types.h"
 
-namespace experimental::cloud_topics {
+namespace experimental::cloud_topics::l1 {
 
 /*
  * Utilities for working with the object storage paths.
@@ -20,9 +19,9 @@ namespace experimental::cloud_topics {
 class object_path_factory {
 public:
     /*
-     * Generate the path of a level-zero object.
+     * Generate the path of a level-one object.
      */
-    static cloud_storage_clients::object_key level_zero_path(object_id id);
+    static cloud_storage_clients::object_key level_one_path();
 };
 
-} // namespace experimental::cloud_topics
+} // namespace experimental::cloud_topics::l1

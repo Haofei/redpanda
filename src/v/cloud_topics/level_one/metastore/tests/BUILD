@@ -7,7 +7,7 @@ redpanda_cc_gtest(
         "simple_metastore_test.cc",
     ],
     deps = [
-        "//src/v/cloud_topics:types",
+        "//src/v/cloud_topics/level_one/common:object_id",
         "//src/v/cloud_topics/level_one/metastore:simple",
         "//src/v/test_utils:gtest",
         "@googletest//:gtest",
@@ -38,7 +38,7 @@ redpanda_cc_gtest(
         "state_update_test.cc",
     ],
     deps = [
-        "//src/v/cloud_topics:types",
+        "//src/v/cloud_topics/level_one/common:object_id",
         "//src/v/cloud_topics/level_one/metastore:state",
         "//src/v/cloud_topics/level_one/metastore:state_update",
         "//src/v/container:fragmented_vector",

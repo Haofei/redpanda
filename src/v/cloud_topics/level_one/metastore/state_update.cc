@@ -44,15 +44,14 @@ void new_object::collect_extents_by_tidp(sorted_extents_by_tidp_t* ret) const {
     for (const auto& [tid, p_extents] : extent_metas) {
         for (const auto& [p, extent_meta] : p_extents) {
             auto& ret_extents = (*ret)[model::topic_id_partition(tid, p)];
-            ret_extents.insert(
-              extent{
-                .base_offset = extent_meta.base_offset,
-                .last_offset = extent_meta.last_offset,
-                .max_timestamp = extent_meta.max_timestamp,
-                .filepos = extent_meta.filepos,
-                .len = extent_meta.len,
-                .oid = oid,
-              });
+            ret_extents.insert(extent{
+              .base_offset = extent_meta.base_offset,
+              .last_offset = extent_meta.last_offset,
+              .max_timestamp = extent_meta.max_timestamp,
+              .filepos = extent_meta.filepos,
+              .len = extent_meta.len,
+              .oid = oid,
+            });
         }
     }
 }
@@ -92,14 +91,13 @@ add_objects_update::can_apply(const state& state) {
 
         for (const auto& extent : extents) {
             if (extent.base_offset != expected_next) {
-                return std::unexpected(stm_update_error(
-                  fmt::format(
-                    "Input object breaks partition {} offset ordering: "
-                    "expected "
-                    "next: {}, actual: {}",
-                    tidp,
-                    expected_next,
-                    extent.base_offset)));
+                return std::unexpected(stm_update_error(fmt::format(
+                  "Input object breaks partition {} offset ordering: "
+                  "expected "
+                  "next: {}, actual: {}",
+                  tidp,
+                  expected_next,
+                  extent.base_offset)));
             }
             expected_next = kafka::next_offset(extent.last_offset);
         }
@@ -168,13 +166,12 @@ replace_objects_update::can_apply(const state& state) {
         const auto& prt = p_state->get();
         auto iters = get_range(prt.extents, req_base, req_last);
         if (!iters.has_value()) {
-            return std::unexpected(stm_update_error(
-              fmt::format(
-                "Partition {} doesn't contain extents that span exactly [{}, "
-                "{}]",
-                tidp,
-                req_base,
-                req_last)));
+            return std::unexpected(stm_update_error(fmt::format(
+              "Partition {} doesn't contain extents that span exactly [{}, "
+              "{}]",
+              tidp,
+              req_base,
+              req_last)));
         }
 
         // Check that the new range of extents is contiguous, which in turn
@@ -183,14 +180,13 @@ replace_objects_update::can_apply(const state& state) {
         auto expected_next = base_it->base_offset;
         for (const auto& new_extent : new_prt_extents) {
             if (new_extent.base_offset != expected_next) {
-                return std::unexpected(stm_update_error(
-                  fmt::format(
-                    "Input object breaks partition {} offset ordering: "
-                    "expected "
-                    "next: {}, actual: {}",
-                    tidp,
-                    expected_next,
-                    new_extent.base_offset)));
+                return std::unexpected(stm_update_error(fmt::format(
+                  "Input object breaks partition {} offset ordering: "
+                  "expected "
+                  "next: {}, actual: {}",
+                  tidp,
+                  expected_next,
+                  new_extent.base_offset)));
             }
             expected_next = kafka::next_offset(new_extent.last_offset);
         }
