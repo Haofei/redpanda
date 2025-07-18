@@ -99,7 +99,7 @@ license_components parse_license(std::string_view license) {
         license.substr(itr + strlen(signature_delimiter)))};
 }
 
-const char* const license_data_validator_schema_v0 = R"(
+constexpr std::string_view license_data_validator_schema_v0 = R"(
 {
     "type": "object",
     "properties": {
@@ -126,7 +126,7 @@ const char* const license_data_validator_schema_v0 = R"(
 }
 )";
 
-const char* const license_data_validator_schema_v1 = R"(
+constexpr std::string_view license_data_validator_schema_v1 = R"(
 {
     "type": "object",
     "properties": {
@@ -162,7 +162,7 @@ const char* const license_data_validator_schema_v1 = R"(
 struct license_data_parser {
     using data_parser = void (*)(license& lc, const json::Document& doc);
 
-    const char* schema;
+    std::string_view schema;
     data_parser parser;
 };
 
