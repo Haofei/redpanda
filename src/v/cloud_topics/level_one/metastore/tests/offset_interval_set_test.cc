@@ -9,7 +9,7 @@
  * by the Apache License, Version 2.0
  */
 #include "bytes/iobuf.h"
-#include "cloud_topics/level_one/offset_interval_set.h"
+#include "cloud_topics/level_one/metastore/offset_interval_set.h"
 #include "gmock/gmock.h"
 
 #include <gtest/gtest.h>

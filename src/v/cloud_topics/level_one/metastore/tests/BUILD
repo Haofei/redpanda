@@ -8,7 +8,7 @@ redpanda_cc_gtest(
     ],
     deps = [
         "//src/v/cloud_topics:types",
-        "//src/v/cloud_topics/level_one:simple_metastore",
+        "//src/v/cloud_topics/level_one/metastore:simple",
         "//src/v/test_utils:gtest",
         "@googletest//:gtest",
     ],
@@ -22,7 +22,7 @@ redpanda_cc_gtest(
     ],
     deps = [
         "//src/v/bytes:iobuf",
-        "//src/v/cloud_topics/level_one:state",
+        "//src/v/cloud_topics/level_one/metastore:state",
         "//src/v/serde",
         "//src/v/serde:named_type",
         "//src/v/serde:uuid",
@@ -39,30 +39,14 @@ redpanda_cc_gtest(
     ],
     deps = [
         "//src/v/cloud_topics:types",
-        "//src/v/cloud_topics/level_one:state",
-        "//src/v/cloud_topics/level_one:state_update",
+        "//src/v/cloud_topics/level_one/metastore:state",
+        "//src/v/cloud_topics/level_one/metastore:state_update",
         "//src/v/container:fragmented_vector",
         "//src/v/model",
         "//src/v/test_utils:gtest",
         "//src/v/utils:uuid",
         "@abseil-cpp//absl/strings",
         "@googletest//:gtest",
-    ],
-)
-
-redpanda_cc_gtest(
-    name = "object_test",
-    timeout = "short",
-    srcs = [
-        "object_test.cc",
-    ],
-    deps = [
-        "//src/v/bytes:iostream",
-        "//src/v/cloud_topics/level_one:object",
-        "//src/v/model/tests:random",
-        "//src/v/test_utils:gtest",
-        "@googletest//:gtest",
-        "@seastar",
     ],
 )
 
@@ -74,7 +58,7 @@ redpanda_cc_gtest(
     ],
     deps = [
         "//src/v/bytes:iobuf",
-        "//src/v/cloud_topics/level_one:offset_interval_set",
+        "//src/v/cloud_topics/level_one/metastore:offset_interval_set",
         "//src/v/test_utils:gtest",
         "@googletest//:gtest",
     ],

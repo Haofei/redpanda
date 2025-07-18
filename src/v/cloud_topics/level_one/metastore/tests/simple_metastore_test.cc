@@ -7,7 +7,7 @@
  *
  * https://github.com/redpanda-data/redpanda/blob/master/licenses/rcl.md
  */
-#include "cloud_topics/level_one/simple_metastore.h"
+#include "cloud_topics/level_one/metastore/simple_metastore.h"
 #include "cloud_topics/types.h"
 
 #include <gtest/gtest.h>
@@ -47,14 +47,15 @@ public:
       model::timestamp last_t,
       size_t first_pos,
       size_t last_pos) {
-        out.ntp_metas.emplace_back(metastore::object_metadata::ntp_metadata{
-          .tidp = model::topic_id_partition::from(tpr_str),
-          .base_offset = base_o,
-          .last_offset = last_o,
-          .max_timestamp = last_t,
-          .pos = first_byte_offset_t{first_pos},
-          .size = byte_range_size_t{last_pos - first_pos},
-        });
+        out.ntp_metas.emplace_back(
+          metastore::object_metadata::ntp_metadata{
+            .tidp = model::topic_id_partition::from(tpr_str),
+            .base_offset = base_o,
+            .last_offset = last_o,
+            .max_timestamp = last_t,
+            .pos = first_byte_offset_t{first_pos},
+            .size = byte_range_size_t{last_pos - first_pos},
+          });
         return *this;
     }
     metastore::object_metadata build() { return std::move(out); }

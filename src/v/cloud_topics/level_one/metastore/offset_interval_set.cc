@@ -8,7 +8,7 @@
  * the Business Source License, use of this software will be governed
  * by the Apache License, Version 2.0
  */
-#include "cloud_topics/level_one/offset_interval_set.h"
+#include "cloud_topics/level_one/metastore/offset_interval_set.h"
 
 #include "model/fundamental.h"
 
