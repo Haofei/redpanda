@@ -93,6 +93,8 @@ public:
     };
     enum class vote_state { follower, candidate, leader };
     using leader_cb_t = ss::noncopyable_function<void(leadership_status)>;
+    using remake_cb_t
+      = ss::noncopyable_function<ss::future<std::error_code>(group_id)>;
 
     consensus(
       model::node_id,
@@ -104,6 +106,7 @@ public:
       config::binding<std::chrono::milliseconds> disk_timeout,
       config::binding<bool> enable_longest_log_detection,
       consensus_client_protocol,
+      remake_cb_t,
       leader_cb_t,
       storage::api&,
       std::optional<std::reference_wrapper<coordinated_recovery_throttle>>,
@@ -820,6 +823,7 @@ private:
     config::binding<std::chrono::milliseconds> _disk_timeout;
     config::binding<bool> _enable_longest_log_detection;
     consensus_client_protocol _client_protocol;
+    remake_cb_t _remake_notification;
     leader_cb_t _leader_notification;
 
     // consensus state

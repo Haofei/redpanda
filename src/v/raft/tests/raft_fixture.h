@@ -249,6 +249,7 @@ public:
 
     ss::future<> remove_data();
 
+    ss::future<std::error_code> remake_learner_callback(group_id g);
     void leadership_notification_callback(leadership_status);
 
     model::ntp ntp() const {

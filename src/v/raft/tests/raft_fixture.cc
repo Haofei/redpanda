@@ -476,6 +476,7 @@ raft_node_instance::initialise(std::vector<raft::vnode> initial_nodes) {
       config::mock_binding<std::chrono::milliseconds>(1s),
       config::mock_binding<bool>(_enable_longest_log_detection),
       consensus_client_protocol(_buffered_protocol),
+      [this](group_id g) { return remake_learner_callback(g); },
       [this](leadership_status ls) { leadership_notification_callback(ls); },
       _storage.local(),
       _recovery_throttle.local(),
@@ -531,6 +532,18 @@ ss::future<> raft_node_instance::stop() {
 ss::future<> raft_node_instance::remove_data() {
     return ss::recursive_remove_directory(
       std::filesystem::path(_base_directory));
+}
+
+ss::future<std::error_code>
+raft_node_instance::remake_learner_callback(group_id g) {
+    _logger.info("remake learner notification for group: {}", g);
+    try {
+        co_await _raft->truncate_state(model::offset{0});
+        co_await _raft->remove_persistent_state();
+    } catch (...) {
+        co_return errc::timeout;
+    }
+    co_return errc::success;
 }
 
 void raft_node_instance::leadership_notification_callback(

@@ -106,7 +106,8 @@ consensus::consensus(
   config::binding<std::chrono::milliseconds> disk_timeout,
   config::binding<bool> enable_longest_log_detection,
   consensus_client_protocol client,
-  consensus::leader_cb_t cb,
+  remake_cb_t remake_cb,
+  consensus::leader_cb_t leader_cb,
   storage::api& storage,
   std::optional<std::reference_wrapper<coordinated_recovery_throttle>>
     recovery_throttle,
@@ -123,7 +124,8 @@ consensus::consensus(
   , _disk_timeout(std::move(disk_timeout))
   , _enable_longest_log_detection(std::move(enable_longest_log_detection))
   , _client_protocol(client)
-  , _leader_notification(std::move(cb))
+  , _remake_notification(std::move(remake_cb))
+  , _leader_notification(std::move(leader_cb))
   , _fstats(_self)
   , _batcher(this, config::shard_local_cfg().raft_replicate_batch_window_size())
   , _event_manager(this)

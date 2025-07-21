@@ -117,6 +117,7 @@ public:
     }
 
 private:
+    ss::future<std::error_code> trigger_remake_notification(raft::group_id);
     void trigger_leadership_notification(raft::leadership_status);
     void setup_metrics();
 
