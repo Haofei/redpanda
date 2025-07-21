@@ -561,6 +561,13 @@ public:
         _inject_error_in_append_entries = inject_error;
     }
 
+    // Function invoked on leader side to clear state on learner node.
+    ss::future<remake_learner_state_reply> remake_learner_state(vnode target);
+
+    // Function invoked on learner side to clear local state.
+    ss::future<remake_learner_state_reply>
+      do_remake_learner_state(remake_learner_state_request);
+
 private:
     friend replication_monitor;
     friend replicate_entries_stm;

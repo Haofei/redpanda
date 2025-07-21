@@ -4290,4 +4290,85 @@ size_t consensus::bytes_to_deliver_to_learners() const {
     return total;
 }
 
+ss::future<remake_learner_state_reply>
+consensus::remake_learner_state(vnode target) {
+    _probe->recovery_reset();
+    remake_learner_state_request req{
+      .node_id = _self,
+      .target_node_id = target,
+      .group = _group,
+      .term = _term};
+    vlog(_ctxlog.info, "Issuing remake group request {}", req);
+    static constexpr auto timeout = 10s;
+    result<remake_learner_state_reply> reply
+      = co_await _client_protocol.remake_learner_state(
+        target.id(), req, rpc::client_opts(timeout));
+    if (!reply) {
+        vlog(
+          _ctxlog.warn,
+          "Unable to issue remake group request {}, {}",
+          req,
+          reply.error());
+        co_return remake_learner_state_reply{};
+    }
+
+    co_return reply.value();
+}
+
+ss::future<remake_learner_state_reply>
+consensus::do_remake_learner_state(remake_learner_state_request req) {
+    remake_learner_state_reply reply{};
+    using is_success = remake_learner_state_reply::is_success;
+    try {
+        auto units = co_await _op_lock.get_units();
+
+        // Perform validation of request under _op_lock
+        auto maybe_err = [&]() -> std::optional<raft::errc> {
+            if (req.term != _term) {
+                return raft::errc::not_leader;
+            }
+            if (req.source_node() != _leader_id) {
+                return raft::errc::leadership_transfer_in_progress;
+            }
+            if (req.target_node() != _self) {
+                return raft::errc::invalid_target_node;
+            }
+            if (!is_learner()) {
+                return raft::errc::not_learner;
+            }
+            if (req.group != _group) {
+                return raft::errc::group_not_exists;
+            }
+
+            return std::nullopt;
+        }();
+
+        if (maybe_err.has_value()) {
+            reply.success = is_success::no;
+            vlog(
+              _ctxlog.warn,
+              "Unable to process remake group request {}, raft::errc {}",
+              req,
+              maybe_err.value());
+        } else {
+            auto cluster_err = co_await _remake_notification(req.group);
+            reply.success = cluster_err ? is_success::no : is_success::yes;
+            vlog(
+              _ctxlog.warn,
+              "Unable to process remake group request {}, cluster::errc {}",
+              req,
+              cluster_err);
+        }
+    } catch (...) {
+        vlog(
+          _ctxlog.warn,
+          "Unable to process remake group request {}, caught exception: {}",
+          req,
+          std::current_exception());
+        reply.success = is_success::no;
+    }
+
+    co_return reply;
+}
+
 } // namespace raft
