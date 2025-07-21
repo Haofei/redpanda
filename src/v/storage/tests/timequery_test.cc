@@ -20,6 +20,7 @@ namespace {
 
 // Make a batch that is big enough to trigger the indexing threshold.
 model::record_batch make_random_batch(
+  model::term_id term,
   model::offset o,
   model::timestamp ts,
   int num_records = 1,
@@ -29,13 +30,17 @@ model::record_batch make_random_batch(
         batch_size = 1024;
     }
 
-    return model::test::make_random_batch(
+    auto b = model::test::make_random_batch(
       model::offset(o),
       num_records,
       true,
       model::record_batch_type::raft_data,
       std::vector<size_t>(num_records, batch_size),
       ts);
+
+    b.set_term(term);
+
+    return b;
 }
 
 } // namespace
@@ -48,7 +53,8 @@ TEST_F(log_builder_fixture, timequery) {
     // seg0: timestamps 0..99, offset = timestamp
     b | add_segment(0);
     for (auto ts = 0; ts < 100; ts++) {
-        auto batch = make_random_batch(model::offset(ts), model::timestamp(ts));
+        auto batch = make_random_batch(
+          model::term_id(0), model::offset(ts), model::timestamp(ts));
         b | add_batch(std::move(batch));
     }
 
@@ -61,7 +67,7 @@ TEST_F(log_builder_fixture, timequery) {
     for (auto offset = 100; offset <= 200; offset++) {
         auto ts = 100 + (offset - 100) / 5;
         auto batch = make_random_batch(
-          model::offset(offset), model::timestamp(ts));
+          model::term_id(0), model::offset(offset), model::timestamp(ts));
         b | add_batch(std::move(batch));
     }
 
@@ -168,7 +174,10 @@ TEST_F(log_builder_fixture, timequery_multiple_messages_per_batch) {
          ts < num_batches * records_per_batch;
          ts += records_per_batch) {
         auto batch = make_random_batch(
-          model::offset(ts), model::timestamp(ts), records_per_batch);
+          model::term_id(0),
+          model::offset(ts),
+          model::timestamp(ts),
+          records_per_batch);
         b | add_batch(std::move(batch));
     }
 
@@ -208,7 +217,9 @@ TEST_F(log_builder_fixture, timequery_single_value) {
     b | add_segment(0);
     for (auto offset = 0; offset < 100; ++offset) {
         auto batch = make_random_batch(
-          model::offset(offset), model::timestamp(offset + 1000));
+          model::term_id(0),
+          model::offset(offset),
+          model::timestamp(offset + 1000));
         b | add_batch(std::move(batch));
     }
 
@@ -240,15 +251,17 @@ TEST_F(log_builder_fixture, timequery_sparse_index) {
     b | start();
 
     b | add_segment(0);
-    auto batch1 = make_random_batch(model::offset(0), model::timestamp(1000));
+    auto batch1 = make_random_batch(
+      model::term_id(0), model::offset(0), model::timestamp(1000));
     b | add_batch(std::move(batch1));
 
     // This batch will not be indexed.
     auto batch2 = make_random_batch(
-      model::offset(1), model::timestamp(1600), 1, false);
+      model::term_id(0), model::offset(1), model::timestamp(1600), 1, false);
     b | add_batch(std::move(batch2));
 
-    auto batch3 = make_random_batch(model::offset(2), model::timestamp(2000));
+    auto batch3 = make_random_batch(
+      model::term_id(0), model::offset(2), model::timestamp(2000));
     b | add_batch(std::move(batch3));
 
     const auto& seg = b.get_log_segments().front();
@@ -281,7 +294,7 @@ TEST_F(log_builder_fixture, timequery_one_element_index) {
     // This batch doesn't trigger the size indexing threshold,
     // but it's the first one so it gets indexed regardless.
     auto batch = make_random_batch(
-      model::offset(0), model::timestamp(1000), 1, false);
+      model::term_id(0), model::offset(0), model::timestamp(1000), 1, false);
     b | add_batch(std::move(batch));
 
     const auto& seg = b.get_log_segments().front();
@@ -327,7 +340,7 @@ TEST_F(log_builder_fixture, timequery_non_monotonic_segment) {
 
     b | add_segment(0);
     for (const auto& [offset, ts] : batch_spec) {
-        auto batch = make_random_batch(offset, ts);
+        auto batch = make_random_batch(model::term_id(0), offset, ts);
         b | add_batch(std::move(batch));
     }
 
@@ -402,7 +415,7 @@ TEST_F(log_builder_fixture, timequery_non_monotonic_log) {
     };
     b | add_segment(0);
     for (const auto& [offset, ts] : batch_spec0) {
-        auto batch = make_random_batch(offset, ts);
+        auto batch = make_random_batch(model::term_id(0), offset, ts);
         b | add_batch(std::move(batch));
     }
 
@@ -411,7 +424,7 @@ TEST_F(log_builder_fixture, timequery_non_monotonic_log) {
     };
     b | add_segment(10);
     for (const auto& [offset, ts] : batch_spec1) {
-        auto batch = make_random_batch(offset, ts);
+        auto batch = make_random_batch(model::term_id(0), offset, ts);
         b | add_batch(std::move(batch));
     }
 
@@ -481,7 +494,7 @@ TEST_F(log_builder_fixture, timequery_non_monotonic_log_many_segments) {
     auto make_segment = [&](auto batch_spec) {
         b | add_segment(batch_spec[0].first);
         for (const auto& [offset, ts] : batch_spec) {
-            auto batch = make_random_batch(offset, ts);
+            auto batch = make_random_batch(model::term_id(0), offset, ts);
             b | add_batch(std::move(batch));
         }
     };
@@ -626,7 +639,7 @@ TEST_F(log_builder_fixture, timequery_clamp) {
 
     b | add_segment(0);
     for (const auto& [offset, ts] : batch_spec) {
-        auto batch = make_random_batch(offset, ts);
+        auto batch = make_random_batch(model::term_id(0), offset, ts);
         b | add_batch(std::move(batch));
     }
 
