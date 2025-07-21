@@ -40,6 +40,11 @@ struct fetch_session_state {
     void reset();
     void toggle(fetch_sessions_enabled enable);
 
+    bool incremental() const {
+        return session_state == state::incremental_fetch
+               || session_state == state::needs_close;
+    }
+
     /**
      * Paraphrased from KIP-227
      *
