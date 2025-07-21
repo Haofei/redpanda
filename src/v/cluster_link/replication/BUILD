@@ -39,3 +39,26 @@ redpanda_cc_library(
         "@seastar",
     ],
 )
+
+redpanda_cc_library(
+    name = "link_replication_mgr",
+    srcs = [
+        "link_replication_mgr.cc",
+    ],
+    hdrs = [
+        "link_replication_mgr.h",
+    ],
+    include_prefix = "cluster_link/replication",
+    visibility = ["//visibility:public"],
+    deps = [
+        ":deps",
+        ":partition_replicator",
+        "//src/v/base",
+        "//src/v/cluster_link:logger",
+        "//src/v/container:chunked_hash_map",
+        "//src/v/model",
+        "//src/v/ssx:work_queue",
+        "//src/v/utils:to_string",
+        "@seastar",
+    ],
+)
