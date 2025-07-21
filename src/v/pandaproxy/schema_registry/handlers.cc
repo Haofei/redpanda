@@ -259,6 +259,8 @@ ss::future<server::reply_t> put_mode(server::request_t rq, server::reply_t rp) {
                  .value_or(force::no);
     auto res = co_await rjson_parse(*rq.req, mode_handler<>{});
 
+    // Ensure we are up to date (eg. see all existing subjects for import mode)
+    co_await rq.service().writer().read_sync();
     co_await rq.service().writer().write_mode(std::nullopt, res.mode, frc);
 
     auto resp = ppj::rjson_serialize_iobuf(res);

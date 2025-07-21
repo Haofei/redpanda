@@ -3964,22 +3964,21 @@ class SchemaRegistryModeMutableTest(SchemaRegistryEndpoints):
             subject=subject, data=json.dumps({"schema": schema1_def}))
         assert result_raw.status_code == requests.codes.ok
 
-        self.logger.debug("Set global mode to IMPORT")
+        self.logger.debug("Set global mode to UNSUPPORTED")
         result_raw = self.sr_client.set_mode(
-            data=json.dumps({"mode": "IMPORT"}))
+            data=json.dumps({"mode": "UNSUPPORTED"}))
         assert result_raw.status_code == 422
         assert result_raw.json()["error_code"] == 42204
         assert result_raw.json(
-        )["message"] == "Invalid mode. Valid values are READWRITE, READONLY"
+        )["message"] == "Invalid mode. Valid values are READWRITE, READONLY, IMPORT"
 
-        self.logger.debug("Set subject mode to IMPORT")
-        result_raw = self.sr_client.set_mode_subject(subject="test-sub",
-                                                     data=json.dumps(
-                                                         {"mode": "IMPORT"}))
+        self.logger.debug("Set subject mode to UNSUPPORTED")
+        result_raw = self.sr_client.set_mode_subject(
+            subject="test-sub", data=json.dumps({"mode": "UNSUPPORTED"}))
         assert result_raw.status_code == 422
         assert result_raw.json()["error_code"] == 42204
         assert result_raw.json(
-        )["message"] == "Invalid mode. Valid values are READWRITE, READONLY"
+        )["message"] == "Invalid mode. Valid values are READWRITE, READONLY, IMPORT"
 
     @cluster(num_nodes=3)
     def test_mode_readonly(self):
