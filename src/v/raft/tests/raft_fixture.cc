@@ -358,6 +358,13 @@ in_memory_test_protocol::transfer_leadership(
       id, std::move(req), std::move(opts));
 }
 
+ss::future<result<remake_learner_state_reply>>
+in_memory_test_protocol::remake_learner_state(
+  model::node_id id, remake_learner_state_request req, rpc::client_opts opts) {
+    return dispatch<remake_learner_state_request, remake_learner_state_reply>(
+      id, std::move(req), std::move(opts));
+}
+
 raft_node_instance::raft_node_instance(
   model::node_id id,
   model::revision_id revision,
