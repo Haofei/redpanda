@@ -212,6 +212,9 @@ public:
     ss::future<kafka::error_code>
       recover_offsets(cluster::group_offsets_snapshot);
 
+    ss::future<cluster::set_group_offsets_reply>
+      set_group_offsets(cluster::set_group_offsets_request);
+
     size_t attached_partitions_count() const { return _partitions.size(); }
 
     ss::future<cluster::get_producers_reply>

@@ -891,6 +891,33 @@ group_manager::recover_offsets(group_offsets_snapshot snap) {
     return do_bulk_write_offsets(std::move(snap), false);
 }
 
+ss::future<cluster::set_group_offsets_reply>
+group_manager::set_group_offsets(cluster::set_group_offsets_request req) {
+    return do_bulk_write_offsets(std::move(req.group_offsets), true)
+      .then([](kafka::error_code ec) -> cluster::set_group_offsets_reply {
+          switch (ec) {
+          case kafka::error_code::none:
+              return {.ec = cluster::errc::success};
+          case kafka::error_code::coordinator_load_in_progress:
+              return {.ec = cluster::errc::update_in_progress};
+          case kafka::error_code::coordinator_not_available:
+          case kafka::error_code::fenced_instance_id:
+          case kafka::error_code::illegal_generation:
+          case kafka::error_code::not_coordinator:
+          case kafka::error_code::rebalance_in_progress:
+          case kafka::error_code::unknown_member_id:
+              return {.ec = cluster::errc::concurrent_modification_error};
+          case kafka::error_code::not_leader_for_partition:
+              return {.ec = cluster::errc::not_leader};
+          case kafka::error_code::request_timed_out:
+              return {.ec = cluster::errc::timeout};
+          case kafka::error_code::unknown_server_error:
+          default:
+              return {.ec = cluster::errc::unknown_update_interruption_error};
+          }
+      });
+}
+
 ss::future<kafka::error_code>
 group_manager::do_bulk_write_offsets(group_offsets_snapshot snap, bool merge) {
     vassert(!snap.groups.empty(), "Group data must not be empty");
