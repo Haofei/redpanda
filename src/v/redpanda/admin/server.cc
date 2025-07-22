@@ -347,7 +347,9 @@ admin_server::admin_server(
 
 void admin_server::add_service(
   std::unique_ptr<serde::pb::rpc::base_service> service) {
+    vlog(adminlog.debug, "Registering RPC service: {}", service->name());
     for (auto& route : service->all_routes()) {
+        vlog(adminlog.debug, "Registering RPC route: {}", route.name);
         ss::httpd::path_description path{
           fmt::format("/v2{}", route.path),
           ss::httpd::operation_type::POST,

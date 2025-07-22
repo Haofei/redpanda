@@ -405,6 +405,8 @@ func (g *headerGenerator) generateService(service protoreflect.ServiceDescriptor
 	w.Printf("%s(%s&&) noexcept = delete;\n", cppName, cppName)
 	w.Printf("virtual ~%s() noexcept = default;\n", cppName)
 	w.Println()
+	w.Println("// Return the name of this RPC service")
+	w.Printf("std::string_view name() const override { return %q; }\n", service.FullName())
 	w.Println("// Call this to get all the routes defined for this service.")
 	w.Println("//")
 	w.Println("// NOTE: The service must outlive anything returned from this method.")

@@ -72,6 +72,8 @@ public:
     base_service& operator=(base_service&&) = delete;
     virtual ~base_service() = default;
 
+    // The name of the RPC service such as "redpanda.core.admin.AdminService".
+    virtual std::string_view name() const = 0;
     // Returns a vector of all the routes that this service has registered.
     virtual std::vector<route_descriptor> all_routes() = 0;
 };
