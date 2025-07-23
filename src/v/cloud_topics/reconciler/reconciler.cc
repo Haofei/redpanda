@@ -13,7 +13,7 @@
 #include "base/vlog.h"
 #include "cloud_storage/configuration.h"
 #include "cloud_topics/level_one/common/object_utils.h"
-#include "cloud_topics/level_zero/ctp_stm_api.h"
+#include "cloud_topics/level_zero/stm/ctp_stm_api.h"
 #include "cloud_topics/object_utils.h"
 #include "cloud_topics/types.h"
 #include "cluster/partition.h"
