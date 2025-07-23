@@ -129,7 +129,7 @@ void service::register_notifications() {
             case ntype::leadership_change:
             case ntype::partition_replica_assigned:
             case ntype::partition_replica_unassigned:
-                _manager->on_leadership_change(ntp, is_leader);
+                _manager->handle_partition_state_change(ntp, is_leader);
                 break;
             case ntype::partition_properties_change:
                 // TODO: once we have partition properties

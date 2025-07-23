@@ -70,7 +70,8 @@ void manager::on_link_change(model::id_t id) {
     _queue.submit([this, id] { return handle_on_link_change(id); });
 }
 
-void manager::on_leadership_change(::model::ntp ntp, ntp_leader is_ntp_leader) {
+void manager::handle_partition_state_change(
+  ::model::ntp ntp, ntp_leader is_ntp_leader) {
     vlog(cllog.trace, "NTP={} leadership changed to {}", ntp, is_ntp_leader);
     _queue.submit([this, ntp{std::move(ntp)}, is_ntp_leader]() mutable {
         return handle_on_leadership_change(std::move(ntp), is_ntp_leader);
