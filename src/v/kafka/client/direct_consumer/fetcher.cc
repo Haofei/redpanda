@@ -200,6 +200,7 @@ bool fetcher::maybe_update_fetch_offset(
   const model::topic& topic,
   model::partition_id partition_id,
   kafka::offset last_received,
+  kafka::offset high_watermark,
   assignment_epoch assignment_epoch) {
     auto t_it = _partitions.find(topic);
     if (t_it == _partitions.end()) {
@@ -224,11 +225,14 @@ bool fetcher::maybe_update_fetch_offset(
 
     vlog(
       logger().trace,
-      "[broker: {}] Updating {}/{} fetch offset to {}",
+      "[broker: {}] Updating {}/{} fetch offset from {} to {} {{hwm: {}}}",
       _id,
       topic,
       partition_id,
-      kafka::next_offset(last_received));
+      p_it->second.fetch_offset,
+      kafka::next_offset(last_received),
+      high_watermark);
+    p_it->second.high_watermark = high_watermark;
     p_it->second.fetch_offset = kafka::next_offset(last_received);
     return true;
 }
@@ -422,6 +426,7 @@ fetcher::process_fetch_response(
                   topic_data.topic,
                   part_data.partition_id,
                   model::offset_cast(part_data.data.back().last_offset()),
+                  part_data.high_watermark,
                   find_assignment_epoch(
                     topic_data.topic, part_data.partition_id, epochs));
             }
@@ -554,6 +559,7 @@ ss::future<kafka::error_code> fetcher::maybe_initialise_fetch_offsets(
               partition_offset.partition_id,
               partition_offset.offset);
             p_it->second.fetch_offset = partition_offset.offset;
+            p_it->second.high_watermark.reset();
         }
     }
 

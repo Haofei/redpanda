@@ -179,7 +179,7 @@ private:
     struct partition_fetch_state {
         model::partition_id partition_id;
         std::optional<kafka::offset> fetch_offset;
-        kafka::offset high_watermark;
+        std::optional<kafka::offset> high_watermark;
         leader_epoch current_leader_epoch{kafka::invalid_leader_epoch};
         intrusive_list_hook _hook;
         assignment_epoch assignment_epoch{0};
@@ -235,6 +235,7 @@ private:
     bool maybe_update_fetch_offset(
       const model::topic&,
       model::partition_id,
+      kafka::offset,
       kafka::offset,
       assignment_epoch);
 
