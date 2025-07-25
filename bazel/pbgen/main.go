@@ -9,7 +9,6 @@ import (
 	"path/filepath"
 	"slices"
 	"strings"
-	"unicode"
 
 	pbgen "github.com/redpanda-data/redpanda/proto/redpanda/pbgen/options"
 	rpcgen "github.com/redpanda-data/redpanda/proto/redpanda/pbgen/rpc"
@@ -1860,36 +1859,6 @@ func fullyQualifiedTypeName(d protoreflect.Descriptor) string {
 	ns := nameToCppNamespace(d.ParentFile())
 	name := cppTypeName(d)
 	return "::" + ns + "::" + name
-}
-
-func pascalToSnakeCase(s string) string {
-	var builder strings.Builder
-	// Iterate through the string character by character
-	for i, r := range s {
-		if !unicode.IsUpper(r) {
-			builder.WriteRune(r)
-			continue
-		}
-		if i == 0 {
-			builder.WriteRune(unicode.ToLower(r))
-			continue
-		}
-		prev := rune(s[i-1])
-		if unicode.IsLower(prev) {
-			builder.WriteRune('_')
-		} else if i+1 < len(s) {
-			next := rune(s[i+1])
-			// If the next character is lowercase, it means the current uppercase
-			// character is the *last* letter of an acronym, and a new word is starting.
-			// So, we add an underscore before this character.
-			// Example: "RPCServer" -> "rpc_server" (underscore before 'S')
-			if unicode.IsLower(next) {
-				builder.WriteRune('_')
-			}
-		}
-		builder.WriteRune(unicode.ToLower(r))
-	}
-	return builder.String()
 }
 
 // getOneofFieldVariantIndex returns the std::variant index of a field in a oneof
