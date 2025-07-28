@@ -74,6 +74,11 @@ class leader_balancer {
     static constexpr std::chrono::milliseconds
       transfer_leadership_recovery_timeout
       = 25ms;
+    /*
+     * after node maintenance change or its health report appears, wait for a
+     * while to make sure node is ready to accept leaders.
+     */
+    static constexpr clock_type::duration node_status_changed_delay = 10s;
 
 public:
     leader_balancer(

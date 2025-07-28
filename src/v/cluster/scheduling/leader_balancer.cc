@@ -173,7 +173,7 @@ void leader_balancer::on_maintenance_change(
     // if a node transitions out of maintenance wake up the balancer early to
     // transfer leadership back to it.
     if (ms == model::maintenance_state::inactive) {
-        schedule_sooner(leader_activation_delay);
+        schedule_sooner(node_status_changed_delay);
     }
 }
 
