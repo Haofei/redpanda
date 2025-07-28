@@ -71,11 +71,11 @@ void cluster_link_manager_test_fixture::elect_leader(
     if (node_id == _self) {
         auto shard = shard_id.value_or(ss::this_shard_id());
         partition_manager()->set_shard_owner(ntp, shard);
-        _manager.local().on_leadership_change(
+        _manager.local().handle_partition_state_change(
           ntp, shard == ss::this_shard_id() ? ntp_leader::yes : ntp_leader::no);
     } else {
         partition_manager()->remove_shard_owner(ntp);
-        _manager.local().on_leadership_change(ntp, ntp_leader::no);
+        _manager.local().handle_partition_state_change(ntp, ntp_leader::no);
     }
 }
 

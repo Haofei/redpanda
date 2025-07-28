@@ -24,6 +24,7 @@ redpanda_cc_library(
         "//src/v/cloud_topics:app",
         "//src/v/cloud_topics/level_zero/stm:ctp_stm_factory",
         "//src/v/cluster",
+        "//src/v/cluster/utils:partition_change_notifier_impl",
         "//src/v/cluster:cloud_metadata_offsets_recovery_router",
         "//src/v/cluster:cloud_metadata_offsets_recovery_service",
         "//src/v/cluster:cloud_metadata_offsets_upload_router",

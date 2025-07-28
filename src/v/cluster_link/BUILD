@@ -96,6 +96,7 @@ redpanda_cc_library(
         ":fwd",
         "//src/v/base",
         "//src/v/cluster",
+        "//src/v/cluster/utils:partition_change_notifier_api",
         "//src/v/model",
         "//src/v/raft",
         "@seastar",

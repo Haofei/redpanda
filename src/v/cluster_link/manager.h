@@ -94,7 +94,8 @@ public:
     /// Used to notify that a cluster link has been updated
     void on_link_change(model::id_t id);
     /// Used to notify manager in a change of NTP leadership
-    void on_leadership_change(::model::ntp ntp, ntp_leader is_ntp_leader);
+    void
+    handle_partition_state_change(::model::ntp ntp, ntp_leader is_ntp_leader);
     /// Handles creation and start of a link
     ss::future<> handle_on_link_change(model::id_t id);
     /// Handles leadership changes for a given NTP

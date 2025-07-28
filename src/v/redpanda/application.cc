@@ -80,6 +80,7 @@
 #include "cluster/tx_gateway_frontend.h"
 #include "cluster/tx_topic_manager.h"
 #include "cluster/types.h"
+#include "cluster/utils/partition_change_notifier_impl.h"
 #include "compression/async_stream_zstd.h"
 #include "compression/lz4_decompression_buffers.h"
 #include "compression/stream_zstd.h"
@@ -1426,7 +1427,12 @@ void application::wire_up_runtime_services(
         construct_service(
           _datalake_manager,
           node_id,
-          &raft_group_manager,
+          ss::sharded_parameter([this] {
+              return cluster::partition_change_notifier_impl::make_default(
+                raft_group_manager,
+                partition_manager,
+                controller->get_topics_state());
+          }),
           &partition_manager,
           &controller->get_topics_state(),
           &feature_table,
