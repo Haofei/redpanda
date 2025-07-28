@@ -790,13 +790,24 @@ class DataMigrationsApiTest(RedpandaTest, DataMigrationTestMixin):
         if group is not None:
 
             def read_with_group(topic, group):
-                with self.ck_consumer(group) as consumer:
-                    consumer.subscribe([topic])
-                    msg = consumer.poll(20)
-                    if msg is None or msg.error() is not None:
-                        raise ck.KafkaException(
-                            f"Failed to read from topic {topic} with group {group}: {msg and msg.error()}"
-                        )
+                while True:
+                    try:
+                        with self.ck_consumer(group) as consumer:
+                            consumer.subscribe([topic])
+                            msg = consumer.poll(20)
+                            if msg is None or msg.error() is not None:
+                                raise ck.KafkaException(
+                                    f"Failed to read from topic {topic} with group {group}: {msg and msg.error()}"
+                                )
+                        break
+                    except ck.KafkaException as e:
+                        if "Failed to fetch committed offsets for 0 partition" in str(
+                                e.args[0]):
+                            self.logger.info(
+                                f"Hit https://github.com/confluentinc/librdkafka/issues/4963 bug, retrying"
+                            )
+                            continue
+                        raise
 
             self._do_validate_operation(**entities,
                                         op_name="read_with_group",
