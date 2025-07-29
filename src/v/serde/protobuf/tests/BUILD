@@ -42,6 +42,16 @@ redpanda_proto_library(
     protos = [":test_messages_edition2023_proto"],
 )
 
+proto_library(
+    name = "codegen_test_proto",
+    srcs = ["codegen_test.proto"],
+)
+
+redpanda_proto_library(
+    name = "codegen_test_redpanda_proto",
+    protos = [":codegen_test_proto"],
+)
+
 redpanda_cc_gtest(
     name = "parser_test",
     timeout = "short",
@@ -138,5 +148,7 @@ redpanda_golden_test(
     srcs = {
         "test_messages_edition2023.proto.cc": ":test_messages_edition2023_redpanda_proto_generated_srcs",
         "test_messages_edition2023.proto.h": ":test_messages_edition2023_redpanda_proto_generated_hdrs",
+        "codegen_test.proto.h": ":codegen_test_redpanda_proto_generated_hdrs",
+        "codegen_test.proto.cc": ":codegen_test_redpanda_proto_generated_srcs",
     },
 )
