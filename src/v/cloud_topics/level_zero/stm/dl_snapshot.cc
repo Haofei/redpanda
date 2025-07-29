@@ -8,7 +8,7 @@
  * https://github.com/redpanda-data/redpanda/blob/master/licenses/rcl.md
  */
 
-#include "cloud_topics/dl_snapshot.h"
+#include "cloud_topics/level_zero/stm/dl_snapshot.h"
 
 auto fmt::formatter<experimental::cloud_topics::dl_snapshot_id>::format(
   const experimental::cloud_topics::dl_snapshot_id& id,

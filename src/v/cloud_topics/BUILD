@@ -63,32 +63,6 @@ redpanda_cc_library(
 )
 
 redpanda_cc_library(
-    name = "dl_version",
-    hdrs = ["dl_version.h"],
-    include_prefix = "cloud_topics",
-    deps = ["//src/v/utils:named_type"],
-)
-
-redpanda_cc_library(
-    name = "dl_snapshot",
-    srcs = [
-        "dl_snapshot.cc",
-    ],
-    hdrs = [
-        "dl_snapshot.h",
-    ],
-    implementation_deps = [
-        "@fmt",
-    ],
-    include_prefix = "cloud_topics",
-    deps = [
-        ":dl_version",
-        "//src/v/container:fragmented_vector",
-        "//src/v/serde",
-    ],
-)
-
-redpanda_cc_library(
     name = "data_plane_api",
     hdrs = [
         "data_plane_api.h",
