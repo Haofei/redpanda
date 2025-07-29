@@ -13,8 +13,6 @@
 #include "cloud_storage/types.h"
 #include "cloud_topics/app.h"
 #include "cloud_topics/data_plane_api.h"
-#include "cloud_topics/dl_placeholder.h"
-#include "cloud_topics/extent_meta.h"
 #include "cloud_topics/frontend/errc.h"
 #include "cloud_topics/frontend/frontend.h"
 #include "cloud_topics/level_zero/reader/reader.h"
