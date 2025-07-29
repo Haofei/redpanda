@@ -45,11 +45,21 @@ redpanda_proto_library(
 proto_library(
     name = "codegen_test_proto",
     srcs = ["codegen_test.proto"],
+    deps = [
+        "//proto/redpanda/pbgen:options_proto",
+        "@protobuf//:duration_proto",
+    ],
+)
+
+cc_proto_library(
+    name = "codegen_test_cc_proto",
+    deps = [":codegen_test_proto"],
 )
 
 redpanda_proto_library(
     name = "codegen_test_redpanda_proto",
     protos = [":codegen_test_proto"],
+    deps = ["@abseil-cpp//absl/time"],
 )
 
 redpanda_cc_gtest(
@@ -125,6 +135,8 @@ redpanda_cc_gtest(
     cpu = 1,
     memory = "128MiB",
     deps = [
+        ":codegen_test_cc_proto",
+        ":codegen_test_redpanda_proto",
         ":test_messages_edition2023_cc_proto",
         ":test_messages_edition2023_redpanda_proto",
         "//proto/redpanda/core/testing:example_cc_proto",
