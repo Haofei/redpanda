@@ -15,7 +15,7 @@
 #include <fmt/format.h>
 #include <seastar/coroutine/maybe_yield.hh>
 
-namespace example {
+namespace proto::example {
 
 a::a() noexcept = default;
 a::a(a&&) noexcept = default;
@@ -282,6 +282,212 @@ seastar::future<c> c::from_json(iobuf data) {
   co_return self;
 }
 
+well_known_protos::well_known_protos() noexcept = default;
+well_known_protos::well_known_protos(well_known_protos&&) noexcept = default;
+well_known_protos& well_known_protos::operator=(well_known_protos&&) noexcept = default;
+well_known_protos::~well_known_protos() noexcept = default;
+bool well_known_protos::operator==(const well_known_protos&) const = default;
+absl::Duration& well_known_protos::get_single_duration() { return single_duration_; }
+const absl::Duration& well_known_protos::get_single_duration() const { return single_duration_; }
+void well_known_protos::set_single_duration(absl::Duration&& v) { single_duration_ = std::move(v); }
+chunked_vector<absl::Duration>& well_known_protos::get_repeated_duration() { return repeated_duration_; }
+const chunked_vector<absl::Duration>& well_known_protos::get_repeated_duration() const { return repeated_duration_; }
+void well_known_protos::set_repeated_duration(chunked_vector<absl::Duration>&& v) { repeated_duration_ = std::move(v); }
+chunked_hash_map<ss::sstring, absl::Duration>& well_known_protos::get_duration_map() { return duration_map_; }
+const chunked_hash_map<ss::sstring, absl::Duration>& well_known_protos::get_duration_map() const { return duration_map_; }
+void well_known_protos::set_duration_map(chunked_hash_map<ss::sstring, absl::Duration>&& v) { duration_map_ = std::move(v); }
+seastar::future<> well_known_protos::from_proto(serde::pb::wire_format_parser* parser, well_known_protos* self) {
+  while (parser->bytes_left() > 0) {
+    auto tag = parser->read_tag();
+    switch (tag.field_number) {
+    case 1: { // single_duration
+      self->set_single_duration(parser->read_wellknown_duration<"example.WellKnownProtos.single_duration">(tag));
+      break;
+    }
+    case 2: { // repeated_duration
+      self->get_repeated_duration().push_back(parser->read_wellknown_duration<"example.WellKnownProtos.repeated_duration">(tag));
+      break;
+    }
+    case 3: { // duration_map
+      serde::pb::wire_format_parser entry_parser = parser->read_message<"example.WellKnownProtos.duration_map">(tag);
+      serde::pb::wire_format_parser* parser = &entry_parser;
+      struct map_entry {
+        ss::sstring key{};
+        absl::Duration value{};
+        void set_key(ss::sstring&& k) { key = std::move(k); }
+        void set_value(absl::Duration&& v) { value = std::move(v); }
+      };
+      map_entry entry;
+      {
+        map_entry* self = &entry;
+        while (parser->bytes_left() > 0) {
+          auto tag = parser->read_tag();
+          switch (tag.field_number) {
+          case 1: { // key
+            self->set_key(parser->read_string<"example.WellKnownProtos.DurationMapEntry.key">(tag));
+            break;
+          }
+          case 2: { // value
+            self->set_value(parser->read_wellknown_duration<"example.WellKnownProtos.DurationMapEntry.value">(tag));
+            break;
+          }
+          default:
+            parser->skip_unknown(tag);
+            break;
+          }
+        }
+      }
+      self->get_duration_map().insert_or_assign(std::move(entry.key), std::move(entry.value));
+      break;
+    }
+    default:
+      parser->skip_unknown(tag);
+      break;
+    }
+  }
+  co_return;
+}
+seastar::future<well_known_protos> well_known_protos::from_proto(iobuf buf) {
+  well_known_protos self;
+  serde::pb::wire_format_parser parser{std::move(buf)};
+  co_await from_proto(&parser, &self);
+  parser.check_empty();
+  co_return self;
+}
+seastar::future<iobuf> well_known_protos::to_proto() const {
+  iobuf buf;
+  {
+    // single_duration
+    serde::pb::tag::write({.wire_type = serde::pb::wire_type::length, .field_number = 1}, &buf);
+    iobuf msg_buf = serde::pb::wellknown::duration_to_proto(get_single_duration());
+    serde::pb::write_length(static_cast<int32_t>(msg_buf.size_bytes()), &buf);
+    buf.append(std::move(msg_buf));
+  }
+  // repeated_duration
+  for (const auto& e : get_repeated_duration()) {
+    iobuf msg_buf = serde::pb::wellknown::duration_to_proto(e);
+    serde::pb::tag::write({.wire_type = serde::pb::wire_type::length, .field_number = 2}, &buf);
+    serde::pb::write_length(static_cast<int32_t>(msg_buf.size_bytes()), &buf);
+    buf.append(std::move(msg_buf));
+  }
+  // duration_map
+  for (const auto& [key, value] : get_duration_map()) {
+    iobuf& parent_buf = buf;
+    iobuf buf;
+    auto get_key = [&key]() -> const ss::sstring& { return key; };
+    auto get_value = [&value]() -> const absl::Duration& { return value; };
+    // key
+    serde::pb::tag::write({.wire_type = serde::pb::wire_type::length, .field_number = 1}, &buf);
+    serde::pb::write_length(static_cast<int32_t>(get_key().size()), &buf);
+    buf.append(get_key().data(), get_key().size());
+    {
+      // value
+      serde::pb::tag::write({.wire_type = serde::pb::wire_type::length, .field_number = 2}, &buf);
+      iobuf msg_buf = serde::pb::wellknown::duration_to_proto(get_value());
+      serde::pb::write_length(static_cast<int32_t>(msg_buf.size_bytes()), &buf);
+      buf.append(std::move(msg_buf));
+    }
+    // now write the entry submessage
+    serde::pb::tag::write({.wire_type = serde::pb::wire_type::length, .field_number = 3}, &parent_buf);
+    serde::pb::write_length(static_cast<int32_t>(buf.size_bytes()), &parent_buf);
+    parent_buf.append(std::move(buf));
+  }
+  co_return buf;
+}
+seastar::future<iobuf> well_known_protos::to_json() const {
+  serde::json::writer w;
+  w.begin_object();
+  w.key("single_duration");
+  w.append_raw_json(serde::pb::json::wellknown::duration_to_json(get_single_duration()));
+  w.key("repeated_duration");
+  w.begin_array();
+  for (const auto& e : get_repeated_duration()) {
+    w.append_raw_json(serde::pb::json::wellknown::duration_to_json(e));
+  }
+  w.end_array();
+  w.key("duration_map");
+  w.begin_object();
+  for (const auto& [key, value] : get_duration_map()) {
+    w.key(key);
+    w.append_raw_json(serde::pb::json::wellknown::duration_to_json(value));
+  }
+  w.end_object();
+  w.end_object();
+  co_return std::move(w).finish();
+}
+seastar::future<> well_known_protos::from_json(serde::pb::json::peekable_parser* parser, well_known_protos* self) {
+  constexpr static auto key_to_field_number = std::to_array<std::pair<std::string_view, int32_t>>({
+    {"durationMap", 3},
+    {"duration_map", 3},
+    {"repeatedDuration", 2},
+    {"repeated_duration", 2},
+    {"singleDuration", 1},
+    {"single_duration", 1},
+  });
+  auto entries = serde::pb::json::object_key_generator(parser);
+  while (auto key = co_await entries()) {
+    auto fields = std::ranges::equal_range(key_to_field_number, *key, std::less<>(), [](const auto& pair) { return pair.first; });
+    if (fields.empty()) {
+      co_await parser->skip_value();
+      continue;
+    }
+    switch (fields.front().second) {
+    case 1: { // single_duration
+      if (co_await parser->peek() == serde::json::token::value_null) {
+        co_await parser->next();
+      } else {
+        absl::Duration v = co_await serde::pb::json::wellknown::duration_from_json(parser);
+        self->set_single_duration(std::move(v));
+      }
+      break;
+    }
+    case 2: { // repeated_duration
+      if (co_await parser->peek() == serde::json::token::value_null) {
+        co_await parser->next();
+      } else {
+        auto elements = serde::pb::json::array_element_generator(parser);
+        while (co_await elements()) {
+          if (co_await parser->peek() == serde::json::token::value_null) {
+            co_await parser->next();
+          } else {
+            absl::Duration v = co_await serde::pb::json::wellknown::duration_from_json(parser);
+            self->get_repeated_duration().push_back(std::move(v));
+          }
+        }
+      }
+      break;
+    }
+    case 3: { // duration_map
+      if (co_await parser->peek() == serde::json::token::value_null) {
+        co_await parser->next();
+      } else {
+        auto map_entries = serde::pb::json::object_key_generator(parser);
+        while (auto map_key = co_await map_entries()) {
+          auto k = serde::pb::json::transform_map_key<ss::sstring>(std::move(*map_key));
+          if (co_await parser->peek() == serde::json::token::value_null) {
+            co_await parser->next();
+          } else {
+            absl::Duration v = co_await serde::pb::json::wellknown::duration_from_json(parser);
+            self->get_duration_map().insert_or_assign(std::move(k), std::move(v));
+          }
+        }
+      }
+      break;
+    }
+    default:
+      vassert(false, "codegen error unexpected field number: {}", fields.front().second);
+    }
+  }
+  co_return;
+}
+seastar::future<well_known_protos> well_known_protos::from_json(iobuf data) {
+  well_known_protos self;
+  serde::pb::json::peekable_parser parser(std::move(data));
+  co_await from_json(&parser, &self);
+  co_await serde::pb::json::check_next_eof(&parser);
+  co_return self;
+}
+
 void enum_from_proto(iobuf_parser* p, corpus* e) {
   auto v = serde::pb::read_varint<int32_t, serde::pb::zigzag::no>(p);
   constexpr static auto values = std::to_array<int32_t>({
@@ -510,5 +716,5 @@ void enum_from_json(serde::pb::json::peekable_parser* p, proto3_test* e) {
   }
 }
 
-} // example
+} // proto::example
 // NOLINTEND(*-avoid-magic-numbers)

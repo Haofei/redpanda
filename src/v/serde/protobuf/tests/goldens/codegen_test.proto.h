@@ -4,8 +4,12 @@
 #pragma once
 
 #include "bytes/iobuf.h"
+#include "container/chunked_hash_map.h"
+#include "container/fragmented_vector.h"
+#include "absl/time/time.h"
 
 #include <seastar/core/future.hh>
+#include <seastar/core/sstring.hh>
 
 class iobuf_parser;
 
@@ -16,11 +20,12 @@ namespace serde::pb::json {
 class peekable_parser;
 }
 
-namespace example {
+namespace proto::example {
 
 class a;
 class b;
 class c;
+class well_known_protos;
 
 // Test that enums that have prefixes in their values as recommended by protobuf
 // are stripped and turned into enum classes.
@@ -164,4 +169,45 @@ private:
   a a_;
 };
 
-} // example
+class well_known_protos {
+public:
+  well_known_protos() noexcept;
+  well_known_protos(const well_known_protos&) = delete;
+  well_known_protos& operator=(const well_known_protos&) = delete;
+  well_known_protos(well_known_protos&&) noexcept;
+  well_known_protos& operator=(well_known_protos&&) noexcept;
+  ~well_known_protos() noexcept;
+  
+  bool operator==(const well_known_protos&) const;  
+  // Serializes example.WellKnownProtos into a protocol buffer, in a way that will not cause stalls for large messages.
+  seastar::future<iobuf> to_proto() const;
+  // Serializes example.WellKnownProtos into proto3 JSON, in a way that will not cause stalls for large messages.
+  seastar::future<iobuf> to_json() const;
+  // Deserializes example.WellKnownProtos from a protocol buffer, in a way that will not cause stalls for large messages.
+  static seastar::future<well_known_protos> from_proto(iobuf);
+  // Note: This factory function should not be used directly, it's exposed for other protobuf parsers to use.
+  // Use the iobuf version instead.
+  static seastar::future<> from_proto(serde::pb::wire_format_parser*, well_known_protos*);
+  // Deserializes example.WellKnownProtos from json, in a way that will not cause stalls for large messages.
+  static seastar::future<well_known_protos> from_json(iobuf);
+  // Note: This factory function should not be used directly, it's exposed for other protobuf parsers to use.
+  // Use the iobuf version instead.
+  static seastar::future<> from_json(serde::pb::json::peekable_parser*, well_known_protos*);
+  
+  absl::Duration& get_single_duration();
+  const absl::Duration& get_single_duration() const;
+  void set_single_duration(absl::Duration&& v);
+  chunked_vector<absl::Duration>& get_repeated_duration();
+  const chunked_vector<absl::Duration>& get_repeated_duration() const;
+  void set_repeated_duration(chunked_vector<absl::Duration>&& v);
+  chunked_hash_map<ss::sstring, absl::Duration>& get_duration_map();
+  const chunked_hash_map<ss::sstring, absl::Duration>& get_duration_map() const;
+  void set_duration_map(chunked_hash_map<ss::sstring, absl::Duration>&& v);
+
+private:
+  absl::Duration single_duration_;
+  chunked_vector<absl::Duration> repeated_duration_;
+  chunked_hash_map<ss::sstring, absl::Duration> duration_map_;
+};
+
+} // proto::example

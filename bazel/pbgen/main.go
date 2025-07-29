@@ -313,6 +313,16 @@ func (g *headerGenerator) leadingComments(msg protoreflect.Descriptor, w *codewr
 	}
 }
 
+func mapImport(path string) string {
+	if strings.HasPrefix(path, "proto/redpanda/pbgen") {
+		return ""
+	}
+	if path == "google/protobuf/duration.proto" {
+		return "absl/time/time.h"
+	}
+	return path + ".h"
+}
+
 func (g *headerGenerator) generateFile(w *codewriter) {
 	imports := g.file.Imports()
 	defer func() {
@@ -333,12 +343,9 @@ func (g *headerGenerator) generateFile(w *codewriter) {
 		}
 		for i := range imports.Len() {
 			f := imports.Get(i)
-			// TODO: I don't know if there is a good way to do this or not,
-			// but these protos don't exist at runtime.
-			if strings.HasPrefix(f.Path(), "proto/redpanda/pbgen") {
-				continue
+			if path := mapImport(f.Path()); path != "" {
+				w.PreludePrintf("#include %q\n", path)
 			}
-			w.PreludePrintf("#include %q\n", strings.ReplaceAll(f.Path(), ".proto", ".proto.h"))
 		}
 		w.PreludePrintln()
 		w.PreludePrintln("#include <seastar/core/future.hh>")
@@ -974,20 +981,25 @@ func (g *implGenerator) generateMapFieldWriteJson(f protoreflect.FieldDescriptor
 	case protoreflect.StringKind:
 		w.Println("w.string(value);")
 	case protoreflect.MessageKind:
-		deref := "."
-		if isPtr(f) {
-			deref = "->"
-			w.Println("if (value) {")
-			w.Indent()
-		}
-		w.Printf("w.append_raw_json(co_await value%sto_json());\n", deref)
-		if isPtr(f) {
-			w.Dedent()
-			w.Println("} else {")
-			w.Indent()
-			w.Println("w.null();")
-			w.Dedent()
-			w.Println("}")
+		switch {
+		case f.MapValue().Message().FullName() == "google.protobuf.Duration":
+			w.Printf("w.append_raw_json(serde::pb::json::wellknown::duration_to_json(value));\n")
+		default:
+			deref := "."
+			if isPtr(f.MapValue()) {
+				deref = "->"
+				w.Println("if (value) {")
+				w.Indent()
+			}
+			w.Printf("w.append_raw_json(co_await value%sto_json());\n", deref)
+			if isPtr(f) {
+				w.Dedent()
+				w.Println("} else {")
+				w.Indent()
+				w.Println("w.null();")
+				w.Dedent()
+				w.Println("}")
+			}
 		}
 	default:
 		panic("unexpected protoreflect.Kind")
@@ -1027,20 +1039,25 @@ func (g *implGenerator) generateRepeatedFieldWriteJson(f protoreflect.FieldDescr
 	case protoreflect.StringKind:
 		w.Println("w.string(e);")
 	case protoreflect.MessageKind:
-		deref := "."
-		if isPtr(f) {
-			deref = "->"
-			w.Println("if (e) {")
-			w.Indent()
-		}
-		w.Printf("w.append_raw_json(co_await e%sto_json());\n", deref)
-		if isPtr(f) {
-			w.Dedent()
-			w.Println("} else {")
-			w.Indent()
-			w.Println("w.null();")
-			w.Dedent()
-			w.Println("}")
+		switch {
+		case f.Message().FullName() == "google.protobuf.Duration":
+			w.Printf("w.append_raw_json(serde::pb::json::wellknown::duration_to_json(e));\n")
+		default:
+			deref := "."
+			if isPtr(f) {
+				deref = "->"
+				w.Println("if (e) {")
+				w.Indent()
+			}
+			w.Printf("w.append_raw_json(co_await e%sto_json());\n", deref)
+			if isPtr(f) {
+				w.Dedent()
+				w.Println("} else {")
+				w.Indent()
+				w.Println("w.null();")
+				w.Dedent()
+				w.Println("}")
+			}
 		}
 	default:
 		panic("unexpected protoreflect.Kind")
@@ -1098,20 +1115,25 @@ func (g *implGenerator) generateSingularFieldWriteJson(f protoreflect.FieldDescr
 	case protoreflect.StringKind:
 		w.Printf("w.string(get_%s());\n", f.Name())
 	case protoreflect.MessageKind:
-		deref := "."
-		if isPtr(f) {
-			deref = "->"
-			w.Printf("if (get_%s()) {\n", f.Name())
-			w.Indent()
-		}
-		w.Printf("w.append_raw_json(co_await get_%s()%sto_json());\n", f.Name(), deref)
-		if isPtr(f) {
-			w.Dedent()
-			w.Println("} else {")
-			w.Indent()
-			w.Println("w.null();")
-			w.Dedent()
-			w.Println("}")
+		switch {
+		case f.Message().FullName() == "google.protobuf.Duration":
+			w.Printf("w.append_raw_json(serde::pb::json::wellknown::duration_to_json(get_%s()));\n", f.Name())
+		default:
+			deref := "."
+			if isPtr(f) {
+				deref = "->"
+				w.Printf("if (get_%s()) {\n", f.Name())
+				w.Indent()
+			}
+			w.Printf("w.append_raw_json(co_await get_%s()%sto_json());\n", f.Name(), deref)
+			if isPtr(f) {
+				w.Dedent()
+				w.Println("} else {")
+				w.Indent()
+				w.Println("w.null();")
+				w.Dedent()
+				w.Println("}")
+			}
 		}
 	default:
 		panic("unexpected protoreflect.Kind")
@@ -1215,7 +1237,12 @@ func (g *implGenerator) generateSingularFieldWrite(f protoreflect.FieldDescripto
 			w.Indent()
 		}
 		w.Printf("serde::pb::tag::write({.wire_type = serde::pb::wire_type::%s, .field_number = %d}, &buf);\n", wireType, f.Number())
-		w.Printf("iobuf msg_buf = co_await get_%s()%sto_proto();\n", f.Name(), deref)
+		switch {
+		case f.Message().FullName() == "google.protobuf.Duration":
+			w.Printf("iobuf msg_buf = serde::pb::wellknown::duration_to_proto(get_%s());\n", f.Name())
+		default:
+			w.Printf("iobuf msg_buf = co_await get_%s()%sto_proto();\n", f.Name(), deref)
+		}
 		w.Printf("serde::pb::write_length(static_cast<int32_t>(msg_buf.size_bytes()), &buf);\n")
 		w.Println("buf.append(std::move(msg_buf));")
 		if isPtr(f) {
@@ -1341,7 +1368,12 @@ func (g *implGenerator) generateRepeatedFieldWrite(f protoreflect.FieldDescripto
 			w.Println("if (e) {")
 			w.Indent()
 		}
-		w.Printf("iobuf msg_buf = co_await e%sto_proto();\n", deref)
+		switch {
+		case f.Message().FullName() == "google.protobuf.Duration":
+			w.Println("iobuf msg_buf = serde::pb::wellknown::duration_to_proto(e);")
+		default:
+			w.Printf("iobuf msg_buf = co_await e%sto_proto();\n", deref)
+		}
 		w.Printf("serde::pb::tag::write({.wire_type = serde::pb::wire_type::length, .field_number = %d}, &buf);\n", f.Number())
 		w.Println("serde::pb::write_length(static_cast<int32_t>(msg_buf.size_bytes()), &buf);")
 		w.Println("buf.append(std::move(msg_buf));")
@@ -1442,10 +1474,13 @@ func (g *implGenerator) generateMessageReadJson(msg protoreflect.MessageDescript
 		w.Dedent()
 		w.Println("} else {")
 		w.Indent()
-		if isPtr(f) {
+		switch {
+		case f.Message().FullName() == "google.protobuf.Duration":
+			w.Println("absl::Duration v = co_await serde::pb::json::wellknown::duration_from_json(parser);")
+		case isPtr(f):
 			w.Printf("auto v = std::make_unique<%s>();\n", typ)
 			w.Printf("co_await %s::from_json(parser, v.get());\n", typ)
-		} else {
+		default:
 			w.Printf("%s v{};\n", typ)
 			w.Printf("co_await %s::from_json(parser, &v);\n", typ)
 		}
@@ -1758,9 +1793,14 @@ func (g *implGenerator) generateRepeatedFieldRead(f protoreflect.FieldDescriptor
 	case protoreflect.BytesKind:
 		w.Printf("self->get_%s().push_back(parser->read_bytes<%q>(tag));\n", f.Name(), f.FullName())
 	case protoreflect.MessageKind:
-		w.Printf("auto msg_parser = parser->read_message<%q>(tag);\n", f.FullName())
-		msgType := g.translateBaseType(f)
-		w.Printf("co_await %s::from_proto(&msg_parser, &self->get_%s().emplace_back());\n", msgType, f.Name())
+		switch {
+		case f.Message().FullName() == "google.protobuf.Duration":
+			w.Printf("self->get_%s().push_back(parser->read_wellknown_duration<%q>(tag));\n", f.Name(), f.FullName())
+		default:
+			w.Printf("auto msg_parser = parser->read_message<%q>(tag);\n", f.FullName())
+			msgType := g.translateBaseType(f)
+			w.Printf("co_await %s::from_proto(&msg_parser, &self->get_%s().emplace_back());\n", msgType, f.Name())
+		}
 	case protoreflect.GroupKind:
 		g.emitError(fmt.Errorf("groups are not supported: %s", f.FullName()))
 		w.Println(`throw std::runtime_error("groups are not supported");`)
@@ -1801,16 +1841,21 @@ func (g *implGenerator) generateSingularFieldRead(f protoreflect.FieldDescriptor
 	case protoreflect.BytesKind:
 		w.Printf("self->set_%s(parser->read_bytes<%q>(tag));\n", f.Name(), f.FullName())
 	case protoreflect.MessageKind:
-		w.Printf("auto msg_parser = parser->read_message<%q>(tag);\n", f.FullName())
-		msgType := g.translateBaseType(f)
-		if isPtr(f) {
-			w.Printf("auto sub_msg = std::make_unique<%s>();\n", msgType)
-			w.Printf("co_await %s::from_proto(&msg_parser, sub_msg.get());\n", msgType)
-			w.Printf("self->set_%s(std::move(sub_msg));\n", f.Name())
-		} else {
-			w.Printf("%s sub_msg;\n", msgType)
-			w.Printf("co_await %s::from_proto(&msg_parser, &sub_msg);\n", msgType)
-			w.Printf("self->set_%s(std::move(sub_msg));\n", f.Name())
+		switch {
+		case f.Message().FullName() == "google.protobuf.Duration":
+			w.Printf("self->set_%s(parser->read_wellknown_duration<%q>(tag));\n", f.Name(), f.FullName())
+		default:
+			w.Printf("auto msg_parser = parser->read_message<%q>(tag);\n", f.FullName())
+			msgType := g.translateBaseType(f)
+			if isPtr(f) {
+				w.Printf("auto sub_msg = std::make_unique<%s>();\n", msgType)
+				w.Printf("co_await %s::from_proto(&msg_parser, sub_msg.get());\n", msgType)
+				w.Printf("self->set_%s(std::move(sub_msg));\n", f.Name())
+			} else {
+				w.Printf("%s sub_msg;\n", msgType)
+				w.Printf("co_await %s::from_proto(&msg_parser, &sub_msg);\n", msgType)
+				w.Printf("self->set_%s(std::move(sub_msg));\n", f.Name())
+			}
 		}
 	case protoreflect.GroupKind:
 		g.emitError(fmt.Errorf("groups are not supported: %s", f.FullName()))
@@ -1854,18 +1899,23 @@ func collectDescriptors(parent protoreflect.Descriptor) (msgs []protoreflect.Mes
 }
 
 func sortMessages(msgs []protoreflect.MessageDescriptor) []protoreflect.MessageDescriptor {
+	// Don't add external dependencies to the graph, only internal messages.
+	internal := map[protoreflect.FullName]bool{}
+	for _, msg := range msgs {
+		internal[msg.FullName()] = true
+	}
 	return sortCyclicalGraph(msgs, func(m protoreflect.MessageDescriptor) []protoreflect.MessageDescriptor {
 		var children []protoreflect.MessageDescriptor
 		for i := range m.Fields().Len() {
 			f := m.Fields().Get(i)
 			if f.IsMap() {
-				if child := f.MapKey().Message(); child != nil {
+				if child := f.MapKey().Message(); child != nil && internal[child.FullName()] {
 					children = append(children, child)
 				}
-				if child := f.MapValue().Message(); child != nil {
+				if child := f.MapValue().Message(); child != nil && internal[child.FullName()] {
 					children = append(children, child)
 				}
-			} else if child := f.Message(); child != nil {
+			} else if child := f.Message(); child != nil && internal[child.FullName()] {
 				children = append(children, child)
 			}
 		}
@@ -1891,6 +1941,10 @@ func nameToCppNamespace(file protoreflect.FileDescriptor) string {
 }
 
 func fullyQualifiedTypeName(d protoreflect.Descriptor) string {
+	switch d.FullName() {
+	case "google.protobuf.Duration":
+		return "absl::Duration"
+	}
 	ns := nameToCppNamespace(d.ParentFile())
 	name := cppTypeName(d)
 	return "::" + ns + "::" + name
