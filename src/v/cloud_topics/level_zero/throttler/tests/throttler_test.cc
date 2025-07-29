@@ -57,7 +57,7 @@ struct throttler_accessor {
 };
 } // namespace experimental::cloud_topics
 
-namespace experimental::cloud_topics::core {
+namespace experimental::cloud_topics::l0 {
 struct write_pipeline_accessor {
     // Returns true if the write request is in the `_pending` collection
     bool write_requests_pending(size_t n) const {
@@ -71,7 +71,7 @@ struct write_pipeline_accessor {
 
     // Ack all write requests in the pipeline
     void ack_all() {
-        std::vector<core::pipeline_stage> stages;
+        std::vector<l0::pipeline_stage> stages;
         auto stage = unassigned_pipeline_stage;
         for (int i = 0; i < 10; i++) {
             stage = pipeline->next_stage(stage);
@@ -86,9 +86,9 @@ struct write_pipeline_accessor {
         }
     }
 
-    cloud_topics::core::write_pipeline<ss::manual_clock>* pipeline;
+    cloud_topics::l0::write_pipeline<ss::manual_clock>* pipeline;
 };
-} // namespace experimental::cloud_topics::core
+} // namespace experimental::cloud_topics::l0
 
 ss::future<> sleep(std::chrono::milliseconds delta, int retry_limit = 100) {
     ss::manual_clock::advance(delta);
@@ -140,7 +140,7 @@ TEST_CORO(throttler_test, no_throttling) {
       co_await model::test::make_random_batches(spec));
     size_t reader_size_bytes = get_serialized_size(batches);
 
-    cloud_topics::core::write_pipeline<ss::manual_clock> pipeline;
+    cloud_topics::l0::write_pipeline<ss::manual_clock> pipeline;
 
     size_t tput_limit = reader_size_bytes * 2;
 
@@ -155,7 +155,7 @@ TEST_CORO(throttler_test, no_throttling) {
     cloud_topics::throttler_accessor throttler_accessor{
       .throttler = &throttler,
     };
-    cloud_topics::core::write_pipeline_accessor pipeline_accessor{
+    cloud_topics::l0::write_pipeline_accessor pipeline_accessor{
       .pipeline = &pipeline,
     };
     std::ignore = pipeline.register_write_pipeline_stage();
@@ -202,7 +202,7 @@ TEST_CORO(throttler_test, tput_limit_reached) {
       co_await model::test::make_random_batches(spec));
     size_t reader_size_bytes = get_serialized_size(batches);
 
-    cloud_topics::core::write_pipeline<ss::manual_clock> pipeline;
+    cloud_topics::l0::write_pipeline<ss::manual_clock> pipeline;
 
     size_t tput_limit = reader_size_bytes / 2;
 
@@ -217,7 +217,7 @@ TEST_CORO(throttler_test, tput_limit_reached) {
     cloud_topics::throttler_accessor throttler_accessor{
       .throttler = &throttler,
     };
-    cloud_topics::core::write_pipeline_accessor pipeline_accessor{
+    cloud_topics::l0::write_pipeline_accessor pipeline_accessor{
       .pipeline = &pipeline,
     };
 
@@ -274,7 +274,7 @@ TEST_CORO(throttler_test, tput_limit_reached_req_timed_out) {
       co_await model::test::make_random_batches(spec));
     size_t reader_size_bytes = get_serialized_size(batches);
 
-    cloud_topics::core::write_pipeline<ss::manual_clock> pipeline;
+    cloud_topics::l0::write_pipeline<ss::manual_clock> pipeline;
 
     size_t tput_limit = reader_size_bytes / 2;
 
@@ -289,7 +289,7 @@ TEST_CORO(throttler_test, tput_limit_reached_req_timed_out) {
     cloud_topics::throttler_accessor throttler_accessor{
       .throttler = &throttler,
     };
-    cloud_topics::core::write_pipeline_accessor pipeline_accessor{
+    cloud_topics::l0::write_pipeline_accessor pipeline_accessor{
       .pipeline = &pipeline,
     };
 
@@ -336,7 +336,7 @@ TEST_CORO(throttler_test, graceful_shutdown) {
       .count = 100,
       .records = 10,
     };
-    cloud_topics::core::write_pipeline<ss::manual_clock> pipeline;
+    cloud_topics::l0::write_pipeline<ss::manual_clock> pipeline;
 
     size_t tput_limit = 100;
 
@@ -348,7 +348,7 @@ TEST_CORO(throttler_test, graceful_shutdown) {
     cloud_topics::throttler_accessor throttler_accessor{
       .throttler = &throttler,
     };
-    cloud_topics::core::write_pipeline_accessor pipeline_accessor{
+    cloud_topics::l0::write_pipeline_accessor pipeline_accessor{
       .pipeline = &pipeline,
     };
     ASSERT_EQ_CORO(throttler_accessor.units_available(), tput_limit);

@@ -34,7 +34,7 @@
 namespace experimental::cloud_topics {
 
 fetch_handler::fetch_handler(
-  core::read_pipeline<>::stage pipeline_stage,
+  l0::read_pipeline<>::stage pipeline_stage,
   cloud_storage_clients::bucket_name bucket,
   cloud_io::remote_api<>* remote,
   cloud_io::basic_cache_service_api<>* cache)
@@ -94,7 +94,7 @@ ss::future<> fetch_handler::bg_process_requests() {
     }
 }
 
-ss::future<> fetch_handler::process_single_request(core::read_request<>* req) {
+ss::future<> fetch_handler::process_single_request(l0::read_request<>* req) {
     auto h = _gate.hold();
     auto auto_dispose = ss::defer([req] {
         // Handle situation when the request is not handled correctly
@@ -132,8 +132,7 @@ ss::future<> fetch_handler::process_single_request(core::read_request<>* req) {
         }
 
         auto_dispose.cancel();
-        req->set_value(
-          core::dataplane_query_result{.results = std::move(data)});
+        req->set_value(l0::dataplane_query_result{.results = std::move(data)});
 
     } catch (...) {
         if (ssx::is_shutdown_exception(std::current_exception())) {

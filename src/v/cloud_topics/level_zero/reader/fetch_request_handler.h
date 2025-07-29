@@ -30,7 +30,7 @@ namespace experimental::cloud_topics {
 class fetch_handler {
 public:
     explicit fetch_handler(
-      core::read_pipeline<>::stage,
+      l0::read_pipeline<>::stage,
       cloud_storage_clients::bucket_name,
       cloud_io::remote_api<>*,
       cloud_io::basic_cache_service_api<>*);
@@ -45,7 +45,7 @@ private:
     ss::future<checked<bool, errc>> process_requests();
 
     /// Process single request
-    ss::future<> process_single_request(core::read_request<>* req);
+    ss::future<> process_single_request(l0::read_request<>* req);
 
     cloud_storage_clients::bucket_name _bucket;
     cloud_io::remote_api<>* _remote;
@@ -53,6 +53,6 @@ private:
     retry_chain_node _rtc;
     retry_chain_logger _logger;
     ss::gate _gate;
-    core::read_pipeline<>::stage _pipeline_stage;
+    l0::read_pipeline<>::stage _pipeline_stage;
 };
 } // namespace experimental::cloud_topics

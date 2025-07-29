@@ -28,7 +28,7 @@
 #include <exception>
 #include <variant>
 
-namespace experimental::cloud_topics::core {
+namespace experimental::cloud_topics::l0 {
 
 template<class Clock>
 read_pipeline<Clock>::read_pipeline()
@@ -70,7 +70,7 @@ ss::future<result<dataplane_query_result>> read_pipeline<Clock>::make_reader(
 
     auto stage = this->first_stage();
 
-    core::read_request<Clock> request(
+    l0::read_request<Clock> request(
       std::move(ntp), std::move(query), timeout, &this->get_root_rtc(), stage);
 
     vlog(
@@ -190,4 +190,4 @@ event read_pipeline<Clock>::trigger_event(pipeline_stage stage) {
 template class read_pipeline<ss::lowres_clock>;
 template class read_pipeline<ss::manual_clock>;
 
-} // namespace experimental::cloud_topics::core
+} // namespace experimental::cloud_topics::l0

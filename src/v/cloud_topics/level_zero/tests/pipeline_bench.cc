@@ -27,7 +27,7 @@
 namespace ct = ::experimental::cloud_topics;
 
 struct read_pipeline_sink {
-    explicit read_pipeline_sink(ct::core::read_pipeline<>& p)
+    explicit read_pipeline_sink(ct::l0::read_pipeline<>& p)
       : _my_stage(p.register_read_pipeline_stage())
       , _pipeline(&p) {}
 
@@ -48,15 +48,15 @@ struct read_pipeline_sink {
         }
     }
 
-    ct::core::read_pipeline<>::stage _my_stage;
-    ct::core::read_pipeline<>* _pipeline;
+    ct::l0::read_pipeline<>::stage _my_stage;
+    ct::l0::read_pipeline<>* _pipeline;
     ss::gate _gate;
 };
 
 struct read_pipeline_bench {};
 
 PERF_TEST_C(read_pipeline_bench, propagation_latency) {
-    ct::core::read_pipeline<> pipeline;
+    ct::l0::read_pipeline<> pipeline;
     read_pipeline_sink sink(pipeline);
     sink.start();
     perf_tests::start_measuring_time();
@@ -71,7 +71,7 @@ PERF_TEST_C(read_pipeline_bench, propagation_latency) {
 }
 
 struct write_pipeline_sink {
-    explicit write_pipeline_sink(ct::core::write_pipeline<>& p)
+    explicit write_pipeline_sink(ct::l0::write_pipeline<>& p)
       : _my_stage(p.register_write_pipeline_stage())
       , _pipeline(&p) {}
 
@@ -85,10 +85,10 @@ struct write_pipeline_sink {
     ss::future<> bg_loop() {
         auto h = _gate.hold();
         while (!_as.abort_requested()) {
-            ct::core::event_filter<> flt(
-              ct::core::event_type::new_write_request, _my_stage.id());
+            ct::l0::event_filter<> flt(
+              ct::l0::event_type::new_write_request, _my_stage.id());
             auto event = co_await _pipeline->subscribe(flt, _as);
-            if (event.type == ct::core::event_type::shutting_down) {
+            if (event.type == ct::l0::event_type::shutting_down) {
                 break;
             }
             auto res = _my_stage.pull_write_requests(1);
@@ -98,8 +98,8 @@ struct write_pipeline_sink {
         }
     }
 
-    ct::core::write_pipeline<>::stage _my_stage;
-    ct::core::write_pipeline<>* _pipeline;
+    ct::l0::write_pipeline<>::stage _my_stage;
+    ct::l0::write_pipeline<>* _pipeline;
     ss::gate _gate;
     ss::abort_source _as;
 };
@@ -107,7 +107,7 @@ struct write_pipeline_sink {
 struct write_pipeline_bench {};
 
 PERF_TEST_C(write_pipeline_bench, propagation_latency) {
-    ct::core::write_pipeline<> pipeline;
+    ct::l0::write_pipeline<> pipeline;
     write_pipeline_sink sink(pipeline);
     sink.start();
 

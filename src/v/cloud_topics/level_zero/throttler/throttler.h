@@ -37,7 +37,7 @@ class throttler {
 
 public:
     // TODO: add config properties for limits
-    explicit throttler(size_t tput_limit, core::write_pipeline<Clock>::stage s);
+    explicit throttler(size_t tput_limit, l0::write_pipeline<Clock>::stage s);
 
     ss::future<> start();
     ss::future<> stop();
@@ -57,8 +57,7 @@ private:
     throttle_write_pipeline_once(size_t prev_total_size_bytes);
 
     /// Apply throttling logic to the write pipeline
-    size_t
-    apply_throttle(size_t prev_total_size_bytes, const core::event& event);
+    size_t apply_throttle(size_t prev_total_size_bytes, const l0::event& event);
 
     /// Throttle write throughput
     ///
@@ -69,10 +68,10 @@ private:
 
     token_bucket<Clock> _write_tput_tb;
 
-    using write_req_ptr = ss::weak_ptr<core::write_request<Clock>>;
+    using write_req_ptr = ss::weak_ptr<l0::write_request<Clock>>;
     ss::abort_source _as;
     ss::gate _gate;
-    core::write_pipeline<Clock>::stage _my_stage;
+    l0::write_pipeline<Clock>::stage _my_stage;
     // Total number of events handled
     size_t _total_events{0};
     // Number of outstanding throttled write requests

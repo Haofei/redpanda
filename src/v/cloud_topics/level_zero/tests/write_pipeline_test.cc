@@ -32,7 +32,7 @@
 namespace cloud_topics = experimental::cloud_topics;
 using namespace std::chrono_literals;
 
-namespace experimental::cloud_topics::core {
+namespace experimental::cloud_topics::l0 {
 struct write_pipeline_accessor {
     // Returns true if the write request is in the `_pending` collection
     bool write_requests_pending(size_t n) {
@@ -41,7 +41,7 @@ struct write_pipeline_accessor {
 
     write_pipeline<ss::manual_clock>* pipeline;
 };
-} // namespace experimental::cloud_topics::core
+} // namespace experimental::cloud_topics::l0
 
 // Simulate sleep of certain duration and wait until the condition is met
 template<class Fn>
@@ -58,8 +58,8 @@ sleep_until(std::chrono::milliseconds delta, Fn&& fn, int retry_limit = 100) {
 }
 
 TEST_CORO(write_pipeline_test, single_write_request) {
-    cloud_topics::core::write_pipeline<ss::manual_clock> pipeline;
-    cloud_topics::core::write_pipeline_accessor accessor{
+    cloud_topics::l0::write_pipeline<ss::manual_clock> pipeline;
+    cloud_topics::l0::write_pipeline_accessor accessor{
       .pipeline = &pipeline,
     };
     // Expect single upload to be made
@@ -86,8 +86,8 @@ TEST_CORO(write_pipeline_test, single_write_request) {
 TEST_CORO(batcher_test, expired_write_request) {
     // The test starts two write request but one of which is expected to
     // timeout.
-    cloud_topics::core::write_pipeline<ss::manual_clock> pipeline;
-    cloud_topics::core::write_pipeline_accessor accessor{
+    cloud_topics::l0::write_pipeline<ss::manual_clock> pipeline;
+    cloud_topics::l0::write_pipeline_accessor accessor{
       .pipeline = &pipeline,
     };
 

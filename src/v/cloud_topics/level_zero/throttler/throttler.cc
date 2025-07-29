@@ -28,7 +28,7 @@ namespace experimental::cloud_topics {
 
 template<class Clock>
 throttler<Clock>::throttler(
-  size_t tput_limit, core::write_pipeline<Clock>::stage s)
+  size_t tput_limit, l0::write_pipeline<Clock>::stage s)
   : _write_tput_tb(tput_limit, "ct:throttler")
   , _my_stage(std::move(s)) {}
 
@@ -107,7 +107,7 @@ throttler<Clock>::throttle_write_pipeline_once(size_t prev_total_size) {
 
 template<class Clock>
 size_t throttler<Clock>::apply_throttle(
-  size_t prev_total_size, const core::event& event) {
+  size_t prev_total_size, const l0::event& event) {
     // NOTE: this method shouldn't be a coroutine to guarantee that there are no
     // scheduling points inside it.
     size_t total_bytes = prev_total_size;
@@ -126,9 +126,9 @@ size_t throttler<Clock>::apply_throttle(
     }
     // Advance all write requests which are not throttled to next stage
     _my_stage.process(
-      [](const core::write_request<Clock>&) noexcept
-        -> checked<core::request_processing_result, errc> {
-          return core::request_processing_result::advance_and_continue;
+      [](const l0::write_request<Clock>&) noexcept
+        -> checked<l0::request_processing_result, errc> {
+          return l0::request_processing_result::advance_and_continue;
       });
     _total_events++;
     return total_bytes;

@@ -36,7 +36,7 @@ namespace experimental::cloud_topics {
 
 template<class Clock>
 batcher<Clock>::batcher(
-  core::write_pipeline<Clock>::stage stage,
+  l0::write_pipeline<Clock>::stage stage,
   cloud_storage_clients::bucket_name bucket,
   cloud_io::remote_api<Clock>& remote_api,
   cluster_services* cluster_services)

@@ -27,7 +27,7 @@
 #include <chrono>
 #include <exception>
 
-namespace experimental::cloud_topics::core {
+namespace experimental::cloud_topics::l0 {
 
 template<class Clock>
 write_pipeline<Clock>::write_pipeline()
@@ -48,7 +48,7 @@ write_pipeline<Clock>::write_and_debounce(
     // fiber until the 'response' promise is set. The
     // promise can be set by any fiber that completed
     // the request processing.
-    auto data_chunk = co_await core::serialize_batches(std::move(batches));
+    auto data_chunk = co_await l0::serialize_batches(std::move(batches));
     auto sz = data_chunk.payload.size_bytes();
     // Grab the semaphore after the size of the write request
     // is known. It's impossible to do this in advance because
@@ -59,7 +59,7 @@ write_pipeline<Clock>::write_and_debounce(
     _bytes_total += sz;
     auto d = ss::defer([this, sz] { _current_size -= sz; });
     auto stage = this->first_stage();
-    core::write_request<Clock> request(
+    l0::write_request<Clock> request(
       std::move(ntp), std::move(data_chunk), timeout, stage);
     vlog(
       cd_log.trace,
@@ -194,8 +194,8 @@ ss::future<checked<event, errc>> write_pipeline<Clock>::stage::wait_until(
   ss::abort_source* maybe_as) noexcept {
     auto [sub, as] = choose_abort_source(maybe_as);
     while (true) {
-        core::event_filter<Clock> filter(
-          core::event_type::new_write_request, _ps, deadline);
+        l0::event_filter<Clock> filter(
+          l0::event_type::new_write_request, _ps, deadline);
         auto event_fut = co_await ss::coroutine::as_future(
           _parent->subscribe(filter, *as));
         if (event_fut.failed()) {
@@ -207,9 +207,9 @@ ss::future<checked<event, errc>> write_pipeline<Clock>::stage::wait_until(
         }
         auto event = event_fut.get();
         switch (event.type) {
-        case core::event_type::shutting_down:
+        case l0::event_type::shutting_down:
             co_return errc::shutting_down;
-        case core::event_type::new_write_request:
+        case l0::event_type::new_write_request:
             if (
               event.pending_write_bytes < max_bytes
               && Clock::now() < deadline) {
@@ -218,10 +218,10 @@ ss::future<checked<event, errc>> write_pipeline<Clock>::stage::wait_until(
                 continue;
             }
             [[fallthrough]];
-        case core::event_type::err_timedout:
+        case l0::event_type::err_timedout:
             break;
-        case core::event_type::new_read_request:
-        case core::event_type::none:
+        case l0::event_type::new_read_request:
+        case l0::event_type::none:
             vassert(false, "Read request added to the write pipeline");
         }
         co_return event;
@@ -231,17 +231,17 @@ ss::future<checked<event, errc>> write_pipeline<Clock>::stage::wait_until(
 template<class Clock>
 ss::future<checked<event, errc>>
 write_pipeline<Clock>::stage::wait_next(ss::abort_source* maybe_as) noexcept {
-    core::event_filter<Clock> filter(core::event_type::new_write_request, _ps);
+    l0::event_filter<Clock> filter(l0::event_type::new_write_request, _ps);
     auto [sub, as] = choose_abort_source(maybe_as);
     auto event = co_await _parent->subscribe(filter, *as);
     switch (event.type) {
-    case core::event_type::shutting_down:
+    case l0::event_type::shutting_down:
         co_return errc::shutting_down;
-    case core::event_type::err_timedout:
-    case core::event_type::new_read_request:
-    case core::event_type::none:
+    case l0::event_type::err_timedout:
+    case l0::event_type::new_read_request:
+    case l0::event_type::none:
         vassert(false, "Read request added to the write pipeline");
-    case core::event_type::new_write_request:
+    case l0::event_type::new_write_request:
         break;
     }
     co_return event;
@@ -269,4 +269,4 @@ write_pipeline<Clock>::stage::choose_abort_source(ss::abort_source* maybe_as) {
 template class write_pipeline<ss::lowres_clock>;
 template class write_pipeline<ss::manual_clock>;
 
-} // namespace experimental::cloud_topics::core
+} // namespace experimental::cloud_topics::l0

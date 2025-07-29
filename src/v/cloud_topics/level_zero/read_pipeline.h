@@ -26,7 +26,7 @@
 #include <seastar/core/loop.hh>
 #include <seastar/core/lowres_clock.hh>
 
-namespace experimental::cloud_topics::core {
+namespace experimental::cloud_topics::l0 {
 
 struct read_pipeline_accessor;
 
@@ -66,19 +66,19 @@ public:
         /// the pipeline).
         ss::future<checked<read_requests_list, errc>>
         pull_fetch_requests(size_t max_bytes) {
-            core::event_filter<Clock> filter(
-              core::event_type::new_read_request, _ps);
+            l0::event_filter<Clock> filter(
+              l0::event_type::new_read_request, _ps);
             auto event = co_await _parent->subscribe(
               filter, _parent->get_abort_source());
             switch (event.type) {
-            case core::event_type::shutting_down:
+            case l0::event_type::shutting_down:
                 co_return errc::shutting_down;
-            case core::event_type::err_timedout:
+            case l0::event_type::err_timedout:
                 co_return errc::timeout;
-            case core::event_type::new_write_request:
-            case core::event_type::none:
+            case l0::event_type::new_write_request:
+            case l0::event_type::none:
                 vassert(false, "Unexpected event type in the read_pipeline");
-            case core::event_type::new_read_request:
+            case l0::event_type::new_read_request:
                 break;
             }
             auto list = _parent->get_fetch_requests(max_bytes, _ps);
@@ -131,4 +131,4 @@ private:
 
     circuit_breaker<Clock> _breaker;
 };
-} // namespace experimental::cloud_topics::core
+} // namespace experimental::cloud_topics::l0

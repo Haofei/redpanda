@@ -56,7 +56,7 @@ TEST_F_CORO(materialized_extent_fixture, l0_fetch_handler_test) {
 
     auto underlying = convert_placeholders(make_underlying());
 
-    cloud_topics::core::read_pipeline<> pipeline;
+    cloud_topics::l0::read_pipeline<> pipeline;
 
     cloud_topics::fetch_handler l0_fetch_handler(
       pipeline.register_read_pipeline_stage(),

@@ -12,7 +12,7 @@
 
 #include "base/vassert.h"
 
-namespace experimental::cloud_topics::core {
+namespace experimental::cloud_topics::l0 {
 
 pipeline_stage_container::pipeline_stage_container(size_t max_pipeline_stages) {
     _stages.reserve(max_pipeline_stages);
@@ -50,12 +50,12 @@ pipeline_stage pipeline_stage_container::register_pipeline_stage() noexcept {
     return pipeline_stage(&_stages.at(_registered++));
 }
 
-} // namespace experimental::cloud_topics::core
+} // namespace experimental::cloud_topics::l0
 
-auto fmt::formatter<experimental::cloud_topics::core::pipeline_stage>::format(
-  const experimental::cloud_topics::core::pipeline_stage& o,
+auto fmt::formatter<experimental::cloud_topics::l0::pipeline_stage>::format(
+  const experimental::cloud_topics::l0::pipeline_stage& o,
   fmt::format_context& ctx) const -> decltype(ctx.out()) {
-    if (o == experimental::cloud_topics::core::unassigned_pipeline_stage) {
+    if (o == experimental::cloud_topics::l0::unassigned_pipeline_stage) {
         return formatter<std::string_view>::format(
           fmt::format("pipeline_stage{{unassigned}}"), ctx);
     }
@@ -64,7 +64,7 @@ auto fmt::formatter<experimental::cloud_topics::core::pipeline_stage>::format(
 }
 
 std::ostream& operator<<(
-  std::ostream& o, experimental::cloud_topics::core::pipeline_stage stage) {
+  std::ostream& o, experimental::cloud_topics::l0::pipeline_stage stage) {
     fmt::print(o, "{}", stage);
     return o;
 }

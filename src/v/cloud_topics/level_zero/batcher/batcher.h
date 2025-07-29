@@ -64,7 +64,7 @@ class batcher {
 
 public:
     explicit batcher(
-      core::write_pipeline<Clock>::stage stage,
+      l0::write_pipeline<Clock>::stage stage,
       cloud_storage_clients::bucket_name bucket,
       cloud_io::remote_api<Clock>& remote_api,
       cluster_services* cluster_services);
@@ -113,6 +113,6 @@ private:
     basic_retry_chain_node<Clock> _rtc;
     basic_retry_chain_logger<Clock> _logger;
 
-    core::write_pipeline<Clock>::stage _stage;
+    l0::write_pipeline<Clock>::stage _stage;
 };
 } // namespace experimental::cloud_topics

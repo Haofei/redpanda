@@ -14,7 +14,7 @@
 
 #include <vector>
 
-namespace experimental::cloud_topics::core {
+namespace experimental::cloud_topics::l0 {
 
 class pipeline_stage_id {
 public:
@@ -53,15 +53,15 @@ private:
     size_t _registered{0};
 };
 
-} // namespace experimental::cloud_topics::core
+} // namespace experimental::cloud_topics::l0
 
 template<>
-struct fmt::formatter<experimental::cloud_topics::core::pipeline_stage>
+struct fmt::formatter<experimental::cloud_topics::l0::pipeline_stage>
   : fmt::formatter<std::string_view> {
     auto format(
-      const experimental::cloud_topics::core::pipeline_stage&,
+      const experimental::cloud_topics::l0::pipeline_stage&,
       fmt::format_context& ctx) const -> decltype(ctx.out());
 };
 
 std::ostream& operator<<(
-  std::ostream& o, experimental::cloud_topics::core::pipeline_stage stage);
+  std::ostream& o, experimental::cloud_topics::l0::pipeline_stage stage);

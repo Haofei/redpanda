@@ -25,28 +25,28 @@ TEST(CircuitBreaker, open_closed_half_open_open) {
     // Wait another cooldown timeout and transition to open state.
     const size_t error_capacity = 10;
     const auto cooldown = 10s;
-    core::circuit_breaker<ss::manual_clock> cb(error_capacity, cooldown);
+    l0::circuit_breaker<ss::manual_clock> cb(error_capacity, cooldown);
 
     // Check that state is 'open' initially
-    ASSERT_EQ(cb.state(), core::circuit_breaker_state::open);
+    ASSERT_EQ(cb.state(), l0::circuit_breaker_state::open);
 
     // Check that state is 'open' if errors are below the threshold
     cb.register_error();
-    ASSERT_EQ(cb.state(), core::circuit_breaker_state::open);
+    ASSERT_EQ(cb.state(), l0::circuit_breaker_state::open);
 
     // Trigger transition to the closed state
     for (size_t i = 0; i < error_capacity; i++) {
         cb.register_error();
     }
-    ASSERT_EQ(cb.state(), core::circuit_breaker_state::closed);
+    ASSERT_EQ(cb.state(), l0::circuit_breaker_state::closed);
 
     // Check that the state goes to half open after cooldown
     ss::manual_clock::advance(cooldown);
-    ASSERT_EQ(cb.state(), core::circuit_breaker_state::half_open);
+    ASSERT_EQ(cb.state(), l0::circuit_breaker_state::half_open);
 
     // Check that the state transitions back to open
     ss::manual_clock::advance(cooldown);
-    ASSERT_EQ(cb.state(), core::circuit_breaker_state::open);
+    ASSERT_EQ(cb.state(), l0::circuit_breaker_state::open);
 }
 
 TEST(CircuitBreaker, open_closed_half_open_closed) {
@@ -56,24 +56,24 @@ TEST(CircuitBreaker, open_closed_half_open_closed) {
     // Register error and transition to closed CB state.
     const size_t error_capacity = 10;
     const auto cooldown = 10s;
-    core::circuit_breaker<ss::manual_clock> cb(error_capacity, cooldown);
+    l0::circuit_breaker<ss::manual_clock> cb(error_capacity, cooldown);
 
     // Trigger transition to the closed state
     for (size_t i = 0; i < error_capacity + 1; i++) {
         cb.register_error();
     }
-    ASSERT_EQ(cb.state(), core::circuit_breaker_state::closed);
+    ASSERT_EQ(cb.state(), l0::circuit_breaker_state::closed);
 
     // Transition to half open state
     ss::manual_clock::advance(cooldown);
-    ASSERT_EQ(cb.state(), core::circuit_breaker_state::half_open);
+    ASSERT_EQ(cb.state(), l0::circuit_breaker_state::half_open);
 
     cb.register_error();
-    ASSERT_EQ(cb.state(), core::circuit_breaker_state::closed);
+    ASSERT_EQ(cb.state(), l0::circuit_breaker_state::closed);
 
     // Check that the state transitions back to open
     ss::manual_clock::advance(cooldown);
-    ASSERT_EQ(cb.state(), core::circuit_breaker_state::half_open);
+    ASSERT_EQ(cb.state(), l0::circuit_breaker_state::half_open);
 }
 
 TEST(CircuitBreaker, open_closed_open) {
@@ -82,24 +82,24 @@ TEST(CircuitBreaker, open_closed_open) {
     // Wait two cooldown intervals and transition to open state.
     const size_t error_capacity = 10;
     const auto cooldown = 10s;
-    core::circuit_breaker<ss::manual_clock> cb(error_capacity, cooldown);
+    l0::circuit_breaker<ss::manual_clock> cb(error_capacity, cooldown);
 
     // Check that state is 'open' initially
-    ASSERT_EQ(cb.state(), core::circuit_breaker_state::open);
+    ASSERT_EQ(cb.state(), l0::circuit_breaker_state::open);
 
     // Check that state is 'open' if errors are below the threshold
     cb.register_error();
-    ASSERT_EQ(cb.state(), core::circuit_breaker_state::open);
+    ASSERT_EQ(cb.state(), l0::circuit_breaker_state::open);
 
     // Trigger transition to the closed state
     for (size_t i = 0; i < error_capacity; i++) {
         cb.register_error();
     }
-    ASSERT_EQ(cb.state(), core::circuit_breaker_state::closed);
+    ASSERT_EQ(cb.state(), l0::circuit_breaker_state::closed);
 
     // Check that the state goes to open after long cooldown
     ss::manual_clock::advance(2 * cooldown);
-    ASSERT_EQ(cb.state(), core::circuit_breaker_state::open);
+    ASSERT_EQ(cb.state(), l0::circuit_breaker_state::open);
 }
 
 TEST(CircuitBreaker, error_ttl) {
@@ -108,21 +108,21 @@ TEST(CircuitBreaker, error_ttl) {
     // Register more errors and make sure that the CB is not closed.
     const size_t error_capacity = 10;
     const auto cooldown = 10s;
-    core::circuit_breaker<ss::manual_clock> cb(error_capacity, cooldown);
+    l0::circuit_breaker<ss::manual_clock> cb(error_capacity, cooldown);
 
-    ASSERT_EQ(cb.state(), core::circuit_breaker_state::open);
+    ASSERT_EQ(cb.state(), l0::circuit_breaker_state::open);
 
     // This shouldn't trigger state transition because we need +1
     // error for this.
     for (size_t i = 0; i < error_capacity; i++) {
         cb.register_error();
     }
-    ASSERT_EQ(cb.state(), core::circuit_breaker_state::open);
+    ASSERT_EQ(cb.state(), l0::circuit_breaker_state::open);
 
     // Expire all registered errors
     ss::manual_clock::advance(cooldown);
     for (size_t i = 0; i < error_capacity; i++) {
         cb.register_error();
     }
-    ASSERT_EQ(cb.state(), core::circuit_breaker_state::open);
+    ASSERT_EQ(cb.state(), l0::circuit_breaker_state::open);
 }

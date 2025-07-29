@@ -20,7 +20,7 @@
 namespace cloud_topics = experimental::cloud_topics;
 
 TEST(SerializerTest, EmptyReader) {
-    auto res = cloud_topics::core::serialize_batches({}).get();
+    auto res = cloud_topics::l0::serialize_batches({}).get();
     ASSERT_TRUE(res.payload.empty());
     ASSERT_TRUE(res.extents.empty());
 }
@@ -36,7 +36,7 @@ TEST_P(SerializerFixture, Consume) {
                        .get();
     chunked_vector<model::record_batch> batches;
     std::ranges::move(std::move(test_data), std::back_inserter(batches));
-    auto res = cloud_topics::core::serialize_batches(std::move(batches)).get();
+    auto res = cloud_topics::l0::serialize_batches(std::move(batches)).get();
     ASSERT_GT(res.payload.size_bytes(), 0);
     ASSERT_EQ(res.extents.size(), num_batches);
     ASSERT_TRUE(
