@@ -434,6 +434,12 @@ cluster_epoch_service<Clock>::fetch_leader_epoch() {
             co_return maybe_epoch;
         }
         if (++retries > max_retries) {
+            vlog(
+              clusterlog.warn,
+              "Failed to fetch leader epoch after {} "
+              "retries due to: {}",
+              max_retries,
+              maybe_epoch.error().message());
             co_return maybe_epoch;
         }
     }
