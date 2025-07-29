@@ -138,8 +138,6 @@ std::string_view enum_to_string(const protobuf3_test& e) {
     return "PROTOBUF3_TEST_UNSPECIFIED";
   case protobuf3_test::started:
     return "PROTOBUF3_TEST_STARTED";
-  case protobuf3_test::running:
-    return "PROTOBUF3_TEST_RUNNING";
   case protobuf3_test::finished:
     return "PROTOBUF3_TEST_FINISHED";
   default:
@@ -151,7 +149,6 @@ void enum_from_json(serde::pb::json::peekable_parser* p, protobuf3_test* e) {
   case serde::json::token::value_string: {
     constexpr static auto values = std::to_array<std::pair<std::string_view, protobuf3_test>>({
       {"PROTOBUF3_TEST_FINISHED", protobuf3_test::finished},
-      {"PROTOBUF3_TEST_RUNNING", protobuf3_test::running},
       {"PROTOBUF3_TEST_STARTED", protobuf3_test::started},
       {"PROTOBUF3_TEST_UNSPECIFIED", protobuf3_test::unspecified},
     });
@@ -170,9 +167,6 @@ void enum_from_json(serde::pb::json::peekable_parser* p, protobuf3_test* e) {
       return;
     case 1:
       *e = protobuf3_test::started;
-      return;
-    case 1:
-      *e = protobuf3_test::running;
       return;
     case 2:
       *e = protobuf3_test::finished;

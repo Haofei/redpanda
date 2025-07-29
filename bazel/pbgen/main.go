@@ -776,6 +776,10 @@ func (g *implGenerator) generateEnumToString(enum protoreflect.EnumDescriptor, w
 	defer w.Println("}")
 	for i := range enum.Values().Len() {
 		v := enum.Values().Get(i)
+		// Skip aliases
+		if enum.Values().ByNumber(v.Number()) != v {
+			continue
+		}
 		w.Printf("case %s::%s:\n", cppTypeName(enum), enumMemberName(v))
 		w.Indent()
 		w.Printf("return %q;\n", v.Name())
@@ -804,6 +808,10 @@ func (g *implGenerator) generateEnumFromJson(enum protoreflect.EnumDescriptor, w
 		pairs := make([]string, 0, enum.Values().Len())
 		for i := range enum.Values().Len() {
 			value := enum.Values().Get(i)
+			// Skip aliases
+			if enum.Values().ByNumber(value.Number()) != value {
+				continue
+			}
 			pair := fmt.Sprintf("{%q, %s::%s},", value.Name(), cppTypeName(enum), enumMemberName(value))
 			pairs = append(pairs, pair)
 		}
@@ -836,6 +844,10 @@ func (g *implGenerator) generateEnumFromJson(enum protoreflect.EnumDescriptor, w
 		defer w.Println("}")
 		for i := range enum.Values().Len() {
 			value := enum.Values().Get(i)
+			// Skip aliases
+			if enum.Values().ByNumber(value.Number()) != value {
+				continue
+			}
 			w.Printf("case %d:\n", value.Number())
 			w.Indent()
 			w.Printf("*e = %s::%s;\n", cppTypeName(enum), enumMemberName(value))
