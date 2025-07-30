@@ -79,6 +79,7 @@ redpanda_cc_library(
         "//src/v/serde/json:writer",
         "//src/v/utils:base64",
         "@abseil-cpp//absl/strings",
+        "@abseil-cpp//absl/strings:str_format",
     ],
     include_prefix = "serde/protobuf",
     visibility = ["//visibility:public"],
