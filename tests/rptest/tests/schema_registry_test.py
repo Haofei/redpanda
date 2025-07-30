@@ -1402,7 +1402,6 @@ class SchemaRegistryEndpoints(RedpandaTest):
         wait_until(has_config, 5)
 
     def _push_to_schemas_topic(self, schemas):
-
         schema_topic = TopicSpec(name="_schemas",
                                  partition_count=1,
                                  replication_factor=1)
@@ -4363,7 +4362,8 @@ class SchemaRegistryModeMutableTest(SchemaRegistryEndpoints):
         #Test /subjects/{subject}/versions
         def test_subjects_subject_versions(entry,
                                            expected_successful,
-                                           expected_id=None):
+                                           expected_id=None,
+                                           include_id=False):
             lookup_schema = import_schemas[entry]
             subject = lookup_schema["subject"]
             schema_def = lookup_schema["schema"]
@@ -4375,7 +4375,8 @@ class SchemaRegistryModeMutableTest(SchemaRegistryEndpoints):
                     "schema": schema_def,
                     "schemaType": "PROTOBUF",
                     "references": references,
-                    "version": lookup_schema["version"]
+                    "version": lookup_schema["version"],
+                    "id": expected_id if include_id else -1
                 }))
             endpoint = f"POST subjects/{subject}/versions"
             if expected_successful:
@@ -4416,13 +4417,22 @@ class SchemaRegistryModeMutableTest(SchemaRegistryEndpoints):
         test_schemas_ids_id_subjects(4, expected_successful=True)
         #Lookup still fails cause schema_d is stored not in it's canonical form
         test_subjects_subject("schema_d", expected_code=404)
+
+        # Force enable IMPORT mode to allow re-posting a specific versions of schemas
+        result_raw = self.sr_client.set_mode(force=True,
+                                             data=json.dumps(
+                                                 {"mode": "IMPORT"}))
+        self.assert_equal(result_raw.status_code, 200)
+        self.assert_equal(result_raw.json()["mode"], "IMPORT")
+
         #Validate that schema_d can now be posted anew.
         #Note that a new version will be created, as the old one was invalid at
         #startup and it was not in canonical form. Thus it cannot be found and a
         #new version is created.
         test_subjects_subject_versions("schema_d",
                                        expected_id=16,
-                                       expected_successful=True)
+                                       expected_successful=True,
+                                       include_id=True)
         #After pushing, schema_d is not stored by its canonical form
         import_schemas["schema_d"]["sanitized"] = schema_d_proto_sanitized_def
         test_subjects_subject_versions_version("schema_d",
@@ -4438,7 +4448,8 @@ class SchemaRegistryModeMutableTest(SchemaRegistryEndpoints):
         #Fix problematic schemas by adding missing dependency for g_v2 and deleting g_v4.
         test_subjects_subject_versions("schema_f_v2",
                                        expected_id=17,
-                                       expected_successful=True)
+                                       expected_successful=True,
+                                       include_id=True)
 
         result_raw = self.sr_client.delete_subject_version("schema_g",
                                                            version=4)
@@ -4447,12 +4458,14 @@ class SchemaRegistryModeMutableTest(SchemaRegistryEndpoints):
 
         test_subjects_subject_versions("schema_g_v5",
                                        expected_id=18,
-                                       expected_successful=True)
+                                       expected_successful=True,
+                                       include_id=True)
 
         #Fix problematic dependency chain by adding base schema.
         test_subjects_subject_versions("schema_h",
                                        expected_id=19,
-                                       expected_successful=True)
+                                       expected_successful=True,
+                                       include_id=True)
         test_schemas_ids_id(12, expected_successful=True)
         test_schemas_ids_id(13, expected_successful=True)
         test_schemas_ids_id(14, expected_successful=True)
@@ -4517,6 +4530,82 @@ class SchemaRegistryModeMutableTest(SchemaRegistryEndpoints):
             }))
         self.assert_equal(result_raw.status_code, 422)
         self.assert_equal(result_raw.json()["error_code"], 42205)
+
+        self.logger.debug(
+            f"Finally, sanity check the expected set of schemas - expecting: {expected_ver_to_id=}"
+        )
+        rpk = self._get_rpk_tools()
+        resp = rpk.list_schemas([sub1])
+        got_ver_to_id = {int(elem["version"]): elem["id"] for elem in resp}
+        self.assert_equal(expected_ver_to_id, got_ver_to_id)
+
+    @cluster(num_nodes=3)
+    @matrix(subject_scope=[False, True])
+    def test_readwrite_mode_version_behaviour(self, subject_scope):
+        """Test expected READWRITE mode behaviour when the version is specified when trying to register a schema"""
+        sub1 = "test-subject-1"
+        expected_ver_to_id = {}
+
+        if subject_scope:
+            self.logger.debug(f"Configure READWRITE mode for subject {sub1}")
+            # Overwrite a global-scoped IMPORT-mode to test that subject-level overwriting works
+            result_raw = self.sr_client.set_mode(
+                data=json.dumps({"mode": "IMPORT"}))
+            self.assert_equal(result_raw.status_code, 200)
+            self.assert_equal(result_raw.json()["mode"], "IMPORT")
+
+            result_raw = self.sr_client.set_mode_subject(
+                subject=sub1, data=json.dumps({"mode": "READWRITE"}))
+            self.assert_equal(result_raw.status_code, 200)
+            self.assert_equal(result_raw.json()["mode"], "READWRITE")
+        else:
+            self.logger.debug(f"Configure READWRITE mode for subject {sub1}")
+            # Noop
+
+        self.logger.debug(
+            "Post a schema with an arbitrary version - should fail")
+        result_raw = self.sr_client.post_subjects_subject_versions(
+            subject=sub1,
+            data=json.dumps({
+                "schema": schema1_def,
+                "version": 7
+            }))
+        self.assert_equal(result_raw.status_code, 422)
+        self.assert_equal(result_raw.json()["error_code"], 42201)
+
+        self.logger.debug(
+            "Post a schema with a max + 1 version - should succeed")
+        result_raw = self.sr_client.post_subjects_subject_versions(
+            subject=sub1,
+            data=json.dumps({
+                "schema": schema1_def,
+                "version": 1
+            }))
+        self.assert_equal(result_raw.status_code, 200)
+        self.assert_equal(result_raw.json()["id"], 1)
+        expected_ver_to_id[1] = 1
+
+        self.logger.debug(
+            "Post the schema again with the same version - should succeed")
+        result_raw = self.sr_client.post_subjects_subject_versions(
+            subject=sub1,
+            data=json.dumps({
+                "schema": schema1_def,
+                "version": 1
+            }))
+        self.assert_equal(result_raw.status_code, 200)
+        self.assert_equal(result_raw.json()["id"], 1)
+
+        self.logger.debug(
+            "Post the schema again with an arbitrary version - should succeed")
+        result_raw = self.sr_client.post_subjects_subject_versions(
+            subject=sub1,
+            data=json.dumps({
+                "schema": schema1_def,
+                "version": 9
+            }))
+        self.assert_equal(result_raw.status_code, 200)
+        self.assert_equal(result_raw.json()["id"], 1)
 
         self.logger.debug(
             f"Finally, sanity check the expected set of schemas - expecting: {expected_ver_to_id=}"
