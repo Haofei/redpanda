@@ -9,6 +9,7 @@
  */
 #include "cloud_topics/level_one/metastore/frontend.h"
 
+#include "cloud_topics/level_one/metastore/rpc_types.h"
 #include "cloud_topics/logger.h"
 #include "cluster/metadata_cache.h"
 #include "cluster/partition_leaders_table.h"
@@ -64,32 +65,32 @@ template<auto Func, typename req_t>
 requires requires(frontend::proto_t f, req_t req, ::rpc::client_opts opts) {
     (f.*Func)(std::move(req), std::move(opts));
 }
-auto frontend::remote_dispatch(req_t request, model::node_id leader_id) {
+ss::future<typename req_t::resp_t>
+frontend::remote_dispatch(req_t request, model::node_id leader_id) {
     using resp_t = req_t::resp_t;
-    return _connection_cache->local()
-      .with_node_client<proto_t>(
-        _self,
-        ss::this_shard_id(),
-        leader_id,
-        rpc_timeout,
-        [request = std::move(request)](proto_t proto) mutable {
-            return (proto.*Func)(
-              std::move(request),
-              ::rpc::client_opts{model::timeout_clock::now() + rpc_timeout});
-        })
-      .then(&::rpc::get_ctx_data<resp_t>)
-      .then([leader_id, self = _self](result<resp_t> r) mutable {
-          if (r.has_error()) {
-              vlog(
-                cd_log.warn,
-                "got error {} sending to L1 STM leader {} from node {}",
-                r.error().message(),
-                leader_id,
-                self);
-              return resp_t{.ec = rpc::errc::timed_out};
-          }
-          return std::move(r.value());
-      });
+    auto res = co_await _connection_cache->local()
+                 .with_node_client<proto_t>(
+                   _self,
+                   ss::this_shard_id(),
+                   leader_id,
+                   rpc_timeout,
+                   [request = std::move(request)](proto_t proto) mutable {
+                       return (proto.*Func)(
+                         std::move(request),
+                         ::rpc::client_opts{
+                           model::timeout_clock::now() + rpc_timeout});
+                   })
+                 .then(&::rpc::get_ctx_data<resp_t>);
+    if (res.has_error()) {
+        vlog(
+          cd_log.warn,
+          "got error {} sending to L1 STM leader {} from node {}",
+          res.error().message(),
+          leader_id,
+          _self);
+        co_return resp_t{.ec = rpc::errc::timed_out};
+    }
+    co_return std::move(res.value());
 }
 
 template<auto LocalFunc, auto RemoteFunc, typename req_t>
@@ -101,89 +102,83 @@ requires requires(
     request_has_metastore_partition<req_t>
       || request_has_topic_id_partition<req_t>;
 }
-auto frontend::process(req_t req, bool local_only) {
+ss::future<typename req_t::resp_t>
+frontend::process(req_t req, bool local_only) {
     using resp_t = req_t::resp_t;
-    return ensure_topic_exists().then([req = std::move(req), local_only, this](
-                                        bool exists) mutable {
-        if (!exists) {
-            return ss::make_ready_future<resp_t>(
-              resp_t{.ec = rpc::errc::not_leader});
+    auto exists = co_await ensure_topic_exists();
+    if (!exists) {
+        co_return resp_t{.ec = rpc::errc::not_leader};
+    }
+    model::partition_id metastore_pid;
+    if constexpr (request_has_topic_id_partition<req_t>) {
+        auto pid_opt = metastore_partition(req.tp);
+        if (!pid_opt.has_value()) {
+            co_return resp_t{.ec = rpc::errc::not_leader};
         }
+        metastore_pid = *pid_opt;
+    } else {
+        metastore_pid = req.metastore_partition;
+    }
+    model::ntp l1_ntp{
+      model::kafka_internal_namespace,
+      model::l1_metastore_topic,
+      metastore_pid};
 
-        model::partition_id metastore_pid;
-        if constexpr (request_has_topic_id_partition<req_t>) {
-            auto pid_opt = metastore_partition(req.tp);
-            if (!pid_opt.has_value()) {
-                return ss::make_ready_future<resp_t>(
-                  resp_t{.ec = rpc::errc::not_leader});
-            }
-            metastore_pid = *pid_opt;
-        } else {
-            metastore_pid = req.metastore_partition;
+    auto leader = _leaders->local().get_leader(l1_ntp);
+    if (leader == _self) {
+        auto shard = _shard_table->local().shard_for(l1_ntp);
+        if (shard.has_value()) {
+            co_return co_await (this->*LocalFunc)(
+              std::move(req), std::move(l1_ntp), shard.value());
         }
-        model::ntp l1_ntp{
-          model::kafka_internal_namespace,
-          model::l1_metastore_topic,
-          metastore_pid};
-
-        auto leader = _leaders->local().get_leader(l1_ntp);
-        if (leader == _self) {
-            auto shard = _shard_table->local().shard_for(l1_ntp);
-            if (shard.has_value()) {
-                return (this->*LocalFunc)(
-                  std::move(req), std::move(l1_ntp), shard.value());
-            }
-        } else if (leader.has_value() && !local_only) {
-            return remote_dispatch<RemoteFunc>(std::move(req), leader.value());
-        }
-        return ss::make_ready_future<resp_t>(
-          resp_t{.ec = rpc::errc::not_leader});
-    });
+    } else if (leader.has_value() && !local_only) {
+        co_return co_await remote_dispatch<RemoteFunc>(
+          std::move(req), leader.value());
+    }
+    co_return resp_t{.ec = rpc::errc::not_leader};
 }
 
-template auto frontend::remote_dispatch<&frontend::client::add_objects>(
-  rpc::add_objects_request, model::node_id);
-
-template auto frontend::process<
+template ss::future<rpc::add_objects_reply>
+  frontend::remote_dispatch<&frontend::client::add_objects>(
+    rpc::add_objects_request, model::node_id);
+template ss::future<rpc::add_objects_reply> frontend::process<
   &frontend::add_objects_locally,
   &frontend::client::add_objects>(rpc::add_objects_request, bool);
 
-template auto frontend::remote_dispatch<&frontend::client::replace_objects>(
-  rpc::replace_objects_request, model::node_id);
-
-template auto frontend::process<
+template ss::future<rpc::replace_objects_reply>
+  frontend::remote_dispatch<&frontend::client::replace_objects>(
+    rpc::replace_objects_request, model::node_id);
+template ss::future<rpc::replace_objects_reply> frontend::process<
   &frontend::replace_objects_locally,
   &frontend::client::replace_objects>(rpc::replace_objects_request, bool);
 
-template auto frontend::remote_dispatch<&frontend::client::get_first_offset_ge>(
-  rpc::get_first_offset_ge_request, model::node_id);
-
-template auto frontend::process<
+template ss::future<rpc::get_first_offset_ge_reply>
+  frontend::remote_dispatch<&frontend::client::get_first_offset_ge>(
+    rpc::get_first_offset_ge_request, model::node_id);
+template ss::future<rpc::get_first_offset_ge_reply> frontend::process<
   &frontend::get_first_offset_ge_locally,
   &frontend::client::get_first_offset_ge>(
   rpc::get_first_offset_ge_request, bool);
 
-template auto
+template ss::future<rpc::get_first_timestamp_ge_reply>
   frontend::remote_dispatch<&frontend::client::get_first_timestamp_ge>(
     rpc::get_first_timestamp_ge_request, model::node_id);
-
-template auto frontend::process<
+template ss::future<rpc::get_first_timestamp_ge_reply> frontend::process<
   &frontend::get_first_timestamp_ge_locally,
   &frontend::client::get_first_timestamp_ge>(
   rpc::get_first_timestamp_ge_request, bool);
 
-template auto frontend::remote_dispatch<&frontend::client::get_offsets>(
-  rpc::get_offsets_request, model::node_id);
-
-template auto frontend::process<
+template ss::future<rpc::get_offsets_reply>
+  frontend::remote_dispatch<&frontend::client::get_offsets>(
+    rpc::get_offsets_request, model::node_id);
+template ss::future<rpc::get_offsets_reply> frontend::process<
   &frontend::get_offsets_locally,
   &frontend::client::get_offsets>(rpc::get_offsets_request, bool);
 
-template auto
+template ss::future<rpc::get_compaction_offsets_reply>
   frontend::remote_dispatch<&frontend::client::get_compaction_offsets>(
     rpc::get_compaction_offsets_request, model::node_id);
-
-template auto frontend::process<
+template ss::future<rpc::get_compaction_offsets_reply> frontend::process<
   &frontend::get_compaction_offsets_locally,
   &frontend::client::get_compaction_offsets>(
   rpc::get_compaction_offsets_request, bool);
@@ -228,7 +223,6 @@ ss::future<bool> frontend::ensure_topic_exists() {
       default_metastore_partitions,
       replication_factor};
 
-    topic.properties.compression = model::compression::none;
     // todo: fix this by implementing on demand raft
     // snapshots.
     topic.properties.cleanup_policy_bitflags

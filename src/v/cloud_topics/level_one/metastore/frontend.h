@@ -92,7 +92,8 @@ private:
     requires requires(proto_t f, req_t req, ::rpc::client_opts opts) {
         (f.*Func)(std::move(req), std::move(opts));
     }
-    auto remote_dispatch(req_t request, model::node_id leader_id);
+    ss::future<typename req_t::resp_t>
+    remote_dispatch(req_t request, model::node_id leader_id);
 
     template<auto LocalFunc, auto RemoteFunc, typename req_t>
     requires requires(
@@ -103,7 +104,7 @@ private:
         request_has_metastore_partition<req_t>
           || request_has_topic_id_partition<req_t>;
     }
-    auto process(req_t req, bool local_only);
+    ss::future<typename req_t::resp_t> process(req_t req, bool local_only);
 
     ss::future<bool> ensure_topic_exists();
 
