@@ -10,6 +10,33 @@ redpanda_cc_rpc_library(
 )
 
 redpanda_cc_library(
+    name = "frontend",
+    srcs = [
+        "frontend.cc",
+    ],
+    hdrs = [
+        "frontend.h",
+    ],
+    implementation_deps = [
+        "//src/v/cloud_topics:logger",
+        "//src/v/hashing:murmur",
+        "@fmt",
+    ],
+    include_prefix = "cloud_topics/level_one/metastore",
+    visibility = ["//visibility:public"],
+    deps = [
+        ":generated_level_one_rpc",
+        ":rpc_types",
+        "//src/v/base",
+        "//src/v/cluster",
+        "//src/v/model",
+        "//src/v/raft",
+        "//src/v/rpc",
+        "@seastar",
+    ],
+)
+
+redpanda_cc_library(
     name = "metastore",
     hdrs = [
         "metastore.h",
