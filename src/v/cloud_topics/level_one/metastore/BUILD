@@ -13,9 +13,11 @@ redpanda_cc_library(
     name = "frontend",
     srcs = [
         "frontend.cc",
+        "service.cc",
     ],
     hdrs = [
         "frontend.h",
+        "service.h",
     ],
     implementation_deps = [
         "//src/v/cloud_topics:logger",
