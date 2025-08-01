@@ -17,8 +17,7 @@
 #include "cluster_link/logger.h"
 #include "cluster_link/manager.h"
 #include "cluster_link/model/types.h"
-#include "model/namespace.h"
-#include "raft/group_manager.h"
+#include "cluster_link/source_topic_syncer.h"
 
 namespace cluster_link {
 
@@ -114,6 +113,8 @@ ss::future<> service::start() {
       std::make_unique<default_link_factory>(),
       std::make_unique<cluster_factory>(),
       30s); // Temporary until we have a proper configuration for this
+
+    co_await _manager->register_task_factory<source_topic_syncer_factory>();
 
     // Register notifications before the manager starts.  The manager will have
     // a constructed the underlying workqueue to start in a paused state and

@@ -129,6 +129,7 @@ redpanda_cc_library(
     implementation_deps = [
         ":impl",
         ":logger",
+        ":source_topic_syncer",
         "//src/v/cluster_link/model",
     ],
     include_prefix = "cluster_link",
