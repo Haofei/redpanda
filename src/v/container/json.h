@@ -15,9 +15,8 @@
 
 namespace json {
 
-template<typename Buffer, typename T, size_t max_fragment_size>
-void rjson_serialize(
-  json::Writer<Buffer>& w, const fragmented_vector<T, max_fragment_size>& v) {
+template<typename Buffer, typename T>
+void rjson_serialize(json::Writer<Buffer>& w, const chunked_vector<T>& v) {
     w.StartArray();
     for (const auto& e : v) {
         rjson_serialize(w, e);
