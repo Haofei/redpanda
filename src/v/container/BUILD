@@ -16,6 +16,7 @@ redpanda_cc_library(
     name = "chunked_vector",
     hdrs = [
         "chunked_vector.h",
+        "chunked_vector_async.h",
     ],
     include_prefix = "container",
     visibility = ["//visibility:public"],

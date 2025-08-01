@@ -9,6 +9,7 @@
 
 #include "base/seastarx.h"
 #include "container/chunked_vector.h"
+#include "container/chunked_vector_async.h"
 
 #include <seastar/testing/thread_test_case.hh>
 
