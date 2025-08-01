@@ -32,7 +32,7 @@
  * vector, but does not store its data in contiguous memory.
  *
  * The iterator implementation works for a few things like std::lower_bound,
- * upper_bound, distance, etc... see fragmented_vector_test.
+ * upper_bound, distance, etc... see chunked_vector_test.
  *
  * By default, this container allocates full sized segments at a time as
  * specified as a template parameter. If fragment_size_bytes is equal to
