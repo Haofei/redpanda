@@ -167,7 +167,7 @@ public:
     void set_overrides(ntp_config::default_overrides) final;
     bool notify_compaction_update() final;
 
-    int64_t compaction_backlog() const final;
+    int64_t compaction_backlog() final;
 
     ss::future<usage_report> disk_usage(gc_config) override;
 

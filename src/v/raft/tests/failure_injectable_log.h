@@ -117,7 +117,7 @@ public:
 
     bool notify_compaction_update() final;
 
-    int64_t compaction_backlog() const final;
+    int64_t compaction_backlog() final;
 
     ss::future<storage::usage_report> disk_usage(storage::gc_config) final;
 

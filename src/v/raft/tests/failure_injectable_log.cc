@@ -215,7 +215,7 @@ bool failure_injectable_log::notify_compaction_update() {
     return _underlying_log->notify_compaction_update();
 }
 
-int64_t failure_injectable_log::compaction_backlog() const {
+int64_t failure_injectable_log::compaction_backlog() {
     return _underlying_log->compaction_backlog();
 }
 

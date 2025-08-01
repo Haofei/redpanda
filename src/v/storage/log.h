@@ -232,7 +232,7 @@ public:
     /// Returns true if the log compaction changed.
     virtual bool notify_compaction_update() = 0;
 
-    virtual int64_t compaction_backlog() const = 0;
+    virtual int64_t compaction_backlog() = 0;
 
     virtual ss::future<usage_report> disk_usage(gc_config) = 0;
     virtual ss::future<reclaimable_offsets>
