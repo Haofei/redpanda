@@ -1051,7 +1051,7 @@ redpanda_cc_gtest(
     deps = [
         "//src/v/cluster",
         "//src/v/config",
-        "//src/v/container:fragmented_vector",
+        "//src/v/container:chunked_vector",
         "//src/v/model",
         "//src/v/random:generators",
         "//src/v/test_utils:gtest",
@@ -1165,7 +1165,7 @@ redpanda_cc_btest(
         "//src/v/cluster/tests:randoms",
         "//src/v/cluster/tests:topic_properties_generator",
         "//src/v/compat",
-        "//src/v/container:fragmented_vector",
+        "//src/v/container:chunked_vector",
         "//src/v/model",
         "//src/v/model/tests:random",
         "//src/v/pandaproxy/schema_registry/test:random",

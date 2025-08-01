@@ -13,7 +13,7 @@ redpanda_cc_library(
 )
 
 redpanda_cc_library(
-    name = "fragmented_vector",
+    name = "chunked_vector",
     hdrs = [
         "fragmented_vector.h",
     ],
@@ -32,7 +32,7 @@ redpanda_cc_library(
     include_prefix = "container",
     visibility = ["//visibility:public"],
     deps = [
-        ":fragmented_vector",
+        ":chunked_vector",
         "@abseil-cpp//absl/hash",
         "@unordered_dense",
     ],
@@ -61,7 +61,7 @@ redpanda_cc_library(
     include_prefix = "container",
     visibility = ["//visibility:public"],
     deps = [
-        ":fragmented_vector",
+        ":chunked_vector",
     ],
 )
 
@@ -85,7 +85,7 @@ redpanda_cc_library(
     include_prefix = "container",
     visibility = ["//visibility:public"],
     deps = [
-        ":fragmented_vector",
+        ":chunked_vector",
         "//src/v/json",
     ],
 )

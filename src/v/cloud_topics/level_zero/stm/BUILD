@@ -47,7 +47,7 @@ redpanda_cc_library(
     include_prefix = "cloud_topics/level_zero/stm",
     deps = [
         ":dl_version",
-        "//src/v/container:fragmented_vector",
+        "//src/v/container:chunked_vector",
         "//src/v/serde",
     ],
 )
@@ -82,7 +82,7 @@ redpanda_cc_library(
         ":ctp_stm_offsets",
         ":dl_snapshot",
         ":dl_version",
-        "//src/v/container:fragmented_vector",
+        "//src/v/container:chunked_vector",
         "//src/v/model",
         "//src/v/serde",
     ],

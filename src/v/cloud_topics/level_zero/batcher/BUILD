@@ -26,7 +26,7 @@ redpanda_cc_library(
         "//src/v/cloud_topics:cluster_services_interface",
         "//src/v/cloud_topics:types",
         "//src/v/cloud_topics/level_zero/pipeline:write_request",
-        "//src/v/container:fragmented_vector",
+        "//src/v/container:chunked_vector",
         "//src/v/model",
         "@abseil-cpp//absl/container:btree",
         "@seastar",

@@ -62,7 +62,7 @@ redpanda_cc_gtest(
         "//src/v/cloud_topics/level_zero/pipeline:event_filter",
         "//src/v/cloud_topics/level_zero/pipeline:pipeline_stage",
         "//src/v/cloud_topics/level_zero/pipeline:write_pipeline",
-        "//src/v/container:fragmented_vector",
+        "//src/v/container:chunked_vector",
         "//src/v/model",
         "//src/v/model/tests:random",
         "//src/v/random:generators",
