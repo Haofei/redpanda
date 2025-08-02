@@ -273,6 +273,7 @@ public:
       earliest_removable_timestamp(model::offset) const = 0;
 
     virtual std::optional<model::offset> max_removed_offset() const = 0;
+    virtual bool needs_compaction() = 0;
 
 private:
     ntp_config _config;

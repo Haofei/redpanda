@@ -284,4 +284,8 @@ failure_injectable_log::max_removed_offset() const {
     return _underlying_log->max_removed_offset();
 }
 
+bool failure_injectable_log::needs_compaction() {
+    return _underlying_log->needs_compaction();
+}
+
 } // namespace raft

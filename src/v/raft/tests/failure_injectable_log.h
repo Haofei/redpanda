@@ -151,6 +151,8 @@ public:
 
     virtual std::optional<model::offset> max_removed_offset() const final;
 
+    bool needs_compaction() final;
+
 private:
     ss::shared_ptr<storage::log> _underlying_log;
     std::optional<append_delay_generator> _append_delay_generator;

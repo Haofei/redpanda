@@ -4679,4 +4679,16 @@ std::optional<model::offset> disk_log_impl::max_removed_offset() const {
     return internal::read_max_removed_offset(_kvstore, config().ntp());
 }
 
+bool disk_log_impl::needs_compaction() {
+    auto max_lag = config().max_compaction_lag_ms();
+    const auto now = to_time_point(model::timestamp::now());
+    const auto earliest_dirty_ts = earliest_dirty_segment_ts();
+    const auto exceed_compact_lag
+      = earliest_dirty_ts.has_value()
+        && (now - to_time_point(earliest_dirty_ts.value()) > max_lag);
+
+    auto dr = dirty_ratio();
+    return dr >= config().min_cleanable_dirty_ratio() || exceed_compact_lag;
+}
+
 } // namespace storage
