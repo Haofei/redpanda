@@ -79,6 +79,16 @@ public:
       const model::topic_id_partition&, model::timestamp) override;
 
 private:
+    static std::expected<offsets_response, errc>
+    get_offsets(const state&, const model::topic_id_partition&);
+    static std::expected<object_response, errc>
+    get_first_ge(const state&, const model::topic_id_partition&, kafka::offset);
+    static std::expected<object_response, errc> get_first_ge(
+      const state&, const model::topic_id_partition&, model::timestamp);
+    static std::expected<compaction_offsets_response, errc>
+    get_compaction_offsets(
+      const state&, const model::topic_id_partition&, model::timestamp);
+
     state state_;
 };
 
