@@ -13,7 +13,7 @@
 
 #include <seastar/testing/thread_test_case.hh>
 
-SEASTAR_THREAD_TEST_CASE(fragmented_vector_fill_async_test) {
+SEASTAR_THREAD_TEST_CASE(chunked_vector_fill_async_test) {
     chunked_vector<int> v;
     chunked_vector_fill_async(v, 0).get();
     BOOST_REQUIRE(v.size() == 0);
@@ -35,7 +35,7 @@ SEASTAR_THREAD_TEST_CASE(fragmented_vector_fill_async_test) {
     }
 }
 
-SEASTAR_THREAD_TEST_CASE(fragmented_vector_clear_async_test) {
+SEASTAR_THREAD_TEST_CASE(chunked_vector_clear_async_test) {
     chunked_vector<int> v;
     chunked_vector_clear_async(v).get();
     BOOST_REQUIRE(v.size() == 0);

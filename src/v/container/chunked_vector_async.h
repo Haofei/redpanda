@@ -53,7 +53,7 @@ chunked_vector_fill_async(chunked_vector<T>& vec, const T& value) {
 }
 
 /**
- * A futurized version of fragmented_vector::clear that allows clearing a large
+ * A futurized version of chunked_vector::clear that allows clearing a large
  * vector without incurring a reactor stall.
  */
 template<typename T>
