@@ -35,12 +35,9 @@ redpanda_cc_library(
 redpanda_cc_library(
     name = "cloud_storage",
     srcs = [
-        "access_time_tracker.cc",
         "anomalies_detector.cc",
         "async_manifest_view.cc",
         "base_manifest.cc",
-        "cache_probe.cc",
-        "cache_service.cc",
         "configuration.cc",
         "download_exception.cc",
         "inventory/aws_ops.cc",
@@ -60,7 +57,6 @@ redpanda_cc_library(
         "recovery_errors.cc",
         "recovery_request.cc",
         "recovery_utils.cc",
-        "recursive_directory_walker.cc",
         "remote.cc",
         "remote_file.cc",
         "remote_partition.cc",
@@ -81,12 +77,9 @@ redpanda_cc_library(
         "tx_range_manifest.cc",
     ],
     hdrs = [
-        "access_time_tracker.h",
         "anomalies_detector.h",
         "async_manifest_view.h",
         "base_manifest.h",
-        "cache_probe.h",
-        "cache_service.h",
         "configuration.h",
         "download_exception.h",
         "fwd.h",
@@ -98,7 +91,6 @@ redpanda_cc_library(
         "inventory/types.h",
         "inventory/utils.h",
         "lifecycle_marker.h",
-        "logger.h",
         "materialized_manifest_cache.h",
         "materialized_resources.h",
         "offset_translation_layer.h",
@@ -109,7 +101,6 @@ redpanda_cc_library(
         "recovery_errors.h",
         "recovery_request.h",
         "recovery_utils.h",
-        "recursive_directory_walker.h",
         "remote.h",
         "remote_file.h",
         "remote_partition.h",
@@ -137,6 +128,8 @@ redpanda_cc_library(
     include_prefix = "cloud_storage",
     visibility = ["//visibility:public"],
     deps = [
+        ":cache",
+        ":logger",
         ":remote_label",
         ":segment_meta_cstore",
         ":topic_mount_manifest_path",
@@ -217,6 +210,47 @@ redpanda_cc_library(
 )
 
 redpanda_cc_library(
+    name = "cache",
+    srcs = [
+        "access_time_tracker.cc",
+        "cache_probe.cc",
+        "cache_service.cc",
+        "recursive_directory_walker.cc",
+    ],
+    hdrs = [
+        "access_time_tracker.h",
+        "cache_probe.h",
+        "cache_service.h",
+        "recursive_directory_walker.h",
+    ],
+    implementation_deps = [
+        ":logger",
+        "//src/v/bytes:iobuf_parser",
+        "//src/v/container:chunked_vector",
+        "//src/v/serde",
+        "//src/v/serde:enum",
+        "//src/v/serde:sstring",
+        "//src/v/ssx:future_util",
+        "//src/v/ssx:watchdog",
+        "//src/v/utils:human",
+        "@abseil-cpp//absl/container:btree",
+        "@re2",
+    ],
+    include_prefix = "cloud_storage",
+    visibility = ["//visibility:public"],
+    deps = [
+        "//src/v/base",
+        "//src/v/bytes:iostream",
+        "//src/v/cloud_io:basic_cache_service_api",
+        "//src/v/config",
+        "//src/v/metrics",
+        "//src/v/ssx:semaphore",
+        "//src/v/storage",
+        "@seastar",
+    ],
+)
+
+redpanda_cc_library(
     name = "types",
     srcs = [
         "types.cc",
@@ -260,5 +294,18 @@ redpanda_cc_library(
         "//src/v/model",
         "//src/v/utils:delta_for",
         "@boost//:iterator",
+    ],
+)
+
+redpanda_cc_library(
+    name = "logger",
+    hdrs = [
+        "logger.h",
+    ],
+    include_prefix = "cloud_storage",
+    visibility = ["//visibility:public"],
+    deps = [
+        "//src/v/base",
+        "@seastar",
     ],
 )

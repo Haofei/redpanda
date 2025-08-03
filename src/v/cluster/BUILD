@@ -198,6 +198,7 @@ redpanda_cc_library(
         ":cloud_metadata_offsets_recovery_router",
         "//src/v/base",
         "//src/v/cloud_storage",
+        "//src/v/cloud_storage:cache",
         "//src/v/cloud_storage:types",
         "//src/v/cloud_storage_clients",
         "//src/v/cluster",
@@ -643,6 +644,7 @@ redpanda_cc_library(
     ],
     implementation_deps = [
         ":topic_memory_per_partition_default",
+        "//src/v/cloud_storage:logger",
         "//src/v/crash_tracker",
         "//src/v/features:enterprise_feature_messages",
         "//src/v/resource_mgmt:memory_groups",
@@ -676,6 +678,7 @@ redpanda_cc_library(
         "//src/v/bytes:iostream",
         "//src/v/bytes:streambuf",
         "//src/v/cloud_storage",
+        "//src/v/cloud_storage:cache",
         "//src/v/cloud_storage:remote_label",
         "//src/v/cloud_storage:topic_mount_manifest_path",
         "//src/v/cloud_storage:types",
