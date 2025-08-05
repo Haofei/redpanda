@@ -13,7 +13,6 @@
 #include "absl/container/node_hash_map.h"
 #include "base/likely.h"
 #include "base/vlog.h"
-#include "container/fragmented_vector.h"
 #include "features/feature_table.h"
 #include "follower_stats.h"
 #include "raft/consensus_client_protocol.h"
