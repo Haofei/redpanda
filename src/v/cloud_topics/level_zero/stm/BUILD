@@ -61,16 +61,6 @@ redpanda_cc_library(
 )
 
 redpanda_cc_library(
-    name = "ctp_stm_offsets",
-    hdrs = ["ctp_stm_offsets.h"],
-    deps = [
-        ":dl_version",
-        "//src/v/model",
-        "//src/v/serde",
-    ],
-)
-
-redpanda_cc_library(
     name = "ctp_stm_state",
     srcs = ["ctp_stm_state.cc"],
     hdrs = ["ctp_stm_state.h"],
