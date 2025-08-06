@@ -177,7 +177,7 @@ frontend::frontend(
   ss::lw_shared_ptr<cluster::partition> p,
   ss::shared_ptr<experimental::cloud_topics::data_plane_api> app) noexcept
   : _partition(std::move(p))
-  , _ct_api(std::move(app)) {}
+  , _data_plane(std::move(app)) {}
 
 frontend::frontend(
   ss::lw_shared_ptr<cluster::partition> p,
@@ -274,14 +274,14 @@ model::term_id frontend::leader_epoch() const {
 ss::future<storage::translating_reader> frontend::make_reader(
   storage::log_reader_config cfg,
   std::optional<model::timeout_clock::time_point>) {
-    vassert(_ct_api != nullptr, "cloud topics api not initialized");
+    vassert(_data_plane != nullptr, "cloud topics api not initialized");
 
     auto ot_state = _partition->get_offset_translator_state();
 
     // TODO: depending on the 'cfg' construct level zero or level one
     // reader impl.
     auto impl = std::make_unique<level_zero_log_reader_impl>(
-      cfg, _partition, _ct_api);
+      cfg, _partition, _data_plane);
 
     co_return storage::translating_reader{
       model::record_batch_reader(std::move(impl)), std::move(ot_state)};
@@ -451,7 +451,7 @@ ss::future<std::expected<kafka::offset, std::error_code>> frontend::replicate(
     }
 
     // Dataplane.
-    auto res = co_await _ct_api->write_and_debounce(
+    auto res = co_await _data_plane->write_and_debounce(
       ntp(),
       std::move(batches),
       model::timeout_clock::now()
@@ -483,7 +483,7 @@ ss::future<std::expected<kafka::offset, std::error_code>> frontend::replicate(
               "Putting batch to cache: {}, term: {}",
               b.base_offset(),
               b.term());
-            _ct_api->cache_put(ntp(), b);
+            _data_plane->cache_put(ntp(), b);
         }
     }
     co_return ret_offset;
@@ -507,7 +507,7 @@ raft::replicate_stages frontend::replicate(
     out.request_enqueued = op_state->request_enqueued.get_future();
     out.replicate_finished = op_state->replicate_finished.get_future();
     ssx::background = bg_upload_and_replicate(
-      _ct_api, _partition, header, op_state, cache_enabled());
+      _data_plane, _partition, header, op_state, cache_enabled());
     return out;
 }
 

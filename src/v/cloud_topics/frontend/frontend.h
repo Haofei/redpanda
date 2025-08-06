@@ -156,7 +156,7 @@ private:
     bool cache_enabled() const;
 
     ss::lw_shared_ptr<cluster::partition> _partition;
-    ss::shared_ptr<experimental::cloud_topics::data_plane_api> _ct_api;
+    ss::shared_ptr<experimental::cloud_topics::data_plane_api> _data_plane;
 };
 
 } // namespace experimental::cloud_topics
