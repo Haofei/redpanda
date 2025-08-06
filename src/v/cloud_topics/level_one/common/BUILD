@@ -9,6 +9,7 @@ redpanda_cc_library(
     ],
     include_prefix = "cloud_topics/level_one/common",
     deps = [
+        "//src/v/base",
         "//src/v/utils:named_type",
         "//src/v/utils:uuid",
     ],
