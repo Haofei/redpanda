@@ -150,6 +150,19 @@ ss::future<> service::stop() {
     co_await _manager->stop();
 }
 
+ss::future<result<model::metadata>>
+service::upsert_cluster_link(model::metadata md) {
+    return _manager->upsert_cluster_link(std::move(md));
+}
+
+result<model::metadata> service::get_cluster_link(const model::name_t& name) {
+    return _manager->get_cluster_link(name);
+}
+
+result<chunked_vector<model::metadata>> service::list_cluster_links() {
+    return _manager->list_cluster_links();
+}
+
 void service::register_notifications() {
     auto pl_notif_id = _plf->local().register_for_updates(
       [this](model::id_t id) { _manager->on_link_change(id); });

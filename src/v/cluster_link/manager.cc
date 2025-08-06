@@ -106,12 +106,83 @@ ss::future<> manager::stop() {
     co_await _queue.shutdown();
     _link_task_reconciler_timer.cancel();
     _as.request_abort();
+    _link_created_cv.broken();
     co_await _g.close();
     for (auto& [_, link] : _links) {
         co_await link->stop();
     }
 
     vlog(cllog.info, "Cluster link manager stopped");
+}
+
+ss::future<result<model::metadata>>
+manager::upsert_cluster_link(model::metadata md) {
+    static constexpr auto wait_for_link_creation_timeout = 30s;
+    auto hold = _g.hold();
+    auto name = md.name;
+    vlog(cllog.info, "Attempting to create cluster link named '{}'", md.name);
+    vlog(cllog.trace, "Cluster link metadata: {}", md);
+    auto ec = co_await _registry->upsert_link(
+      std::move(md), ::model::timeout_clock::now() + 30s);
+    auto err = map_cluster_errc(ec);
+    if (err != errc::success) {
+        co_return err_info(
+          err, fmt::format("Failed to create cluster link: {}", ec));
+    }
+
+    try {
+        co_await _link_created_cv.wait(
+          wait_for_link_creation_timeout, [this, name] {
+              return _registry->find_link_by_name(name).has_value();
+          });
+    } catch (const ss::condition_variable_timed_out&) {
+        co_return err_info(
+          errc::link_creation_failed,
+          fmt::format(
+            "Timed out waiting for cluster link '{}' to be created", name));
+    } catch (const ss::broken_condition_variable&) {
+        co_return err_info(
+          errc::service_shutting_down,
+          fmt::format(
+            "Aborted waiting for cluster link '{}' to be created", name));
+    }
+
+    auto metadata_resp = _registry->find_link_by_name(name);
+    if (!metadata_resp) {
+        co_return err_info(
+          errc::link_creation_failed,
+          fmt::format("Failed to find cluster link with name '{}'", name));
+    }
+
+    co_return metadata_resp->get().copy();
+}
+
+result<model::metadata> manager::get_cluster_link(const model::name_t& name) {
+    auto metadata_resp = _registry->find_link_by_name(name);
+    if (!metadata_resp) {
+        return err_info(
+          errc::link_id_not_found,
+          fmt::format("Failed to find cluster link with name '{}'", name));
+    }
+    return metadata_resp->get().copy();
+}
+
+result<chunked_vector<model::metadata>> manager::list_cluster_links() {
+    auto link_ids = _registry->get_all_link_ids();
+    chunked_vector<model::metadata> resp;
+    resp.reserve(link_ids.size());
+
+    for (const auto id : link_ids) {
+        auto maybe_md = _registry->find_link_by_id(id);
+        if (!maybe_md) {
+            vlog(cllog.warn, "Failed to find link ID {}", id);
+            continue;
+        }
+
+        resp.emplace_back(maybe_md.value().get().copy());
+    }
+
+    return resp;
 }
 
 void manager::on_link_change(model::id_t id) {
@@ -144,7 +215,8 @@ ss::future<> manager::handle_on_link_change(model::id_t id) {
             } catch (const std::exception& e) {
                 vlog(
                   cllog.warn,
-                  "Failed to stop link {}: \"{}\".  Re-attempting link stop "
+                  "Failed to stop link {}: \"{}\".  Re-attempting link "
+                  "stop "
                   "within {} seconds",
                   id,
                   e,
@@ -210,13 +282,15 @@ ss::future<> manager::handle_on_link_change(model::id_t id) {
             }
             co_await new_link->start();
             _links.emplace(id, std::move(new_link));
+            _link_created_cv.broadcast();
         } catch (const ss::semaphore_aborted&) {
             vlog(cllog.debug, "Semaphore aborted, stopping link creation");
             co_return;
         } catch (const std::exception& e) {
             vlog(
               cllog.warn,
-              "Failed to create link {}: \"{}\".  Re-attempting link creation "
+              "Failed to create link {}: \"{}\".  Re-attempting link "
+              "creation "
               "in {} seconds",
               id,
               e,
