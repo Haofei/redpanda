@@ -10,6 +10,7 @@ redpanda_cc_library(
         "placeholder.h",
     ],
     visibility = [
+        ":__subpackages__",
         "//src/v/cloud_topics/batch_cache:__pkg__",
         "//src/v/cloud_topics/frontend:__pkg__",
         "//src/v/cloud_topics/level_zero/frontend_reader:__pkg__",
