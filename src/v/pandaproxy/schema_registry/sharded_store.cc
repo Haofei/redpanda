@@ -260,13 +260,20 @@ sharded_store::has_schema(subject_schema schema, include_deleted inc_del) {
         throw as_exception(invalid_subject_schema(schema.sub()));
     }
 
-    std::optional<stored_schema> sub_schema;
-    for (auto ver : versions) {
+    // Find the maximal id schema with the given definition
+    struct match {
+        stored_schema sub_schema;
+        schema_id id;
+    };
+    std::optional<match> found;
+    for (auto ver : std::views::reverse(versions)) {
         try {
             auto res = co_await get_subject_schema(schema.sub(), ver, inc_del);
-            if (schema.def() == res.schema.def()) {
-                sub_schema.emplace(std::move(res));
-                break;
+            if (
+              (!found || res.id > found->id)
+              && schema.def() == res.schema.def()) {
+                auto id = res.id;
+                found.emplace(match{.sub_schema = std::move(res), .id = id});
             }
         } catch (const exception& e) {
             if (failed_subject_schema_lookup(e.code())) {
@@ -284,11 +291,11 @@ sharded_store::has_schema(subject_schema schema, include_deleted inc_del) {
                 throw;
             }
         }
-    };
-    if (!sub_schema.has_value()) {
+    }
+    if (!found.has_value()) {
         throw as_exception(schema_not_found());
     }
-    co_return std::move(sub_schema).value();
+    co_return std::move(found->sub_schema);
 }
 
 ss::future<std::optional<schema_definition>>

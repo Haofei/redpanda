@@ -4654,9 +4654,20 @@ class SchemaRegistryModeMutableTest(SchemaRegistryEndpoints):
         self.assert_equal(result_raw.status_code, 200)
         self.assert_equal(result_raw.json()["mode"], "READWRITE")
 
+        # POST /subjects/{subject}/versions/{version}
         self.logger.debug(
-            "Post the schema definition again - should return id 2")
+            "Post the schema definition again to post_subjects_subject_versions - should return id 2"
+        )
         result_raw = self.sr_client.post_subjects_subject_versions(
+            sub, data=json.dumps({"schema": schema1_def}))
+        self.assert_equal(result_raw.status_code, 200)
+        self.assert_equal(result_raw.json()["id"], 2)
+
+        # POST /subjects/{subject}
+        self.logger.debug(
+            "Post the schema definition again to post_subjects_subject - should return id 2"
+        )
+        result_raw = self.sr_client.post_subjects_subject(
             sub, data=json.dumps({"schema": schema1_def}))
         self.assert_equal(result_raw.status_code, 200)
         self.assert_equal(result_raw.json()["id"], 2)
