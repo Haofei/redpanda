@@ -523,14 +523,17 @@ ss::future<server::reply_t>
 post_subject_versions(server::request_t rq, server::reply_t rp) {
     parse_content_type_header(rq);
     parse_accept_header(rq, rp);
-    auto sub = parse::request_param<subject>(*rq.req, "subject");
-    auto norm{parse::query_param<std::optional<normalize>>(*rq.req, "normalize")
-                .value_or(normalize::no)};
+    const auto sub = parse::request_param<subject>(*rq.req, "subject");
+    const auto norm{
+      parse::query_param<std::optional<normalize>>(*rq.req, "normalize")
+        .value_or(normalize::no)};
     vlog(
       srlog.debug,
       "post_subject_versions subject='{}', normalize='{}'",
       sub,
       norm);
+
+    auto& st = rq.service().schema_store();
 
     co_await rq.service().writer().read_sync();
 
@@ -549,38 +552,81 @@ post_subject_versions(server::request_t rq, server::reply_t rp) {
     }
 
     stored_schema schema{
-      co_await rq.service().schema_store().make_canonical_schema(
-        std::move(unparsed.def), norm),
+      co_await st.make_canonical_schema(std::move(unparsed.def), norm),
       unparsed.version.value_or(invalid_schema_version),
       unparsed.id.value_or(invalid_schema_id),
       is_deleted::no};
 
-    auto ids = co_await rq.service().schema_store().get_schema_version(
-      schema.share());
+    // Validate the schema (may throw)
+    co_await st.validate_schema(schema.schema.share());
+
+    // Determine if the definition already exists
+    auto s_id = co_await st.get_schema_id(schema.schema.def().share());
+
+    // Determine if a provided schema id is appropriate
+    const auto mode = co_await st.get_mode(sub, default_to_global::yes);
+    if (mode == mode::import) {
+        if (
+          schema.id != invalid_schema_id && s_id != schema.id
+          && co_await st.has_schema(schema.id)) {
+            // The supplied id already exists, but the schema is different
+            co_return ss::coroutine::return_exception(
+              as_exception(overwrite_schema_with_id_not_permitted(schema.id)));
+        }
+    }
+
+    vlog(srlog.debug, "get_schema_version: ID for schema definition: {}", s_id);
+
+    // Determine if the subject already has a version that references this
+    // schema, deleted versions are seen.
+    const auto versions = co_await st.get_subject_versions(
+      sub, include_deleted::no);
+
+    std::optional<schema_version> v_id;
+    if (s_id.has_value()) {
+        auto v_it = absl::c_find_if(versions, [id = *s_id](const auto& s_id_v) {
+            return s_id_v.id == id;
+        });
+        if (v_it != versions.end()) {
+            v_id.emplace(v_it->version);
+        }
+    }
+
+    // Check compatibility of the schema
+    if (!v_id.has_value() && !versions.empty() && mode != mode::import) {
+        auto compat = co_await st.is_compatible(
+          versions.back().version, schema.schema.share(), verbose::yes);
+        if (!compat.is_compat) {
+            throw exception(
+              error_code::schema_incompatible,
+              fmt::format(
+                "Schema being registered is incompatible with an earlier "
+                "schema for subject \"{}\", details: [{}]",
+                sub,
+                fmt::join(compat.messages, ", ")));
+        }
+    }
 
     // Check if a match was found for the given request
     // Return the id if a match was found, register the schema if not
     const auto any_id_allowed = schema.id == invalid_schema_id;
-    const auto id_matches = (any_id_allowed && ids.id.has_value())
-                            || schema.id == ids.id;
+    const auto id_matches = (any_id_allowed && s_id.has_value())
+                            || schema.id == s_id;
 
     const auto any_version_allowed = schema.version == invalid_schema_version;
-    const auto version_matches = (any_version_allowed
-                                  && ids.version.has_value())
-                                 || schema.version == ids.version;
+    const auto version_matches = (any_version_allowed && v_id.has_value())
+                                 || schema.version == v_id;
 
     const auto matched = id_matches && version_matches;
 
-    schema_id schema_id{ids.id.value_or(invalid_schema_id)};
+    schema_id schema_id{s_id.value_or(invalid_schema_id)};
     if (!matched) {
-        const auto mode = co_await rq.service().schema_store().get_mode(
-          schema.schema.sub(), default_to_global::yes);
         if (schema.id >= 0 && mode != mode::import) {
             throw as_exception(mode_not_import(schema.schema.sub()));
         }
 
         schema.id = (schema.id == invalid_schema_id)
-                      ? ids.id.value_or(invalid_schema_id)
+                      ? s_id.value_or(invalid_schema_id)
                       : schema.id;
 
         schema_id = co_await rq.service().writer().write_subject_version(

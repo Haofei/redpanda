@@ -153,61 +153,6 @@ sharded_store::make_valid_schema(subject_schema schema) {
     throw as_exception(invalid_schema_type(schema.type()));
 }
 
-ss::future<sharded_store::has_schema_result>
-sharded_store::get_schema_version(stored_schema schema) {
-    // Validate the schema (may throw)
-    co_await validate_schema(schema.schema.share());
-
-    // Determine if the definition already exists
-    auto s_id = co_await get_schema_id(schema.schema.def().share());
-
-    // Determine if a provided schema id is appropriate
-    const auto& sub = schema.schema.sub();
-    const auto mode = co_await get_mode(sub, default_to_global::yes);
-    if (mode == mode::import) {
-        if (
-          schema.id != invalid_schema_id && s_id != schema.id
-          && co_await has_schema(schema.id)) {
-            // The supplied id already exists, but the schema is different
-            co_return ss::coroutine::return_exception(
-              as_exception(overwrite_schema_with_id_not_permitted(schema.id)));
-        }
-    }
-
-    vlog(srlog.debug, "get_schema_version: ID for schema definition: {}", s_id);
-
-    // Determine if the subject already has a version that references this
-    // schema, deleted versions are seen.
-    const auto versions = co_await get_subject_versions(
-      sub, include_deleted::no);
-
-    std::optional<schema_version> v_id;
-    if (s_id.has_value()) {
-        auto v_it = absl::c_find_if(versions, [id = *s_id](const auto& s_id_v) {
-            return s_id_v.id == id;
-        });
-        if (v_it != versions.end()) {
-            v_id.emplace(v_it->version);
-        }
-    }
-
-    // Check compatibility of the schema
-    if (!v_id.has_value() && !versions.empty() && mode != mode::import) {
-        auto compat = co_await is_compatible(
-          versions.back().version, schema.schema.share(), verbose::yes);
-        if (!compat.is_compat) {
-            throw exception(
-              error_code::schema_incompatible,
-              fmt::format(
-                "Schema being registered is incompatible with an earlier "
-                "schema for subject \"{}\", details: [{}]",
-                sub,
-                fmt::join(compat.messages, ", ")));
-        }
-    }
-    co_return has_schema_result{s_id, v_id};
-}
-
 ss::future<sharded_store::insert_result>
 sharded_store::project_ids(stored_schema schema) {
     const auto& sub = schema.schema.sub();
