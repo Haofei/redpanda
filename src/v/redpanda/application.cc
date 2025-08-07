@@ -1212,25 +1212,23 @@ static storage::log_config manager_config_from_global_config(
 }
 
 static storage::backlog_controller_config
-compaction_controller_config(ss::scheduling_group sg) {
-    auto space_info = std::filesystem::space(
-      config::node().data_directory().path);
+compaction_controller_config(ss::scheduling_group sg, uint64_t fs_avail) {
     /**
      * By default we set desired compaction backlog size to 10% of disk
-     * capacity.
+     * availability.
      */
-    static const int64_t backlog_capacity_percents = 10;
+    static const int64_t backlog_avail_percents = 10;
     int64_t backlog_size
       = config::shard_local_cfg().compaction_ctrl_backlog_size().value_or(
-        (space_info.capacity / 100) * backlog_capacity_percents
-        / ss::smp::count);
+        (fs_avail / 100) * backlog_avail_percents / ss::smp::count);
 
     /**
-     * We normalize internals using disk capacity to make controller settings
-     * independent from disk space. After normalization all values equal to disk
-     * capacity will be represented in the controller with value equal 1000.
+     * We normalize internals using disk availability to make controller
+     * settings independent from disk space. After normalization all values
+     * equal to disk availability will be represented in the controller with
+     * value equal 1000.
      *
-     * Set point = 10% of disk capacity will always be equal to 100.
+     * Set point = 10% of disk availability will always be equal to 100.
      *
      * This way we can calculate proportional coefficient.
      *
@@ -1241,7 +1239,7 @@ compaction_controller_config(ss::scheduling_group sg) {
      *  k_p = 1000 / 80 = 12.5
      *
      */
-    auto normalization = space_info.capacity / (1000 * ss::smp::count);
+    auto normalization = fs_avail / (1000 * ss::smp::count);
 
     return storage::backlog_controller_config(
       config::shard_local_cfg().compaction_ctrl_p_coeff(),
@@ -1257,7 +1255,7 @@ compaction_controller_config(ss::scheduling_group sg) {
 }
 
 static storage::backlog_controller_config
-make_upload_controller_config(ss::scheduling_group sg) {
+make_upload_controller_config(ss::scheduling_group sg, uint64_t fs_avail) {
     // This settings are similar to compaction_controller_config.
     // The desired setpoint for archival is set to 0 since the goal is to upload
     // all data that we have.
@@ -1269,10 +1267,8 @@ make_upload_controller_config(ss::scheduling_group sg) {
     // once integral part will rump up high enough it won't be able to go down
     // even if everything is uploaded.
 
-    auto available
-      = ss::fs_avail(config::node().data_directory().path.string()).get();
     int64_t setpoint = 0;
-    int64_t normalization = static_cast<int64_t>(available)
+    int64_t normalization = static_cast<int64_t>(fs_avail)
                             / (1000 * ss::smp::count);
     return {
       config::shard_local_cfg().cloud_storage_upload_ctrl_p_coeff(),
@@ -1976,6 +1972,8 @@ void application::wire_up_redpanda_services(
       std::ref(feature_table))
       .get();
 
+    auto fs_avail
+      = ss::fs_avail(config::node().data_directory().path.string()).get();
     if (archival_storage_enabled()) {
         syschecks::systemd_message("Starting shadow indexing cache").get();
         auto redpanda_dir = config::node().data_directory.value();
@@ -2026,7 +2024,8 @@ void application::wire_up_redpanda_services(
         construct_service(
           _archival_upload_controller,
           std::ref(partition_manager),
-          make_upload_controller_config(sched_groups.archival_upload()))
+          make_upload_controller_config(
+            sched_groups.archival_upload(), fs_avail))
           .get();
 
         construct_service(
@@ -2476,7 +2475,7 @@ void application::wire_up_redpanda_services(
     construct_service(
       _compaction_controller,
       std::ref(storage),
-      compaction_controller_config(sched_groups.compaction_sg()))
+      compaction_controller_config(sched_groups.compaction_sg(), fs_avail))
       .get();
 }
 
