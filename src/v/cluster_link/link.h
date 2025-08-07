@@ -80,6 +80,16 @@ public:
 
     kafka::client::cluster& get_cluster_connection() noexcept;
 
+    const kafka::data::rpc::partition_leader_cache&
+    get_partition_leader_cache() const noexcept {
+        return *_partition_leader_cache;
+    }
+
+    const kafka::data::rpc::partition_manager&
+    get_partition_manager() const noexcept {
+        return *_partition_manager;
+    }
+
 private:
     bool should_start_task(task* t) const;
     bool should_stop_task(task* t) const;
