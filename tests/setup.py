@@ -44,7 +44,7 @@ setup(
         'z3-solver==4.12.2',
         'hypothesis==6.82',
         'jsonschema==4.10.0',
-        'redpanda-polaris-catalog-python==1.0.0.post3',  # https://github.com/rockwotj/polaris-catalog-python
+        'redpanda-polaris-catalog-python==1.0.0.post3',  # See: .github/workflows/publish-apache-polaris-python-client.yml
         "pyiceberg==0.9.1",
         "adlfs==2024.7.0",
         "pyarrow",
