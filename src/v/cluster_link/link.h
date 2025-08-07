@@ -114,6 +114,5 @@ private:
     ss::timer<ss::lowres_clock> _task_reconciler;
     ss::gate _gate;
     ss::abort_source _as;
-    bool _is_running{false};
 };
 } // namespace cluster_link

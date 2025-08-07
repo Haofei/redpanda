@@ -80,13 +80,11 @@ ss::future<> link::start() {
         ssx::spawn_with_gate(_gate, [this] { return run_task_reconciler(); });
     });
     _task_reconciler.arm_periodic(_task_reconciler_interval);
-    _is_running = true;
 }
 
 ss::future<> link::stop() {
     vlog(
       cllog.info, "Stopping cluster link {} ({})", _config.name, _config.uuid);
-    _is_running = false;
     _task_reconciler.cancel();
     _as.request_abort();
     co_await _gate.close();
@@ -231,7 +229,7 @@ ss::future<> link::run_task_reconciler() {
       cllog.trace, "Running task reconciler for cluster link {}", _config.name);
     // Iterate over all tasks and reconcile their state
     for (auto& [name, t] : _tasks) {
-        if (_is_running && should_start_task(t.get())) {
+        if (!_as.abort_requested() && should_start_task(t.get())) {
             vlog(
               cllog.info,
               "Reconciler starting task {} for cluster link {}",
@@ -299,7 +297,7 @@ ss::future<result<void>> link::do_register_task(std::unique_ptr<task> t) {
     });
     // If we register a task after the link has started, then check to see
     // if it should start and do so
-    if (_is_running && should_start_task(t.get())) {
+    if (!_as.abort_requested() && should_start_task(t.get())) {
         vlog(cllog.info, "Starting task {}", t->name());
         res = co_await start_task(t.get());
         if (!res) {
