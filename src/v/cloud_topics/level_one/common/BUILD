@@ -93,3 +93,19 @@ redpanda_cc_library(
         "@seastar",
     ],
 )
+
+redpanda_cc_library(
+    name = "fake_io",
+    srcs = ["fake_io.cc"],
+    hdrs = ["fake_io.h"],
+    include_prefix = "cloud_topics/level_one/common",
+    deps = [
+        ":abstract_io",
+        ":object_id",
+        ":object_utils",
+        "//src/v/bytes:iobuf",
+        "//src/v/bytes:iostream",
+        "@abseil-cpp//absl/container:btree",
+        "@seastar",
+    ],
+)
