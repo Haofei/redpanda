@@ -119,7 +119,19 @@ public:
     }
 
     /**
-     * @brief Construct a new vector by copying from a const range
+     * @brief Construct a new vector from a range
+     *
+     * This constructor will copy or move from the range depending on the value
+     * category of the elements NOT the one of the range. I.e.
+     * `chunked_vector(std::move(src))` will not necessarily invoke move
+     * constructor on the elements of `src`. For example, an rvalue `std::span`
+     * is a non-owning view, and moving from its elements would be a bug.
+     * Similar for most of the standard library views.
+     *
+     * To ensure move semantics from the range elements, use
+     * `std::views::as_rvalue`.
+     *
+     * https://en.cppreference.com/w/cpp/ranges/as_rvalue_view.html
      */
     template<typename Range>
     requires(std::ranges::sized_range<Range>)
