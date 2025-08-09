@@ -123,12 +123,18 @@ audit_log_manager::audit_log_manager(
     });
     // NOTE: construct a sink on every shard, unconditionally. the kafka
     // sinks on the non-client shards will be inactive.
-    vlog(adtlog.info, "Audit log in Kafka Client mode");
-    _sink = audit_sink::make_kafka_sink(
-      this, _controller, *_config, [this](bool v) {
-          return container().invoke_on_all(
-            [v](audit_log_manager& mgr) { mgr.set_auth_misconfigured(v); });
-      });
+    if (config::shard_local_cfg().audit_use_rpc()) {
+        vlog(adtlog.info, "Audit log in RPC mode");
+        _sink = audit_sink::make_rpc_sink(
+          this, _controller, &_rpc_client->local());
+    } else {
+        vlog(adtlog.info, "Audit log in Kafka Client mode");
+        _sink = audit_sink::make_kafka_sink(
+          this, _controller, *_config, [this](bool v) {
+              return container().invoke_on_all(
+                [v](audit_log_manager& mgr) { mgr.set_auth_misconfigured(v); });
+          });
+    }
 
     _drain_timer.set_callback([this] {
         ssx::spawn_with_gate(_gate, [this]() {
@@ -218,9 +224,7 @@ ss::future<> audit_log_manager::stop() {
     _drain_timer.cancel();
     _as.request_abort();
     vlog(adtlog.info, "Shutting down audit log manager");
-    if (_sink != nullptr) {
-        co_await sink().stop();
-    }
+    co_await sink().stop();
     if (!_gate.is_closed()) {
         /// Gate may already be closed if ::pause() had been called
         co_await _gate.close();
@@ -264,6 +268,9 @@ bool audit_log_manager::report_redpanda_app_event(is_started app_started) {
         : application_lifecycle::activity_id::stop);
 }
 
+// TODO: this whole function should be able to use the rpc client
+// in which case we might not need to embed a metadata cache
+// Could do this even if we're not using RPC for transport
 model::partition_id audit_log_manager::compute_partition_id() {
     static thread_local model::partition_id _next_pid{0};
 
@@ -395,6 +402,7 @@ audit_log_manager::should_enqueue_audit_event() const {
         _probe.audit_error();
         return std::make_optional(audit_event_passthrough::yes);
     }
+    // NOTE: RPC client will never set this flag
     if (_auth_misconfigured) {
         /// Audit logging depends on having auth enabled, if it is not
         /// then messages are rejected for increased observability into why

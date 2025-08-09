@@ -1,4 +1,4 @@
-load("//bazel:test.bzl", "redpanda_cc_btest", "redpanda_test_cc_library")
+load("//bazel:test.bzl", "redpanda_cc_gtest", "redpanda_test_cc_library")
 
 redpanda_test_cc_library(
     name = "utils",
@@ -13,7 +13,7 @@ redpanda_test_cc_library(
     ],
 )
 
-redpanda_cc_btest(
+redpanda_cc_gtest(
     name = "audit_test",
     timeout = "short",
     srcs = ["audit_log_test.cc"],
@@ -21,13 +21,14 @@ redpanda_cc_btest(
     memory = "256MiB",
     deps = [
         ":utils",
+        "//src/v/base",
         "//src/v/cluster",
         "//src/v/kafka/client/test:fixture",
         "//src/v/redpanda/tests:fixture",
         "//src/v/security/audit",
-        "//src/v/security/audit:types",
-        "//src/v/test_utils:seastar_boost",
-        "@boost//:test",
+        "//src/v/test_utils:gtest",
+        "//src/v/test_utils:scoped_config",
+        "@googletest//:gtest",
         "@seastar",
     ],
 )

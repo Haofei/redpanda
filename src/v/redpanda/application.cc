@@ -2575,7 +2575,8 @@ application::make_datalake_usage_aggregator() {
 }
 
 bool application::kafka_data_rpc_enabled() {
-    return wasm_data_transforms_enabled();
+    return wasm_data_transforms_enabled()
+           || config::shard_local_cfg().audit_use_rpc();
 }
 
 ss::future<>

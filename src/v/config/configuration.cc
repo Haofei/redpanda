@@ -1994,7 +1994,8 @@ configuration::configuration()
   , audit_use_rpc(
       *this,
       "audit_use_rpc",
-      "If set, the audit log will produce messages via internal redpanda RPCs",
+      "Produce audit log messages using internal Redpanda RPCs. When disabled, "
+      "produce audit log messages using a Kafka client instead.",
       {.needs_restart = needs_restart::yes, .visibility = visibility::tunable},
       true)
   , cloud_storage_enabled(
