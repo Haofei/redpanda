@@ -15,6 +15,7 @@
 #include "iceberg/datatypes.h"
 
 #include <ranges>
+#include <stdexcept>
 #include <variant>
 
 namespace iceberg {
@@ -69,6 +70,9 @@ struct primitive_type_promotion_policy_visitor {
         return compat_errc::mismatch;
     }
 };
+
+constexpr auto primitive_type_promotion_policy_visitor_v
+  = primitive_type_promotion_policy_visitor{};
 
 struct field_type_check_visitor {
     explicit field_type_check_visitor(
@@ -500,6 +504,196 @@ try_fill_field_ids(const struct_type& source, struct_type& dest) {
         // All we care about here is that every field got an ID
         return ids_filled{res.value().n_added == 0};
     }
+}
+
+namespace {
+
+nested_field*
+get_exactly_one_field_by_name(const struct_type& s, const ss::sstring& name) {
+    auto host_matches = s.fields
+                        | std::views::filter(
+                          [&name](const nested_field_ptr& f) {
+                              return f != nullptr && f->name == name;
+                          });
+
+    auto host_match_it = host_matches.begin();
+    auto n_matches = std::distance(host_match_it, host_matches.end());
+
+    switch (n_matches) {
+    case 0:
+        return nullptr;
+    case 1:
+        return host_match_it->get();
+    default:
+        // This should never happen and we can't handle it anyway.
+        ss::throw_with_backtrace<std::runtime_error>(fmt::format(
+          "Ambiguous field name: {}. Matches: {}.", name, n_matches));
+    }
+}
+
+struct merging_schema_visitor {
+    schema_merge_result operator()(
+      const struct_type& writer_struct_type,
+      struct_type& host_struct_type) const {
+        for (const auto& writer_field : writer_struct_type.fields) {
+            auto host_field = get_exactly_one_field_by_name(
+              host_struct_type, writer_field->name);
+
+            if (!host_field) {
+                // Add the field to the host struct since no matching field was
+                // found.
+                host_struct_type.fields.push_back(writer_field->copy());
+                host_struct_type.fields.back()->id = nested_field::id_t{};
+            } else {
+                // Match found. Check field compatibility (recursively if
+                // needed).
+                auto field_merge_res = std::visit(
+                  *this, writer_field->type, host_field->type);
+                if (field_merge_res.has_error()) {
+                    return field_merge_res.error();
+                }
+
+                // Merge field properties.
+                if (host_field->required == field_required::yes) {
+                    // If the host field is required the writer field is
+                    // allowed to relax nullability.
+                    host_field->required = writer_field->required;
+                }
+            }
+        }
+
+        return outcome::success();
+    }
+
+    schema_merge_result operator()(
+      const primitive_type& writer_type, primitive_type& host_type) const {
+        // Find the super type between the writer and host types and assign it
+        // to the host type.
+
+        if (writer_type == host_type) {
+            // If the types are already the same there is nothing to be done.
+            return outcome::success();
+        } else {
+            // ... otherwise, we find the supertype by trying to promote first
+            // the writer to the host type. If promotion is allowed, we're done.
+            // If promotion fails, we check if host_type can be promoted to the
+            // writer type. If it can, then we set host_type to the writer type.
+            auto res = std::visit(
+              primitive_type_promotion_policy_visitor_v,
+              writer_type,
+              host_type);
+
+            if (res.has_value()) {
+                switch (res.value()) {
+                case type_promoted::no:
+                    // Both types are the same.
+                    return outcome::success();
+                case type_promoted::yes:
+                    // Writer type is promotable to/compatible with the host
+                    // type.
+                    return outcome::success();
+                case type_promoted::changes_partition:
+                    // TODO: Update the return type so that this impossible
+                    // value does not need to be handled.
+                    return schema_evolution_errc::incompatible;
+                }
+            } else {
+                // writer -> host promotion fails, let's check the opposite
+                // direction and upgrade/promote the field if needed.
+                auto res = std::visit(
+                  primitive_type_promotion_policy_visitor_v,
+                  host_type,
+                  writer_type);
+                if (res.has_error()) {
+                    // Errors in both directions. The fields are incompatible at
+                    // all/unrelated types.
+                    return schema_evolution_errc::incompatible;
+                } else {
+                    switch (res.value()) {
+                    case type_promoted::no:
+                        // Both types are the same.
+                        return outcome::success();
+                    case type_promoted::yes:
+                        host_type = writer_type; // promote the type
+                        return outcome::success();
+                    case type_promoted::changes_partition:
+                        // TODO: Update the return type so that this impossible
+                        // value does not need to be handled.
+                        return schema_evolution_errc::incompatible;
+                    }
+                }
+            }
+        }
+    }
+
+    schema_merge_result operator()(
+      const list_type& writer_list_type,
+      const list_type& host_list_type) const {
+        const auto& writer_element = writer_list_type.element_field;
+        auto& host_element = host_list_type.element_field;
+
+        // Merge list element type recursively.
+        vassert(
+          writer_element != nullptr && host_element != nullptr,
+          "List element fields assumed to be non-NULL");
+        if (auto ve_res = std::visit(
+              *this, writer_element->type, host_element->type);
+            ve_res.has_error()) {
+            return ve_res.error();
+        }
+        return outcome::success();
+    }
+
+    schema_merge_result operator()(
+      const map_type& writer_map_type, const map_type& host_map_type) const {
+        const auto& writer_key = writer_map_type.key_field;
+        auto& host_key = host_map_type.key_field;
+        const auto& writer_value = writer_map_type.value_field;
+        auto& host_value = host_map_type.value_field;
+
+        vassert(
+          writer_key != nullptr && host_key != nullptr,
+          "Map key fields assumed to be non-NULL");
+        vassert(
+          writer_value != nullptr && host_value != nullptr,
+          "Map value fields assumed to be non-NULL");
+
+        // No changes allowed to map key type as doing so would change the
+        // equality. The limitation is not in the spec but is in all
+        // implementations.
+        // https://iceberg.apache.org/docs/1.9.0/evolution/#schema-evolution
+        if (auto vk_res = std::visit(
+              annotate_schema_visitor{partition_spec{}},
+              make_copy(writer_key->type),
+              make_copy(host_key->type));
+            vk_res.has_error()) {
+            return vk_res.error();
+        } else if (vk_res.value().total() > 0) {
+            return schema_evolution_errc::violates_map_key_invariant;
+        }
+
+        auto value_merge_res = std::visit(
+          *this, writer_value->type, host_value->type);
+        if (value_merge_res.has_error()) {
+            return value_merge_res.error();
+        }
+
+        return outcome::success();
+    }
+
+    template<typename S, typename D>
+    requires(!std::is_same_v<S, D>)
+    schema_merge_result operator()(const S&, const D&) const {
+        return schema_evolution_errc::incompatible;
+    }
+};
+
+} // namespace
+
+schema_merge_result merge_struct_types(
+  const struct_type& writer_struct_type, struct_type& host_struct_type) {
+    return std::invoke(
+      merging_schema_visitor{}, writer_struct_type, host_struct_type);
 }
 
 } // namespace iceberg

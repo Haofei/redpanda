@@ -1337,3 +1337,215 @@ TEST(ValuePromotionTest, PrimitiveValuePromotion) {
           << "value: " << val << ", type: " << type;
     }
 }
+
+namespace {
+
+struct merge_test_case {
+    std::string description;
+
+    ss::lw_shared_ptr<struct_type> source;
+    ss::lw_shared_ptr<struct_type> dest;
+
+    checked<void, schema_evolution_errc> expected_result = outcome::success();
+    ss::lw_shared_ptr<struct_type> expected_dest;
+};
+
+std::vector<merge_test_case> generate_merge_test_cases() {
+    std::vector<merge_test_case> test_cases;
+
+    test_cases.push_back(
+      merge_test_case{
+        .description = "merging two empty structs",
+        .source = ss::make_lw_shared<struct_type>(),
+        .dest = ss::make_lw_shared<struct_type>(),
+        .expected_dest = ss::make_lw_shared<struct_type>(),
+      });
+
+    {
+        auto nested_struct = nested_test_struct();
+        test_cases.push_back(
+          merge_test_case{
+            .description = "merging two complex but equal structs",
+            .source = ss::make_lw_shared<struct_type>(nested_struct.copy()),
+            .dest = ss::make_lw_shared<struct_type>(nested_struct.copy()),
+            .expected_dest = ss::make_lw_shared<struct_type>(
+              nested_struct.copy()),
+          });
+    }
+
+    {
+        auto src_struct = ss::make_lw_shared<struct_type>();
+        src_struct->fields.emplace_back(
+          nested_field::create(0, "foo", field_required::no, int_type{}));
+        src_struct->fields.emplace_back(
+          nested_field::create(1, "bar", field_required::no, int_type{}));
+
+        auto dst_struct = ss::make_lw_shared<struct_type>();
+        dst_struct->fields.emplace_back(
+          nested_field::create(0, "bar", field_required::no, int_type{}));
+        dst_struct->fields.emplace_back(
+          nested_field::create(1, "baz", field_required::no, int_type{}));
+
+        auto result_struct = ss::make_lw_shared<struct_type>();
+        result_struct->fields.emplace_back(
+          nested_field::create(0, "bar", field_required::no, int_type{}));
+        result_struct->fields.emplace_back(
+          nested_field::create(1, "baz", field_required::no, int_type{}));
+        result_struct->fields.emplace_back(
+          nested_field::create(2, "foo", field_required::no, int_type{}));
+
+        test_cases.push_back(
+          merge_test_case{
+            .description = "merging two structs with overlapping fields",
+            .source = src_struct,
+            .dest = dst_struct,
+            .expected_dest = result_struct,
+          });
+    }
+
+    {
+        auto struct_a = ss::make_lw_shared<struct_type>();
+        struct_a->fields.emplace_back(
+          nested_field::create(0, "foo", field_required::no, int_type{}));
+
+        auto struct_b = ss::make_lw_shared<struct_type>();
+        struct_b->fields.emplace_back(
+          nested_field::create(0, "foo", field_required::no, long_type{}));
+
+        test_cases.push_back(
+          merge_test_case{
+            .description = "wider primitive takes precedence",
+            .source = struct_a,
+            .dest = struct_b,
+            .expected_dest = ss::make_lw_shared<struct_type>(struct_b->copy()),
+          });
+
+        test_cases.push_back(
+          merge_test_case{
+            .description = "wider primitive takes precedence",
+            .source = struct_b,
+            .dest = struct_a,
+            .expected_dest = ss::make_lw_shared<struct_type>(struct_b->copy()),
+          });
+    }
+
+    {
+        auto struct_a = ss::make_lw_shared<struct_type>(
+          nested_test_struct().copy());
+        auto struct_b = ss::make_lw_shared<struct_type>(struct_a->copy());
+        auto& map = get<map_type>(struct_b->fields[0]);
+        auto& key = get<struct_type>(map.key_field);
+        key.fields.emplace_back(
+          nested_field::create(0, "qux", field_required::no, int_type{}));
+
+        test_cases.push_back(
+          merge_test_case{
+            .description = "change map key",
+            .source = struct_a,
+            .dest = struct_b,
+            .expected_result
+            = {schema_evolution_errc::violates_map_key_invariant},
+          });
+
+        test_cases.push_back(
+          merge_test_case{
+            .description = "change map key",
+            .source = struct_b,
+            .dest = struct_a,
+            .expected_result
+            = {schema_evolution_errc::violates_map_key_invariant},
+          });
+    }
+
+    {
+        auto struct_a = ss::make_lw_shared<struct_type>(
+          nested_test_struct().copy());
+        auto struct_b = ss::make_lw_shared<struct_type>(struct_a->copy());
+        auto& map = get<map_type>(struct_b->fields[0]);
+        auto& value = get<map_type>(map.value_field);
+        auto& nested_map_value = get<struct_type>(value.value_field);
+        nested_map_value.fields.emplace_back(
+          nested_field::create(0, "quux", field_required::no, int_type{}));
+
+        test_cases.push_back(
+          merge_test_case{
+            .description = "change map value",
+            .source = struct_a,
+            .dest = struct_b,
+            .expected_dest = ss::make_lw_shared<struct_type>(struct_b->copy()),
+          });
+
+        test_cases.push_back(
+          merge_test_case{
+            .description = "change map value",
+            .source = struct_b,
+            .dest = struct_a,
+            .expected_dest = ss::make_lw_shared<struct_type>(struct_b->copy()),
+          });
+    }
+
+    {
+        auto struct_a = ss::make_lw_shared<struct_type>(
+          nested_test_struct().copy());
+        auto struct_b = ss::make_lw_shared<struct_type>(struct_a->copy());
+        struct_a->fields[0]->required = field_required::no;
+
+        test_cases.push_back(
+          merge_test_case{
+            .description = "change nullability",
+            .source = struct_a,
+            .dest = struct_b,
+            .expected_dest = ss::make_lw_shared<struct_type>(struct_a->copy()),
+          });
+
+        test_cases.push_back(
+          merge_test_case{
+            .description = "change nullability",
+            .source = struct_b,
+            .dest = struct_a,
+            .expected_dest = ss::make_lw_shared<struct_type>(struct_a->copy()),
+          });
+    }
+
+    return test_cases;
+}
+
+struct MergeTest : public CompatibilityTest<merge_test_case> {};
+
+} // namespace
+
+INSTANTIATE_TEST_SUITE_P(
+  MergeTest, MergeTest, ::testing::ValuesIn(generate_merge_test_cases()));
+
+TEST_P(MergeTest, CompatibleTypesAreCompatible) {
+    const auto& p = GetParam();
+
+    auto dest = p.dest->copy();
+
+    auto res = merge_struct_types(*p.source, dest);
+    ASSERT_EQ(res.has_error(), p.expected_result.has_error())
+      << (res.has_error()
+            ? fmt::format("Unexpected error: {}", res.error())
+            : fmt::format("Expected {}", p.expected_result.error()));
+
+    if (res.has_error()) {
+        ASSERT_EQ(res.error(), p.expected_result.error());
+    }
+
+    ASSERT_FALSE(for_each_field(dest, [i = 0](nested_field* f) mutable {
+                     f->id = nested_field::id_t{i++};
+                     f->meta = std::nullopt;
+                 }).has_error());
+
+    ASSERT_FALSE(
+      p.expected_dest != nullptr
+      && for_each_field(*p.expected_dest, [i = 0](nested_field* f) mutable {
+             f->id = nested_field::id_t{i++};
+             f->meta = std::nullopt;
+         }).has_error());
+
+    if (p.expected_result.has_value() && res.has_value()) {
+        ASSERT_TRUE(structs_equivalent(dest, *p.expected_dest))
+          << fmt::format("Expected: {}\nGot: {}", *p.expected_dest, dest);
+    }
+}

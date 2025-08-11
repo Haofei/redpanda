@@ -162,4 +162,27 @@ schema_evolution_result evolve_schema(
 fill_ids_result
 try_fill_field_ids(const struct_type& source, struct_type& dest);
 
+using schema_merge_result = checked<void, schema_evolution_errc>;
+
+/**
+ * Merge the writer struct type into host struct using Iceberg schema evolution
+ * rules such that on successful result the host struct can accept writes using
+ * the writer struct.
+ *
+ * Notation:
+ * - writer_struct_type: schema derived from the incoming record/write.
+ * - host_struct_type: the table's existing schema (the one we are merging
+ * into).
+ *
+ * Conflict resolution:
+ * - Non-structural metadata (e.g., field comments, field order):
+ * `host_struct_type` wins.
+ * - Structural incompatibilities: return an error.
+ *
+ * On error, `host_struct_type` may be partially updated; discard it in that
+ * case.
+ */
+schema_merge_result merge_struct_types(
+  const struct_type& writer_struct_type, struct_type& host_struct_type);
+
 } // namespace iceberg
