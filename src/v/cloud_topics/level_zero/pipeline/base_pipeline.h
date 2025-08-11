@@ -151,9 +151,16 @@ public:
     /// operations.
     basic_retry_chain_node<Clock>& get_root_rtc() noexcept { return _root_rtc; }
 
-    ss::future<> stop() {
+    void shutdown() {
         _as.request_abort_ex(
           std::make_exception_ptr(pipeline_abort_requested()));
+    }
+
+    ss::future<> stop() {
+        if (!_as.abort_requested()) {
+            _as.request_abort_ex(
+              std::make_exception_ptr(pipeline_abort_requested()));
+        }
         auto fut = _gate.close();
         for (auto& f : _filters) {
             f.cancel();
