@@ -221,6 +221,13 @@
             "schema": {
               "$ref": "#/definitions/mode"
             }
+          },
+          {
+            "name": "force",
+            "description": "If true, override the emptiness check when setting the global mode to IMPORT",
+            "in": "query",
+            "required": false,
+            "type": "boolean"
           }
         ],
         "produces": [
@@ -318,6 +325,13 @@
             "schema": {
               "$ref": "#/definitions/mode"
             }
+          },
+          {
+            "name": "force",
+            "description": "If true, override the emptiness check when setting a subject's mode to IMPORT",
+            "in": "query",
+            "required": false,
+            "type": "boolean"
           }
         ],
         "produces": [
