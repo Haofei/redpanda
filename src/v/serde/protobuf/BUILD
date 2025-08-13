@@ -108,12 +108,12 @@ redpanda_cc_library(
 
 redpanda_cc_library(
     name = "field_mask",
-    hdrs = [
-        "field_mask.h",
-    ],
+    srcs = ["field_mask.cc"],
+    hdrs = ["field_mask.h"],
     include_prefix = "serde/protobuf",
     visibility = ["//visibility:public"],
     deps = [
+        "//src/v/base",
         "//src/v/container:chunked_vector",
         "@seastar",
     ],

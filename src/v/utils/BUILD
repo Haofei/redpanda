@@ -176,12 +176,12 @@ redpanda_cc_library(
 
 redpanda_cc_library(
     name = "to_string",
-    hdrs = [
-        "to_string.h",
-    ],
+    srcs = ["to_string.cc"],
+    hdrs = ["to_string.h"],
     include_prefix = "utils",
     deps = [
         "//src/v/base",
+        "@abseil-cpp//absl/container:flat_hash_map",
         "@abseil-cpp//absl/container:node_hash_map",
         "@fmt",
         "@seastar",
