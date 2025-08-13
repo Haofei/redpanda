@@ -130,7 +130,6 @@ redpanda_cc_library(
     implementation_deps = [
         "//src/v/compression",
     ],
-    include_prefix = "model",
     visibility = ["//visibility:public"],
     deps = [
         ":model",
