@@ -98,3 +98,25 @@ redpanda_cc_library(
         "@seastar",
     ],
 )
+
+redpanda_cc_library(
+    name = "filter",
+    srcs = [
+        "filter.cc",
+    ],
+    hdrs = [
+        "filter.h",
+    ],
+    implementation_deps = [
+        ":utils",
+        "//src/v/model:batch_compression",
+    ],
+    visibility = ["//visibility:public"],
+    deps = [
+        ":reducer",
+        ":types",
+        "//src/v/bytes",
+        "//src/v/model",
+        "@seastar",
+    ],
+)
