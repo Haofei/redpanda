@@ -953,19 +953,20 @@ ss::future<upload_result> remote::delete_objects_sequentially(
 
     std::vector<upload_result> results;
     results.reserve(key_nodes.size());
-    auto fut = co_await ss::coroutine::as_future(ss::max_concurrent_for_each(
-      key_nodes.begin(),
-      key_nodes.end(),
-      concurrency(),
-      [this, &bucket, &results, ctxlog, req_cb = std::move(req_cb)](
-        auto& kn) -> ss::future<> {
-          vlog(ctxlog.trace, "Deleting key {}", kn.key);
-          return delete_object({.bucket = bucket,
-                                .key = kn.key,
-                                .parent_rtc = *kn.node,
-                                .on_req_cb = req_cb})
-            .then([&results](auto result) { results.push_back(result); });
-      }));
+    auto fut = co_await ss::coroutine::as_future(
+      ss::max_concurrent_for_each(
+        key_nodes.begin(),
+        key_nodes.end(),
+        concurrency(),
+        [this, &bucket, &results, ctxlog, req_cb = std::move(req_cb)](
+          auto& kn) -> ss::future<> {
+            vlog(ctxlog.trace, "Deleting key {}", kn.key);
+            return delete_object({.bucket = bucket,
+                                  .key = kn.key,
+                                  .parent_rtc = *kn.node,
+                                  .on_req_cb = req_cb})
+              .then([&results](auto result) { results.push_back(result); });
+        }));
     if (fut.failed()) {
         std::exception_ptr eptr = fut.get_exception();
         if (ssx::is_shutdown_exception(eptr)) {

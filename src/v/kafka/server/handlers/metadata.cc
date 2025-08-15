@@ -259,8 +259,9 @@ static metadata_response::topic make_topic_response(
      */
     if (rq.data.include_topic_authorized_operations) {
         res.topic_authorized_operations = kafka::topic_authorized_operations{
-          details::to_bit_field(details::authorized_operations(
-            ctx, md.get_configuration().tp_ns.tp))};
+          details::to_bit_field(
+            details::authorized_operations(
+              ctx, md.get_configuration().tp_ns.tp))};
     }
 
     return res;
@@ -507,11 +508,12 @@ fill_info_about_brokers_and_controller_id(
         }
 
         if (peer_listener) {
-            reply.data.brokers.push_back(typename response_type::broker{
-              nm.broker.id(),
-              peer_listener->address.host(),
-              peer_listener->address.port(),
-              nm.broker.rack()});
+            reply.data.brokers.push_back(
+              typename response_type::broker{
+                nm.broker.id(),
+                peer_listener->address.host(),
+                peer_listener->address.port(),
+                nm.broker.rack()});
         }
     }
 
@@ -577,10 +579,11 @@ ss::future<typename T::api::response_type> handle_metadata(
                 // Don't include any other information in the response
                 metadata_response reply;
                 for (auto& topic : *request.data.topics) {
-                    reply.data.topics.push_back(metadata_response::topic{
-                      .error_code = err,
-                      .name = std::move(topic.name).value_or(model::topic{}),
-                      .topic_id = topic.topic_id});
+                    reply.data.topics.push_back(
+                      metadata_response::topic{
+                        .error_code = err,
+                        .name = std::move(topic.name).value_or(model::topic{}),
+                        .topic_id = topic.topic_id});
                 }
                 co_return reply;
             }
@@ -594,8 +597,8 @@ ss::future<typename T::api::response_type> handle_metadata(
       && ctx.authorized(
         security::acl_operation::describe, security::default_cluster_name)) {
         reply.data.cluster_authorized_operations
-          = kafka::cluster_authorized_operations{
-            details::to_bit_field(details::authorized_operations(
+          = kafka::cluster_authorized_operations{details::to_bit_field(
+            details::authorized_operations(
               ctx, security::default_cluster_name))};
     }
 

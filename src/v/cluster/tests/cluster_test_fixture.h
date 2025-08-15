@@ -365,8 +365,9 @@ public:
         auto new_leader_id = model::node_id{
           ++current_leader_id % static_cast<int>(_instances.size())};
         return partition
-          ->transfer_leadership(raft::transfer_leadership_request{
-            .group = partition->group(), .target = new_leader_id})
+          ->transfer_leadership(
+            raft::transfer_leadership_request{
+              .group = partition->group(), .target = new_leader_id})
           .discard_result();
     }
 

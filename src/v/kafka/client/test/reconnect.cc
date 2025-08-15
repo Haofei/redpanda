@@ -110,11 +110,12 @@ FIXTURE_TEST(password_change_live_client, kafka_client_fixture) {
 
     auto tp = model::topic_partition(model::topic("t"), model::partition_id(0));
     auto kafka_client = make_client();
-    kafka_client.set_credentials(kc::sasl_configuration{
-      .mechanism = "SCRAM-SHA-256",
-      .username = username,
-      .password = userpass,
-    });
+    kafka_client.set_credentials(
+      kc::sasl_configuration{
+        .mechanism = "SCRAM-SHA-256",
+        .username = username,
+        .password = userpass,
+      });
 
     kafka_client.connect().get();
 
@@ -135,11 +136,12 @@ FIXTURE_TEST(password_change_live_client, kafka_client_fixture) {
         // Setting the password has no effect until the client disconnects
         info("Changing password");
         userpass = "foobar";
-        kafka_client.set_credentials(kc::sasl_configuration{
-          .mechanism = "SCRAM-SHA-256",
-          .username = username,
-          .password = userpass,
-        });
+        kafka_client.set_credentials(
+          kc::sasl_configuration{
+            .mechanism = "SCRAM-SHA-256",
+            .username = username,
+            .password = userpass,
+          });
     }
 
     {

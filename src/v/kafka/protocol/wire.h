@@ -264,10 +264,12 @@ public:
         while (num_tags-- > 0) {
             auto id = read_unsigned_varint(); // consume tag id
             if (id <= prev_tag_id) {
-                throw std::out_of_range(fmt::format(
-                  "Protocol error encountered when parsing tags, tags must be "
-                  "serialized in ascending order with no duplicates, tag: {}",
-                  id));
+                throw std::out_of_range(
+                  fmt::format(
+                    "Protocol error encountered when parsing tags, tags must "
+                    "be "
+                    "serialized in ascending order with no duplicates, tag: {}",
+                    id));
             }
             prev_tag_id = id;
             auto size = read_unsigned_varint(); // consume size in bytes
@@ -281,10 +283,12 @@ public:
         tagged_fields::type fs(std::move(fields));
         auto [_, succeded] = fs.emplace(tag_id(id), _parser.read_bytes(n));
         if (!succeded) {
-            throw std::out_of_range(fmt::format(
-              "Protocol error encountered when parsing unknown tags, duplicate "
-              "tag id detected: {}",
-              id));
+            throw std::out_of_range(
+              fmt::format(
+                "Protocol error encountered when parsing unknown tags, "
+                "duplicate "
+                "tag id detected: {}",
+                id));
         }
         fields = tagged_fields(std::move(fs));
     }
