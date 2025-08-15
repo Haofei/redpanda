@@ -232,7 +232,8 @@ replicated_metastore::get_offsets(const model::topic_id_partition& tidp) {
 
 ss::future<std::expected<metastore::add_response, metastore::errc>>
 replicated_metastore::add_objects(
-  std::unique_ptr<metastore::object_metadata_builder> builder) {
+  std::unique_ptr<metastore::object_metadata_builder> builder,
+  const metastore::term_offset_map_t& terms) {
     auto replicated_builder = std::unique_ptr<replicated_object_builder>(
       static_cast<replicated_object_builder*>(builder.release()));
 
@@ -244,10 +245,34 @@ replicated_metastore::add_objects(
           objects_result.error());
         co_return std::unexpected(metastore::errc::invalid_request);
     }
+    chunked_hash_map<model::partition_id, term_state_update_t>
+      partitioned_terms;
+    for (const auto& [tp, tp_terms] : terms) {
+        auto metastore_partition = fe_.metastore_partition(tp);
+        if (!metastore_partition) {
+            vlog(cd_log.error, "Unable to get metastore partition for {}", tp);
+            co_return std::unexpected(errc::transport_error);
+        }
+        auto& prt_terms = partitioned_terms[*metastore_partition][tp];
+        for (const auto& t : tp_terms) {
+            prt_terms.emplace_back(
+              term_start{.term_id = t.term, .start_offset = t.first_offset});
+        }
+    }
     add_response resp;
     for (auto& [partition_id, partition_objects] : objects_result.value()) {
+        auto terms_it = partitioned_terms.find(partition_id);
+        if (terms_it == partitioned_terms.end()) {
+            // TODO: consider making this less strict, down to the STM layer?
+            vlog(
+              cd_log.error,
+              "No term metadata routed to partition {}",
+              partition_id);
+            co_return std::unexpected(errc::invalid_request);
+        }
         rpc::add_objects_request req;
         req.metastore_partition = partition_id;
+        req.new_terms = std::move(terms_it->second);
         chunked_vector<new_object> new_objects;
         for (auto& obj : partition_objects) {
             new_objects.emplace_back(meta_to_rpc_obj(obj));

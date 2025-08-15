@@ -76,7 +76,10 @@ domain_manager::add_objects(rpc::add_objects_request req) {
     }
     chunked_hash_map<model::topic_id_partition, kafka::offset> corrections;
     auto update_res = add_objects_update::build(
-      stm_state, std::move(req.new_objects), &corrections);
+      stm_state,
+      std::move(req.new_objects),
+      std::move(req.new_terms),
+      &corrections);
     if (!update_res.has_value()) {
         vlog(
           cd_log.debug,

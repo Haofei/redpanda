@@ -75,7 +75,13 @@ public:
         std::unique_ptr<metastore::object_metadata_builder> objs;
         ASSERT_NO_FATAL_FAILURE_CORO(
           create_initial_objects(meta, partitions_count, last_offset, &objs));
-        auto add_res = meta.add_objects(std::move(objs)).get();
+        metastore::term_offset_map_t terms;
+        for (int i = 0; i < partitions_count; ++i) {
+            terms[make_tp(i)].emplace_back(
+              metastore::term_offset{
+                .term = model::term_id{0}, .first_offset = o{0}});
+        }
+        auto add_res = meta.add_objects(std::move(objs), terms).get();
         ASSERT_TRUE_CORO(add_res.has_value());
     }
 };
@@ -97,7 +103,7 @@ TEST_F(ReplicatedMetastoreTest, TestAddNotFinished) {
         .size = 500,
       });
     ASSERT_TRUE(add_res.has_value()) << add_res.error();
-    auto commit_res = meta.add_objects(std::move(obj_builder)).get();
+    auto commit_res = meta.add_objects(std::move(obj_builder), {}).get();
     ASSERT_FALSE(commit_res.has_value());
     ASSERT_EQ(commit_res.error(), metastore::errc::invalid_request);
 }
@@ -317,9 +323,17 @@ TEST_F(ReplicatedMetastoreTest, TestNotLeader) {
         auto fin_res = obj_builder->finish(oid, 500);
         ASSERT_TRUE(fin_res.has_value()) << fin_res.error();
 
-        auto commit_res = meta.add_objects(std::move(obj_builder)).get();
+        metastore::term_offset_map_t terms;
+        terms[tp].emplace_back(
+          metastore::term_offset{
+            .term = model::term_id{0}, .first_offset = next_to_send});
+        auto commit_res = meta.add_objects(std::move(obj_builder), terms).get();
         if (!commit_res.has_value()) {
             while (true) {
+                if (ss::lowres_clock::now() > deadline) {
+                    timed_out = true;
+                    break;
+                }
                 // If there's an error, reset our expected next offset with
                 // whatever is actually in L1.
                 auto get_res = meta.get_offsets(tp).get();

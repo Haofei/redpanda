@@ -49,10 +49,13 @@ struct add_objects_request
       serde::version<0>,
       serde::compat_version<0>> {
     using resp_t = add_objects_reply;
-    auto serde_fields() { return std::tie(metastore_partition, new_objects); }
+    auto serde_fields() {
+        return std::tie(metastore_partition, new_objects, new_terms);
+    }
 
     model::partition_id metastore_partition;
     chunked_vector<new_object> new_objects;
+    term_state_update_t new_terms;
 };
 
 struct replace_objects_reply
