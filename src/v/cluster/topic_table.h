@@ -101,11 +101,12 @@ public:
         concurrent_modification_error(
           model::revision_id initial_revision,
           model::revision_id current_revision)
-          : ::concurrent_modification_error(ssx::sformat(
-              "Topic table was modified by concurrent fiber. "
-              "(initial_revision: {}, current_revision: {}) ",
-              initial_revision,
-              current_revision)) {}
+          : ::concurrent_modification_error(
+              ssx::sformat(
+                "Topic table was modified by concurrent fiber. "
+                "(initial_revision: {}, current_revision: {}) ",
+                initial_revision,
+                current_revision)) {}
     };
 
     class in_progress_update {
@@ -502,8 +503,9 @@ public:
     void unregister_topic_delta_notification(cluster::notification_id_type id) {
         std::erase_if(
           _topic_notifications,
-          [id](const std::pair<cluster::notification_id_type, topic_delta_cb_t>&
-                 n) { return n.first == id; });
+          [id](
+            const std::pair<cluster::notification_id_type, topic_delta_cb_t>&
+              n) { return n.first == id; });
     }
 
     cluster::notification_id_type
