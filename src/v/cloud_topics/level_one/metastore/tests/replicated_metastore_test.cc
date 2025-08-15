@@ -373,3 +373,26 @@ TEST_F(ReplicatedMetastoreTest, TestNotLeader) {
         expected_next = kafka::next_offset(e.last_offset);
     }
 }
+
+TEST_F(ReplicatedMetastoreTest, TestInvalidTermRequest) {
+    auto& app = get_ct_app(model::node_id{0});
+    replicated_metastore meta(app.get_sharded_l1_metastore_fe()->local());
+
+    std::unique_ptr<metastore::object_metadata_builder> objs;
+    ASSERT_NO_FATAL_FAILURE(create_initial_objects(meta, 100, o{99}, &objs));
+    metastore::term_offset_map_t terms;
+    for (int i = 0; i < 100; ++i) {
+        if (i == 0) {
+            // Omit the term of one partition.
+            continue;
+        }
+        terms[make_tp(i)].emplace_back(
+          metastore::term_offset{
+            .term = model::term_id{0}, .first_offset = o{0}});
+    }
+    // This constitutes an incorrectly formed request, and is not expected
+    // ever, hence overall failure.
+    auto add_res = meta.add_objects(std::move(objs), terms).get();
+    ASSERT_FALSE(add_res.has_value());
+    ASSERT_EQ(add_res.error(), metastore::errc::invalid_request);
+}

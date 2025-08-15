@@ -1096,3 +1096,16 @@ TEST(SimpleMetastoreTest, TestUpdateWithObjectBuilder) {
         EXPECT_THAT(dirty, testing::ElementsAre(MatchesRange(0_o, 9_o)));
     }
 }
+
+TEST(SimpleMetastoreState, TestInvalidTermRequest) {
+    simple_metastore m;
+    om_list_t os;
+    os.emplace_back(
+      om_builder(oid1, 100).add(tid_a, 0_o, 10_o, 2000_t, 0, 99).build());
+    // Make the term misaligned with the extent.
+    auto add_res = m.add_objects(
+                      os, terms_builder().add(tid_a, 0_tm, 1337_o).build())
+                     .get();
+    ASSERT_FALSE(add_res.has_value());
+    ASSERT_EQ(add_res.error(), metastore::errc::invalid_request);
+}
