@@ -20,6 +20,7 @@
 #include "container/contiguous_range_map.h"
 #include "logger.h"
 #include "model/fundamental.h"
+#include "model/kitp.h"
 #include "model/metadata.h"
 #include "utils/stable_iterator_adaptor.h"
 
@@ -656,6 +657,8 @@ public:
     bool contains(model::topic_namespace_view tp) const {
         return _topics.contains(tp);
     }
+    /// Checks if it has given partition
+    bool contains(const model::kitp& kitp) const;
     /// contains() check with stronger validation on the topic revision/offset.
     /// Just looking up in the cache can yield false negatives if the cache is
     /// not warmed up because controller replay can be in progress. This variant

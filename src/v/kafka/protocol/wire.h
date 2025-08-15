@@ -17,6 +17,7 @@
 #include "bytes/iobuf_parser.h"
 #include "kafka/protocol/batch_reader.h"
 #include "kafka/protocol/types.h"
+#include "model/fundamental.h"
 #include "strings/utf8.h"
 #include "utils/vint.h"
 
@@ -140,9 +141,7 @@ public:
         return {apply_control_validation(do_read_flex_string(n))};
     }
 
-    uuid read_uuid() {
-        return uuid(_parser.consume_type<uuid::underlying_t>());
-    }
+    uuid_t read_uuid() { return _parser.consume_type<uuid_t>(); }
 
     bytes read_bytes() { return _parser.read_bytes(read_int32()); }
 
@@ -456,10 +455,10 @@ public:
         return write(std::string_view(*v));
     }
 
-    uint32_t write(uuid uuid) {
+    uint32_t write(uuid_t id) {
         /// This type is not prepended with its size
-        _out->append(uuid.view().data(), uuid::length);
-        return uuid::length;
+        _out->append(id.uuid().begin(), uuid_t::length);
+        return uuid_t::length;
     }
 
     uint32_t write(float64_t v) {

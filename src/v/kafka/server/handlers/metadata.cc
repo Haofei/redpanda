@@ -566,7 +566,7 @@ ss::future<typename T::api::response_type> handle_metadata(
                       "Topic name can not be null for version {}",
                       version);
                     break;
-                } else if (topic.topic_id != uuid{}) {
+                } else if (topic.topic_id != model::topic_id{}) {
                     err = kafka::error_code::invalid_request;
                     vlog(
                       klog.info,
