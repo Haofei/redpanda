@@ -221,7 +221,6 @@ func rpcAlternativeRoute(f protoreflect.MethodDescriptor) string {
 type baseGenerator struct {
 	needsChunkedHashMap bool
 	needsChunkedVector  bool
-	needsString         bool
 	needsRpcs           bool
 
 	emitError func(error)
@@ -288,7 +287,6 @@ func (g *baseGenerator) translateBaseType(f protoreflect.FieldDescriptor) (typ s
 		if isIOBuf(f) {
 			return "iobuf"
 		}
-		g.needsString = true
 		return "ss::sstring"
 	default:
 		panic(fmt.Sprintf("unexpected protoreflect.Kind: %#v", f.Kind()))
@@ -352,12 +350,11 @@ func (g *headerGenerator) generateFile(w *codewriter) {
 		}
 		w.PreludePrintln()
 		w.PreludePrintln("#include <seastar/core/future.hh>")
-		if g.needsString {
-			w.PreludePrintln("#include <seastar/core/sstring.hh>")
-		}
+		w.PreludePrintln("#include <seastar/core/sstring.hh>")
 		if g.needsVariant {
 			w.PreludePrintln("#include <seastar/util/variant_utils.hh>")
 		}
+		w.PreludePrintln("#include <span>")
 		w.PreludePrintln()
 		w.PreludePrintln("class iobuf_parser;")
 		w.PreludePrintln()
@@ -559,8 +556,13 @@ func (g *headerGenerator) generateMessage(msg protoreflect.MessageDescriptor, w 
 			}
 		}
 	}
-	w.Dedent()
 	w.Println()
+	w.Println("// NOTE: This is intended to be used by field_mask only. Do not use directly.")
+	w.Println("static bool is_valid_field_path(std::span<const ss::sstring> path);")
+	w.Println("// NOTE: This is intended to be used by field_mask only. Do not use directly.")
+	w.Printf("void apply_field_path_from(std::span<const ss::sstring> path, %s* update);\n", typeName)
+	w.Println()
+	w.Dedent()
 	w.Println("private:")
 	w.Indent()
 	clear(oneofs)
@@ -641,6 +643,8 @@ func (g *implGenerator) generateFile(w *codewriter) {
 		g.generateMessageWriteJson(msg, w)
 		g.generateMessageReadJson(msg, w)
 		g.generateMessageReadJsonHelper(msg, w)
+		g.generateMessageFieldMaskIsValidHelper(msg, w)
+		g.generateMessageFieldMaskApplyHelper(msg, w)
 		w.Println()
 	}
 	for _, enum := range enums {
@@ -657,6 +661,147 @@ func (g *implGenerator) generateFile(w *codewriter) {
 		g.generateServiceHandlers(service, w)
 		w.Println()
 	}
+}
+
+func (g *implGenerator) generateMessageFieldMaskIsValidHelper(msg protoreflect.MessageDescriptor, w *codewriter) {
+	w.Printf("bool %s::is_valid_field_path(std::span<const ss::sstring> path) {\n", cppTypeName(msg))
+	defer w.Println("}")
+	w.Indent()
+	defer w.Dedent()
+	if msg.Fields().Len() == 0 {
+		w.Println("return path.empty();")
+		return
+	}
+	w.Println("if (path.empty()) { return true; }")
+	w.Println("constexpr auto fields = std::to_array<std::pair<std::string_view, bool(*)(decltype(path))>>({")
+	w.Indent()
+	for i := range msg.Fields().Len() {
+		field := msg.Fields().Get(i)
+		if field.Cardinality() == protoreflect.Repeated {
+			// NOTE: This is the most strict and minimal support
+			// There are options to support wildcards or support updating map entries,
+			// but that is much more complex, so we don't support it.
+			w.Printf("{%q, [](auto path) { return path.empty(); }},\n", field.Name())
+		} else if msg := field.Message(); msg != nil && !isWellKnownType(msg) {
+			w.Printf("{%q, %s::is_valid_field_path},\n", field.Name(), cppTypeName(msg))
+		} else {
+			w.Printf("{%q, [](auto path) { return path.empty(); }},\n", field.Name())
+		}
+	}
+	w.Dedent()
+	w.Println("});")
+	w.Println("for (const auto& [name, is_valid] : fields) {")
+	w.Indent()
+	w.Println("if (path.front() == name) {")
+	w.Indent()
+	w.Println("return is_valid(path.subspan(1));")
+	w.Dedent()
+	w.Println("}")
+	w.Dedent()
+	w.Println("}")
+	w.Println("return false;")
+}
+
+func (g *implGenerator) generateMessageFieldMaskApplyHelper(msg protoreflect.MessageDescriptor, w *codewriter) {
+	w.Printf("void %s::apply_field_path_from(std::span<const ss::sstring> path, %s* update) {\n", cppTypeName(msg), cppTypeName(msg))
+	defer w.Println("}")
+	w.Indent()
+	defer w.Dedent()
+	w.Println("if (path.empty()) {")
+	w.Indent()
+	w.Println("*this = std::move(*update);")
+	w.Println("return;")
+	w.Dedent()
+	w.Println("}")
+	if msg.Fields().Len() == 0 {
+		return
+	}
+	w.Println("constexpr auto fields = std::to_array<std::pair<std::string_view, void(*)(decltype(path), decltype(this), decltype(update))>>({")
+	w.Indent()
+	for i := range msg.Fields().Len() {
+		field := msg.Fields().Get(i)
+		if field.IsList() {
+			w.Printf("{%q, [](auto, auto* self, auto* update) {\n", field.Name())
+			w.Indent()
+			w.Printf("std::ranges::move(update->get_%s(), std::back_inserter(self->get_%s()));\n", field.Name(), field.Name())
+			w.Printf("update->get_%s().clear();\n", field.Name())
+			w.Dedent()
+			w.Println("}},")
+		} else if field.IsMap() {
+			w.Printf("{%q, [](auto, auto* self, auto* update) {\n", field.Name())
+			w.Indent()
+			w.Printf("for (auto& [k, v] : update->get_%s()) {\n", field.Name())
+			w.Indent()
+			w.Printf("self->get_%s().insert_or_assign(std::move(k), std::move(v));\n", field.Name())
+			w.Dedent()
+			w.Println("}")
+			w.Printf("update->get_%s().clear();\n", field.Name())
+			w.Dedent()
+			w.Println("}},")
+		} else {
+			printApplyFn := func() {
+				if isPtr(field) {
+					w.Printf("auto* self_field = self->get_%s().get();\n", field.Name())
+					w.Printf("auto* update_field = update->get_%s().get();\n", field.Name())
+					w.Println("if (!self_field && !update_field) return;")
+					w.Println("if (!self_field) {")
+					w.Indent()
+					w.Printf("self->set_%s(std::make_unique<%s>());\n", field.Name(), cppTypeName(field.Message()))
+					w.Printf("self_field = self->get_%s().get();\n", field.Name())
+					w.Dedent()
+					w.Println("}")
+					w.Println("if (!update_field && path.empty()) {")
+					w.Indent()
+					w.Printf("self->set_%s(nullptr);\n", field.Name())
+					w.Println("return;")
+					w.Dedent()
+					w.Println("} else if (!update_field) {")
+					w.Indent()
+					w.Printf("update->set_%s(std::make_unique<%s>());\n", field.Name(), cppTypeName(field.Message()))
+					w.Printf("update_field = update->get_%s().get();\n", field.Name())
+					w.Dedent()
+					w.Println("}")
+					w.Println("self_field->apply_field_path_from(path, update_field);")
+				} else if msg := field.Message(); msg != nil && !isWellKnownType(msg) {
+					w.Printf("self->get_%s().apply_field_path_from(path, &update->get_%s());\n", field.Name(), field.Name())
+				} else {
+					w.Printf("self->set_%s(std::move(update->get_%s()));\n", field.Name(), field.Name())
+				}
+			}
+			if field.ContainingOneof() != nil {
+				w.Printf("{%q, []([[maybe_unused]] auto path, auto* self, auto* update) {\n", field.Name())
+				w.Indent()
+				w.Printf("if (update->has_%s()) {\n", field.Name())
+				w.Indent()
+				printApplyFn()
+				w.Dedent()
+				w.Println("} else {")
+				w.Indent()
+				w.Printf("self->set_%s({});\n", field.Name())
+				w.Dedent()
+				w.Println("}")
+				w.Dedent()
+				w.Println("}},")
+			} else {
+				w.Printf("{%q, []([[maybe_unused]] auto path, auto* self, auto* update) {\n", field.Name())
+				w.Indent()
+				printApplyFn()
+				w.Dedent()
+				w.Println("}},")
+			}
+		}
+	}
+	w.Dedent()
+	w.Println("});")
+	w.Println("for (const auto& [name, apply] : fields) {")
+	w.Indent()
+	w.Println("if (path.front() == name) {")
+	w.Indent()
+	w.Println("return apply(path.subspan(1), this, update);")
+	w.Dedent()
+	w.Println("}")
+	w.Dedent()
+	w.Println("}")
 }
 
 func (g *implGenerator) generateServiceRoutes(service protoreflect.ServiceDescriptor, w *codewriter) {

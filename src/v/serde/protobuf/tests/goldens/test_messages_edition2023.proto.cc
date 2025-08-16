@@ -133,6 +133,52 @@ seastar::future<test_all_types_edition2023_nested_message> test_all_types_editio
   co_await serde::pb::json::check_next_eof(&parser);
   co_return self;
 }
+bool test_all_types_edition2023_nested_message::is_valid_field_path(std::span<const ss::sstring> path) {
+  if (path.empty()) { return true; }
+  constexpr auto fields = std::to_array<std::pair<std::string_view, bool(*)(decltype(path))>>({
+    {"a", [](auto path) { return path.empty(); }},
+    {"corecursive", test_all_types_edition2023::is_valid_field_path},
+  });
+  for (const auto& [name, is_valid] : fields) {
+    if (path.front() == name) {
+      return is_valid(path.subspan(1));
+    }
+  }
+  return false;
+}
+void test_all_types_edition2023_nested_message::apply_field_path_from(std::span<const ss::sstring> path, test_all_types_edition2023_nested_message* update) {
+  if (path.empty()) {
+    *this = std::move(*update);
+    return;
+  }
+  constexpr auto fields = std::to_array<std::pair<std::string_view, void(*)(decltype(path), decltype(this), decltype(update))>>({
+    {"a", []([[maybe_unused]] auto path, auto* self, auto* update) {
+      self->set_a(std::move(update->get_a()));
+    }},
+    {"corecursive", []([[maybe_unused]] auto path, auto* self, auto* update) {
+      auto* self_field = self->get_corecursive().get();
+      auto* update_field = update->get_corecursive().get();
+      if (!self_field && !update_field) return;
+      if (!self_field) {
+        self->set_corecursive(std::make_unique<test_all_types_edition2023>());
+        self_field = self->get_corecursive().get();
+      }
+      if (!update_field && path.empty()) {
+        self->set_corecursive(nullptr);
+        return;
+      } else if (!update_field) {
+        update->set_corecursive(std::make_unique<test_all_types_edition2023>());
+        update_field = update->get_corecursive().get();
+      }
+      self_field->apply_field_path_from(path, update_field);
+    }},
+  });
+  for (const auto& [name, apply] : fields) {
+    if (path.front() == name) {
+      return apply(path.subspan(1), this, update);
+    }
+  }
+}
 
 test_all_types_edition2023_group_like_type::test_all_types_edition2023_group_like_type() noexcept = default;
 test_all_types_edition2023_group_like_type::test_all_types_edition2023_group_like_type(test_all_types_edition2023_group_like_type&&) noexcept = default;
@@ -231,6 +277,38 @@ seastar::future<test_all_types_edition2023_group_like_type> test_all_types_editi
   co_await from_json(&parser, &self);
   co_await serde::pb::json::check_next_eof(&parser);
   co_return self;
+}
+bool test_all_types_edition2023_group_like_type::is_valid_field_path(std::span<const ss::sstring> path) {
+  if (path.empty()) { return true; }
+  constexpr auto fields = std::to_array<std::pair<std::string_view, bool(*)(decltype(path))>>({
+    {"group_int32", [](auto path) { return path.empty(); }},
+    {"group_uint32", [](auto path) { return path.empty(); }},
+  });
+  for (const auto& [name, is_valid] : fields) {
+    if (path.front() == name) {
+      return is_valid(path.subspan(1));
+    }
+  }
+  return false;
+}
+void test_all_types_edition2023_group_like_type::apply_field_path_from(std::span<const ss::sstring> path, test_all_types_edition2023_group_like_type* update) {
+  if (path.empty()) {
+    *this = std::move(*update);
+    return;
+  }
+  constexpr auto fields = std::to_array<std::pair<std::string_view, void(*)(decltype(path), decltype(this), decltype(update))>>({
+    {"group_int32", []([[maybe_unused]] auto path, auto* self, auto* update) {
+      self->set_group_int32(std::move(update->get_group_int32()));
+    }},
+    {"group_uint32", []([[maybe_unused]] auto path, auto* self, auto* update) {
+      self->set_group_uint32(std::move(update->get_group_uint32()));
+    }},
+  });
+  for (const auto& [name, apply] : fields) {
+    if (path.front() == name) {
+      return apply(path.subspan(1), this, update);
+    }
+  }
 }
 
 test_all_types_edition2023::test_all_types_edition2023() noexcept = default;
@@ -4320,6 +4398,604 @@ seastar::future<test_all_types_edition2023> test_all_types_edition2023::from_jso
   co_await serde::pb::json::check_next_eof(&parser);
   co_return self;
 }
+bool test_all_types_edition2023::is_valid_field_path(std::span<const ss::sstring> path) {
+  if (path.empty()) { return true; }
+  constexpr auto fields = std::to_array<std::pair<std::string_view, bool(*)(decltype(path))>>({
+    {"optional_int32", [](auto path) { return path.empty(); }},
+    {"optional_int64", [](auto path) { return path.empty(); }},
+    {"optional_uint32", [](auto path) { return path.empty(); }},
+    {"optional_uint64", [](auto path) { return path.empty(); }},
+    {"optional_sint32", [](auto path) { return path.empty(); }},
+    {"optional_sint64", [](auto path) { return path.empty(); }},
+    {"optional_fixed32", [](auto path) { return path.empty(); }},
+    {"optional_fixed64", [](auto path) { return path.empty(); }},
+    {"optional_sfixed32", [](auto path) { return path.empty(); }},
+    {"optional_sfixed64", [](auto path) { return path.empty(); }},
+    {"optional_float", [](auto path) { return path.empty(); }},
+    {"optional_double", [](auto path) { return path.empty(); }},
+    {"optional_bool", [](auto path) { return path.empty(); }},
+    {"optional_string", [](auto path) { return path.empty(); }},
+    {"optional_bytes", [](auto path) { return path.empty(); }},
+    {"optional_nested_message", test_all_types_edition2023_nested_message::is_valid_field_path},
+    {"optional_foreign_message", foreign_message_edition2023::is_valid_field_path},
+    {"optional_nested_enum", [](auto path) { return path.empty(); }},
+    {"optional_foreign_enum", [](auto path) { return path.empty(); }},
+    {"optional_string_piece", [](auto path) { return path.empty(); }},
+    {"optional_cord", [](auto path) { return path.empty(); }},
+    {"recursive_message", test_all_types_edition2023::is_valid_field_path},
+    {"repeated_int32", [](auto path) { return path.empty(); }},
+    {"repeated_int64", [](auto path) { return path.empty(); }},
+    {"repeated_uint32", [](auto path) { return path.empty(); }},
+    {"repeated_uint64", [](auto path) { return path.empty(); }},
+    {"repeated_sint32", [](auto path) { return path.empty(); }},
+    {"repeated_sint64", [](auto path) { return path.empty(); }},
+    {"repeated_fixed32", [](auto path) { return path.empty(); }},
+    {"repeated_fixed64", [](auto path) { return path.empty(); }},
+    {"repeated_sfixed32", [](auto path) { return path.empty(); }},
+    {"repeated_sfixed64", [](auto path) { return path.empty(); }},
+    {"repeated_float", [](auto path) { return path.empty(); }},
+    {"repeated_double", [](auto path) { return path.empty(); }},
+    {"repeated_bool", [](auto path) { return path.empty(); }},
+    {"repeated_string", [](auto path) { return path.empty(); }},
+    {"repeated_bytes", [](auto path) { return path.empty(); }},
+    {"repeated_nested_message", [](auto path) { return path.empty(); }},
+    {"repeated_foreign_message", [](auto path) { return path.empty(); }},
+    {"repeated_nested_enum", [](auto path) { return path.empty(); }},
+    {"repeated_foreign_enum", [](auto path) { return path.empty(); }},
+    {"repeated_string_piece", [](auto path) { return path.empty(); }},
+    {"repeated_cord", [](auto path) { return path.empty(); }},
+    {"packed_int32", [](auto path) { return path.empty(); }},
+    {"packed_int64", [](auto path) { return path.empty(); }},
+    {"packed_uint32", [](auto path) { return path.empty(); }},
+    {"packed_uint64", [](auto path) { return path.empty(); }},
+    {"packed_sint32", [](auto path) { return path.empty(); }},
+    {"packed_sint64", [](auto path) { return path.empty(); }},
+    {"packed_fixed32", [](auto path) { return path.empty(); }},
+    {"packed_fixed64", [](auto path) { return path.empty(); }},
+    {"packed_sfixed32", [](auto path) { return path.empty(); }},
+    {"packed_sfixed64", [](auto path) { return path.empty(); }},
+    {"packed_float", [](auto path) { return path.empty(); }},
+    {"packed_double", [](auto path) { return path.empty(); }},
+    {"packed_bool", [](auto path) { return path.empty(); }},
+    {"packed_nested_enum", [](auto path) { return path.empty(); }},
+    {"unpacked_int32", [](auto path) { return path.empty(); }},
+    {"unpacked_int64", [](auto path) { return path.empty(); }},
+    {"unpacked_uint32", [](auto path) { return path.empty(); }},
+    {"unpacked_uint64", [](auto path) { return path.empty(); }},
+    {"unpacked_sint32", [](auto path) { return path.empty(); }},
+    {"unpacked_sint64", [](auto path) { return path.empty(); }},
+    {"unpacked_fixed32", [](auto path) { return path.empty(); }},
+    {"unpacked_fixed64", [](auto path) { return path.empty(); }},
+    {"unpacked_sfixed32", [](auto path) { return path.empty(); }},
+    {"unpacked_sfixed64", [](auto path) { return path.empty(); }},
+    {"unpacked_float", [](auto path) { return path.empty(); }},
+    {"unpacked_double", [](auto path) { return path.empty(); }},
+    {"unpacked_bool", [](auto path) { return path.empty(); }},
+    {"unpacked_nested_enum", [](auto path) { return path.empty(); }},
+    {"map_int32_int32", [](auto path) { return path.empty(); }},
+    {"map_int64_int64", [](auto path) { return path.empty(); }},
+    {"map_uint32_uint32", [](auto path) { return path.empty(); }},
+    {"map_uint64_uint64", [](auto path) { return path.empty(); }},
+    {"map_sint32_sint32", [](auto path) { return path.empty(); }},
+    {"map_sint64_sint64", [](auto path) { return path.empty(); }},
+    {"map_fixed32_fixed32", [](auto path) { return path.empty(); }},
+    {"map_fixed64_fixed64", [](auto path) { return path.empty(); }},
+    {"map_sfixed32_sfixed32", [](auto path) { return path.empty(); }},
+    {"map_sfixed64_sfixed64", [](auto path) { return path.empty(); }},
+    {"map_int32_float", [](auto path) { return path.empty(); }},
+    {"map_int32_double", [](auto path) { return path.empty(); }},
+    {"map_bool_bool", [](auto path) { return path.empty(); }},
+    {"map_string_string", [](auto path) { return path.empty(); }},
+    {"map_string_bytes", [](auto path) { return path.empty(); }},
+    {"map_string_nested_message", [](auto path) { return path.empty(); }},
+    {"map_string_foreign_message", [](auto path) { return path.empty(); }},
+    {"map_string_nested_enum", [](auto path) { return path.empty(); }},
+    {"map_string_foreign_enum", [](auto path) { return path.empty(); }},
+    {"oneof_uint32", [](auto path) { return path.empty(); }},
+    {"oneof_nested_message", test_all_types_edition2023_nested_message::is_valid_field_path},
+    {"oneof_string", [](auto path) { return path.empty(); }},
+    {"oneof_bytes", [](auto path) { return path.empty(); }},
+    {"oneof_bool", [](auto path) { return path.empty(); }},
+    {"oneof_uint64", [](auto path) { return path.empty(); }},
+    {"oneof_float", [](auto path) { return path.empty(); }},
+    {"oneof_double", [](auto path) { return path.empty(); }},
+    {"oneof_enum", [](auto path) { return path.empty(); }},
+    {"groupliketype", test_all_types_edition2023_group_like_type::is_valid_field_path},
+    {"delimited_field", test_all_types_edition2023_group_like_type::is_valid_field_path},
+  });
+  for (const auto& [name, is_valid] : fields) {
+    if (path.front() == name) {
+      return is_valid(path.subspan(1));
+    }
+  }
+  return false;
+}
+void test_all_types_edition2023::apply_field_path_from(std::span<const ss::sstring> path, test_all_types_edition2023* update) {
+  if (path.empty()) {
+    *this = std::move(*update);
+    return;
+  }
+  constexpr auto fields = std::to_array<std::pair<std::string_view, void(*)(decltype(path), decltype(this), decltype(update))>>({
+    {"optional_int32", []([[maybe_unused]] auto path, auto* self, auto* update) {
+      self->set_optional_int32(std::move(update->get_optional_int32()));
+    }},
+    {"optional_int64", []([[maybe_unused]] auto path, auto* self, auto* update) {
+      self->set_optional_int64(std::move(update->get_optional_int64()));
+    }},
+    {"optional_uint32", []([[maybe_unused]] auto path, auto* self, auto* update) {
+      self->set_optional_uint32(std::move(update->get_optional_uint32()));
+    }},
+    {"optional_uint64", []([[maybe_unused]] auto path, auto* self, auto* update) {
+      self->set_optional_uint64(std::move(update->get_optional_uint64()));
+    }},
+    {"optional_sint32", []([[maybe_unused]] auto path, auto* self, auto* update) {
+      self->set_optional_sint32(std::move(update->get_optional_sint32()));
+    }},
+    {"optional_sint64", []([[maybe_unused]] auto path, auto* self, auto* update) {
+      self->set_optional_sint64(std::move(update->get_optional_sint64()));
+    }},
+    {"optional_fixed32", []([[maybe_unused]] auto path, auto* self, auto* update) {
+      self->set_optional_fixed32(std::move(update->get_optional_fixed32()));
+    }},
+    {"optional_fixed64", []([[maybe_unused]] auto path, auto* self, auto* update) {
+      self->set_optional_fixed64(std::move(update->get_optional_fixed64()));
+    }},
+    {"optional_sfixed32", []([[maybe_unused]] auto path, auto* self, auto* update) {
+      self->set_optional_sfixed32(std::move(update->get_optional_sfixed32()));
+    }},
+    {"optional_sfixed64", []([[maybe_unused]] auto path, auto* self, auto* update) {
+      self->set_optional_sfixed64(std::move(update->get_optional_sfixed64()));
+    }},
+    {"optional_float", []([[maybe_unused]] auto path, auto* self, auto* update) {
+      self->set_optional_float(std::move(update->get_optional_float()));
+    }},
+    {"optional_double", []([[maybe_unused]] auto path, auto* self, auto* update) {
+      self->set_optional_double(std::move(update->get_optional_double()));
+    }},
+    {"optional_bool", []([[maybe_unused]] auto path, auto* self, auto* update) {
+      self->set_optional_bool(std::move(update->get_optional_bool()));
+    }},
+    {"optional_string", []([[maybe_unused]] auto path, auto* self, auto* update) {
+      self->set_optional_string(std::move(update->get_optional_string()));
+    }},
+    {"optional_bytes", []([[maybe_unused]] auto path, auto* self, auto* update) {
+      self->set_optional_bytes(std::move(update->get_optional_bytes()));
+    }},
+    {"optional_nested_message", []([[maybe_unused]] auto path, auto* self, auto* update) {
+      self->get_optional_nested_message().apply_field_path_from(path, &update->get_optional_nested_message());
+    }},
+    {"optional_foreign_message", []([[maybe_unused]] auto path, auto* self, auto* update) {
+      auto* self_field = self->get_optional_foreign_message().get();
+      auto* update_field = update->get_optional_foreign_message().get();
+      if (!self_field && !update_field) return;
+      if (!self_field) {
+        self->set_optional_foreign_message(std::make_unique<foreign_message_edition2023>());
+        self_field = self->get_optional_foreign_message().get();
+      }
+      if (!update_field && path.empty()) {
+        self->set_optional_foreign_message(nullptr);
+        return;
+      } else if (!update_field) {
+        update->set_optional_foreign_message(std::make_unique<foreign_message_edition2023>());
+        update_field = update->get_optional_foreign_message().get();
+      }
+      self_field->apply_field_path_from(path, update_field);
+    }},
+    {"optional_nested_enum", []([[maybe_unused]] auto path, auto* self, auto* update) {
+      self->set_optional_nested_enum(std::move(update->get_optional_nested_enum()));
+    }},
+    {"optional_foreign_enum", []([[maybe_unused]] auto path, auto* self, auto* update) {
+      self->set_optional_foreign_enum(std::move(update->get_optional_foreign_enum()));
+    }},
+    {"optional_string_piece", []([[maybe_unused]] auto path, auto* self, auto* update) {
+      self->set_optional_string_piece(std::move(update->get_optional_string_piece()));
+    }},
+    {"optional_cord", []([[maybe_unused]] auto path, auto* self, auto* update) {
+      self->set_optional_cord(std::move(update->get_optional_cord()));
+    }},
+    {"recursive_message", []([[maybe_unused]] auto path, auto* self, auto* update) {
+      auto* self_field = self->get_recursive_message().get();
+      auto* update_field = update->get_recursive_message().get();
+      if (!self_field && !update_field) return;
+      if (!self_field) {
+        self->set_recursive_message(std::make_unique<test_all_types_edition2023>());
+        self_field = self->get_recursive_message().get();
+      }
+      if (!update_field && path.empty()) {
+        self->set_recursive_message(nullptr);
+        return;
+      } else if (!update_field) {
+        update->set_recursive_message(std::make_unique<test_all_types_edition2023>());
+        update_field = update->get_recursive_message().get();
+      }
+      self_field->apply_field_path_from(path, update_field);
+    }},
+    {"repeated_int32", [](auto, auto* self, auto* update) {
+      std::ranges::move(update->get_repeated_int32(), std::back_inserter(self->get_repeated_int32()));
+      update->get_repeated_int32().clear();
+    }},
+    {"repeated_int64", [](auto, auto* self, auto* update) {
+      std::ranges::move(update->get_repeated_int64(), std::back_inserter(self->get_repeated_int64()));
+      update->get_repeated_int64().clear();
+    }},
+    {"repeated_uint32", [](auto, auto* self, auto* update) {
+      std::ranges::move(update->get_repeated_uint32(), std::back_inserter(self->get_repeated_uint32()));
+      update->get_repeated_uint32().clear();
+    }},
+    {"repeated_uint64", [](auto, auto* self, auto* update) {
+      std::ranges::move(update->get_repeated_uint64(), std::back_inserter(self->get_repeated_uint64()));
+      update->get_repeated_uint64().clear();
+    }},
+    {"repeated_sint32", [](auto, auto* self, auto* update) {
+      std::ranges::move(update->get_repeated_sint32(), std::back_inserter(self->get_repeated_sint32()));
+      update->get_repeated_sint32().clear();
+    }},
+    {"repeated_sint64", [](auto, auto* self, auto* update) {
+      std::ranges::move(update->get_repeated_sint64(), std::back_inserter(self->get_repeated_sint64()));
+      update->get_repeated_sint64().clear();
+    }},
+    {"repeated_fixed32", [](auto, auto* self, auto* update) {
+      std::ranges::move(update->get_repeated_fixed32(), std::back_inserter(self->get_repeated_fixed32()));
+      update->get_repeated_fixed32().clear();
+    }},
+    {"repeated_fixed64", [](auto, auto* self, auto* update) {
+      std::ranges::move(update->get_repeated_fixed64(), std::back_inserter(self->get_repeated_fixed64()));
+      update->get_repeated_fixed64().clear();
+    }},
+    {"repeated_sfixed32", [](auto, auto* self, auto* update) {
+      std::ranges::move(update->get_repeated_sfixed32(), std::back_inserter(self->get_repeated_sfixed32()));
+      update->get_repeated_sfixed32().clear();
+    }},
+    {"repeated_sfixed64", [](auto, auto* self, auto* update) {
+      std::ranges::move(update->get_repeated_sfixed64(), std::back_inserter(self->get_repeated_sfixed64()));
+      update->get_repeated_sfixed64().clear();
+    }},
+    {"repeated_float", [](auto, auto* self, auto* update) {
+      std::ranges::move(update->get_repeated_float(), std::back_inserter(self->get_repeated_float()));
+      update->get_repeated_float().clear();
+    }},
+    {"repeated_double", [](auto, auto* self, auto* update) {
+      std::ranges::move(update->get_repeated_double(), std::back_inserter(self->get_repeated_double()));
+      update->get_repeated_double().clear();
+    }},
+    {"repeated_bool", [](auto, auto* self, auto* update) {
+      std::ranges::move(update->get_repeated_bool(), std::back_inserter(self->get_repeated_bool()));
+      update->get_repeated_bool().clear();
+    }},
+    {"repeated_string", [](auto, auto* self, auto* update) {
+      std::ranges::move(update->get_repeated_string(), std::back_inserter(self->get_repeated_string()));
+      update->get_repeated_string().clear();
+    }},
+    {"repeated_bytes", [](auto, auto* self, auto* update) {
+      std::ranges::move(update->get_repeated_bytes(), std::back_inserter(self->get_repeated_bytes()));
+      update->get_repeated_bytes().clear();
+    }},
+    {"repeated_nested_message", [](auto, auto* self, auto* update) {
+      std::ranges::move(update->get_repeated_nested_message(), std::back_inserter(self->get_repeated_nested_message()));
+      update->get_repeated_nested_message().clear();
+    }},
+    {"repeated_foreign_message", [](auto, auto* self, auto* update) {
+      std::ranges::move(update->get_repeated_foreign_message(), std::back_inserter(self->get_repeated_foreign_message()));
+      update->get_repeated_foreign_message().clear();
+    }},
+    {"repeated_nested_enum", [](auto, auto* self, auto* update) {
+      std::ranges::move(update->get_repeated_nested_enum(), std::back_inserter(self->get_repeated_nested_enum()));
+      update->get_repeated_nested_enum().clear();
+    }},
+    {"repeated_foreign_enum", [](auto, auto* self, auto* update) {
+      std::ranges::move(update->get_repeated_foreign_enum(), std::back_inserter(self->get_repeated_foreign_enum()));
+      update->get_repeated_foreign_enum().clear();
+    }},
+    {"repeated_string_piece", [](auto, auto* self, auto* update) {
+      std::ranges::move(update->get_repeated_string_piece(), std::back_inserter(self->get_repeated_string_piece()));
+      update->get_repeated_string_piece().clear();
+    }},
+    {"repeated_cord", [](auto, auto* self, auto* update) {
+      std::ranges::move(update->get_repeated_cord(), std::back_inserter(self->get_repeated_cord()));
+      update->get_repeated_cord().clear();
+    }},
+    {"packed_int32", [](auto, auto* self, auto* update) {
+      std::ranges::move(update->get_packed_int32(), std::back_inserter(self->get_packed_int32()));
+      update->get_packed_int32().clear();
+    }},
+    {"packed_int64", [](auto, auto* self, auto* update) {
+      std::ranges::move(update->get_packed_int64(), std::back_inserter(self->get_packed_int64()));
+      update->get_packed_int64().clear();
+    }},
+    {"packed_uint32", [](auto, auto* self, auto* update) {
+      std::ranges::move(update->get_packed_uint32(), std::back_inserter(self->get_packed_uint32()));
+      update->get_packed_uint32().clear();
+    }},
+    {"packed_uint64", [](auto, auto* self, auto* update) {
+      std::ranges::move(update->get_packed_uint64(), std::back_inserter(self->get_packed_uint64()));
+      update->get_packed_uint64().clear();
+    }},
+    {"packed_sint32", [](auto, auto* self, auto* update) {
+      std::ranges::move(update->get_packed_sint32(), std::back_inserter(self->get_packed_sint32()));
+      update->get_packed_sint32().clear();
+    }},
+    {"packed_sint64", [](auto, auto* self, auto* update) {
+      std::ranges::move(update->get_packed_sint64(), std::back_inserter(self->get_packed_sint64()));
+      update->get_packed_sint64().clear();
+    }},
+    {"packed_fixed32", [](auto, auto* self, auto* update) {
+      std::ranges::move(update->get_packed_fixed32(), std::back_inserter(self->get_packed_fixed32()));
+      update->get_packed_fixed32().clear();
+    }},
+    {"packed_fixed64", [](auto, auto* self, auto* update) {
+      std::ranges::move(update->get_packed_fixed64(), std::back_inserter(self->get_packed_fixed64()));
+      update->get_packed_fixed64().clear();
+    }},
+    {"packed_sfixed32", [](auto, auto* self, auto* update) {
+      std::ranges::move(update->get_packed_sfixed32(), std::back_inserter(self->get_packed_sfixed32()));
+      update->get_packed_sfixed32().clear();
+    }},
+    {"packed_sfixed64", [](auto, auto* self, auto* update) {
+      std::ranges::move(update->get_packed_sfixed64(), std::back_inserter(self->get_packed_sfixed64()));
+      update->get_packed_sfixed64().clear();
+    }},
+    {"packed_float", [](auto, auto* self, auto* update) {
+      std::ranges::move(update->get_packed_float(), std::back_inserter(self->get_packed_float()));
+      update->get_packed_float().clear();
+    }},
+    {"packed_double", [](auto, auto* self, auto* update) {
+      std::ranges::move(update->get_packed_double(), std::back_inserter(self->get_packed_double()));
+      update->get_packed_double().clear();
+    }},
+    {"packed_bool", [](auto, auto* self, auto* update) {
+      std::ranges::move(update->get_packed_bool(), std::back_inserter(self->get_packed_bool()));
+      update->get_packed_bool().clear();
+    }},
+    {"packed_nested_enum", [](auto, auto* self, auto* update) {
+      std::ranges::move(update->get_packed_nested_enum(), std::back_inserter(self->get_packed_nested_enum()));
+      update->get_packed_nested_enum().clear();
+    }},
+    {"unpacked_int32", [](auto, auto* self, auto* update) {
+      std::ranges::move(update->get_unpacked_int32(), std::back_inserter(self->get_unpacked_int32()));
+      update->get_unpacked_int32().clear();
+    }},
+    {"unpacked_int64", [](auto, auto* self, auto* update) {
+      std::ranges::move(update->get_unpacked_int64(), std::back_inserter(self->get_unpacked_int64()));
+      update->get_unpacked_int64().clear();
+    }},
+    {"unpacked_uint32", [](auto, auto* self, auto* update) {
+      std::ranges::move(update->get_unpacked_uint32(), std::back_inserter(self->get_unpacked_uint32()));
+      update->get_unpacked_uint32().clear();
+    }},
+    {"unpacked_uint64", [](auto, auto* self, auto* update) {
+      std::ranges::move(update->get_unpacked_uint64(), std::back_inserter(self->get_unpacked_uint64()));
+      update->get_unpacked_uint64().clear();
+    }},
+    {"unpacked_sint32", [](auto, auto* self, auto* update) {
+      std::ranges::move(update->get_unpacked_sint32(), std::back_inserter(self->get_unpacked_sint32()));
+      update->get_unpacked_sint32().clear();
+    }},
+    {"unpacked_sint64", [](auto, auto* self, auto* update) {
+      std::ranges::move(update->get_unpacked_sint64(), std::back_inserter(self->get_unpacked_sint64()));
+      update->get_unpacked_sint64().clear();
+    }},
+    {"unpacked_fixed32", [](auto, auto* self, auto* update) {
+      std::ranges::move(update->get_unpacked_fixed32(), std::back_inserter(self->get_unpacked_fixed32()));
+      update->get_unpacked_fixed32().clear();
+    }},
+    {"unpacked_fixed64", [](auto, auto* self, auto* update) {
+      std::ranges::move(update->get_unpacked_fixed64(), std::back_inserter(self->get_unpacked_fixed64()));
+      update->get_unpacked_fixed64().clear();
+    }},
+    {"unpacked_sfixed32", [](auto, auto* self, auto* update) {
+      std::ranges::move(update->get_unpacked_sfixed32(), std::back_inserter(self->get_unpacked_sfixed32()));
+      update->get_unpacked_sfixed32().clear();
+    }},
+    {"unpacked_sfixed64", [](auto, auto* self, auto* update) {
+      std::ranges::move(update->get_unpacked_sfixed64(), std::back_inserter(self->get_unpacked_sfixed64()));
+      update->get_unpacked_sfixed64().clear();
+    }},
+    {"unpacked_float", [](auto, auto* self, auto* update) {
+      std::ranges::move(update->get_unpacked_float(), std::back_inserter(self->get_unpacked_float()));
+      update->get_unpacked_float().clear();
+    }},
+    {"unpacked_double", [](auto, auto* self, auto* update) {
+      std::ranges::move(update->get_unpacked_double(), std::back_inserter(self->get_unpacked_double()));
+      update->get_unpacked_double().clear();
+    }},
+    {"unpacked_bool", [](auto, auto* self, auto* update) {
+      std::ranges::move(update->get_unpacked_bool(), std::back_inserter(self->get_unpacked_bool()));
+      update->get_unpacked_bool().clear();
+    }},
+    {"unpacked_nested_enum", [](auto, auto* self, auto* update) {
+      std::ranges::move(update->get_unpacked_nested_enum(), std::back_inserter(self->get_unpacked_nested_enum()));
+      update->get_unpacked_nested_enum().clear();
+    }},
+    {"map_int32_int32", [](auto, auto* self, auto* update) {
+      for (auto& [k, v] : update->get_map_int32_int32()) {
+        self->get_map_int32_int32().insert_or_assign(std::move(k), std::move(v));
+      }
+      update->get_map_int32_int32().clear();
+    }},
+    {"map_int64_int64", [](auto, auto* self, auto* update) {
+      for (auto& [k, v] : update->get_map_int64_int64()) {
+        self->get_map_int64_int64().insert_or_assign(std::move(k), std::move(v));
+      }
+      update->get_map_int64_int64().clear();
+    }},
+    {"map_uint32_uint32", [](auto, auto* self, auto* update) {
+      for (auto& [k, v] : update->get_map_uint32_uint32()) {
+        self->get_map_uint32_uint32().insert_or_assign(std::move(k), std::move(v));
+      }
+      update->get_map_uint32_uint32().clear();
+    }},
+    {"map_uint64_uint64", [](auto, auto* self, auto* update) {
+      for (auto& [k, v] : update->get_map_uint64_uint64()) {
+        self->get_map_uint64_uint64().insert_or_assign(std::move(k), std::move(v));
+      }
+      update->get_map_uint64_uint64().clear();
+    }},
+    {"map_sint32_sint32", [](auto, auto* self, auto* update) {
+      for (auto& [k, v] : update->get_map_sint32_sint32()) {
+        self->get_map_sint32_sint32().insert_or_assign(std::move(k), std::move(v));
+      }
+      update->get_map_sint32_sint32().clear();
+    }},
+    {"map_sint64_sint64", [](auto, auto* self, auto* update) {
+      for (auto& [k, v] : update->get_map_sint64_sint64()) {
+        self->get_map_sint64_sint64().insert_or_assign(std::move(k), std::move(v));
+      }
+      update->get_map_sint64_sint64().clear();
+    }},
+    {"map_fixed32_fixed32", [](auto, auto* self, auto* update) {
+      for (auto& [k, v] : update->get_map_fixed32_fixed32()) {
+        self->get_map_fixed32_fixed32().insert_or_assign(std::move(k), std::move(v));
+      }
+      update->get_map_fixed32_fixed32().clear();
+    }},
+    {"map_fixed64_fixed64", [](auto, auto* self, auto* update) {
+      for (auto& [k, v] : update->get_map_fixed64_fixed64()) {
+        self->get_map_fixed64_fixed64().insert_or_assign(std::move(k), std::move(v));
+      }
+      update->get_map_fixed64_fixed64().clear();
+    }},
+    {"map_sfixed32_sfixed32", [](auto, auto* self, auto* update) {
+      for (auto& [k, v] : update->get_map_sfixed32_sfixed32()) {
+        self->get_map_sfixed32_sfixed32().insert_or_assign(std::move(k), std::move(v));
+      }
+      update->get_map_sfixed32_sfixed32().clear();
+    }},
+    {"map_sfixed64_sfixed64", [](auto, auto* self, auto* update) {
+      for (auto& [k, v] : update->get_map_sfixed64_sfixed64()) {
+        self->get_map_sfixed64_sfixed64().insert_or_assign(std::move(k), std::move(v));
+      }
+      update->get_map_sfixed64_sfixed64().clear();
+    }},
+    {"map_int32_float", [](auto, auto* self, auto* update) {
+      for (auto& [k, v] : update->get_map_int32_float()) {
+        self->get_map_int32_float().insert_or_assign(std::move(k), std::move(v));
+      }
+      update->get_map_int32_float().clear();
+    }},
+    {"map_int32_double", [](auto, auto* self, auto* update) {
+      for (auto& [k, v] : update->get_map_int32_double()) {
+        self->get_map_int32_double().insert_or_assign(std::move(k), std::move(v));
+      }
+      update->get_map_int32_double().clear();
+    }},
+    {"map_bool_bool", [](auto, auto* self, auto* update) {
+      for (auto& [k, v] : update->get_map_bool_bool()) {
+        self->get_map_bool_bool().insert_or_assign(std::move(k), std::move(v));
+      }
+      update->get_map_bool_bool().clear();
+    }},
+    {"map_string_string", [](auto, auto* self, auto* update) {
+      for (auto& [k, v] : update->get_map_string_string()) {
+        self->get_map_string_string().insert_or_assign(std::move(k), std::move(v));
+      }
+      update->get_map_string_string().clear();
+    }},
+    {"map_string_bytes", [](auto, auto* self, auto* update) {
+      for (auto& [k, v] : update->get_map_string_bytes()) {
+        self->get_map_string_bytes().insert_or_assign(std::move(k), std::move(v));
+      }
+      update->get_map_string_bytes().clear();
+    }},
+    {"map_string_nested_message", [](auto, auto* self, auto* update) {
+      for (auto& [k, v] : update->get_map_string_nested_message()) {
+        self->get_map_string_nested_message().insert_or_assign(std::move(k), std::move(v));
+      }
+      update->get_map_string_nested_message().clear();
+    }},
+    {"map_string_foreign_message", [](auto, auto* self, auto* update) {
+      for (auto& [k, v] : update->get_map_string_foreign_message()) {
+        self->get_map_string_foreign_message().insert_or_assign(std::move(k), std::move(v));
+      }
+      update->get_map_string_foreign_message().clear();
+    }},
+    {"map_string_nested_enum", [](auto, auto* self, auto* update) {
+      for (auto& [k, v] : update->get_map_string_nested_enum()) {
+        self->get_map_string_nested_enum().insert_or_assign(std::move(k), std::move(v));
+      }
+      update->get_map_string_nested_enum().clear();
+    }},
+    {"map_string_foreign_enum", [](auto, auto* self, auto* update) {
+      for (auto& [k, v] : update->get_map_string_foreign_enum()) {
+        self->get_map_string_foreign_enum().insert_or_assign(std::move(k), std::move(v));
+      }
+      update->get_map_string_foreign_enum().clear();
+    }},
+    {"oneof_uint32", []([[maybe_unused]] auto path, auto* self, auto* update) {
+      if (update->has_oneof_uint32()) {
+        self->set_oneof_uint32(std::move(update->get_oneof_uint32()));
+      } else {
+        self->set_oneof_uint32({});
+      }
+    }},
+    {"oneof_nested_message", []([[maybe_unused]] auto path, auto* self, auto* update) {
+      if (update->has_oneof_nested_message()) {
+        self->get_oneof_nested_message().apply_field_path_from(path, &update->get_oneof_nested_message());
+      } else {
+        self->set_oneof_nested_message({});
+      }
+    }},
+    {"oneof_string", []([[maybe_unused]] auto path, auto* self, auto* update) {
+      if (update->has_oneof_string()) {
+        self->set_oneof_string(std::move(update->get_oneof_string()));
+      } else {
+        self->set_oneof_string({});
+      }
+    }},
+    {"oneof_bytes", []([[maybe_unused]] auto path, auto* self, auto* update) {
+      if (update->has_oneof_bytes()) {
+        self->set_oneof_bytes(std::move(update->get_oneof_bytes()));
+      } else {
+        self->set_oneof_bytes({});
+      }
+    }},
+    {"oneof_bool", []([[maybe_unused]] auto path, auto* self, auto* update) {
+      if (update->has_oneof_bool()) {
+        self->set_oneof_bool(std::move(update->get_oneof_bool()));
+      } else {
+        self->set_oneof_bool({});
+      }
+    }},
+    {"oneof_uint64", []([[maybe_unused]] auto path, auto* self, auto* update) {
+      if (update->has_oneof_uint64()) {
+        self->set_oneof_uint64(std::move(update->get_oneof_uint64()));
+      } else {
+        self->set_oneof_uint64({});
+      }
+    }},
+    {"oneof_float", []([[maybe_unused]] auto path, auto* self, auto* update) {
+      if (update->has_oneof_float()) {
+        self->set_oneof_float(std::move(update->get_oneof_float()));
+      } else {
+        self->set_oneof_float({});
+      }
+    }},
+    {"oneof_double", []([[maybe_unused]] auto path, auto* self, auto* update) {
+      if (update->has_oneof_double()) {
+        self->set_oneof_double(std::move(update->get_oneof_double()));
+      } else {
+        self->set_oneof_double({});
+      }
+    }},
+    {"oneof_enum", []([[maybe_unused]] auto path, auto* self, auto* update) {
+      if (update->has_oneof_enum()) {
+        self->set_oneof_enum(std::move(update->get_oneof_enum()));
+      } else {
+        self->set_oneof_enum({});
+      }
+    }},
+    {"groupliketype", []([[maybe_unused]] auto path, auto* self, auto* update) {
+      self->get_groupliketype().apply_field_path_from(path, &update->get_groupliketype());
+    }},
+    {"delimited_field", []([[maybe_unused]] auto path, auto* self, auto* update) {
+      self->get_delimited_field().apply_field_path_from(path, &update->get_delimited_field());
+    }},
+  });
+  for (const auto& [name, apply] : fields) {
+    if (path.front() == name) {
+      return apply(path.subspan(1), this, update);
+    }
+  }
+}
 
 foreign_message_edition2023::foreign_message_edition2023() noexcept = default;
 foreign_message_edition2023::foreign_message_edition2023(foreign_message_edition2023&&) noexcept = default;
@@ -4399,6 +5075,34 @@ seastar::future<foreign_message_edition2023> foreign_message_edition2023::from_j
   co_await from_json(&parser, &self);
   co_await serde::pb::json::check_next_eof(&parser);
   co_return self;
+}
+bool foreign_message_edition2023::is_valid_field_path(std::span<const ss::sstring> path) {
+  if (path.empty()) { return true; }
+  constexpr auto fields = std::to_array<std::pair<std::string_view, bool(*)(decltype(path))>>({
+    {"c", [](auto path) { return path.empty(); }},
+  });
+  for (const auto& [name, is_valid] : fields) {
+    if (path.front() == name) {
+      return is_valid(path.subspan(1));
+    }
+  }
+  return false;
+}
+void foreign_message_edition2023::apply_field_path_from(std::span<const ss::sstring> path, foreign_message_edition2023* update) {
+  if (path.empty()) {
+    *this = std::move(*update);
+    return;
+  }
+  constexpr auto fields = std::to_array<std::pair<std::string_view, void(*)(decltype(path), decltype(this), decltype(update))>>({
+    {"c", []([[maybe_unused]] auto path, auto* self, auto* update) {
+      self->set_c(std::move(update->get_c()));
+    }},
+  });
+  for (const auto& [name, apply] : fields) {
+    if (path.front() == name) {
+      return apply(path.subspan(1), this, update);
+    }
+  }
 }
 
 void enum_from_proto(iobuf_parser* p, test_all_types_edition2023_nested_enum* e) {
