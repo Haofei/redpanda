@@ -12,7 +12,7 @@
 #include "base/seastarx.h"
 #include "cloud_topics/level_one/metastore/metastore.h"
 
-namespace experimental::cloud_topics::l1 {
+namespace cloud_topics::l1 {
 class frontend;
 
 // Implementation of the `metastore` interface that routes metadata requests
@@ -54,4 +54,4 @@ private:
     frontend& fe_;
 };
 
-} // namespace experimental::cloud_topics::l1
+} // namespace cloud_topics::l1

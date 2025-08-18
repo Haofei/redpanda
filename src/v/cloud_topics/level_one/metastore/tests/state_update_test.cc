@@ -18,8 +18,8 @@
 
 #include <gtest/gtest.h>
 
-using namespace experimental::cloud_topics;
-using namespace experimental::cloud_topics::l1;
+using namespace cloud_topics;
+using namespace cloud_topics::l1;
 
 namespace {
 const object_id oid1 = l1::create_object_id();

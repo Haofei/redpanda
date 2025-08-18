@@ -15,7 +15,7 @@
 
 #include <seastar/core/future.hh>
 
-namespace experimental::cloud_topics::l1 {
+namespace cloud_topics::l1 {
 
 class simple_metastore;
 class simple_object_builder : public metastore::object_metadata_builder {
@@ -95,4 +95,4 @@ private:
     state state_;
 };
 
-} // namespace experimental::cloud_topics::l1
+} // namespace cloud_topics::l1

@@ -13,8 +13,8 @@
 
 #include <gtest/gtest.h>
 
-using namespace experimental::cloud_topics;
-using namespace experimental::cloud_topics::l1;
+using namespace cloud_topics;
+using namespace cloud_topics::l1;
 
 namespace {
 

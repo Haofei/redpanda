@@ -14,7 +14,7 @@
 
 #include <gtest/gtest.h>
 
-using consumer = experimental::cloud_topics::reconciler::range_batch_consumer;
+using consumer = cloud_topics::reconciler::range_batch_consumer;
 
 model::record_batch_reader make_reader(
   int offset, int record_size, int num_batches, int records_per_batch) {

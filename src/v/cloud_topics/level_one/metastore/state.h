@@ -24,7 +24,7 @@
 
 #include <expected>
 
-namespace experimental::cloud_topics::l1 {
+namespace cloud_topics::l1 {
 
 // Represents the state managed by the replicated state machine that serves L1
 // metadata.
@@ -258,4 +258,4 @@ struct stm_snapshot
     auto serde_fields() { return std::tie(state); }
 };
 
-} // namespace experimental::cloud_topics::l1
+} // namespace cloud_topics::l1

@@ -11,7 +11,7 @@
 
 #include "model/fundamental.h"
 
-namespace experimental::cloud_topics::l1 {
+namespace cloud_topics::l1 {
 
 namespace {
 
@@ -574,4 +574,4 @@ replace_objects_update::build(
     return update;
 }
 
-} // namespace experimental::cloud_topics::l1
+} // namespace cloud_topics::l1

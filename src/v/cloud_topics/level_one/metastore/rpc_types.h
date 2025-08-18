@@ -19,7 +19,7 @@
 
 #include <fmt/format.h>
 
-namespace experimental::cloud_topics::l1::rpc {
+namespace cloud_topics::l1::rpc {
 
 enum class errc : int16_t {
     ok = 0,
@@ -187,12 +187,12 @@ struct get_compaction_offsets_request
     model::timestamp tombstone_removal_upper_bound_ts;
 };
 
-} //  namespace experimental::cloud_topics::l1::rpc
+} //  namespace cloud_topics::l1::rpc
 
 template<>
-struct fmt::formatter<experimental::cloud_topics::l1::rpc::errc> final
+struct fmt::formatter<cloud_topics::l1::rpc::errc> final
   : fmt::formatter<std::string_view> {
-    using errc = experimental::cloud_topics::l1::rpc::errc;
+    using errc = cloud_topics::l1::rpc::errc;
     template<typename FormatContext>
     auto format(const errc& ec, FormatContext& ctx) const {
         switch (ec) {

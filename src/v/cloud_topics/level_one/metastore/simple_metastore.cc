@@ -16,7 +16,7 @@
 
 #include <seastar/core/coroutine.hh>
 
-namespace experimental::cloud_topics::l1 {
+namespace cloud_topics::l1 {
 
 namespace {
 term_state_update_t make_terms_update(const metastore::term_offset_map_t& m) {
@@ -372,4 +372,4 @@ simple_metastore::get_compaction_offsets(
     return resp;
 }
 
-} // namespace experimental::cloud_topics::l1
+} // namespace cloud_topics::l1

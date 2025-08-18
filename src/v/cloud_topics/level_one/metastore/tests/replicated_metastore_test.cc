@@ -15,7 +15,7 @@
 #include "model/fundamental.h"
 #include "model/namespace.h"
 
-using namespace experimental::cloud_topics::l1;
+using namespace cloud_topics::l1;
 
 namespace {
 using o = kafka::offset;
@@ -26,7 +26,7 @@ MATCHER_P2(MatchesRange, base, last, "") {
 
 } // namespace
 class ReplicatedMetastoreTest
-  : public experimental::cloud_topics::cluster_fixture
+  : public cloud_topics::cluster_fixture
   , public ::testing::Test {
 public:
     static constexpr size_t num_brokers = 3;

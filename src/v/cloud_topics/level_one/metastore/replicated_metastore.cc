@@ -14,7 +14,7 @@
 #include "cloud_topics/level_one/metastore/state_update.h"
 #include "cloud_topics/logger.h"
 
-namespace experimental::cloud_topics::l1 {
+namespace cloud_topics::l1 {
 
 namespace {
 
@@ -96,7 +96,7 @@ public:
     std::expected<void, error> finish(object_id, size_t footer_pos) override;
 
 private:
-    friend class experimental::cloud_topics::l1::replicated_metastore;
+    friend class cloud_topics::l1::replicated_metastore;
     std::expected<
       chunked_hash_map<
         model::partition_id,
@@ -485,4 +485,4 @@ replicated_metastore::get_compaction_offsets(
     co_return resp;
 }
 
-} // namespace experimental::cloud_topics::l1
+} // namespace cloud_topics::l1

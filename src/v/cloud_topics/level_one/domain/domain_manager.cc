@@ -13,7 +13,7 @@
 #include "cloud_topics/level_one/metastore/simple_metastore.h"
 #include "cloud_topics/logger.h"
 
-namespace experimental::cloud_topics::l1 {
+namespace cloud_topics::l1 {
 namespace {
 rpc::errc convert_stm_errc(simple_stm::errc e) {
     switch (e) {
@@ -306,4 +306,4 @@ domain_manager::get_compaction_offsets(
     };
 }
 
-} // namespace experimental::cloud_topics::l1
+} // namespace cloud_topics::l1

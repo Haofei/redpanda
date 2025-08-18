@@ -18,7 +18,7 @@
 
 #include <expected>
 
-namespace experimental::cloud_topics::l1 {
+namespace cloud_topics::l1 {
 
 enum class update_key : uint8_t {
     add_objects = 0,
@@ -159,19 +159,18 @@ struct replace_objects_update
       compaction_updates;
 };
 
-} // namespace experimental::cloud_topics::l1
+} // namespace cloud_topics::l1
 
 template<>
-struct fmt::formatter<experimental::cloud_topics::l1::update_key> final
+struct fmt::formatter<cloud_topics::l1::update_key> final
   : fmt::formatter<std::string_view> {
     template<typename FormatContext>
-    auto format(
-      const experimental::cloud_topics::l1::update_key& k,
-      FormatContext& ctx) const {
+    auto
+    format(const cloud_topics::l1::update_key& k, FormatContext& ctx) const {
         switch (k) {
-        case experimental::cloud_topics::l1::update_key::add_objects:
+        case cloud_topics::l1::update_key::add_objects:
             return formatter<string_view>::format("add_objects", ctx);
-        case experimental::cloud_topics::l1::update_key::replace_objects:
+        case cloud_topics::l1::update_key::replace_objects:
             return formatter<string_view>::format("replace_objects", ctx);
         }
     }

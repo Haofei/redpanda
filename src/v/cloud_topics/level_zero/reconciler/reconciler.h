@@ -26,11 +26,11 @@
 
 #include <optional>
 
-namespace experimental::cloud_topics {
+namespace cloud_topics {
 class data_plane_api;
 }
 
-namespace experimental::cloud_topics::reconciler {
+namespace cloud_topics::reconciler {
 
 /*
  * The reconciler runs on every shard. It queries the leader of cloud topic
@@ -159,4 +159,4 @@ private:
     ss::abort_source _as;
 };
 
-} // namespace experimental::cloud_topics::reconciler
+} // namespace cloud_topics::reconciler

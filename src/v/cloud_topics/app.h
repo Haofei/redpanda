@@ -30,7 +30,7 @@ namespace storage {
 class api;
 } // namespace storage
 
-namespace experimental::cloud_topics {
+namespace cloud_topics {
 class data_plane_api;
 
 class app : public ssx::sharded_service_container {
@@ -76,4 +76,4 @@ private:
     ss::sharded<l1::frontend> l1_metastore_fe;
 };
 
-} // namespace experimental::cloud_topics
+} // namespace cloud_topics

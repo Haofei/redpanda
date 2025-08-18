@@ -21,7 +21,7 @@
 
 #include <expected>
 
-namespace experimental::cloud_topics::l1 {
+namespace cloud_topics::l1 {
 
 // Interface to interact with the L1 metastore. Meant to be totally agnostic to
 // the underlying implementation, whether it's an in-memory store, replicated
@@ -277,16 +277,15 @@ public:
       = 0;
 };
 
-} // namespace experimental::cloud_topics::l1
+} // namespace cloud_topics::l1
 
 template<>
-struct fmt::formatter<experimental::cloud_topics::l1::metastore::errc> final
+struct fmt::formatter<cloud_topics::l1::metastore::errc> final
   : fmt::formatter<std::string_view> {
     template<typename FormatContext>
     auto format(
-      const experimental::cloud_topics::l1::metastore::errc& k,
-      FormatContext& ctx) const {
-        using enum experimental::cloud_topics::l1::metastore::errc;
+      const cloud_topics::l1::metastore::errc& k, FormatContext& ctx) const {
+        using enum cloud_topics::l1::metastore::errc;
         switch (k) {
         case invalid_request:
             return formatter<string_view>::format(
