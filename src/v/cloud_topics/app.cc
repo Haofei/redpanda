@@ -16,6 +16,7 @@
 #include "cloud_topics/manager/manager.h"
 #include "cluster/cluster_epoch_service.h"
 #include "cluster/controller.h"
+#include "config/node_config.h"
 #include "ssx/sharded_service_container.h"
 
 #include <seastar/core/coroutine.hh>
@@ -50,13 +51,26 @@ ss::future<> app::construct(
 
     co_await construct_service(state, data_plane.get());
 
+    // Touch the L1 staging directory before L1 i/o starts.
+    co_await ss::recursive_touch_directory(
+      config::node().l1_staging_path().string());
+
+    co_await construct_service(
+      l1_io,
+      config::node().l1_staging_path(),
+      ss::sharded_parameter([&remote] { return &remote->local(); }),
+      bucket,
+      ss::sharded_parameter([&cloud_cache] { return &cloud_cache->local(); }));
+
     co_await construct_service(
       reconciler,
       ss::sharded_parameter(
         [&partition_mgr] { return &partition_mgr->local(); }),
-      remote,
       data_plane.get(),
-      bucket);
+      ss::sharded_parameter([this] { return &l1_io.local(); }),
+      ss::sharded_parameter(
+        [&metadata_cache] { return &metadata_cache->local(); }));
+
     co_await construct_service(domain_supervisor, controller);
     co_await construct_service(
       l1_metastore_fe,

@@ -4,13 +4,21 @@ package(default_visibility = ["//src/v/cloud_topics/level_one:__subpackages__"])
 
 redpanda_cc_library(
     name = "object_id",
+    srcs = [
+        "object_id.cc",
+    ],
     hdrs = [
         "object_id.h",
+    ],
+    visibility = [
+        "//src/v/cloud_topics/level_one:__subpackages__",
+        "//src/v/cloud_topics/reconciler:__subpackages__",
     ],
     deps = [
         "//src/v/base",
         "//src/v/utils:named_type",
         "//src/v/utils:uuid",
+        "@fmt",
     ],
 )
 
@@ -67,6 +75,10 @@ redpanda_cc_library(
     name = "abstract_io",
     srcs = ["abstract_io.cc"],
     hdrs = ["abstract_io.h"],
+    visibility = [
+        "//src/v/cloud_topics/level_one:__subpackages__",
+        "//src/v/cloud_topics/reconciler:__subpackages__",
+    ],
     deps = [
         ":object_id",
         "//src/v/container:chunked_vector",
@@ -79,6 +91,11 @@ redpanda_cc_library(
     name = "file_io",
     srcs = ["file_io.cc"],
     hdrs = ["file_io.h"],
+    visibility = [
+        "//src/v/cloud_topics:__pkg__",
+        "//src/v/cloud_topics/level_one:__subpackages__",
+        "//src/v/cloud_topics/reconciler:__pkg__",
+    ],
     deps = [
         ":abstract_io",
         ":object_id",
