@@ -125,7 +125,7 @@ class EndToEndCloudTopicsTxTest(EndToEndCloudTopicsBase):
             self.topic,
             msg_size=self.msg_size,
             msg_count=self.msg_count,
-            use_transactions=False,
+            use_transactions=True,
             transaction_abort_rate=0.1,
             msgs_per_transaction=self.per_transaction,
             debug_logs=True)
