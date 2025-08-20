@@ -2047,7 +2047,15 @@ describe_groups_handler::handle(request_context ctx, ss::smp_service_group) {
               [&ctx, &request, group_id](auto res) {
                   if (request.data.include_authorized_operations) {
                       res.authorized_operations = details::to_bit_field(
-                        details::authorized_operations(ctx, group_id));
+                        details::authorized_operations<kafka::group_id>(
+                          [&ctx](
+                            security::acl_operation op,
+                            const kafka::group_id& resource,
+                            authz_quiet q,
+                            audit_authz_check c) {
+                              return ctx.authorized(op, resource, q, c);
+                          },
+                          group_id));
                   }
                   return res;
               }));

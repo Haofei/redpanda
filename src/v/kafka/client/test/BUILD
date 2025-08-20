@@ -321,6 +321,7 @@ redpanda_cc_btest(
         "//src/v/kafka/protocol",
         "//src/v/kafka/protocol:metadata",
         "//src/v/kafka/server",
+        "//src/v/kafka/server:security",
         "//src/v/model",
         "//src/v/redpanda/tests:fixture",
         "//src/v/security",
