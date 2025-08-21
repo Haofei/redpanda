@@ -266,7 +266,7 @@ async def main():
                         help="path to ubsan_suppressions.txt")
     parser.add_argument("--lsan_suppression_file",
                         type=pathlib.Path,
-                        help="path lsan_suppressions.txt")
+                        help="path to lsan_suppressions.txt")
     parser.add_argument("--nodes", type=int, help="number of nodes", default=3)
     parser.add_argument("--cores",
                         type=int,
