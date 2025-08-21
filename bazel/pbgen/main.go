@@ -395,6 +395,7 @@ func (g *headerGenerator) generateFile(w *codewriter) {
 	for i := range g.file.Services().Len() {
 		service := g.file.Services().Get(i)
 		g.generateService(service, w)
+		g.generateClient(service, w)
 	}
 }
 
@@ -442,6 +443,49 @@ func (g *headerGenerator) generateService(service protoreflect.ServiceDescriptor
 			pascalToSnakeCase(string(method.Name())),
 		)
 	}
+}
+
+func (g *headerGenerator) generateClient(service protoreflect.ServiceDescriptor, w *codewriter) {
+	g.needsRpcs = true
+	g.leadingComments(service, w)
+	cppName := cppTypeName(service)
+	w.Printf("class %s_client {\n", cppName)
+	defer w.Println("};")
+	w.Println("public:")
+	w.Indent()
+	defer w.Dedent()
+	w.Println("// This defines the transport layer for the RPC client.")
+	w.Println("//")
+	w.Println("// This function should take a context with the RPC metadata and the iobuf containing the request.")
+	w.Println("// It should only throw subclasses of serde::pb::rpc::base_exception.")
+	w.Println("// NOTE: This RPC client only uses protobuf serialization at the moment.")
+	w.Println("using send_rpc_fn_t = std::function<seastar::future<iobuf>(serde::pb::rpc::context, iobuf)>;")
+	w.Println()
+	w.Printf("%s_client(send_rpc_fn_t fn) : send_rpc_fn_(std::move(fn)) {}\n", cppName)
+	w.Printf("%s_client& operator=(const %s_client&) noexcept = delete;\n", cppName, cppName)
+	w.Printf("%s_client(const %s_client&) noexcept = delete;\n", cppName, cppName)
+	w.Printf("%s_client& operator=(%s_client&&) noexcept = default;\n", cppName, cppName)
+	w.Printf("%s_client(%s_client&&) noexcept = default;\n", cppName, cppName)
+	w.Printf("virtual ~%s_client() noexcept = default;\n", cppName)
+	w.Println()
+	w.Println("// Return the name of this RPC service")
+	w.Printf("std::string_view name() const { return %q; }\n", service.FullName())
+	w.Println()
+	for i := range service.Methods().Len() {
+		method := service.Methods().Get(i)
+		g.leadingComments(method, w)
+		w.Printf(
+			"seastar::future<%s> %s(serde::pb::rpc::context, %s);\n",
+			cppTypeName(method.Output()),
+			pascalToSnakeCase(string(method.Name())),
+			cppTypeName(method.Input()),
+		)
+	}
+	w.Dedent()
+	w.Println()
+	w.Println("private:")
+	w.Indent()
+	w.Println("send_rpc_fn_t send_rpc_fn_;")
 }
 
 func (g *headerGenerator) generateEnumSerde(msg protoreflect.EnumDescriptor, w *codewriter) {
@@ -659,6 +703,7 @@ func (g *implGenerator) generateFile(w *codewriter) {
 		service := g.file.Services().Get(i)
 		g.generateServiceRoutes(service, w)
 		g.generateServiceHandlers(service, w)
+		g.generateServiceClient(service, w)
 		w.Println()
 	}
 }
@@ -882,6 +927,28 @@ func (g *implGenerator) generateServiceHandlers(service protoreflect.ServiceDesc
 		w.Println("co_return is_json ? co_await output.to_json() : co_await output.to_proto();")
 		w.Dedent()
 		w.Println("}\n")
+	}
+}
+
+func (g *implGenerator) generateServiceClient(service protoreflect.ServiceDescriptor, w *codewriter) {
+	for i := range service.Methods().Len() {
+		method := service.Methods().Get(i)
+		w.Printf(
+			"seastar::future<%s> %s_client::%s(serde::pb::rpc::context ctx, %s input) {\n",
+			cppTypeName(method.Output()),
+			cppTypeName(service),
+			pascalToSnakeCase(string(method.Name())),
+			cppTypeName(method.Input()),
+		)
+		w.Indent()
+		w.Println("iobuf payload = co_await input.to_proto();")
+		w.Printf("ctx.service_name = %q;\n", service.FullName())
+		w.Printf("ctx.method_name = %q;\n", method.Name())
+		w.Println("ctx.content_type = serde::pb::rpc::content_type::proto;")
+		w.Println("payload = co_await send_rpc_fn_(std::move(ctx), std::move(payload));")
+		w.Printf("co_return co_await %s::from_proto(std::move(payload));\n", cppTypeName(method.Output()))
+		w.Dedent()
+		w.Println("}")
 	}
 }
 

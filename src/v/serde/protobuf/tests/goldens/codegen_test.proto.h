@@ -7,6 +7,7 @@
 #include "bytes/iobuf.h"
 #include "container/chunked_hash_map.h"
 #include "container/chunked_vector.h"
+#include "serde/protobuf/rpc.h"
 #include "absl/time/time.h"
 #include "serde/protobuf/field_mask.h"
 
@@ -31,6 +32,8 @@ class c;
 class super_duper_secret;
 class mask_wrapper;
 class well_known_protos;
+class say_greeting_request;
+class say_greeting_response;
 
 // Test that enums that have prefixes in their values as recommended by protobuf
 // are stripped and turned into enum classes.
@@ -350,4 +353,129 @@ private:
   chunked_hash_map<ss::sstring, absl::Time> timestamp_map_;
 };
 
+class say_greeting_request {
+public:
+  say_greeting_request() noexcept;
+  say_greeting_request(const say_greeting_request&) = delete;
+  say_greeting_request& operator=(const say_greeting_request&) = delete;
+  say_greeting_request(say_greeting_request&&) noexcept;
+  say_greeting_request& operator=(say_greeting_request&&) noexcept;
+  ~say_greeting_request() noexcept;
+  
+  bool operator==(const say_greeting_request&) const;
+  fmt::iterator format_to(fmt::iterator) const;
+  
+  // Serializes example.SayGreetingRequest into a protocol buffer, in a way that will not cause stalls for large messages.
+  seastar::future<iobuf> to_proto() const;
+  // Serializes example.SayGreetingRequest into proto3 JSON, in a way that will not cause stalls for large messages.
+  seastar::future<iobuf> to_json() const;
+  // Deserializes example.SayGreetingRequest from a protocol buffer, in a way that will not cause stalls for large messages.
+  static seastar::future<say_greeting_request> from_proto(iobuf);
+  // Note: This factory function should not be used directly, it's exposed for other protobuf parsers to use.
+  // Use the iobuf version instead.
+  static seastar::future<> from_proto(serde::pb::wire_format_parser*, say_greeting_request*);
+  // Deserializes example.SayGreetingRequest from json, in a way that will not cause stalls for large messages.
+  static seastar::future<say_greeting_request> from_json(iobuf);
+  // Note: This factory function should not be used directly, it's exposed for other protobuf parsers to use.
+  // Use the iobuf version instead.
+  static seastar::future<> from_json(serde::pb::json::peekable_parser*, say_greeting_request*);
+  
+  ss::sstring& get_greeting();
+  const ss::sstring& get_greeting() const;
+  void set_greeting(ss::sstring&& v);
+  
+  // NOTE: This is intended to be used by field_mask only. Do not use directly.
+  static bool is_valid_field_path(std::span<const ss::sstring> path);
+  // NOTE: This is intended to be used by field_mask only. Do not use directly.
+  void apply_field_path_from(std::span<const ss::sstring> path, say_greeting_request* update);
+  
+private:
+  ss::sstring greeting_;
+};
+
+class say_greeting_response {
+public:
+  say_greeting_response() noexcept;
+  say_greeting_response(const say_greeting_response&) = delete;
+  say_greeting_response& operator=(const say_greeting_response&) = delete;
+  say_greeting_response(say_greeting_response&&) noexcept;
+  say_greeting_response& operator=(say_greeting_response&&) noexcept;
+  ~say_greeting_response() noexcept;
+  
+  bool operator==(const say_greeting_response&) const;
+  fmt::iterator format_to(fmt::iterator) const;
+  
+  // Serializes example.SayGreetingResponse into a protocol buffer, in a way that will not cause stalls for large messages.
+  seastar::future<iobuf> to_proto() const;
+  // Serializes example.SayGreetingResponse into proto3 JSON, in a way that will not cause stalls for large messages.
+  seastar::future<iobuf> to_json() const;
+  // Deserializes example.SayGreetingResponse from a protocol buffer, in a way that will not cause stalls for large messages.
+  static seastar::future<say_greeting_response> from_proto(iobuf);
+  // Note: This factory function should not be used directly, it's exposed for other protobuf parsers to use.
+  // Use the iobuf version instead.
+  static seastar::future<> from_proto(serde::pb::wire_format_parser*, say_greeting_response*);
+  // Deserializes example.SayGreetingResponse from json, in a way that will not cause stalls for large messages.
+  static seastar::future<say_greeting_response> from_json(iobuf);
+  // Note: This factory function should not be used directly, it's exposed for other protobuf parsers to use.
+  // Use the iobuf version instead.
+  static seastar::future<> from_json(serde::pb::json::peekable_parser*, say_greeting_response*);
+  
+  ss::sstring& get_response();
+  const ss::sstring& get_response() const;
+  void set_response(ss::sstring&& v);
+  
+  // NOTE: This is intended to be used by field_mask only. Do not use directly.
+  static bool is_valid_field_path(std::span<const ss::sstring> path);
+  // NOTE: This is intended to be used by field_mask only. Do not use directly.
+  void apply_field_path_from(std::span<const ss::sstring> path, say_greeting_response* update);
+  
+private:
+  ss::sstring response_;
+};
+
+class test_service : public ::serde::pb::rpc::base_service {
+public:
+  test_service() = default;
+  test_service& operator=(const test_service&) noexcept = delete;
+  test_service(const test_service&) noexcept = delete;
+  test_service& operator=(test_service&&) noexcept = delete;
+  test_service(test_service&&) noexcept = delete;
+  virtual ~test_service() noexcept = default;
+  
+  // Return the name of this RPC service
+  std::string_view name() const override { return "example.TestService"; }
+  // Call this to get all the routes defined for this service.
+  //
+  // NOTE: The service must outlive anything returned from this method.
+  std::vector<serde::pb::rpc::route_descriptor> all_routes() override;
+  
+  virtual seastar::future<say_greeting_response> say_greeting(serde::pb::rpc::context, say_greeting_request) = 0;
+
+private:
+  seastar::future<iobuf> say_greeting_handler_impl(serde::pb::rpc::context, iobuf);
+};
+class test_service_client {
+public:
+  // This defines the transport layer for the RPC client.
+  //
+  // This function should take a context with the RPC metadata and the iobuf containing the request.
+  // It should only throw subclasses of serde::pb::rpc::base_exception.
+  // NOTE: This RPC client only uses protobuf serialization at the moment.
+  using send_rpc_fn_t = std::function<seastar::future<iobuf>(serde::pb::rpc::context, iobuf)>;
+  
+  test_service_client(send_rpc_fn_t fn) : send_rpc_fn_(std::move(fn)) {}
+  test_service_client& operator=(const test_service_client&) noexcept = delete;
+  test_service_client(const test_service_client&) noexcept = delete;
+  test_service_client& operator=(test_service_client&&) noexcept = default;
+  test_service_client(test_service_client&&) noexcept = default;
+  virtual ~test_service_client() noexcept = default;
+  
+  // Return the name of this RPC service
+  std::string_view name() const { return "example.TestService"; }
+  
+  seastar::future<say_greeting_response> say_greeting(serde::pb::rpc::context, say_greeting_request);
+
+private:
+  send_rpc_fn_t send_rpc_fn_;
+};
 } // proto::example
