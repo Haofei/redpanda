@@ -15,6 +15,7 @@
 #include "cloud_topics/level_one/common/abstract_io.h"
 #include "cloud_topics/level_one/common/object.h"
 #include "cloud_topics/level_one/common/object_id.h"
+#include "cloud_topics/level_one/metastore/metastore.h"
 #include "cloud_topics/reconciler/reconciliation_consumer.h"
 #include "cluster/notification.h"
 #include "cluster/partition.h"
@@ -47,7 +48,8 @@ public:
       cluster::partition_manager*,
       data_plane_api*,
       l1::io*,
-      cluster::metadata_cache*);
+      cluster::metadata_cache*,
+      l1::metastore*);
 
     reconciler(const reconciler&) = delete;
     reconciler& operator=(const reconciler&) = delete;
@@ -153,6 +155,7 @@ private:
     data_plane_api* _data_plane;
     l1::io* _l1_io;
     cluster::metadata_cache* _metadata_cache;
+    [[maybe_unused]] l1::metastore* _metastore;
     ss::gate _gate;
     ss::abort_source _as;
 };

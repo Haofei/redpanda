@@ -15,6 +15,7 @@
 #include "cloud_topics/frontend/frontend.h"
 #include "cloud_topics/level_one/common/abstract_io.h"
 #include "cloud_topics/level_one/common/object.h"
+#include "cloud_topics/level_one/metastore/metastore.h"
 #include "cloud_topics/reconciler/reconciliation_consumer.h"
 #include "cluster/metadata_cache.h"
 #include "cluster/partition.h"
@@ -62,11 +63,13 @@ reconciler::reconciler(
   cluster::partition_manager* pm,
   data_plane_api* data_plane,
   l1::io* l1_io,
-  cluster::metadata_cache* metadata_cache)
+  cluster::metadata_cache* metadata_cache,
+  l1::metastore* metastore)
   : _partition_manager(pm)
   , _data_plane(data_plane)
   , _l1_io(l1_io)
-  , _metadata_cache(metadata_cache) {}
+  , _metadata_cache(metadata_cache)
+  , _metastore(metastore) {}
 
 std::optional<model::topic_id_partition>
 reconciler::ntp_to_topic_id_partition(const model::ntp& ntp) const {

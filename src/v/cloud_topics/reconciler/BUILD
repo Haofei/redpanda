@@ -42,6 +42,8 @@ redpanda_cc_library(
         "//src/v/cloud_topics/level_one/common:object",
         "//src/v/cloud_topics/level_one/common:object_id",
         "//src/v/cloud_topics/level_one/common:object_utils",
+        "//src/v/cloud_topics/level_one/metastore",
+        "//src/v/cloud_topics/level_one/metastore:replicated_metastore",
         "//src/v/cloud_topics/level_zero/stm:ctp_stm_api",
         "//src/v/cluster",
         "//src/v/cluster:notification",

@@ -49,7 +49,16 @@ namespace cloud_topics::l1 {
 // implementation to ensure such requests are rejected and don't have harmful
 // side effects. As such, callers can think of this interface as thread safe.
 class metastore {
+protected:
+    metastore() = default;
+
 public:
+    virtual ~metastore() = default;
+    metastore(const metastore&) = delete;
+    metastore& operator=(const metastore&) = delete;
+    metastore(const metastore&&) = delete;
+    metastore& operator=(const metastore&&) = delete;
+
     enum class errc {
         missing_ntp,
         invalid_request,
