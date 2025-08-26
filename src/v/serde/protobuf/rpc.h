@@ -26,9 +26,6 @@ namespace seastar::http {
 struct request;
 struct reply;
 } // namespace seastar::http
-namespace seastar::httpd {
-class routes;
-} // namespace seastar::httpd
 
 // Supporting functions for ConnectRPC protocol support in seastar
 //
