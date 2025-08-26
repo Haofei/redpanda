@@ -95,3 +95,23 @@ redpanda_cc_library(
         "@seastar",
     ],
 )
+
+redpanda_cc_library(
+    name = "deps_impl",
+    srcs = [
+        "deps_impl.cc",
+    ],
+    hdrs = [
+        "deps_impl.h",
+    ],
+    visibility = ["//src/v/cluster_link:__subpackages__"],
+    deps = [
+        ":deps",
+        ":mux_remote_consumer",
+        "//src/v/cluster",
+        "//src/v/cluster_link:logger",
+        "//src/v/kafka/server:write_at_offset_stm",
+        "//src/v/ssx:future_util",
+        "@seastar",
+    ],
+)
