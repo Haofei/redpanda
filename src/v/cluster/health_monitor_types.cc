@@ -213,7 +213,7 @@ std::ostream& operator<<(std::ostream& o, const partition_status& ps) {
       o,
       "{{id: {}, term: {}, leader_id: {}, revision_id: {}, size_bytes: {}, "
       "reclaimable_size_bytes: {}, under_replicated: {}, shard: {}, "
-      "followers_stats: {}}}",
+      "followers_stats: {}, kafka_highwatermark: {}}}",
       ps.id,
       ps.term,
       ps.leader_id,
@@ -222,7 +222,8 @@ std::ostream& operator<<(std::ostream& o, const partition_status& ps) {
       ps.reclaimable_size_bytes,
       ps.under_replicated_replicas,
       ps.shard,
-      ps.followers_stats);
+      ps.followers_stats,
+      ps.high_watermark);
     return o;
 }
 

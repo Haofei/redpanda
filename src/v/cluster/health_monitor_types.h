@@ -104,7 +104,7 @@ struct followers_stats
 };
 struct partition_status
   : serde::
-      envelope<partition_status, serde::version<4>, serde::compat_version<0>> {
+      envelope<partition_status, serde::version<5>, serde::compat_version<0>> {
     static constexpr size_t invalid_size_bytes = size_t(-1);
     static constexpr uint32_t invalid_shard_id = uint32_t(-1);
 
@@ -136,6 +136,13 @@ struct partition_status
     // present on leaders only
     std::optional<followers_stats> followers_stats;
 
+    /**
+     * Kafka high watermark of partition replica, this offset is only populated
+     * for Kafka partitions. For other partitions the offset stays not
+     * initialized.
+     */
+    kafka::offset high_watermark;
+
     auto serde_fields() {
         return std::tie(
           id,
@@ -146,7 +153,8 @@ struct partition_status
           under_replicated_replicas,
           reclaimable_size_bytes,
           shard,
-          followers_stats);
+          followers_stats,
+          high_watermark);
     }
 
     friend std::ostream& operator<<(std::ostream&, const partition_status&);

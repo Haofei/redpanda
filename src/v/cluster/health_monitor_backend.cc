@@ -952,6 +952,11 @@ struct ntp_report {
         status.reclaimable_size_bytes = p.reclaimable_size_bytes();
         status.shard = ss::this_shard_id();
 
+        if (p.ntp().ns == model::kafka_namespace) {
+            status.high_watermark = model::offset_cast(
+              p.log()->from_log_offset(p.high_watermark()));
+        }
+
         if (p.raft()->is_elected_leader()) {
             const auto fms = p.raft()->get_follower_metrics();
 
