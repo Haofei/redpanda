@@ -128,7 +128,12 @@ func (b *codewriter) Printf(msg string, args ...any) {
 }
 
 func (b *codewriter) Println(args ...any) {
-	_, _ = b.content.WriteString(b.indent + fmt.Sprintln(args...))
+	if len(args) == 0 {
+		// Don't add indentation for blank lines.
+		b.content.WriteString("\n")
+	} else {
+		_, _ = b.content.WriteString(b.indent + fmt.Sprintln(args...))
+	}
 }
 
 func (b *codewriter) PreludePrintf(msg string, args ...any) {
