@@ -10,6 +10,7 @@
 #include "cloud_topics/level_zero/gc/level_zero_gc.h"
 
 #include "base/vlog.h"
+#include "cloud_io/remote.h"
 #include "cloud_topics/logger.h"
 #include "cloud_topics/object_utils.h"
 
@@ -18,6 +19,65 @@
 #include <seastar/coroutine/as_future.hh>
 
 namespace cloud_topics {
+
+class object_storage_remote_impl : public level_zero_gc::object_storage {
+public:
+    // TODO(noah) some random-but-not-awful values for the retry chain that
+    // cloud io requires. will need to be fine tuned at some point.
+    static constexpr std::chrono::seconds timeout{5};
+    static constexpr std::chrono::seconds backoff{1};
+
+    object_storage_remote_impl(
+      cloud_io::remote* remote, cloud_storage_clients::bucket_name bucket)
+      : remote_(remote)
+      , bucket_(std::move(bucket)) {}
+
+    seastar::future<std::expected<
+      cloud_storage_clients::client::list_bucket_result,
+      cloud_storage_clients::error_outcome>>
+    list_objects(seastar::abort_source* asrc) override {
+        retry_chain_node rtc(*asrc, timeout, backoff);
+        auto res = co_await remote_->list_objects(
+          bucket_, rtc, object_path_factory::level_zero_data_dir());
+        if (res.has_value()) {
+            co_return res.assume_value();
+        }
+        co_return std::unexpected(res.assume_error());
+    }
+
+    seastar::future<std::expected<void, cloud_io::upload_result>>
+    delete_objects(
+      seastar::abort_source* asrc,
+      std::vector<cloud_storage_clients::client::list_bucket_item> objects)
+      override {
+        retry_chain_node rtc(*asrc, timeout, backoff);
+        auto keys
+          = objects | std::views::transform([](auto& obj) { return obj.key; })
+            | std::ranges::to<std::vector<cloud_storage_clients::object_key>>();
+        auto res = co_await remote_->delete_objects(
+          bucket_, keys, rtc, [](auto) {});
+        if (res == cloud_io::upload_result::success) {
+            co_return std::expected<void, cloud_io::upload_result>();
+        }
+        co_return std::unexpected(res);
+    }
+
+private:
+    cloud_io::remote* remote_;
+    const cloud_storage_clients::bucket_name bucket_;
+};
+
+class epoch_source_cluster_impl : public level_zero_gc::epoch_source {
+public:
+    seastar::future<std::expected<std::optional<cluster_epoch>, std::string>>
+    max_gc_eligible_epoch(seastar::abort_source*) override {
+        /*
+         * TODO(noah): missing an integration of epochs with the partition
+         * table. for now we report no eligible epoch.
+         */
+        co_return std::nullopt;
+    }
+};
 
 level_zero_gc::level_zero_gc(
   level_zero_gc_config config,
@@ -29,6 +89,15 @@ level_zero_gc::level_zero_gc(
   , should_run_(false) // begin in a stopped state
   , should_shutdown_(false)
   , worker_(worker()) {}
+
+level_zero_gc::level_zero_gc(
+  cloud_io::remote* remote,
+  cloud_storage_clients::bucket_name bucket,
+  level_zero_gc_config config)
+  : level_zero_gc(
+      config,
+      std::make_unique<object_storage_remote_impl>(remote, std::move(bucket)),
+      std::make_unique<epoch_source_cluster_impl>()) {}
 
 void level_zero_gc::start() {
     vlog(cd_log.info, "Starting cloud topics L0 GC worker");

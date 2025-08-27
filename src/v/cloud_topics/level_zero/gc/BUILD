@@ -10,6 +10,7 @@ redpanda_cc_library(
     ],
     implementation_deps = [
         "//src/v/base",
+        "//src/v/cloud_io:remote",
         "//src/v/cloud_topics:logger",
         "//src/v/cloud_topics:object_utils",
     ],

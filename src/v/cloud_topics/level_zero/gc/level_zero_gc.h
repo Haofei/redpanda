@@ -18,6 +18,10 @@
 
 #include <expected>
 
+namespace cloud_io {
+class remote;
+}
+
 namespace cloud_topics {
 
 /*
@@ -194,6 +198,14 @@ public:
       level_zero_gc_config,
       std::unique_ptr<object_storage>,
       std::unique_ptr<epoch_source>);
+
+    /*
+     * Construct with default implementations of storage and epoch providers.
+     */
+    level_zero_gc(
+      cloud_io::remote*,
+      cloud_storage_clients::bucket_name,
+      level_zero_gc_config = {});
 
     /*
      * Request that GC be started or stopped. These can be called multiple times
