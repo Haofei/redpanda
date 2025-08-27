@@ -730,6 +730,11 @@ class DataMigrationsApiTest(RedpandaTest, DataMigrationTestMixin):
         consumer.start(clean=False)
         return consumer
 
+    class OperationValidationException(Exception):
+        """Indicates operation validation neither failed nor succeeded
+        but is not complete."""
+        pass
+
     def _do_validate_operation(self, topic: str | None, group: str | None,
                                op_name: str, expected_to_pass: bool | None,
                                operation: Callable[[str | None, str | None],
@@ -741,12 +746,14 @@ class DataMigrationsApiTest(RedpandaTest, DataMigrationTestMixin):
                          f" against {topic=} {group=}")
         try:
             result = operation(topic, group)
+        except DataMigrationsApiTest.OperationValidationException:
+            raise
         except Exception as e:
             self.logger.info(
                 f"Operation {op_name} executed against"
                 f" {topic=} {group=} failed - {e} (full exception follows)",
                 exc_info=True)
-            result = False  # assume real op cannot return False
+            result = False
         success = result is not False
 
         assert expected_to_pass == success, f"Operation {op_name} outcome is not " \
@@ -791,7 +798,8 @@ class DataMigrationsApiTest(RedpandaTest, DataMigrationTestMixin):
         if group is not None:
 
             def read_with_group(topic, group):
-                while True:
+                def try_once():
+                    """ returns True if success, False to retry, throws on failure """
                     try:
                         with self.ck_consumer(group) as consumer:
                             consumer.subscribe([topic])
@@ -803,7 +811,7 @@ class DataMigrationsApiTest(RedpandaTest, DataMigrationTestMixin):
                                     f"Failed to read from topic {topic} "
                                     f"with group {group}: {msg and msg.error()}"
                                 )
-                        break
+                        return True
                     except ck.KafkaException as e:
                         self.logger.debug(
                             f"exception when polling consumer: {e} (full exception follows)",
@@ -814,8 +822,14 @@ class DataMigrationsApiTest(RedpandaTest, DataMigrationTestMixin):
                                 "Hit "
                                 "https://github.com/confluentinc/librdkafka/issues/4963 "
                                 "bug, retrying")
-                            continue
+                            return False
                         raise
+
+                try:
+                    wait_until(try_once, timeout_sec=120, backoff_sec=1)
+                    return True
+                except ducktape.errors.TimeoutError as e:
+                    raise DataMigrationsApiTest.OperationValidationException(e)
 
             self._do_validate_operation(**entities,
                                         op_name="read_with_group",
