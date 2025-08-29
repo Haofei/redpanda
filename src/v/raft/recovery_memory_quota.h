@@ -23,7 +23,8 @@ class recovery_memory_quota {
 public:
     explicit recovery_memory_quota(
       config::binding<std::optional<size_t>> max_recovery_memory,
-      config::binding<size_t> default_read_buffer_size);
+      config::binding<size_t> default_read_buffer_size,
+      config::binding<size_t> raft_recovery_concurrency_per_shard);
 
     ss::future<ssx::semaphore_units> acquire_read_memory();
 
@@ -32,6 +33,7 @@ private:
 
     config::binding<std::optional<size_t>> _max_recovery_memory;
     config::binding<size_t> _default_read_buffer_size;
+    config::binding<size_t> _raft_recovery_concurrency_per_shard;
 
     size_t _current_max_recovery_mem;
     ssx::semaphore _memory;
