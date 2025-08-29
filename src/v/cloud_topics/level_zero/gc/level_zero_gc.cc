@@ -232,7 +232,7 @@ level_zero_gc::try_to_collect() {
             co_return std::unexpected(collection_error::invalid_object_name);
         }
 
-        // detect non-lexiographic ordering. this may indicate that GC will not
+        // detect non-lexicographic ordering. this may indicate that GC will not
         // operate efficiently with the underlying storage system. see the class
         // comment for more details about what this means in practice.
         if (!last_epoch.has_value()) {
@@ -247,7 +247,7 @@ level_zero_gc::try_to_collect() {
               cd_log,
               seastar::log_level::warn,
               rate,
-              "Non-lexiographic object listing detected during L0 GC {} < {}",
+              "Non-lexicographic object listing detected during L0 GC {} < {}",
               object.key,
               last_key);
         }

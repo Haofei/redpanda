@@ -153,7 +153,7 @@ public:
 
         /*
          * Implementations are expected to limit the listing to only L0 data
-         * objects, and provide the listing in _globally_ lexiographic order.
+         * objects, and provide the listing in _globally_ lexicographic order.
          */
         virtual seastar::future<std::expected<
           cloud_storage_clients::client::list_bucket_result,
