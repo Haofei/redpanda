@@ -229,15 +229,12 @@ auto validate_batch_timestamps(
     // `message.timestamp_type` is `CreateTime`. Validate record timestamps
     // using `message.timestamp.before.max.ms` and
     // `message.timestamp.after.max.ms`.
-    auto broker_timepoint = model::duration_since_epoch(broker_time);
 
     // reject if first_timestamp is too far in the past
-    auto first_timepoint = model::duration_since_epoch(header.first_timestamp);
     if (
-      broker_timepoint > first_timepoint
-      && std::chrono::duration_cast<std::chrono::milliseconds>(
-           broker_timepoint - first_timepoint)
-           > message_timestamp_before_max_ms) {
+      broker_time > header.first_timestamp
+      && (broker_time - header.first_timestamp)
+           > model::timestamp(message_timestamp_before_max_ms.count())) {
         thread_local static ss::logger::rate_limit rate(despam_interval);
         klog.log(
           ss::log_level::warn,
@@ -261,12 +258,10 @@ auto validate_batch_timestamps(
     }
 
     // reject if max_timestamp is too far in the future.
-    auto max_timepoint = model::duration_since_epoch(header.max_timestamp);
     if (
-      broker_timepoint < max_timepoint
-      && std::chrono::duration_cast<std::chrono::milliseconds>(
-           max_timepoint - broker_timepoint)
-           > message_timestamp_after_max_ms) {
+      broker_time < header.max_timestamp
+      && (header.max_timestamp - broker_time)
+           > model::timestamp(message_timestamp_after_max_ms.count())) {
         thread_local static ss::logger::rate_limit rate(despam_interval);
         klog.log(
           ss::log_level::warn,
