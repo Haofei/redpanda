@@ -1505,6 +1505,15 @@ delete_topics_handler::handle(request_context ctx, ss::smp_service_group) {
            .error_message = "Too many partition mutations requested"});
     }
 
+    for (auto& topic : nodelete_topics) {
+        resp.data.responses.push_back(
+          deletable_topic_result{
+            .name = std::move(topic),
+            .error_code = error_code::topic_authorization_failed,
+            .error_message = "Topic is protected by 'kafka_nodelete_topics'",
+          });
+    }
+
     std::vector<cluster::topic_result> do_delete_res;
     if (!valid_topic_names.empty()) {
         // construct namespaced topic set from request
