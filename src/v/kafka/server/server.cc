@@ -718,6 +718,8 @@ ss::future<response_ptr> sasl_handshake_handler::handle(
     log_request(ctx.header(), request);
     vlog(klog.debug, "Received SASL_HANDSHAKE {}", request);
 
+    const auto& listener = ctx.connection()->listener();
+
     /*
      * configure sasl for the current connection context. see the sasl
      * authenticate request for the next phase of the auth process.
@@ -725,7 +727,7 @@ ss::future<response_ptr> sasl_handshake_handler::handle(
     auto error = error_code::none;
 
     chunked_vector<ss::sstring> supported_sasl_mechanisms;
-    if (config::has_sasl_mechanism(config::scram)) {
+    if (config::has_sasl_mechanism(listener, config::scram)) {
         supported_sasl_mechanisms.emplace_back(
           security::scram_sha256_authenticator::name);
         supported_sasl_mechanisms.emplace_back(
@@ -747,7 +749,7 @@ ss::future<response_ptr> sasl_handshake_handler::handle(
         }
     }
 
-    if (config::has_sasl_mechanism(config::plain)) {
+    if (config::has_sasl_mechanism(listener, config::plain)) {
         supported_sasl_mechanisms.emplace_back(
           security::plain_authenticator::name);
         if (request.data.mechanism == security::plain_authenticator::name) {
@@ -757,7 +759,7 @@ ss::future<response_ptr> sasl_handshake_handler::handle(
         }
     }
 
-    if (config::has_sasl_mechanism(config::gssapi)) {
+    if (config::has_sasl_mechanism(listener, config::gssapi)) {
         supported_sasl_mechanisms.emplace_back(
           security::gssapi_authenticator::name);
 
@@ -771,7 +773,7 @@ ss::future<response_ptr> sasl_handshake_handler::handle(
         }
     }
 
-    if (config::has_sasl_mechanism(config::oauthbearer)) {
+    if (config::has_sasl_mechanism(listener, config::oauthbearer)) {
         supported_sasl_mechanisms.emplace_back(
           security::oidc::sasl_authenticator::name);
 
