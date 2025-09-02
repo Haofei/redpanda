@@ -47,7 +47,7 @@ ss::future<> compaction_sink::maybe_roll() {
     _builder = object_builder::create(
       make_iobuf_ref_output_stream(_active_output_buf.value()), _opts);
 
-    co_await _builder->start_partition(_ntp);
+    co_await _builder->start_partition(_tidp);
 
     co_return;
 }
