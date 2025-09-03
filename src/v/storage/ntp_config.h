@@ -149,6 +149,7 @@ public:
     ss::sstring& base_directory() { return _base_dir; }
 
     const default_overrides& get_overrides() const { return *_overrides; }
+
     default_overrides& get_overrides() { return *_overrides; }
 
     bool has_overrides() const { return _overrides != nullptr; }
@@ -222,6 +223,11 @@ public:
         }
 
         return config::shard_local_cfg().log_retention_ms();
+    }
+
+    topic_recovery_enabled recovery_enabled() const {
+        return _overrides != nullptr ? _overrides->recovery_enabled
+                                     : topic_recovery_enabled::no;
     }
 
     bool is_archival_enabled() const {
