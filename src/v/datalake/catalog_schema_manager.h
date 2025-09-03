@@ -31,7 +31,7 @@ public:
 
     virtual ss::future<checked<std::nullopt_t, errc>> ensure_table_schema(
       const iceberg::table_identifier&,
-      const iceberg::struct_type& writer_struct_type,
+      const iceberg::struct_type& desired_type,
       const iceberg::unresolved_partition_spec&)
       = 0;
 
@@ -67,7 +67,7 @@ public:
     ss::future<checked<std::nullopt_t, schema_manager::errc>>
     ensure_table_schema(
       const iceberg::table_identifier&,
-      const iceberg::struct_type& writer_struct_type,
+      const iceberg::struct_type& desired_type,
       const iceberg::unresolved_partition_spec&) override;
 
     ss::future<checked<table_info, schema_manager::errc>> get_table_info(
@@ -89,15 +89,14 @@ public:
     explicit catalog_schema_manager(iceberg::catalog& catalog)
       : catalog_(catalog) {}
 
-    // Ensure the table schema is compatible with the writer struct. If the
-    // table does not exist it is created, or, if the table exists and its
+    // Create the table with a desired schema, or, if the table exists and its
     // current schema doesn't include all of the fields (e.g. we are going from
     // the schemaless schema to a schema containing user fields), the table's
-    // schema is updated to be compatible with the writer_struct.
+    // schema is updated to the desired type.
     ss::future<checked<std::nullopt_t, schema_manager::errc>>
     ensure_table_schema(
       const iceberg::table_identifier&,
-      const iceberg::struct_type& writer_struct_type,
+      const iceberg::struct_type& desired_type,
       const iceberg::unresolved_partition_spec&) override;
 
     // Loads the table metadata for the given topic.
@@ -117,7 +116,7 @@ private:
     // Returns true if successful, false if the fill is incomplete because the
     // table schema does not have all the necessary fields. The latter is a
     // signal that the caller needs to add the schema to the table.
-    checked<bool, errc> apply_evolution_rules(
+    checked<bool, errc> get_ids_from_table_meta(
       const iceberg::table_identifier&,
       const iceberg::table_metadata&,
       iceberg::struct_type&);
