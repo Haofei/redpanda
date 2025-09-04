@@ -141,8 +141,8 @@ class MultiClusterKafkaTest(MultiClusterTestBase):
 class ShadowLinkBasicTests(ShadowLinkTestBase):
     @cluster(num_nodes=6)
     def test_create_simple_link(self):
-        create_res = self.create_link("test-link")
-        self.logger.info(f"Create shadow link result: {create_res.shadow_link}")
+        shadow_link = self.create_link("test-link")
+        self.logger.info(f"Create shadow link result: {shadow_link}")
 
         links = self.list_links()
         assert len(links) == 1, f"Expected exactly one shadow link, got {len(links)}"
@@ -165,10 +165,10 @@ class ShadowLinkBasicTests(ShadowLinkTestBase):
 
     @cluster(num_nodes=6)
     def test_can_not_create_more_than_one_link(self):
-        resp = self.create_link("test-link")
+        shadow_link = self.create_link("test-link")
 
-        assert resp.shadow_link.name == "test-link", (
-            f"Expected shadow link name to be 'test-link', got {resp.shadow_link.name}"
+        assert shadow_link.name == "test-link", (
+            f"Expected shadow link name to be 'test-link', got {shadow_link.name}"
         )
 
         # Now attempt to create a second one with the same name
