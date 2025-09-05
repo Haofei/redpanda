@@ -80,7 +80,8 @@ ss::future<> cluster_link_manager_test_fixture::wire_up_and_start(
           _consumer_group_router = router.get();
           return router;
       }),
-      1s);
+      1s,
+      _default_topic_replication.bind());
 
     auto notif_id = _table.local().register_for_updates(
       [this](model::id_t id) { _manager.local().on_link_change(id); });

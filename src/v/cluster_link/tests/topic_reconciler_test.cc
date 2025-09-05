@@ -11,6 +11,7 @@
 
 #include "cluster_link/tests/deps.h"
 #include "cluster_link/topic_reconciler.h"
+#include "config/mock_property.h"
 #include "test_utils/async.h"
 #include "test_utils/test.h"
 
@@ -48,7 +49,11 @@ public:
           });
 
         _reconciler = std::make_unique<topic_reconciler>(
-          _ftc.get(), _ftmc.get(), _link_registry.get(), 1s);
+          _ftc.get(),
+          _ftmc.get(),
+          _link_registry.get(),
+          1s,
+          _default_topic_replication.bind());
         co_await _reconciler->start();
 
         set_required_topic_properties(
@@ -168,6 +173,8 @@ private:
     model::id_t _created_link_id;
 
     model::id_t _next_link_id{1};
+
+    config::mock_property<int16_t> _default_topic_replication{3};
 };
 
 TEST_F_CORO(topic_reconciler_test, test_topic_creation_and_property_updates) {

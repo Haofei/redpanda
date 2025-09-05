@@ -27,11 +27,13 @@ topic_reconciler::topic_reconciler(
   kafka::data::rpc::topic_creator* topic_creator,
   kafka::data::rpc::topic_metadata_cache* topic_metadata_cache,
   link_registry* link_registry,
-  ss::lowres_clock::duration run_interval)
+  ss::lowres_clock::duration run_interval,
+  config::binding<int16_t> default_topic_replication)
   : _topic_creator(topic_creator)
   , _topic_metadata_cache(topic_metadata_cache)
   , _link_registry(link_registry)
-  , _run_interval(run_interval) {}
+  , _run_interval(run_interval)
+  , _default_topic_replication(std::move(default_topic_replication)) {}
 
 ss::future<> topic_reconciler::start() {
     vlog(cllog.info, "Starting topic reconciler");
