@@ -49,7 +49,8 @@ ss::future<> cluster_link_manager_test_fixture::wire_up_and_start(
         int32_t partition_count,
         ::model::node_id leader) {
           return update_partition_count(tp_ns, partition_count, leader);
-      });
+      },
+      _default_topic_replication.bind());
     _ftpc = ftpc.get();
 
     _lf = lf.get();

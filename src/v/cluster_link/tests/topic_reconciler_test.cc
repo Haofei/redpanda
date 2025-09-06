@@ -46,7 +46,8 @@ public:
             ::model::node_id) {
               _ftmc->set_partition_count(tp_ns, partition_count);
               return cluster::errc::success;
-          });
+          },
+          _default_topic_replication.bind());
 
         _reconciler = std::make_unique<topic_reconciler>(
           _ftc.get(),
