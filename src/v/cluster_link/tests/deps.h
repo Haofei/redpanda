@@ -495,7 +495,7 @@ private:
     link_factory* _lf{nullptr};
     test_consumer_group_router* _consumer_group_router{nullptr};
     ss::sharded<manager> _manager;
-    config::mock_property<int16_t> _default_topic_replication{3};
+    config::mock_property<int16_t> _default_topic_replication{1};
 
     ::model::node_id _self;
     model::id_t _next_link_id{0};

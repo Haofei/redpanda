@@ -47,7 +47,7 @@ protected:
 private:
     struct topic_metadata {
         int32_t partition_count;
-        int16_t rf;
+        std::optional<int16_t> rf;
     };
 
     using reconciler_commands = std::variant<
