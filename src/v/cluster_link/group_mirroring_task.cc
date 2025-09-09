@@ -375,8 +375,6 @@ void group_mirroring_task::handle_offset_commit_response(
 ss::future<chunked_vector<group_mirroring_task::group_offsets>>
 group_mirroring_task::trim_to_partition_highwatermark(
   chunked_vector<group_offsets> offsets) {
-    auto& metadata_provider = get_link()->get_partition_metadata_provider();
-
     chunked_vector<group_offsets> trimmed_offsets;
     trimmed_offsets.reserve(offsets.size());
 
@@ -390,10 +388,8 @@ group_mirroring_task::trim_to_partition_highwatermark(
             trimmed_t_offsets.partition_offsets.reserve(
               t_offsets.partition_offsets.size());
             for (auto& po : t_offsets.partition_offsets) {
-                auto maybe_hw
-                  = co_await metadata_provider.get_partition_high_watermark(
-                    ::model::topic_partition_view(
-                      trimmed_t_offsets.topic, po.partition));
+                auto maybe_hw = co_await get_partition_high_watermark(
+                  trimmed_t_offsets.topic, po.partition);
                 vlog(
                   logger().trace,
                   "Offset trimming for group {}, partition: {}/{}, committed "
@@ -432,7 +428,60 @@ group_mirroring_task::trim_to_partition_highwatermark(
 
     co_return std::move(trimmed_offsets);
 }
+ss::future<std::optional<kafka::offset>>
+group_mirroring_task::get_partition_high_watermark(
+  const ::model::topic& topic, ::model::partition_id p_id) {
+    auto& metadata_provider = get_link()->get_partition_metadata_provider();
+    auto hr_hwm = co_await metadata_provider.get_partition_high_watermark(
+      ::model::topic_partition_view(topic, p_id));
 
+    /**
+     * Check if the replica for partition is present on current node, if it is
+     * then query for its high watermark as it is most likely more up to date
+     * than the one from the health report.
+     */
+
+    auto& partition_manager = get_link()->partition_manager();
+    ::model::ktp ktp(topic, p_id);
+    auto owning_shard = partition_manager.shard_owner(
+      ktp); // ensure metadata is loaded
+    if (!owning_shard.has_value()) {
+        co_return hr_hwm;
+    }
+
+    if (owning_shard) {
+        vlog(
+          logger().trace,
+          "Fetching high watermark for partition {}/{} from replica on shard "
+          "{}",
+          topic,
+          p_id,
+          *owning_shard);
+        auto hw = co_await partition_manager.invoke_on_shard(
+          *owning_shard,
+          ktp,
+          [](kafka::partition_proxy* pp) {
+              return ssx::now<::result<::model::offset, cluster::errc>>(
+                pp->high_watermark());
+          },
+          kafka::data::rpc::require_leader::no);
+        if (hw) {
+            auto replica_hwm = ::model::offset_cast(hw.value());
+            if (hr_hwm) {
+                co_return std::max(replica_hwm, hr_hwm.value());
+            }
+            co_return replica_hwm;
+        }
+        vlog(
+          logger().info,
+          "Failed to get high watermark for partition {}/{} from replica - "
+          "{}",
+          topic,
+          p_id,
+          hw.error());
+    }
+    co_return hr_hwm;
+}
 ss::future<std::expected<
   chunked_vector<group_mirroring_task::group_offsets>,
   group_mirroring_task::error>>
