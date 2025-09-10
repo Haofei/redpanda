@@ -849,6 +849,7 @@ redpanda_cc_bench(
         "//src/v/security",
         "//src/v/test_utils:fixture",
         "@boost//:test",
+        "@fmt",
         "@seastar//:benchmark",
     ],
 )

@@ -18,11 +18,14 @@
 #include "kafka/server/handlers/fetch.h"
 #include "model/fundamental.h"
 #include "model/metadata.h"
-#include "random/generators.h"
 #include "redpanda/tests/fixture.h"
 #include "security/acl.h"
 
 #include <seastar/testing/perf_tests.hh>
+
+#include <fmt/core.h>
+
+#include <string>
 
 static ss::logger fpt_logger("fpt_test");
 
@@ -100,12 +103,16 @@ struct fetch_plan : redpanda_thread_fixture {
 
         _state.emplace();
 
-        co_await ss::parallel_for_each(boost::irange(tcount), [&, this](int) {
-            auto name = model::topic(
-              random_generators::gen_alphanum_string(topic_name_length));
-            _state->topics.push_back(name);
+        co_await ss::parallel_for_each(boost::irange(tcount), [&, this](int i) {
+            constexpr auto topic_name_format = "topic-{:05}-";
+            auto name = fmt::format(topic_name_format, i);
+            vassert(name.size() <= topic_name_length, "cannot fit name");
+            name += std::string(topic_name_length - name.size(), 'x');
+            vassert(name.size() == topic_name_length, "huh");
+            model::topic topic{name};
+            _state->topics.push_back(topic);
             return add_topic(
-              model::topic_namespace_view(model::kafka_namespace, name),
+              model::topic_namespace_view(model::kafka_namespace, topic),
               pcount);
         });
 
