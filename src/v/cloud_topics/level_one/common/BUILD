@@ -1,6 +1,9 @@
 load("//bazel:build.bzl", "redpanda_cc_library")
 
-package(default_visibility = ["//src/v/cloud_topics/level_one:__subpackages__"])
+package(default_visibility = [
+    "//src/v/cloud_topics/level_one:__subpackages__",
+    "//src/v/cloud_topics/reconciler:__subpackages__",
+])
 
 redpanda_cc_library(
     name = "object_id",
@@ -9,10 +12,6 @@ redpanda_cc_library(
     ],
     hdrs = [
         "object_id.h",
-    ],
-    visibility = [
-        "//src/v/cloud_topics/level_one:__subpackages__",
-        "//src/v/cloud_topics/reconciler:__subpackages__",
     ],
     deps = [
         "//src/v/base",
@@ -29,10 +28,6 @@ redpanda_cc_library(
     ],
     hdrs = [
         "object_utils.h",
-    ],
-    visibility = [
-        "//src/v/cloud_topics/level_one:__subpackages__",
-        "//src/v/cloud_topics/reconciler:__subpackages__",
     ],
     deps = [
         ":object_id",
@@ -56,10 +51,6 @@ redpanda_cc_library(
         "//src/v/serde:vector",
         "//src/v/storage:record_batch_builder",
     ],
-    visibility = [
-        "//src/v/cloud_topics/level_one:__subpackages__",
-        "//src/v/cloud_topics/reconciler:__subpackages__",
-    ],
     deps = [
         "//src/v/base",
         "//src/v/container:chunked_vector",
@@ -75,10 +66,6 @@ redpanda_cc_library(
     name = "abstract_io",
     srcs = ["abstract_io.cc"],
     hdrs = ["abstract_io.h"],
-    visibility = [
-        "//src/v/cloud_topics/level_one:__subpackages__",
-        "//src/v/cloud_topics/reconciler:__subpackages__",
-    ],
     deps = [
         ":object_id",
         "//src/v/container:chunked_vector",
@@ -94,7 +81,6 @@ redpanda_cc_library(
     visibility = [
         "//src/v/cloud_topics:__pkg__",
         "//src/v/cloud_topics/level_one:__subpackages__",
-        "//src/v/cloud_topics/reconciler:__pkg__",
     ],
     deps = [
         ":abstract_io",
