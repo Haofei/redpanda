@@ -172,10 +172,8 @@ ss::future<> reconciler::reconcile() {
     auto staging_file_fut = co_await ss::coroutine::as_future(
       _l1_io->create_tmp_file());
     if (staging_file_fut.failed()) {
-        vlog(
-          lg.error,
-          "Exception creating staging file: {}",
-          staging_file_fut.get_exception());
+        auto ex = staging_file_fut.get_exception();
+        vlog(lg.error, "Exception creating staging file: {}", ex);
     }
     auto staging_file_result = staging_file_fut.get();
     if (!staging_file_result.has_value()) {
@@ -196,10 +194,8 @@ ss::future<> reconciler::reconcile() {
       build_object(builder.get(), staging_file.get()));
     co_await builder->close(); // Always.
     if (object_fut.failed()) {
-        vlog(
-          lg.error,
-          "Exception building object: {}",
-          object_fut.get_exception());
+        auto ex = object_fut.get_exception();
+        vlog(lg.error, "Exception building object: {}", ex);
         co_await staging_file->remove();
         co_return;
     }
@@ -222,11 +218,8 @@ ss::future<> reconciler::reconcile() {
       _l1_io->put_object(object_id, staging_file.get(), &_as));
     co_await staging_file->remove(); // Always.
     if (upload_fut.failed()) {
-        vlog(
-          lg.error,
-          "Exception uploading L1 object {}: {}",
-          object_id,
-          upload_fut.get_exception());
+        auto ex = upload_fut.get_exception();
+        vlog(lg.error, "Exception uploading L1 object {}: {}", object_id, ex);
         co_return;
     }
     auto upload_result = upload_fut.get();
@@ -282,8 +275,8 @@ ss::future<std::optional<reconciler::built_object>> reconciler::build_object(
         auto tidp = ntp_to_topic_id_partition(partition->partition->ntp());
         if (!tidp.has_value()) {
             vlog(
-              lg.warn,
-              "Failed to get topic_id for partition {}, skipping",
+              lg.error,
+              "Failed to get topic_id for cloud topic partition {}, skipping",
               partition->partition->ntp());
             continue;
         }
