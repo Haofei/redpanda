@@ -77,7 +77,8 @@ ss::future<bool> partition_replicator::handle_replication_result(
         }
         vlog(
           _log.trace,
-          "Replicated batches in range [{} - {}] with at offset: {}",
+          "Replicated batches in kafka range [{} - {}] ending at raft offset: "
+          "{}",
           begin,
           end,
           result.value().last_offset);
