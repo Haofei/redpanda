@@ -28,6 +28,7 @@ from rptest.services.multi_cluster_services import (
     MultiClusterServices,
     RedpandaCluster,
     RedpandaService,
+    SecondaryClusterArgs,
     ServiceType,
 )
 from rptest.services.redpanda import LoggingConfig
@@ -43,7 +44,14 @@ class ShadowLinkTestBase(PreallocNodesTest):
     the target cluster. Secondary service is used as the source cluster.
     """
 
-    def __init__(self, test_context, num_prealloc_nodes=0, *args, **kwargs):
+    def __init__(
+        self,
+        test_context,
+        num_prealloc_nodes=0,
+        secondary_cluster_args: SecondaryClusterArgs = SecondaryClusterArgs(),
+        *args,
+        **kwargs,
+    ):
         super().__init__(
             test_context=test_context,
             # For running kgo producer/consumer
@@ -69,6 +77,7 @@ class ShadowLinkTestBase(PreallocNodesTest):
         self.admin_v2: AdminV2
         self.services: MultiClusterServices
         self.client: shadow_link_pb2_connect.ShadowLinkServiceClient
+        self.secondary_cluster_args: SecondaryClusterArgs = secondary_cluster_args
 
     def setUp(self):
         self.services = MultiClusterServices(
@@ -77,6 +86,7 @@ class ShadowLinkTestBase(PreallocNodesTest):
             self.redpanda,
             secondary_type=ServiceType.REDPANDA,
             num_brokers=3,
+            secondary_args=self.secondary_cluster_args,
         )
         self.services.setUp()
         self.admin_v2 = AdminV2(self.target_cluster_service)
