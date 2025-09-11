@@ -8,7 +8,7 @@
 # by the Apache License, Version 2.0
 from rptest.tests.redpanda_test import RedpandaTest
 from rptest.services.cluster import cluster
-from ducktape.mark import matrix
+from ducktape.mark import ignore, matrix
 from ducktape.utils.util import wait_until
 from rptest.clients.types import TopicSpec
 from rptest.services.redpanda import SISettings, get_cloud_storage_type
@@ -46,6 +46,8 @@ class CloudTopicsTest(RedpandaTest):
                 config={"redpanda.cloud_topic.enabled": "true"},
             )
 
+    # Ignored because it's flaky but the test is still useful locally.
+    @ignore
     @cluster(num_nodes=3)
     @matrix(cloud_storage_type=get_cloud_storage_type())
     def test_reconciler_uploads(self, cloud_storage_type):
