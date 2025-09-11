@@ -69,6 +69,7 @@ mux_remote_consumer::remove(const model::topic_partition& tp) {
         }
     }
     _cv.signal();
+    co_await _consumer->unassign_partitions({tp});
     co_await queue->stop();
     co_return result{};
 }
