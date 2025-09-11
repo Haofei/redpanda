@@ -14,6 +14,7 @@ from ducktape.errors import TimeoutError
 from ducktape.mark import matrix
 from ducktape.utils.util import wait_until
 
+from rptest.util import expect_timeout, wait_until
 from rptest.clients.kafka_cli_tools import KafkaCliTools
 from rptest.clients.rpk import RpkTool
 from rptest.clients.types import TopicSpec
@@ -971,4 +972,54 @@ class BogusTimestampTest(RedpandaTest):
 
         # Segments should be cleaned up now that we've switched on force-correction
         # of timestamps in the future
+        self.redpanda.wait_until(prefix_truncated, timeout_sec=30, backoff_sec=1)
+
+    @cluster(num_nodes=2)
+    def test_past_timestamps(self):
+        """
+        Ensure record timestamps in the past are respected by retention enforcement.
+        """
+
+        # Set `retention.ms` to 25 hours
+        retention_ms = 25 * 3600 * 1000
+        self.client().alter_topic_config(self.topic, "retention.ms", retention_ms)
+
+        # A fictional artificial timestamp base in milliseconds (one day previous)
+        past_timestamp = (int(time.time()) - 24 * 3600) * 1000
+
+        # Produce a run of messages with CreateTime-style timestamps, each
+        # record having a timestamp 1ms greater than the last.
+        msg_size = 14000
+        segments_count = 10
+        msg_count = (self.segment_size // msg_size) * segments_count
+
+        # Write msg_count messages with timestamps in the past
+        producer = KgoVerifierProducer(
+            context=self.test_context,
+            redpanda=self.redpanda,
+            topic=self.topic,
+            msg_size=msg_size,
+            msg_count=(self.segment_size // msg_size) * segments_count,
+            fake_timestamp_ms=past_timestamp,
+            batch_max_bytes=msg_size * 2,
+        )
+        producer.start()
+        producer.wait()
+
+        def prefix_truncated():
+            segs = self.redpanda.node_storage(self.redpanda.nodes[0]).segments(
+                "kafka", self.topic, 0
+            )
+            self.logger.debug(f"Segments: {segs}")
+            return len(segs) <= 1
+
+        # Don't expect to see prefix truncation of day old records with `retention.ms=25h`.
+        with expect_timeout():
+            self.redpanda.wait_until(prefix_truncated, timeout_sec=5, backoff_sec=1)
+
+        # Set `retention.ms` to 23 hours
+        retention_ms = 23 * 3600 * 1000
+        self.client().alter_topic_config(self.topic, "retention.ms", retention_ms)
+
+        # Expect to see prefix truncation of day old records with `retention.ms=23h`.
         self.redpanda.wait_until(prefix_truncated, timeout_sec=30, backoff_sec=1)
