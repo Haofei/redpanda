@@ -370,10 +370,13 @@ public:
           = std::bit_cast<std::array<char, sizeof(uint32_t)>, uint32_t>(
             _offset - footer_start);
         co_await _output.write(footer_size.data(), footer_size.size());
+        _offset += footer_size.size();
         co_return info;
     }
 
     ss::future<> close() final { return _output.close(); }
+
+    size_t file_size() const final { return _offset; }
 
 private:
     void end_partition() {

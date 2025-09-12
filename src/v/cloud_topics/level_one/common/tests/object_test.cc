@@ -30,22 +30,26 @@ struct batch_spec {
     model::timestamp max_timestamp;
 };
 
+model::record_batch make_batch(const batch_spec& spec) {
+    int count = static_cast<int>(spec.last_offset - spec.base_offset) + 1;
+    std::vector<size_t> record_sizes;
+    std::fill_n(std::back_inserter(record_sizes), count, 100);
+    return model::test::make_random_batch(
+      model::test::record_batch_spec{
+        .offset = kafka::offset_cast(spec.base_offset),
+        .count = count,
+        .record_sizes = record_sizes,
+        .timestamp = spec.max_timestamp,
+        .all_records_have_same_timestamp = true,
+      });
+}
+
 chunked_vector<model::record_batch>
 make_batches(const std::vector<batch_spec>& specs) {
     chunked_vector<model::record_batch> batches;
+    batches.reserve(specs.size());
     for (const auto& spec : specs) {
-        int count = static_cast<int>(spec.last_offset - spec.base_offset) + 1;
-        std::vector<size_t> record_sizes;
-        std::fill_n(std::back_inserter(record_sizes), count, 100);
-        batches.push_back(
-          model::test::make_random_batch(
-            model::test::record_batch_spec{
-              .offset = kafka::offset_cast(spec.base_offset),
-              .count = count,
-              .record_sizes = record_sizes,
-              .timestamp = spec.max_timestamp,
-              .all_records_have_same_timestamp = true,
-            }));
+        batches.push_back(make_batch(spec));
     }
     return batches;
 }
@@ -581,4 +585,29 @@ TEST(L1Objects, PartialScan) {
           std::nullopt,
           /*expect_ntp_markers=*/false));
     }
+}
+
+TEST(L1Objects, BuilderSize) {
+    auto test_topic_id = model::topic_id(uuid_t::create());
+    iobuf output;
+    auto builder = object_builder::create(
+      make_iobuf_ref_output_stream(output), {});
+    auto _ = ss::defer([&builder] { builder->close().get(); });
+    EXPECT_EQ(builder->file_size(), 0);
+    builder->start_partition({test_topic_id, model::partition_id{0}}).get();
+    auto after_partition_size = builder->file_size();
+    EXPECT_GT(after_partition_size, 0);
+    builder
+      ->add_batch(make_batch({
+        .base_offset = 10_o,
+        .last_offset = 15_o,
+        .max_timestamp = 100_t,
+      }))
+      .get();
+    auto after_batch_size = builder->file_size();
+    EXPECT_GT(after_batch_size, after_partition_size);
+    auto finished = builder->finish().get();
+    auto final_size = builder->file_size();
+    EXPECT_GT(final_size, after_batch_size);
+    EXPECT_EQ(final_size, finished.size_bytes);
 }

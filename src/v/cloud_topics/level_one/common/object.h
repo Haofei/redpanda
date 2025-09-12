@@ -269,6 +269,12 @@ public:
     //    partition.
     virtual ss::future<> add_batch(model::record_batch) = 0;
 
+    // Return the size of file in bytes that has been built so far.
+    //
+    // After `finish` has been called, this will be the size of the fully
+    // constructed file.
+    virtual size_t file_size() const = 0;
+
     // Information about the finished object.
     struct object_info {
         footer index;
