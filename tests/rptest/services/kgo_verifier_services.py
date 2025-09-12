@@ -514,6 +514,7 @@ class ValidatorStatus:
         name: str,
         valid_reads: int,
         invalid_reads: int,
+        offset_gaps: int,
         out_of_scope_invalid_reads: int,
         max_offsets_consumed: Optional[int],
         lost_offsets: Dict[str, int],
@@ -525,6 +526,7 @@ class ValidatorStatus:
 
         self.valid_reads = valid_reads
         self.invalid_reads = invalid_reads
+        self.offset_gaps = offset_gaps
         self.out_of_scope_invalid_reads = out_of_scope_invalid_reads
         self.max_offsets_consumed = max_offsets_consumed
         self.lost_offsets = lost_offsets
@@ -546,6 +548,7 @@ class ValidatorStatus:
 
         self.valid_reads += rhs.valid_reads
         self.invalid_reads += rhs.invalid_reads
+        self.offset_gaps += rhs.offset_gaps
         self.out_of_scope_invalid_reads += rhs.out_of_scope_invalid_reads
 
     def __str__(self):
@@ -553,6 +556,7 @@ class ValidatorStatus:
             f"ValidatorStatus<"
             f"valid_reads={self.valid_reads}, "
             f"invalid_reads={self.invalid_reads}, "
+            f"offset_gaps={self.offset_gaps}, "
             f"out_of_scope_invalid_reads={self.out_of_scope_invalid_reads}, "
             f"lost_offsets={self.lost_offsets}, "
             f"tombstones_consumed={self.tombstones_consumed}>"
@@ -576,6 +580,7 @@ class ConsumerStatus:
             validator = {
                 "valid_reads": 0,
                 "invalid_reads": 0,
+                "offset_gaps": 0,
                 "out_of_scope_invalid_reads": 0,
                 "name": "",
                 "max_offsets_consumed": dict(),
