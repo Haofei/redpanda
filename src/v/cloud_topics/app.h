@@ -75,7 +75,7 @@ private:
     ss::sharded<reconciler::reconciler> reconciler;
     ss::sharded<l1::domain_supervisor> domain_supervisor;
     ss::sharded<l1::frontend> l1_metastore_fe;
-    std::unique_ptr<cloud_topics_manager> manager;
+    ss::sharded<cloud_topics_manager> manager;
 };
 
 } // namespace cloud_topics

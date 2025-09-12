@@ -62,11 +62,14 @@ ss::future<> app::construct(
       connection_cache,
       &domain_supervisor);
 
-    manager = std::make_unique<cloud_topics_manager>(
-      &remote->local(),
+    co_await construct_service(
+      manager,
+      ss::sharded_parameter([&] { return &remote->local(); }),
       bucket,
-      &controller->get_partition_manager().local(),
-      &controller->get_raft_manager().local());
+      ss::sharded_parameter(
+        [&] { return &controller->get_partition_manager().local(); }),
+      ss::sharded_parameter(
+        [&] { return &controller->get_raft_manager().local(); }));
 }
 
 ss::future<> app::start() {
@@ -74,12 +77,11 @@ ss::future<> app::start() {
     co_await reconciler.invoke_on_all([](auto& r) { return r.start(); });
     co_await domain_supervisor.invoke_on_all(
       [](auto& ds) { return ds.start(); });
-    co_await manager->start();
+    co_await manager.invoke_on_all([](auto& r) { return r.start(); });
 }
 
 ss::future<> app::stop() {
     ssx::sharded_service_container::shutdown();
-    co_await manager->stop();
     co_await data_plane->stop();
 }
 
