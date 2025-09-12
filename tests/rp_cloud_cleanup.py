@@ -687,6 +687,12 @@ def cleanup_entrypoint():
     # Init the cleaner class
     cleaner = CloudCleanup()
 
+    if cleaner.config.type == "serverless":
+        # Serverless clusters are created outside the scope of the test and will be cleaned up
+        # outside the scope of the test
+        print("Skipping cleanup during serverless tests")
+        sys.exit(0)
+
     # Arguments parsing. Quick and head on. No fancy argparse needed
     clean_namespaces = False
     clean_buckets = False

@@ -1625,8 +1625,18 @@ class RedpandaServiceCloud(KubeServiceMixin, RedpandaServiceABC):
             "ResourceSettings: setting dedicated_nodes=True because serving from redpanda cloud"
         )
 
-        cluster_id = self._cloud_cluster.create(superuser=self._superuser)
+        self._is_serverless_cluster = False
+        if self._cc_config["type"] == "serverless":
+            self._is_serverless_cluster = True
+        cluster_id = self._cloud_cluster.create(
+            superuser=self._superuser, is_serverless_cluster=self._is_serverless_cluster
+        )
         remote_uri = f"redpanda@{cluster_id}-agent"
+        if self._is_serverless_cluster:
+            # if cluster is a serverless cluster it will be treated as a black box, there will be no kubectl or
+            # checking of pods
+            return
+
         self.__kubectl = KubectlTool(
             self,
             remote_uri=remote_uri,
@@ -1968,9 +1978,14 @@ class RedpandaServiceCloud(KubeServiceMixin, RedpandaServiceABC):
             )
 
     def brokers(self) -> str:
+        if self._is_serverless_cluster:
+            return self._cloud_cluster.get_serverless_broker_address()
         return self._cloud_cluster.get_broker_address()
 
     def install_pack_version(self) -> str:
+        if self._is_serverless_cluster:
+            # if serverless cluster we do not have an install pack version
+            return "unknown_version"
         return self._cloud_cluster.get_install_pack_version()
 
     def sockets_clear(self, node: RemoteClusterNode):
@@ -2173,6 +2188,10 @@ class RedpandaServiceCloud(KubeServiceMixin, RedpandaServiceABC):
             # Shortcut to getting restart counter
             return p["containerStatuses"][0]["restartCount"]
 
+        if self._is_serverless_cluster:
+            # if serverless cluster test treats it like a black box, no checking of pods
+            return
+
         # Not checking active count vs expected nodes
         active, _, _ = self.get_redpanda_pods_presorted()
         for pod in active:
@@ -2247,6 +2266,10 @@ class RedpandaServiceCloud(KubeServiceMixin, RedpandaServiceABC):
         :param allow_list: list of compiled regexes, or None for default
         :return: None
         """
+        if self._is_serverless_cluster:
+            # if serverless cluster test treats it as a black box, no checking of logs
+            return
+
         allow_list = prepare_allow_list(allow_list)
 
         lsearcher = LogSearchCloud(
@@ -2304,6 +2327,10 @@ class RedpandaServiceCloud(KubeServiceMixin, RedpandaServiceABC):
             except Exception as e:
                 self.logger.warning(f"Error getting logs for {pod.name}: {e}")
             return pod.name
+
+        if self._is_serverless_cluster:
+            # if serverless cluster test treats it as a black box, no checking of pods
+            return {}
 
         # Safeguard if CloudService not created
         if self.pods is None or self._cloud_cluster is None:
