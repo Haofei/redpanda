@@ -7,16 +7,26 @@
 # the Business Source License, use of this software will be governed
 # by the Apache License, Version 2.0
 
-from connectrpc.errors import ConnectError, ConnectErrorCode
-
+import random
+import re
 from contextlib import nullcontext
-from rptest.clients.admin.v2 import Admin as AdminV2
+
+from connectrpc.errors import ConnectError, ConnectErrorCode
+from ducktape.mark import matrix
+
 from rptest.clients.admin.proto.redpanda.core.admin.v2 import (
     shadow_link_pb2,
     shadow_link_pb2_connect,
 )
+from rptest.clients.admin.v2 import Admin as AdminV2
+from rptest.clients.rpk import RpkTool
 from rptest.clients.types import TopicSpec
+from rptest.services.admin import Admin
 from rptest.services.cluster import cluster
+from rptest.services.kgo_verifier_services import (
+    KgoVerifierConsumerGroupConsumer,
+    KgoVerifierProducer,
+)
 from rptest.services.multi_cluster_services import (
     Cluster,
     MultiClusterServices,
@@ -28,15 +38,6 @@ from rptest.tests.cluster_linking_test_base import (
 )
 from rptest.tests.redpanda_test import RedpandaTest
 from rptest.util import bg_thread_cm, expect_exception, wait_until, wait_until_result
-from rptest.services.kgo_verifier_services import (
-    KgoVerifierProducer,
-    KgoVerifierConsumerGroupConsumer,
-)
-from rptest.services.admin import Admin
-from ducktape.mark import matrix
-from rptest.clients.rpk import RpkTool
-import re
-import random
 
 
 class MultiClusterTestBase(RedpandaTest):

@@ -7,12 +7,22 @@
 # the Business Source License, use of this software will be governed
 # by the Apache License, Version 2.0
 
-from rptest.clients.admin.v2 import Admin as AdminV2
+from contextlib import contextmanager
+
+import google.protobuf.duration_pb2
+from ducktape.utils.util import wait_until
+
 from rptest.clients.admin.proto.redpanda.core.admin.v2 import (
     shadow_link_pb2,
     shadow_link_pb2_connect,
 )
+from rptest.clients.admin.v2 import Admin as AdminV2
 from rptest.clients.default import DefaultClient
+from rptest.clients.rpk import RpkTool
+from rptest.services.kgo_verifier_services import (
+    KgoVerifierConsumerGroupConsumer,
+    KgoVerifierProducer,
+)
 from rptest.services.multi_cluster_services import (
     Cluster,
     MultiClusterServices,
@@ -20,18 +30,10 @@ from rptest.services.multi_cluster_services import (
     RedpandaService,
     ServiceType,
 )
-from rptest.services.kgo_verifier_services import (
-    KgoVerifierProducer,
-    KgoVerifierConsumerGroupConsumer,
-)
-from rptest.clients.rpk import RpkTool
-from ducktape.utils.util import wait_until
-from rptest.tests.prealloc_nodes import PreallocNodesTest
 from rptest.services.redpanda import LoggingConfig
+from rptest.tests.prealloc_nodes import PreallocNodesTest
 from rptest.tests.redpanda_test import RedpandaTest
-import google.protobuf.duration_pb2
 from rptest.utils.node_operations import FailureInjectorBackgroundThread
-from contextlib import contextmanager
 
 
 class ShadowLinkTestBase(PreallocNodesTest):
