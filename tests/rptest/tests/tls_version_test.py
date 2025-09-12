@@ -148,6 +148,7 @@ class TLSVersionTestBase(RedpandaTest):
             or "tlsv1 alert protocol version" in output
             or "handshake failure" in output
             or "wrong version number" in output
+            or ("CONNECTED(" in output and "unexpected eof while reading" in output)
         )
 
     def verify_tls_version(
@@ -304,6 +305,25 @@ class TLSVersionTestBase(RedpandaTest):
             return self._get_default_ciphers(key_type=self.key_type, strict=strict)
 
         check_ciphers(default_ciphers)
+
+        # Change ciphers
+        self.redpanda.set_cluster_config(
+            values={
+                "tls_v1_2_cipher_suites": ":".join(self.TLSV1_2_CIPHERS_WEAK),
+                "tls_v1_3_cipher_suites": ":".join(self.TLSV1_3_CIPHERS_STRICT),
+            },
+            expect_restart=True,
+        )
+
+        def expected_ciphers(strict: bool):
+            return [(TLSVersion.v1_3, c) for c in self.TLSV1_3_CIPHERS_STRICT] + [
+                (TLSVersion.v1_2, c)
+                for c in self._filter_by_key_type(
+                    self.key_type, (self.TLSV1_2_CIPHERS_WEAK if not strict else [])
+                )
+            ]
+
+        check_ciphers(expected_ciphers)
 
     @cluster(num_nodes=3, log_allow_list=PERMITTED_ERROR_MESSAGE)
     @matrix(version=[0, 1, 2, 3])
