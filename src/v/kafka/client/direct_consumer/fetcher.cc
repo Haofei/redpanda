@@ -495,6 +495,23 @@ fetcher::process_fetch_response(
             part_data.partition_id = part_response.partition_index;
 
             if (part_response.error_code != kafka::error_code::none) {
+                if (
+                  part_response.error_code
+                  == kafka::error_code::offset_out_of_range) {
+                    vlog(
+                      logger().warn,
+                      "[broker: {}] {}/{} fetch returned: {}, resetting "
+                      "offset with policy: {}",
+                      _id,
+                      topic_data.topic,
+                      part_data.partition_id,
+                      part_response.error_code,
+                      _parent->_config.reset_policy);
+                    reset_partition_offset(
+                      model::topic_partition_view(
+                        topic_data.topic, part_data.partition_id));
+                    continue;
+                }
                 if (is_retriable_error(part_response.error_code)) {
                     vlog(
                       logger().debug,
@@ -672,6 +689,18 @@ fetcher::process_fetch_response(
     }
 
     co_return result;
+}
+
+void fetcher::reset_partition_offset(model::topic_partition_view tp) {
+    auto t_it = _partitions.find(tp.topic);
+    if (t_it == _partitions.end()) {
+        return;
+    }
+    auto p_it = t_it->second.find(tp.partition);
+    if (p_it == t_it->second.end()) {
+        return;
+    }
+    p_it->second.fetch_offset = std::nullopt;
 }
 
 namespace {
