@@ -170,7 +170,18 @@ public:
                && model::is_compaction_enabled(cleanup_policy());
     }
 
-    bool is_collectable() const {
+    // If time/bytes based retention is enabled for local storage.
+    bool is_locally_collectable() const {
+        if (cloud_topic_enabled()) {
+            // Cloud topics always manually retains the log based
+            // on what has been written to L1.
+            return false;
+        }
+        return model::is_deletion_enabled(cleanup_policy());
+    }
+
+    // If time/bytes based retention is enabled for remote storage.
+    bool is_remotely_collectable() const {
         return model::is_deletion_enabled(cleanup_policy());
     }
 
