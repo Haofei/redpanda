@@ -33,7 +33,13 @@ from rptest.tests.cluster_linking_test_base import (
     ShadowLinkTestBase,
 )
 from rptest.tests.redpanda_test import RedpandaTest
-from rptest.util import bg_thread_cm, expect_exception, wait_until, wait_until_result
+from rptest.util import (
+    bg_thread_cm,
+    contextmanager,
+    expect_exception,
+    wait_until,
+    wait_until_result,
+)
 
 
 class MultiClusterTestBase(RedpandaTest):
@@ -191,64 +197,6 @@ class ShadowLinkBasicTests(ShadowLinkTestBase):
             assert e.code == ConnectErrorCode.RESOURCE_EXHAUSTED, (
                 f"Expected {ConnectErrorCode.RESOURCE_EXHAUSTED}, got {e.code}"
             )
-
-    def create_source_consumer(self, topic, group_name="test_group", consumer_count=1):
-        return KgoVerifierConsumerGroupConsumer(
-            self.test_context,
-            self.source_cluster.service,
-            topic=topic,
-            group_name=group_name,
-            msg_size=128,
-            readers=consumer_count,
-        )
-
-    @cluster(num_nodes=7)
-    def test_consumer_groups_mirroring(self):
-        # Create a shadow link
-
-        topic = TopicSpec(name="source-topic", partition_count=5, replication_factor=3)
-
-        self.source_default_client().create_topic(topic)
-        # produce some data to the source cluster
-
-        KgoVerifierProducer.oneshot(
-            self.test_context, self.source_cluster.service, topic.name, 128, 10000
-        )
-
-        consumer = self.create_source_consumer(
-            topic=topic.name, group_name="test_group", consumer_count=1
-        )
-        consumer.start()
-        consumer.wait()
-        consumer.stop()
-        source_rpk = RpkTool(self.source_cluster.service)
-        description = source_rpk.group_describe(group="test_group")
-        self.logger.info(f">>> source_state: {description}")
-
-        self.create_link("test-link")
-
-        def _group_present_in_target_cluster():
-            target_rpk = RpkTool(self.target_cluster.service)
-            groups = target_rpk.group_list()
-
-            if not any(g.group == "test_group" for g in groups):
-                return False, None
-
-            desc = target_rpk.group_describe(
-                group="test_group", tolerant=True, summary=False
-            )
-
-            return True, desc
-
-        target_cluster_group = wait_until_result(
-            lambda: _group_present_in_target_cluster(),
-            timeout_sec=20,
-            err_msg="Failed to find consumer group in the target cluster",
-        )
-
-        assert target_cluster_group.state == "Empty", (
-            "Group test_group state expected to be empty on target cluster"
-        )
 
     @cluster(num_nodes=6)
     def test_topic_creation_in_target_cluster(self):
@@ -411,3 +359,157 @@ class ShadowLinkingReplicationTests(ShadowLinkPreAllocTestBase):
             self.create_target_failure_injector(),
         ):
             self.verify()
+
+
+class ShadowLinkConsumeGroupsMirroringTest(ShadowLinkTestBase):
+    def create_source_consumer(self, topic, group_name="test_group", consumer_count=1):
+        return KgoVerifierConsumerGroupConsumer(
+            self.test_context,
+            self.source_cluster.service,
+            topic=topic,
+            group_name=group_name,
+            msg_size=128,
+            readers=consumer_count,
+        )
+
+    @cluster(num_nodes=7)
+    def test_consumer_groups_mirroring(self):
+        topic = TopicSpec(name="source-topic", partition_count=5, replication_factor=3)
+
+        self.source_default_client().create_topic(topic)
+        # produce some data to the source cluster
+
+        KgoVerifierProducer.oneshot(
+            self.test_context, self.source_cluster.service, topic.name, 128, 10000
+        )
+
+        consumer = self.create_source_consumer(
+            topic=topic.name, group_name="test_group", consumer_count=1
+        )
+        consumer.start()
+        consumer.wait()
+        consumer.stop()
+        source_rpk = RpkTool(self.source_cluster.service)
+        description = source_rpk.group_describe(group="test_group")
+        self.logger.info(f"source_state: {description}")
+
+        self.create_link("test-link")
+
+        def _group_present_in_target_cluster():
+            target_rpk = RpkTool(self.target_cluster.service)
+            groups = target_rpk.group_list()
+
+            if not any(g.group == "test_group" for g in groups):
+                return False, None
+
+            desc = target_rpk.group_describe(
+                group="test_group", tolerant=True, summary=False
+            )
+
+            return True, desc
+
+        target_cluster_group = wait_until_result(
+            lambda: _group_present_in_target_cluster(),
+            timeout_sec=20,
+            err_msg="Failed to find consumer group in the target cluster",
+        )
+
+        assert target_cluster_group.state == "Empty", (
+            "Group test_group state expected to be empty on target cluster"
+        )
+
+    @contextmanager
+    def _nop_context_manager(self):
+        try:
+            yield
+        finally:
+            pass
+
+    @cluster(num_nodes=7)
+    @matrix(with_failures=[True, False])
+    def test_continuous_group_sync(self, with_failures):
+        partition_count = 120
+        topic_count = 6
+
+        topics = [
+            TopicSpec(
+                name=f"source-topic-{i}",
+                partition_count=int(partition_count / topic_count),
+                replication_factor=3,
+            )
+            for i in range(topic_count)
+        ]
+
+        groups = [f"test_group_{i}" for i in range(20)]
+
+        self.create_link("test-link")
+        source_rpk = RpkTool(self.source_cluster.service)
+        target_rpk = RpkTool(self.target_cluster.service)
+
+        def _maybe_failure_injector():
+            if with_failures:
+                return self.create_source_failure_injector()
+            else:
+                return self._nop_context_manager()
+
+        def _consume_with_group(topic: str, group_id: str):
+            try:
+                source_rpk.consume(
+                    topic=topic, group=group_id, n=1, timeout=5, offset="start"
+                )
+            except Exception as e:
+                self.logger.debug(
+                    f"Failed to consume from topic {topic}, group {group_id}: {e}"
+                )
+
+        def _wait_for_group_states_consistent():
+            source_groups = {g: source_rpk.group_describe(group=g) for g in groups}
+            target_groups = {g: target_rpk.group_describe(group=g) for g in groups}
+
+            for g_name, g_desc in source_groups.items():
+                self.logger.debug(f"group: {g_name} - source:  {g_desc.partitions}")
+                self.logger.debug(
+                    f"group: {g_name} - target:  {target_groups[g_name].partitions if g_name in target_groups else 'N/A'}"
+                )
+                if g_name not in target_groups:
+                    self.logger.debug(f"Group {g_name} not present in target cluster")
+                    return False
+
+                t_desc = target_groups[g_name]
+                t_partitions = {
+                    (p.topic, p.partition): p.current_offset for p in t_desc.partitions
+                }
+                for p in g_desc.partitions:
+                    if (p.topic, p.partition) not in t_partitions:
+                        return False
+                    if p.current_offset != t_partitions[(p.topic, p.partition)]:
+                        self.logger.warn(
+                            f"Group {g_name} partition {p.topic}/{p.partition} offsets differ: source {p.current_offset} vs target {t_partitions[(p.topic, p.partition)]}"
+                        )
+                        return False
+            return True
+
+        def _execute_random_updates(cnt: int):
+            for _ in range(cnt):
+                topic = topics[random.randint(0, len(topics) - 1)].name
+                group = groups[random.randint(0, len(groups) - 1)]
+                self.logger.debug(f"Consuming from topic {topic}, group {group}")
+                _consume_with_group(topic, group)
+
+        for t in topics:
+            self.source_default_client().create_topic(t)
+
+        for t in topics:
+            KgoVerifierProducer.oneshot(
+                self.test_context, self.source_cluster.service, t.name, 40, 1000
+            )
+        with _maybe_failure_injector():
+            for _ in range(5):
+                _execute_random_updates(10)
+                wait_until(
+                    lambda: _wait_for_group_states_consistent(),
+                    timeout_sec=120,
+                    backoff_sec=3,
+                    err_msg="Group states not consistent between source and target clusters",
+                    retry_on_exc=True,
+                )
