@@ -177,6 +177,12 @@ class ShadowLinkTestBase(PreallocNodesTest):
         req.shadow_link.CopyFrom(link_resource)
         return req
 
+    def delete_link_request(
+        self, link_name: str
+    ) -> shadow_link_pb2.DeleteShadowLinkRequest:
+        req = shadow_link_pb2.DeleteShadowLinkRequest(name=link_name)
+        return req
+
     def create_link(
         self, link_name: str, *args, **kwargs
     ) -> shadow_link_pb2.ShadowLink:
@@ -187,6 +193,17 @@ class ShadowLinkTestBase(PreallocNodesTest):
         self, req: shadow_link_pb2.CreateShadowLinkRequest
     ) -> shadow_link_pb2.ShadowLink:
         return self.service_client.create_shadow_link(req=req).shadow_link
+
+    def delete_link(
+        self, link_name: str, *args, **kwargs
+    ) -> shadow_link_pb2.DeleteShadowLinkResponse:
+        req = self.delete_link_request(link_name=link_name, *args, **kwargs)
+        return self.delete_link_with_request(req=req)
+
+    def delete_link_with_request(
+        self, req: shadow_link_pb2.DeleteShadowLinkRequest
+    ) -> shadow_link_pb2.DeleteShadowLinkResponse:
+        return self.service_client.delete_shadow_link(req=req)
 
     def list_links(self) -> list[shadow_link_pb2.ShadowLink]:
         resp = self.service_client.list_shadow_links(
