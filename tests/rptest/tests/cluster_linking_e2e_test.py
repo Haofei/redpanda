@@ -17,6 +17,7 @@ from contextlib import nullcontext
 
 from connectrpc.errors import ConnectError, ConnectErrorCode
 from ducktape.mark import matrix
+from ducktape.mark import ignore
 
 from rptest.clients.admin.proto.redpanda.core.admin.v2 import (
     shadow_link_pb2,
@@ -32,6 +33,7 @@ from rptest.services.kgo_verifier_services import (
 from rptest.services.multi_cluster_services import (
     Cluster,
     MultiClusterServices,
+    SecondaryClusterSpec,
     ServiceType,
 )
 from rptest.tests.cluster_linking_test_base import (
@@ -136,13 +138,15 @@ class MultiClusterKafkaTest(MultiClusterTestBase):
         # MultiClusterServices will set itself up
         pass
 
-    @cluster(num_nodes=7)
+    @cluster(num_nodes=6)
     def test_basic_ops(self):
         with MultiClusterServices(
             self.test_context,
             self.logger,
             self.redpanda,
-            secondary_spec=SecondaryClusterSpec(ServiceType.REDPANDA),
+            secondary_spec=SecondaryClusterSpec(
+                ServiceType.KAFKA, kafka_version="3.8.0", kafka_quorum="COMBINED_KRAFT"
+            ),
             num_brokers=3,
         ) as services:
             assert services.secondary.is_kafka, (
@@ -548,8 +552,16 @@ class ShadowLinkingReplicationTests(ShadowLinkPreAllocTestBase):
         return leadership_transfer_thread(redpanda, topic)
 
     @cluster(num_nodes=7)
-    @matrix(shuffle_leadership=[True, False])
-    def test_replication_basic(self, shuffle_leadership):
+    @matrix(
+        shuffle_leadership=[True, False],
+        source_cluster_spec=[
+            SecondaryClusterSpec(ServiceType.REDPANDA),
+            SecondaryClusterSpec(
+                ServiceType.KAFKA, kafka_version="3.8.0", kafka_quorum="COMBINED_KRAFT"
+            ),
+        ],
+    )
+    def test_replication_basic(self, shuffle_leadership, source_cluster_spec):
         topic = TopicSpec(name="source-topic", partition_count=5, replication_factor=3)
 
         self.source_default_client().create_topic(topic)
@@ -606,7 +618,15 @@ class ShadowLinkConsumeGroupsMirroringTest(ShadowLinkTestBase):
         )
 
     @cluster(num_nodes=7)
-    def test_consumer_groups_mirroring(self):
+    @matrix(
+        source_cluster_spec=[
+            SecondaryClusterSpec(ServiceType.REDPANDA),
+            SecondaryClusterSpec(
+                ServiceType.KAFKA, kafka_version="3.8.0", kafka_quorum="COMBINED_KRAFT"
+            ),
+        ]
+    )
+    def test_consumer_groups_mirroring(self, source_cluster_spec):
         topic = TopicSpec(name="source-topic", partition_count=5, replication_factor=3)
 
         self.source_default_client().create_topic(topic)
@@ -659,8 +679,22 @@ class ShadowLinkConsumeGroupsMirroringTest(ShadowLinkTestBase):
             pass
 
     @cluster(num_nodes=7)
-    @matrix(with_failures=[True, False])
-    def test_continuous_group_sync(self, with_failures):
+    @ignore(
+        with_failures=True,
+        source_cluster_spec=SecondaryClusterSpec(
+            ServiceType.KAFKA, kafka_version="3.8.0", kafka_quorum="COMBINED_KRAFT"
+        ),
+    )
+    @matrix(
+        with_failures=[True, False],
+        source_cluster_spec=[
+            SecondaryClusterSpec(ServiceType.REDPANDA),
+            SecondaryClusterSpec(
+                ServiceType.KAFKA, kafka_version="3.8.0", kafka_quorum="COMBINED_KRAFT"
+            ),
+        ],
+    )
+    def test_continuous_group_sync(self, with_failures, source_cluster_spec):
         partition_count = 120
         topic_count = 6
 
