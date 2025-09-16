@@ -11,10 +11,11 @@ import random
 import re
 from contextlib import nullcontext
 
+
 from connectrpc.errors import ConnectError, ConnectErrorCode
 from ducktape.mark import matrix
 
-from rptest.clients.rpk import RpkTool
+from rptest.clients.rpk import RpkTool, RPKACLInput, RpkException
 from rptest.clients.types import TopicSpec
 from rptest.services.admin import Admin
 from rptest.services.cluster import cluster
@@ -290,6 +291,58 @@ class ShadowLinkBasicTests(ShadowLinkTestBase):
                 f"Expected cleanup policy {t.cleanup_policy} for topic {t.name}, "
                 f"got {target_configs['cleanup.policy']}"
             )
+
+    @cluster(num_nodes=6)
+    def test_topic_creation_restriction(self):
+        """
+        Test validates that when cluster linking is active, that topics can only be created by superusers
+        """
+        username = "test-user"
+        password = "test-password"
+        topic_name_prefix = "test-topic"
+
+        superuser_rpk = RpkTool(
+            self.target_cluster_service,
+            username=self.redpanda.SUPERUSER_CREDENTIALS.username,
+            password=self.redpanda.SUPERUSER_CREDENTIALS.password,
+            sasl_mechanism=self.redpanda.SUPERUSER_CREDENTIALS.mechanism,
+        )
+        normaluser_rpk = RpkTool(
+            self.target_cluster_service,
+            username=username,
+            password=password,
+            sasl_mechanism="SCRAM-SHA-256",
+        )
+
+        self.logger.debug(f'Creating user "{username}"')
+        superuser_rpk.sasl_create_user(new_username=username, new_password=password)
+        new_acl = RPKACLInput()
+        new_acl.allow_principal = [f"User:{username}"]
+        new_acl.operation = ["ALL"]
+        new_acl.resource_pattern_type = "prefixed"
+        new_acl.topic = [topic_name_prefix]
+
+        self.logger.debug("Enabling SASL on target cluster")
+
+        self.target_cluster_service.set_cluster_config(values={"enable_sasl": True})
+
+        self.logger.debug(f"Creating ACL {new_acl}")
+        superuser_rpk.acl_create(acl=new_acl)
+
+        # Verifying that a normal user can create a topic without link being present
+        normaluser_rpk.create_topic(f"{topic_name_prefix}-1")
+
+        self.logger.debug("Creating cluster link")
+        self.create_link("test-link")
+
+        # Now verify that the user cannot create the topic
+        try:
+            normaluser_rpk.create_topic(f"{topic_name_prefix}-2")
+            assert False, "Should not have been able to create a topic"
+        except RpkException:
+            pass
+
+        superuser_rpk.create_topic(f"{topic_name_prefix}-3")
 
 
 class ShadowLinkingReplicationTests(ShadowLinkPreAllocTestBase):

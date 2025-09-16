@@ -65,6 +65,8 @@ public:
 
     bool cluster_link_active() const;
 
+    bool cluster_linking_enabled() const;
+
     notification_id register_for_updates(notification_callback);
     void unregister_for_updates(notification_id);
 

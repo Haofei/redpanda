@@ -11,6 +11,7 @@
 
 #include "absl/container/flat_hash_map.h"
 #include "base/vlog.h"
+#include "cluster/cluster_link/frontend.h"
 #include "cluster/id_allocator_frontend.h"
 #include "cluster/security_frontend.h"
 #include "cluster/topics_frontend.h"
@@ -157,6 +158,7 @@ server::server(
   ss::sharded<cluster::controller_api>& controller_api,
   ss::sharded<cluster::tx_gateway_frontend>& tx_gateway_frontend,
   ss::sharded<kafka::datalake_throttle_manager>& datalake_throttle_manager,
+  ss::sharded<cluster::cluster_link::frontend>& clfe,
   std::optional<qdc_monitor_config> qdc_config,
   ssx::singleton_thread_worker& tw,
   const std::unique_ptr<pandaproxy::schema_registry::api>& sr) noexcept
@@ -194,6 +196,7 @@ server::server(
   , _controller_api(controller_api)
   , _tx_gateway_frontend(tx_gateway_frontend)
   , _datalake_throttle_manager(datalake_throttle_manager)
+  , _cluster_link_frontend(clfe)
   , _mtls_principal_mapper(
       config::shard_local_cfg().kafka_mtls_principal_mapping_rules.bind())
   , _gssapi_principal_mapper(
@@ -224,6 +227,11 @@ server::server(
 
     _sasl_probe->setup_metrics(cfg->local().name);
     _read_dist_probe->setup_metrics();
+}
+
+bool server::is_cluster_link_active() const {
+    const auto& clfe = _cluster_link_frontend.local();
+    return clfe.cluster_linking_enabled() && clfe.cluster_link_active();
 }
 
 void server::setup_metrics() {
