@@ -214,7 +214,7 @@ ss::future<> remote_broker::initialize_versions() {
         vlog(
           _logger.warn,
           "Unable to initialize the API versions - {}",
-          std::current_exception());
+          response.data.error_code);
         throw broker_error(
           _node_id,
           response.data.error_code,
