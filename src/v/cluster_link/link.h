@@ -78,7 +78,7 @@ public:
     add_mirror_topic(model::add_mirror_topic_cmd cmd);
 
     ss::future<::cluster::cluster_link::errc>
-    update_mirror_topic_state(model::update_mirror_topic_state_cmd cmd);
+    update_mirror_topic_state(model::update_mirror_topic_status_cmd cmd);
 
     ss::future<::cluster::cluster_link::errc> update_mirror_topic_properties(
       model::update_mirror_topic_properties_cmd cmd);

@@ -119,8 +119,8 @@ TEST_F_CORO(topic_properties_syncer_test, topic_properties_sync) {
         const auto& mirror_topics = link->get().state.mirror_topics;
         auto mirror_topic_it = mirror_topics.find(test_topic);
         if (mirror_topic_it != mirror_topics.end()) {
-            return mirror_topic_it->second.state
-                   == model::mirror_topic_state::failed;
+            return mirror_topic_it->second.status
+                   == model::mirror_topic_status::failed;
         }
         return false;
     });
@@ -133,7 +133,8 @@ TEST_F_CORO(topic_properties_syncer_test, topic_properties_sync) {
     auto mirror_topic_it = mirror_topics.find(test_topic);
     ASSERT_NE_CORO(mirror_topic_it, mirror_topics.end());
     EXPECT_EQ(mirror_topic_it->second.partition_count, 3);
-    EXPECT_EQ(mirror_topic_it->second.state, model::mirror_topic_state::failed);
+    EXPECT_EQ(
+      mirror_topic_it->second.status, model::mirror_topic_status::failed);
 }
 
 TEST_F_CORO(topic_properties_syncer_test, sync_rf) {

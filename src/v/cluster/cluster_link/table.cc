@@ -21,17 +21,17 @@ namespace cluster::cluster_link {
 using ::cluster_link::model::add_mirror_topic_cmd;
 using ::cluster_link::model::id_t;
 using ::cluster_link::model::metadata;
-using ::cluster_link::model::mirror_topic_state;
+using ::cluster_link::model::mirror_topic_status;
 using ::cluster_link::model::name_t;
 using ::cluster_link::model::update_cluster_link_configuration_cmd;
-using ::cluster_link::model::update_mirror_topic_state_cmd;
+using ::cluster_link::model::update_mirror_topic_status_cmd;
 
 namespace {
 static constexpr auto accepted_commands = cluster::make_commands_list<
   cluster::cluster_link_upsert_cmd,
   cluster::cluster_link_remove_cmd,
   cluster::cluster_link_add_mirror_topic_cmd,
-  cluster::cluster_link_update_mirror_topic_state_cmd,
+  cluster::cluster_link_update_mirror_topic_status_cmd,
   cluster::cluster_link_update_mirror_topic_properties_cmd,
   cluster::cluster_link_update_cluster_link_configuration_cmd>();
 
@@ -150,8 +150,8 @@ std::optional<id_t> table::find_id_by_topic(model::topic_view tp) const {
     return it->second;
 }
 
-std::optional<mirror_topic_state>
-table::find_mirror_topic_state(model::topic_view tp) const {
+std::optional<mirror_topic_status>
+table::find_mirror_topic_status(model::topic_view tp) const {
     auto id = find_id_by_topic(tp);
     if (!id) {
         return std::nullopt;
@@ -169,7 +169,7 @@ table::find_mirror_topic_state(model::topic_view tp) const {
       "Inconsistent topic index for {} expected to exist in metadata id {}",
       tp,
       id.value());
-    return it->second.state;
+    return it->second.status;
 }
 
 chunked_vector<id_t> table::get_all_link_ids() const {
@@ -203,7 +203,7 @@ ss::future<std::error_code> table::apply_update(model::record_batch b) {
               return table.add_mirror_topic(add.key, add.value);
           },
           [&table](
-            const cluster::cluster_link_update_mirror_topic_state_cmd& state) {
+            const cluster::cluster_link_update_mirror_topic_status_cmd& state) {
               return table.update_mirror_topic_state(state.key, state.value);
           },
           [&table](
@@ -367,7 +367,7 @@ table::add_mirror_topic(id_t id, const add_mirror_topic_cmd& cmd) {
 }
 
 cluster::cluster_link::errc table::update_mirror_topic_state(
-  id_t id, const update_mirror_topic_state_cmd& cmd) {
+  id_t id, const update_mirror_topic_status_cmd& cmd) {
     auto link_id = find_id_by_topic(cmd.topic);
     if (!link_id) {
         vlog(
@@ -393,7 +393,7 @@ cluster::cluster_link::errc table::update_mirror_topic_state(
       cmd.topic,
       id);
 
-    it->second.state = cmd.state;
+    it->second.status = cmd.status;
     run_callbacks(id);
     return errc::success;
 }

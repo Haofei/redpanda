@@ -21,7 +21,11 @@
 
 namespace cluster_link::model {
 
-std::ostream& operator<<(std::ostream& os, mirror_topic_state s) {
+std::ostream& operator<<(std::ostream& os, const link_status& s) {
+    return os << fmt::format("{}", s);
+}
+
+std::ostream& operator<<(std::ostream& os, mirror_topic_status s) {
     return os << fmt::format("{}", s);
 }
 
@@ -90,7 +94,7 @@ std::ostream& operator<<(std::ostream& os, const metadata& md) {
 
 mirror_topic_metadata mirror_topic_metadata::copy() const {
     mirror_topic_metadata copy;
-    copy.state = state;
+    copy.status = status;
     copy.source_topic_id = source_topic_id;
     copy.source_topic_name = source_topic_name;
     copy.destination_topic_id = destination_topic_id;
@@ -161,7 +165,7 @@ void link_state::set_mirror_topics(mirror_topics_t&& topics) {
 
 link_state link_state::copy() const {
     link_state copy;
-    copy.paused = paused;
+    copy.status = status;
     copy.mirror_topics.reserve(mirror_topics.size());
     for (const auto& [topic, state] : mirror_topics) {
         copy.mirror_topics.emplace(topic, state.copy());
@@ -315,7 +319,7 @@ auto fmt::formatter<cluster_link::model::mirror_topic_metadata>::format(
       "{{state: {}, source_topic_id: {}, source_topic_name: {}, "
       "destination_topic_id: {}, partition_count: {}, replication_factor: {}, "
       "topic_configs: {}}}",
-      m.state,
+      m.status,
       m.source_topic_id,
       m.source_topic_name,
       m.destination_topic_id,
@@ -388,8 +392,8 @@ auto fmt::formatter<cluster_link::model::link_state>::format(
   -> decltype(ctx.out()) {
     return fmt::format_to(
       ctx.out(),
-      "{{paused: {}, mirror_topics: {}}}",
-      s.paused,
+      "{{status: {}, mirror_topics: {}}}",
+      s.status,
       fmt::join(s.mirror_topics.begin(), s.mirror_topics.end(), ","));
 }
 
@@ -412,11 +416,12 @@ auto fmt::formatter<cluster_link::model::add_mirror_topic_cmd>::format(
       ctx.out(), "{{topic: {}, metadata: {}}}", m.topic, m.metadata);
 }
 
-auto fmt::formatter<cluster_link::model::update_mirror_topic_state_cmd>::format(
-  const cluster_link::model::update_mirror_topic_state_cmd& m,
-  format_context& ctx) -> decltype(ctx.out()) {
+auto fmt::formatter<cluster_link::model::update_mirror_topic_status_cmd>::
+  format(
+    const cluster_link::model::update_mirror_topic_status_cmd& m,
+    format_context& ctx) -> decltype(ctx.out()) {
     return fmt::format_to(
-      ctx.out(), "{{topic: {}, state: {}}}", m.topic, m.state);
+      ctx.out(), "{{topic: {}, state: {}}}", m.topic, m.status);
 }
 
 auto fmt::formatter<cluster_link::model::update_mirror_topic_properties_cmd>::

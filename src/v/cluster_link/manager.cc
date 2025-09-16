@@ -263,13 +263,16 @@ ss::future<result<void>> manager::delete_cluster_link(model::name_t name) {
         co_return cl_resp.assume_error();
     }
 
-    const auto is_active = [](const model::mirror_topic_state s) {
+    const auto is_active = [](const model::mirror_topic_status s) {
         switch (s) {
-        case model::mirror_topic_state::active:
-        case model::mirror_topic_state::paused:
+        case model::mirror_topic_status::active:
+        case model::mirror_topic_status::paused:
+        case model::mirror_topic_status::failing_over:
+        case model::mirror_topic_status::promoting:
             return true;
-        case model::mirror_topic_state::failed:
-        case model::mirror_topic_state::promoted:
+        case model::mirror_topic_status::failed:
+        case model::mirror_topic_status::promoted:
+        case model::mirror_topic_status::failed_over:
             return false;
         }
     };
@@ -277,7 +280,7 @@ ss::future<result<void>> manager::delete_cluster_link(model::name_t name) {
     const auto mirror_topic_states = cl_resp.assume_value().state.mirror_topics
                                      | std::views::values
                                      | std::views::transform(
-                                       &model::mirror_topic_metadata::state);
+                                       &model::mirror_topic_metadata::status);
 
     if (std::ranges::any_of(mirror_topic_states, is_active)) {
         co_return err_info(
@@ -545,7 +548,7 @@ ss::future<::cluster::cluster_link::errc> manager::add_mirror_topic(
 }
 
 ss::future<::cluster::cluster_link::errc> manager::update_mirror_topic_state(
-  model::id_t link_id, model::update_mirror_topic_state_cmd cmd) {
+  model::id_t link_id, model::update_mirror_topic_status_cmd cmd) {
     static constexpr auto mirror_topic_timeout = 5s;
     return _registry->update_mirror_topic_state(
       link_id,

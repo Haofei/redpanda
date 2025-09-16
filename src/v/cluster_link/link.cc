@@ -256,7 +256,7 @@ link::add_mirror_topic(model::add_mirror_topic_cmd cmd) {
 }
 
 ss::future<::cluster::cluster_link::errc>
-link::update_mirror_topic_state(model::update_mirror_topic_state_cmd cmd) {
+link::update_mirror_topic_state(model::update_mirror_topic_status_cmd cmd) {
     return _manager->update_mirror_topic_state(_link_id, std::move(cmd));
 }
 

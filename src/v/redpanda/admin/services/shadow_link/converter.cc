@@ -66,16 +66,22 @@ constexpr auto to_filter_type(proto::admin::filter_type f) {
 }
 
 constexpr auto mirror_topic_state_to_shadow_topic_state(
-  cluster_link::model::mirror_topic_state s) {
+  cluster_link::model::mirror_topic_status s) {
     switch (s) {
-    case cluster_link::model::mirror_topic_state::active:
+    case cluster_link::model::mirror_topic_status::active:
         return proto::admin::shadow_topic_state::active;
-    case cluster_link::model::mirror_topic_state::failed:
+    case cluster_link::model::mirror_topic_status::failed:
         return proto::admin::shadow_topic_state::faulted;
-    case cluster_link::model::mirror_topic_state::paused:
+    case cluster_link::model::mirror_topic_status::paused:
         return proto::admin::shadow_topic_state::paused;
-    case cluster_link::model::mirror_topic_state::promoted:
+    case cluster_link::model::mirror_topic_status::promoted:
         return proto::admin::shadow_topic_state::promoted;
+    case cluster_link::model::mirror_topic_status::failing_over:
+        return proto::admin::shadow_topic_state::failing_over;
+    case cluster_link::model::mirror_topic_status::failed_over:
+        return proto::admin::shadow_topic_state::failed_over;
+    case cluster_link::model::mirror_topic_status::promoting:
+        return proto::admin::shadow_topic_state::promoting;
     }
 }
 
@@ -816,7 +822,7 @@ create_shadow_topic_statuses(const cluster_link::model::link_state& state) {
         shadow_topic_status status;
         status.set_name(ss::sstring{topic});
         status.set_state(
-          mirror_topic_state_to_shadow_topic_state(metadata.state));
+          mirror_topic_state_to_shadow_topic_state(metadata.status));
         statuses.emplace_back(std::move(status));
     }
 

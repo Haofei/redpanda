@@ -56,8 +56,8 @@ public:
     find_id_by_topic(model::topic_view tp) const;
     /// Find the state of a mirror topic by its name, otherwise returns
     /// std::nullopt
-    std::optional<::cluster_link::model::mirror_topic_state>
-    find_mirror_topic_state(model::topic_view tp) const;
+    std::optional<::cluster_link::model::mirror_topic_status>
+    find_mirror_topic_status(model::topic_view tp) const;
 
     /// Returns a list of all link IDs in the table
     chunked_vector<::cluster_link::model::id_t> get_all_link_ids() const;
@@ -95,7 +95,7 @@ private:
 
     cluster::cluster_link::errc update_mirror_topic_state(
       ::cluster_link::model::id_t,
-      const ::cluster_link::model::update_mirror_topic_state_cmd& cmd);
+      const ::cluster_link::model::update_mirror_topic_status_cmd& cmd);
 
     cluster::cluster_link::errc update_mirror_topic_properties(
       ::cluster_link::model::id_t,

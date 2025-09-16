@@ -29,7 +29,7 @@ using ::cluster_link::model::metadata;
 using ::cluster_link::model::name_t;
 using ::cluster_link::model::update_cluster_link_configuration_cmd;
 using ::cluster_link::model::update_mirror_topic_properties_cmd;
-using ::cluster_link::model::update_mirror_topic_state_cmd;
+using ::cluster_link::model::update_mirror_topic_status_cmd;
 
 namespace {
 errc map_errc(std::error_code ec) {
@@ -119,15 +119,15 @@ ss::future<errc> frontend::add_mirror_topic(
     co_return co_await do_mutation(std::move(c), timeout);
 }
 
-ss::future<errc> frontend::update_mirror_topic_state(
+ss::future<errc> frontend::update_mirror_topic_status(
   id_t id,
-  update_mirror_topic_state_cmd cmd,
+  update_mirror_topic_status_cmd cmd,
   model::timeout_clock::time_point timeout) {
     if (!cluster_linking_enabled()) {
         co_return errc::feature_disabled;
     }
     cluster_link_cmd c{
-      cluster::cluster_link_update_mirror_topic_state_cmd(id, std::move(cmd))};
+      cluster::cluster_link_update_mirror_topic_status_cmd(id, std::move(cmd))};
     co_return co_await do_mutation(std::move(c), timeout);
 }
 
@@ -294,25 +294,25 @@ ss::future<errc> frontend::dispatch_mutation_to_remote(
                     });
               },
               [client, timeout](
-                cluster::cluster_link_update_mirror_topic_state_cmd
+                cluster::cluster_link_update_mirror_topic_status_cmd
                   cmd) mutable {
                   return client
-                    .update_mirror_topic_state(
-                      cluster::update_mirror_topic_state_request{
+                    .update_mirror_topic_status(
+                      cluster::update_mirror_topic_status_request{
                         .link_id = cmd.key,
                         .cmd = std::move(cmd.value),
                         .timeout = timeout},
                       rpc::client_opts(timeout))
                     .then(&rpc::get_ctx_data<
-                          cluster::update_mirror_topic_state_response>)
-                    .then(
-                      [](
-                        result<cluster::update_mirror_topic_state_response> r) {
-                          if (r.has_error()) {
-                              return result<void>(r.error());
-                          }
-                          return result<void>(r.value().ec);
-                      });
+                          cluster::update_mirror_topic_status_response>)
+                    .then([](
+                            result<cluster::update_mirror_topic_status_response>
+                              r) {
+                        if (r.has_error()) {
+                            return result<void>(r.error());
+                        }
+                        return result<void>(r.value().ec);
+                    });
               },
               [client, timeout](
                 cluster::cluster_link_update_mirror_topic_properties_cmd
@@ -543,7 +543,7 @@ errc frontend::validator::validate_mutation(const cluster_link_cmd& cmd) const {
           }
           return errc::success;
       },
-      [this](const cluster::cluster_link_update_mirror_topic_state_cmd& cmd) {
+      [this](const cluster::cluster_link_update_mirror_topic_status_cmd& cmd) {
           auto ec = model::validate_kafka_topic_name(cmd.value.topic);
           if (ec) {
               vlog(cluster::clusterlog.warn, "Invalid topic name: {}", ec);

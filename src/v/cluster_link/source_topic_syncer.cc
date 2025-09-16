@@ -355,12 +355,12 @@ void source_topic_syncer::enqueue_update_mirror_topic_commands(
         const auto& metadata_cache = it->second.first;
         const auto& mirror_topic_cache = it->second.second;
 
-        if (mirror_topic_cache.state != model::mirror_topic_state::active) {
+        if (mirror_topic_cache.status != model::mirror_topic_status::active) {
             vlog(
               logger().debug,
               "Skipping update to topic {} which is in a non-active state: {}",
               topic,
-              mirror_topic_cache.state);
+              mirror_topic_cache.status);
             continue;
         }
 
@@ -377,9 +377,9 @@ void source_topic_syncer::enqueue_update_mirror_topic_commands(
               "Topic {} has fewer partitions than expected, marking as failed",
               topic);
             commands.emplace_back(
-              model::update_mirror_topic_state_cmd{
+              model::update_mirror_topic_status_cmd{
                 .topic = topic,
-                .state = model::mirror_topic_state::failed,
+                .status = model::mirror_topic_status::failed,
               });
             continue;
         }
@@ -396,8 +396,8 @@ void source_topic_syncer::enqueue_update_mirror_topic_commands(
               mirror_topic_cache.source_topic_id,
               metadata_cache.topic_id);
             commands.emplace_back(
-              model::update_mirror_topic_state_cmd{
-                .topic = topic, .state = model::mirror_topic_state::failed});
+              model::update_mirror_topic_status_cmd{
+                .topic = topic, .status = model::mirror_topic_status::failed});
             continue;
         }
 
@@ -486,7 +486,7 @@ source_topic_syncer::submit_commands(reconciler_commands_vector commands) {
           [this](model::update_mirror_topic_properties_cmd c) {
               return get_link()->update_mirror_topic_properties(std::move(c));
           },
-          [this](model::update_mirror_topic_state_cmd c) {
+          [this](model::update_mirror_topic_status_cmd c) {
               return get_link()->update_mirror_topic_state(std::move(c));
           });
         if (res != ::cluster::cluster_link::errc::success) {
