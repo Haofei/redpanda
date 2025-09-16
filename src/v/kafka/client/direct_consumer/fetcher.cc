@@ -572,7 +572,10 @@ fetcher::process_fetch_response(
                   || part_response.records->is_end_of_stream()) {
                     continue;
                 }
-                topic_data.total_bytes += part_response.records->size_bytes();
+                auto partition_response_size
+                  = part_response.records->size_bytes();
+                part_data.size_bytes = partition_response_size;
+                topic_data.total_bytes += partition_response_size;
                 part_data.data = co_await reader_to_chunked_vector(
                   std::move(part_response.records.value()));
 
