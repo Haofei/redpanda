@@ -277,65 +277,27 @@ bool fetcher::maybe_update_fetch_offset(
   const model::topic& topic,
   model::partition_id partition_id,
   kafka::offset last_received,
-  kafka::offset high_watermark,
-  std::optional<epoch_set> maybe_response_epochs) {
-    auto t_it = _partitions.find(topic);
-    if (t_it == _partitions.end()) {
-        return false;
-    }
-    auto p_it = t_it->second.find(partition_id);
-    if (p_it == t_it->second.end()) {
+  kafka::offset high_watermark) {
+    auto maybe_fetch_state = find_fetcher_state(topic, partition_id);
+    if (!maybe_fetch_state) {
         return false;
     }
 
-    // possible in a tight race
-    // 1. unassign from A
-    // 2. begin fetch
-    // 3. assign to A
-    // 4. broker receives update
-    // 5. the fetch will receive a response for which it did not have an epoch
-    // this is logically the same as epoch mismatch
-    if (!maybe_response_epochs) {
-        vlog(
-          logger().info,
-          "[broker: {}] Ignoring unbidden {}/{} current epoch: {}",
-          _id,
-          topic,
-          partition_id,
-          p_it->second.fetcher_epoch);
-        return false;
-    }
-
-    const auto response_fetcher_epoch
-      = maybe_response_epochs.value().fetcher_epoch;
-
-    if (p_it->second.fetcher_epoch != response_fetcher_epoch) {
-        vlog(
-          logger().trace,
-          "[broker: {}] Ignoring {}/{} reply, fetcher epoch changed, "
-          "request epoch: {}, current epoch: {}",
-          _id,
-          topic,
-          partition_id,
-          response_fetcher_epoch,
-          p_it->second.fetcher_epoch);
-        return false;
-    }
-
+    auto& fetch_state = maybe_fetch_state->get();
     vlog(
       logger().trace,
       "[broker: {}] Updating {}/{} fetch offset from {} to {} {{hwm: {}}}",
       _id,
       topic,
       partition_id,
-      p_it->second.fetch_offset,
+      fetch_state.fetch_offset,
       kafka::next_offset(last_received),
       high_watermark);
-    p_it->second.high_watermark = high_watermark;
-    p_it->second.fetch_offset = kafka::next_offset(last_received);
+    fetch_state.high_watermark = high_watermark;
+    fetch_state.fetch_offset = kafka::next_offset(last_received);
     // we updated the fetch offset, so we should sync to with the broker's
     // fetch session on the next request
-    p_it->second.incremental_include = true;
+    fetch_state.incremental_include = true;
 
     return true;
 }
@@ -604,20 +566,12 @@ fetcher::process_fetch_response(
                 part_data.data = co_await reader_to_chunked_vector(
                   std::move(part_response.records.value()));
 
-                auto maybe_response_epoch = find_epoch_set(
-                  topic_data.topic, part_data.partition_id, epochs);
-
                 bool updated_offset = maybe_update_fetch_offset(
                   topic_data.topic,
                   part_data.partition_id,
                   model::offset_cast(part_data.data.back().last_offset()),
-                  part_data.high_watermark,
-                  maybe_response_epoch);
+                  part_data.high_watermark);
                 if (!updated_offset) {
-                    // case when partition is either
-                    // 1. partition is not assigned to this fetcher
-                    // 2. fetcher epoch changed
-                    // for either skip
                     continue;
                 }
                 dirty_partitions[topic_data.topic].insert(

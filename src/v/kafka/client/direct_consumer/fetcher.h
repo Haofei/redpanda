@@ -304,11 +304,7 @@ private:
      * This indicates that the fetch response should be ignored.
      */
     bool maybe_update_fetch_offset(
-      const model::topic&,
-      model::partition_id,
-      kafka::offset,
-      kafka::offset,
-      std::optional<epoch_set>);
+      const model::topic&, model::partition_id, kafka::offset, kafka::offset);
 
     ss::future<kafka_result<chunked_vector<topic_partition_offsets>>>
       do_list_offsets(list_offsets_request);
