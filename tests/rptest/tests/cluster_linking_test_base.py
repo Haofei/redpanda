@@ -31,10 +31,17 @@ from rptest.services.multi_cluster_services import (
     RedpandaService,
     SecondaryClusterArgs,
     ServiceType,
+    SecondaryClusterSpec,
 )
 from rptest.services.redpanda import LoggingConfig
 from rptest.tests.prealloc_nodes import PreallocNodesTest
 from rptest.utils.node_operations import FailureInjectorBackgroundThread
+
+
+SOURCE_CLUSTER_SPEC = "source_cluster_spec"
+
+
+DEFAULT_SOURCE_CLUSTER_SPEC = SecondaryClusterSpec(ServiceType.REDPANDA)
 
 
 class ShadowLinkTestBase(PreallocNodesTest):
@@ -82,13 +89,22 @@ class ShadowLinkTestBase(PreallocNodesTest):
         self.services: MultiClusterServices
         self.service_client: shadow_link_pb2_connect.ShadowLinkServiceClient
         self.secondary_cluster_args: SecondaryClusterArgs = secondary_cluster_args
+        self.source_cluster_spec: SecondaryClusterSpec = self.get_source_cluster_spec()
+
+    def get_source_cluster_spec(self) -> SecondaryClusterSpec:
+        if not self.test_context.injected_args:
+            return DEFAULT_SOURCE_CLUSTER_SPEC
+
+        return self.test_context.injected_args.get(
+            SOURCE_CLUSTER_SPEC, DEFAULT_SOURCE_CLUSTER_SPEC
+        )
 
     def setUp(self):
         self.services = MultiClusterServices(
             self.test_context,
             self.logger,
             self.redpanda,
-            secondary_type=ServiceType.REDPANDA,
+            secondary_spec=self.source_cluster_spec,
             num_brokers=3,
             secondary_args=self.secondary_cluster_args,
         )
