@@ -171,7 +171,7 @@ struct configuration final : public config_store {
     deprecated_property min_version;
     deprecated_property max_version;
     bounded_property<std::optional<size_t>> raft_max_recovery_memory;
-    bounded_property<size_t> raft_recovery_default_read_size;
+    deprecated_property raft_recovery_default_read_size;
     property<bool> raft_enable_lw_heartbeat;
     bounded_property<size_t> raft_recovery_concurrency_per_shard;
     property<std::optional<size_t>> raft_replica_max_pending_flush_bytes;

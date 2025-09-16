@@ -438,14 +438,7 @@ configuration::configuration()
        .visibility = visibility::tunable},
       std::nullopt,
       {.min = 32_MiB})
-  , raft_recovery_default_read_size(
-      *this,
-      "raft_recovery_default_read_size",
-      "Specifies the default size of a read issued during Raft follower "
-      "recovery.",
-      {.needs_restart = needs_restart::no, .visibility = visibility::tunable},
-      512_KiB,
-      {.min = 128, .max = 5_MiB})
+  , raft_recovery_default_read_size(*this, "raft_recovery_default_read_size")
   , raft_enable_lw_heartbeat(
       *this,
       "raft_enable_lw_heartbeat",

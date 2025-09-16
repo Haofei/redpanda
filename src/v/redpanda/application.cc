@@ -1631,15 +1631,9 @@ void application::wire_up_redpanda_services(
                   .bind(),
             };
         },
-        [] {
-            return raft::recovery_memory_quota::configuration{
-              .max_recovery_memory
-              = config::shard_local_cfg().raft_max_recovery_memory.bind(),
-              .default_read_buffer_size
-              = config::shard_local_cfg()
-                  .raft_recovery_default_read_size.bind(),
-            };
-        },
+        ss::sharded_parameter([] {
+            return config::shard_local_cfg().raft_max_recovery_memory.bind();
+        }),
         std::ref(_connection_cache),
         std::ref(storage),
         std::ref(recovery_throttle),

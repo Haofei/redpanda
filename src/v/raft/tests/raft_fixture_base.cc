@@ -421,13 +421,9 @@ raft_node_instance::raft_node_instance(
         _max_inflight_requests.bind(),
         _max_queued_bytes.bind()))
   , _features(feature_table)
-  , _recovery_mem_quota([this] {
-      return raft::recovery_memory_quota::configuration{
-        .max_recovery_memory = config::mock_binding<std::optional<size_t>>(
-          200_MiB),
-        .default_read_buffer_size = _default_recovery_read_size.bind(),
-      };
-  })
+  , _recovery_mem_quota(
+      config::mock_binding<std::optional<size_t>>(200_MiB),
+      _max_concurrent_recoveries.bind())
   , _recovery_scheduler(
       config::mock_binding<size_t>(64), config::mock_binding(10ms))
   , _leader_clb(std::move(leader_update_clb))

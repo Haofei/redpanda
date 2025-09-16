@@ -191,6 +191,7 @@ inline model::timeout_clock::time_point default_timeout() {
  */
 class raft_node_instance : public ss::weakly_referencable<raft_node_instance> {
 public:
+    static constexpr size_t max_recovery_memory = 200_MiB;
     using service_t
       = raft::service<fixture_group_manager, fixture_shard_manager>;
     using leader_update_clb_t
@@ -310,7 +311,8 @@ public:
     service_t& get_service() { return _service; }
 
     void set_default_recovery_read_size(size_t bytes) {
-        _default_recovery_read_size.update(std::move(bytes));
+        // indirectly set max concurrent recoveries
+        _max_concurrent_recoveries.update(max_recovery_memory / bytes);
     }
 
 private:
@@ -320,7 +322,7 @@ private:
     ss::sstring _base_directory;
     config::mock_property<size_t> _max_inflight_requests{16};
     config::mock_property<size_t> _max_queued_bytes{1_MiB};
-    config::mock_property<size_t> _default_recovery_read_size{128_KiB};
+    config::mock_property<size_t> _max_concurrent_recoveries{4};
     ss::shared_ptr<in_memory_test_protocol> _protocol;
     ss::shared_ptr<buffered_protocol> _buffered_protocol;
     ss::sharded<storage::api> _storage;
