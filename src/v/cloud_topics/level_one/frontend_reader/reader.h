@@ -86,6 +86,7 @@ private:
     struct current_object {
         l1::object_id oid;
         l1::footer footer;
+        kafka::offset last_offset;
     };
 
     ss::future<> fetch_metadata(model::timeout_clock::time_point deadline);

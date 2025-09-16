@@ -186,7 +186,11 @@ ss::future<> level_one_log_reader_impl::fetch_metadata(
 
     auto footer = co_await read_footer(
       obj.oid, obj.footer_pos, obj.object_size);
-    _current_obj = current_object{.oid = obj.oid, .footer = std::move(footer)};
+    _current_obj = current_object{
+      .oid = obj.oid,
+      .footer = std::move(footer),
+      .last_offset = obj.last_offset,
+    };
     _state = state::ready;
 }
 
@@ -204,10 +208,10 @@ ss::future<l1::footer> level_one_log_reader_impl::read_footer(
     auto* abort_source = _config.abort_source
                            ? &_config.abort_source.value().get()
                            : &default_abort_source;
-    auto stream_fut = co_await ss::coroutine::as_future(
-      _io->read_object(extent, abort_source));
-    if (stream_fut.failed()) {
-        auto ex = stream_fut.get_exception();
+    auto read_fut = co_await ss::coroutine::as_future(
+      _io->read_object_as_iobuf(extent, abort_source));
+    if (read_fut.failed()) {
+        auto ex = read_fut.get_exception();
         vlog(
           cd_log.error,
           "Exception opening stream for footer from object {} (pos {} object "
@@ -218,40 +222,28 @@ ss::future<l1::footer> level_one_log_reader_impl::read_footer(
           ex);
         std::rethrow_exception(ex);
     }
-    auto stream_result = stream_fut.get();
-    if (!stream_result.has_value()) {
-        throw std::runtime_error(
-          fmt::format(
-            "Failed to open stream for footer from object {} (pos {} size {}): "
-            "{}",
-            oid,
-            extent.position,
-            object_size,
-            std::to_underlying(stream_result.error())));
-    }
 
-    auto& stream = stream_result.value();
-
-    auto footer_fut = co_await ss::coroutine::as_future(
-      read_iobuf_exactly(stream, footer_total_size));
-    if (footer_fut.failed()) {
-        auto ex = footer_fut.get_exception();
+    auto read_result = read_fut.get();
+    if (!read_result.has_value()) {
         vlog(
           cd_log.error,
-          "Exception reading footer from object {} (pos {} object size {}): {}",
+          "Failed to read footer from object {} (pos {} object size {}): {}",
           oid,
           extent.position,
           object_size,
-          ex);
-        co_await stream.close();
-        std::rethrow_exception(ex);
+          std::to_underlying(read_result.error()));
+        throw std::runtime_error(
+          fmt::format(
+            "Failed to read footer from object {} (pos {} size {}): {}",
+            oid,
+            extent.position,
+            object_size,
+            std::to_underlying(read_result.error())));
     }
 
-    iobuf footer_buf = footer_fut.get();
-    co_await stream.close();
-
     // Parse the footer - we have the complete footer so this should succeed.
-    auto footer_result = co_await l1::footer::read(std::move(footer_buf));
+    auto footer_result = co_await l1::footer::read(
+      std::move(read_result).value());
 
     if (!std::holds_alternative<l1::footer>(footer_result)) {
         vlog(
@@ -299,12 +291,7 @@ level_one_log_reader_impl::read_batches(l1::object_reader& reader) {
 
             // If we make it past all that, emit the batch.
             _batches.push_back(std::move(batch));
-        } else if (std::holds_alternative<model::topic_id_partition>(result)) {
-            // Partition marker. Done with this ntp's partition.
-            break;
-        } else if (
-          std::holds_alternative<l1::footer>(result)
-          || std::holds_alternative<l1::object_reader::eof>(result)) {
+        } else {
             // End of data.
             break;
         }
@@ -435,14 +422,13 @@ void level_one_log_reader_impl::consume_materialized_batches(
     // progress even if the offset range in the object is
     // smaller than the metastore's metadata about the offset
     // range covered by the object (because of, e.g. compaction).
-    // TODO: The metastore API should return the endpoint of the
-    // range covered by each object, which would be easier to
-    // understand than the increment here, and which would permit
-    // optimizations like read-ahead.
-    _next_offset = dest->empty()
-                     ? kafka::next_offset(_next_offset)
-                     : model::offset_cast(
-                         model::next_offset(dest->back().last_offset()));
+    auto last_offset = dest->empty()
+                         ? _current_obj
+                             .transform(
+                               [](const auto& obj) { return obj.last_offset; })
+                             .value_or(_next_offset)
+                         : model::offset_cast(dest->back().last_offset());
+    _next_offset = kafka::next_offset(last_offset);
 
     _current_obj.reset();
     _state = state::empty;
