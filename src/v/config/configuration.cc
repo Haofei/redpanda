@@ -2392,6 +2392,23 @@ configuration::configuration()
       {.needs_restart = needs_restart::yes, .visibility = visibility::tunable},
       // TODO: make this runtime configurable.
       true)
+  , cloud_storage_cluster_name(
+      *this,
+      "cloud_storage_cluster_name",
+      "Optional unique name to disambiguate this cluster's metadata in object "
+      "storage (e.g. for Whole Cluster Restore) when multiple clusters share a "
+      "bucket. Must be unique within the bucket, 1-64 chars, [A-Za-z0-9_-]. Do "
+      "not change once set.",
+      {
+        .needs_restart = needs_restart::no,
+        .visibility = visibility::user,
+        // Do not restore this value from the existing cluster metadata. It may
+        // be empty if the metadata is slightly stale. It may be different if we
+        // are trying to restore from a cluster with a different name.
+        .gets_restored = gets_restored::no,
+      },
+      std::nullopt,
+      &validate_cloud_storage_cluster_name)
   , cloud_storage_max_segments_pending_deletion_per_partition(
       *this,
       "cloud_storage_max_segments_pending_deletion_per_partition",
