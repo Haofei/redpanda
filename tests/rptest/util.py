@@ -12,7 +12,7 @@ import pprint
 import threading
 from contextlib import contextmanager
 from logging import Logger
-from typing import Any, Callable, ContextManager, Optional, TypeVar
+from typing import Any, Callable, ContextManager, Optional, Type, TypeVar
 
 from ducktape.cluster.remoteaccount import RemoteCommandError
 from ducktape.errors import TimeoutError
@@ -23,6 +23,7 @@ from rptest.clients.kafka_cli_tools import KafkaCliTools
 from rptest.services.storage import Segment
 
 T = TypeVar("T")
+E = TypeVar("E", bound=Exception)
 
 
 class Scale:
@@ -378,9 +379,12 @@ def wait_for_local_storage_truncate(
 
 
 @contextmanager
-def expect_exception(exception_klass, validator):
+def expect_exception(
+    exception_klass: Type[E] | tuple[Type[E], ...],
+    validator: Callable[[E], bool],
+):
     """
-    :param exception_klass: the expected exception type
+    :param exception_klass: the expected exception type or tuple of exception types
     :param validator: a callable that is expected to return true when passed the exception
     :return: None.  Raises on unexpected exception or no exception.
     """

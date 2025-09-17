@@ -6,7 +6,6 @@
 # As of the Change Date specified in that file, in accordance with
 # the Business Source License, use of this software will be governed
 # by the Apache License, Version 2.0
-import collections
 import concurrent.futures
 import copy
 import dataclasses
@@ -38,6 +37,7 @@ from typing import (
     List,
     Literal,
     Mapping,
+    NamedTuple,
     Protocol,
     Set,
     Tuple,
@@ -107,13 +107,20 @@ from rptest.util import (
 from rptest.utils.mode_checks import in_fips_environment
 from rptest.utils.rpenv import sample_license
 
-Partition = collections.namedtuple(
-    "Partition", ["topic", "index", "leader", "replicas"]
-)
 
-MetricSample = collections.namedtuple(
-    "MetricSample", ["family", "sample", "node", "value", "labels"]
-)
+class Partition(NamedTuple):
+    topic: str
+    index: int  # type: ignore existing name clash, fix later
+    leader: ClusterNode | None
+    replicas: list[ClusterNode | None] | None
+
+
+class MetricSample(NamedTuple):
+    family: str
+    sample: str
+    node: Any
+    value: float
+    labels: dict[str, str]
 
 
 @dataclass
@@ -4501,7 +4508,7 @@ class RedpandaService(RedpandaServiceABC, Service):
             samples = self.metrics_sample(name, [node])
             if samples is None:
                 return 0
-            return sum(s.value for s in samples.samples)
+            return int(sum(s.value for s in samples.samples))
 
         try:
             self._usage_stats.disk_bytes_read += _metrics_sum(
