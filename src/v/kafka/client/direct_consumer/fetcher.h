@@ -258,7 +258,7 @@ private:
         kafka::fetch_session_id session_id{0};
     };
 
-    static std::optional<fetcher_epoch> find_fetcher_epoch(
+    static std::optional<epoch_set> find_epoch_set(
       const model::topic& topic,
       model::partition_id partition,
       const topic_partition_map<epoch_set>& epochs);
@@ -288,7 +288,7 @@ private:
       model::partition_id,
       kafka::offset,
       kafka::offset,
-      std::optional<fetcher_epoch>);
+      std::optional<epoch_set>);
 
     ss::future<kafka_result<chunked_vector<topic_partition_offsets>>>
       do_list_offsets(list_offsets_request);
