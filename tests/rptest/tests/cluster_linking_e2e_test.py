@@ -337,7 +337,7 @@ class ShadowLinkBasicTests(ShadowLinkTestBase):
         with expect_exception(ducktape.errors.TimeoutError, lambda _: True):
             wait_until(_any_topics_are_present_in_target_cluster, timeout_sec=5)
 
-        shadow_link.configurations.topic_metadata_sync_options.topic_filters.extend(
+        shadow_link.configurations.topic_metadata_sync_options.auto_create_shadow_topic_filters.extend(
             [
                 shadow_link_pb2.NameFilter(
                     pattern_type=shadow_link_pb2.PATTERN_TYPE_PREFIX,
@@ -352,10 +352,10 @@ class ShadowLinkBasicTests(ShadowLinkTestBase):
             ]
         )
 
-        update_mask: google.protobuf.field_mask_pb2.FieldMask = (
-            google.protobuf.field_mask_pb2.FieldMask(
-                paths=["configurations.topic_metadata_sync_options.topic_filters"]
-            )
+        update_mask: google.protobuf.field_mask_pb2.FieldMask = google.protobuf.field_mask_pb2.FieldMask(
+            paths=[
+                "configurations.topic_metadata_sync_options.auto_create_shadow_topic_filters"
+            ]
         )
 
         updated_link = self.update_link(
@@ -394,7 +394,7 @@ class ShadowLinkBasicTests(ShadowLinkTestBase):
             "test-link", mirror_all_topics=False, mirror_all_groups=False
         )
 
-        shadow_link.configurations.topic_metadata_sync_options.topic_filters.extend(
+        shadow_link.configurations.topic_metadata_sync_options.auto_create_shadow_topic_filters.extend(
             [
                 shadow_link_pb2.NameFilter(
                     pattern_type=shadow_link_pb2.PATTERN_TYPE_PREFIX,
@@ -426,10 +426,12 @@ class ShadowLinkBasicTests(ShadowLinkTestBase):
         )
 
         assert (
-            len(updated_link.configurations.topic_metadata_sync_options.topic_filters)
+            len(
+                updated_link.configurations.topic_metadata_sync_options.auto_create_shadow_topic_filters
+            )
             == 0
         ), (
-            f"Expected topic filters to not be updated, got {updated_link.configurations.topic_metadata_sync_options.topic_filters}"
+            f"Expected topic filters to not be updated, got {updated_link.configurations.topic_metadata_sync_options.auto_create_shadow_topic_filters}"
         )
 
     @cluster(num_nodes=6)

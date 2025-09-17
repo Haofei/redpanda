@@ -140,7 +140,7 @@ class ShadowLinkTestBase(PreallocNodesTest):
         if mirror_all_topics:
             topic_sync_options = shadow_link_pb2.TopicMetadataSyncOptions(
                 interval=google.protobuf.duration_pb2.Duration(seconds=1),
-                topic_filters=[
+                auto_create_shadow_topic_filters=[
                     shadow_link_pb2.NameFilter(
                         pattern_type=shadow_link_pb2.PATTERN_TYPE_LITERAL,
                         filter_type=shadow_link_pb2.FILTER_TYPE_INCLUDE,
