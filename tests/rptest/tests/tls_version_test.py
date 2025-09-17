@@ -10,6 +10,7 @@
 import socket
 import subprocess
 from enum import IntEnum
+from typing import Optional
 
 from ducktape.cluster.cluster import ClusterNode
 from ducktape.mark import matrix
@@ -152,7 +153,7 @@ class TLSVersionTestBase(RedpandaTest):
         tls_version: TLSVersion,
         expect_fail: bool,
         port: int = 9092,
-        cipher: str = None,
+        cipher: Optional[str] = None,
     ):
         tls_version_str = tls_version_to_openssl(tls_version)
         cipher_arg = "ciphersuites" if tls_version == TLSVersion.v1_3 else "cipher"
