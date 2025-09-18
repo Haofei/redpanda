@@ -178,6 +178,7 @@ TEST(SimpleMetastoreTest, TestGetMissingPartition) {
     ASSERT_EQ(get_res->oid, oid1);
     ASSERT_EQ(get_res->footer_pos, 200);
     ASSERT_EQ(get_res->object_size, 1200);
+    ASSERT_EQ(get_res->first_offset, 0_o);
     ASSERT_EQ(get_res->last_offset, 10_o);
 }
 
@@ -318,6 +319,7 @@ TEST(SimpleMetastoreTest, TestAddGetOffsetBasic) {
         ASSERT_EQ(get_res->oid, oid1);
         ASSERT_EQ(get_res->footer_pos, 100);
         ASSERT_EQ(get_res->object_size, 1100);
+        ASSERT_EQ(get_res->first_offset, 0_o);
         ASSERT_EQ(get_res->last_offset, 10_o);
     }
     for (const auto& o : std::views::iota(11, 21)) {
@@ -326,6 +328,7 @@ TEST(SimpleMetastoreTest, TestAddGetOffsetBasic) {
         ASSERT_EQ(get_res->oid, oid2);
         ASSERT_EQ(get_res->footer_pos, 100);
         ASSERT_EQ(get_res->object_size, 1100);
+        ASSERT_EQ(get_res->first_offset, 11_o);
         ASSERT_EQ(get_res->last_offset, 20_o);
     }
     for (const auto& o : std::views::iota(21, 31)) {
@@ -334,6 +337,7 @@ TEST(SimpleMetastoreTest, TestAddGetOffsetBasic) {
         ASSERT_EQ(get_res->oid, oid3);
         ASSERT_EQ(get_res->footer_pos, 100);
         ASSERT_EQ(get_res->object_size, 1100);
+        ASSERT_EQ(get_res->first_offset, 21_o);
         ASSERT_EQ(get_res->last_offset, 30_o);
     }
 }
@@ -357,6 +361,7 @@ TEST(SimpleMetastoreTest, TestAddGetOffsetBelowStart) {
     ASSERT_EQ(get_res->oid, oid1);
     ASSERT_EQ(get_res->footer_pos, 100);
     ASSERT_EQ(get_res->object_size, 1100);
+    ASSERT_EQ(get_res->first_offset, 0_o);
     ASSERT_EQ(get_res->last_offset, 10_o);
 }
 
@@ -402,6 +407,7 @@ TEST(SimpleMetastoreTest, TestAddGetTimestampBasic) {
         ASSERT_EQ(get_res->oid, oid1);
         ASSERT_EQ(get_res->footer_pos, 100);
         ASSERT_EQ(get_res->object_size, 1100);
+        ASSERT_EQ(get_res->first_offset, 0_o);
         ASSERT_EQ(get_res->last_offset, 10_o);
     }
     for (const auto& t : {2000_t, 2999_t}) {
@@ -410,6 +416,7 @@ TEST(SimpleMetastoreTest, TestAddGetTimestampBasic) {
         ASSERT_EQ(get_res->oid, oid2);
         ASSERT_EQ(get_res->footer_pos, 100);
         ASSERT_EQ(get_res->object_size, 1100);
+        ASSERT_EQ(get_res->first_offset, 11_o);
         ASSERT_EQ(get_res->last_offset, 20_o);
     }
     for (const auto& t : {3000_t, 3999_t}) {
@@ -418,6 +425,7 @@ TEST(SimpleMetastoreTest, TestAddGetTimestampBasic) {
         ASSERT_EQ(get_res->oid, oid3);
         ASSERT_EQ(get_res->footer_pos, 100);
         ASSERT_EQ(get_res->object_size, 1100);
+        ASSERT_EQ(get_res->first_offset, 21_o);
         ASSERT_EQ(get_res->last_offset, 30_o);
     }
 }
@@ -514,6 +522,7 @@ TEST(StateUpdateTest, TestReplaceMultipleOnePartition) {
         ASSERT_EQ(get_res->oid, oid3);
         ASSERT_EQ(get_res->footer_pos, 100);
         ASSERT_EQ(get_res->object_size, 1100);
+        ASSERT_EQ(get_res->first_offset, 0_o);
         ASSERT_EQ(get_res->last_offset, 20_o);
     }
     // Others should be served from oid1 or oid2.
@@ -524,6 +533,7 @@ TEST(StateUpdateTest, TestReplaceMultipleOnePartition) {
         ASSERT_EQ(get_res->oid, oid1);
         ASSERT_EQ(get_res->footer_pos, 100);
         ASSERT_EQ(get_res->object_size, 1100);
+        ASSERT_EQ(get_res->first_offset, 0_o);
         ASSERT_EQ(get_res->last_offset, 10_o);
     }
     for (const auto& o : std::views::iota(11, 21)) {
@@ -532,6 +542,7 @@ TEST(StateUpdateTest, TestReplaceMultipleOnePartition) {
         ASSERT_EQ(get_res->oid, oid2);
         ASSERT_EQ(get_res->footer_pos, 100);
         ASSERT_EQ(get_res->object_size, 1100);
+        ASSERT_EQ(get_res->first_offset, 11_o);
         ASSERT_EQ(get_res->last_offset, 20_o);
     }
     // Sanity check that replacement leaves us with expected offsets.
@@ -581,6 +592,7 @@ TEST(StateUpdateTest, TestReplaceMultipleMultiplePartitions) {
         ASSERT_EQ(get_res->oid, oid3);
         ASSERT_EQ(get_res->footer_pos, 100);
         ASSERT_EQ(get_res->object_size, 1100);
+        ASSERT_EQ(get_res->first_offset, 0_o);
         ASSERT_EQ(get_res->last_offset, 20_o);
     }
     tpr = model::topic_id_partition::from(tid_b);
@@ -590,6 +602,7 @@ TEST(StateUpdateTest, TestReplaceMultipleMultiplePartitions) {
         ASSERT_EQ(get_res->oid, oid3);
         ASSERT_EQ(get_res->footer_pos, 100);
         ASSERT_EQ(get_res->object_size, 1100);
+        ASSERT_EQ(get_res->first_offset, 11_o);
         ASSERT_EQ(get_res->last_offset, 20_o);
     }
     // Others should be served from oid1 or oid2.
@@ -599,6 +612,7 @@ TEST(StateUpdateTest, TestReplaceMultipleMultiplePartitions) {
         ASSERT_EQ(get_res->oid, oid1);
         ASSERT_EQ(get_res->footer_pos, 100);
         ASSERT_EQ(get_res->object_size, 1100);
+        ASSERT_EQ(get_res->first_offset, 0_o);
         ASSERT_EQ(get_res->last_offset, 10_o);
     }
     // Sanity check that replacement leaves us with expected offsets.

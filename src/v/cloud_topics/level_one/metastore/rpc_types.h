@@ -87,13 +87,16 @@ struct object_metadata
   : serde::
       envelope<object_metadata, serde::version<0>, serde::compat_version<0>> {
     auto serde_fields() {
-        return std::tie(oid, footer_pos, object_size, last_offset);
+        return std::tie(
+          oid, footer_pos, object_size, first_offset, last_offset);
     }
 
     object_id oid;
     size_t footer_pos;
     size_t object_size;
 
+    // The first offset (inclusive) that is within this object.
+    kafka::offset first_offset;
     // The last offset (inclusive) that is within this object.
     kafka::offset last_offset;
 };

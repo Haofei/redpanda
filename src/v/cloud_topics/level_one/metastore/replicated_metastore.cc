@@ -391,6 +391,7 @@ replicated_metastore::get_first_ge(
     resp.oid = reply.object.oid;
     resp.footer_pos = reply.object.footer_pos;
     resp.object_size = reply.object.object_size;
+    resp.first_offset = reply.object.first_offset;
     resp.last_offset = reply.object.last_offset;
     co_return resp;
 }
@@ -419,6 +420,7 @@ replicated_metastore::get_first_ge(
     resp.oid = reply.object.oid;
     resp.footer_pos = reply.object.footer_pos;
     resp.object_size = reply.object.object_size;
+    resp.first_offset = reply.object.first_offset;
     resp.last_offset = reply.object.last_offset;
     co_return resp;
 }

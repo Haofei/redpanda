@@ -249,6 +249,7 @@ simple_metastore::get_first_ge(
           .oid = it->oid,
           .footer_pos = footer_pos,
           .object_size = object_size,
+          .first_offset = it->base_offset,
           .last_offset = it->last_offset,
         };
     }
@@ -284,6 +285,7 @@ simple_metastore::get_first_ge(
               .oid = obj.oid,
               .footer_pos = footer_pos,
               .object_size = object_size,
+              .first_offset = obj.base_offset,
               .last_offset = obj.last_offset,
             };
         }

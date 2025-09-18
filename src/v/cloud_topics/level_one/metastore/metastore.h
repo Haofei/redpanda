@@ -79,6 +79,8 @@ public:
         object_id oid;
         size_t footer_pos;
         size_t object_size;
+        // The first offset available in the object (inclusive).
+        kafka::offset first_offset;
         // The last offset available in the object (inclusive).
         // This can be used to skip to the next offset.
         kafka::offset last_offset;
