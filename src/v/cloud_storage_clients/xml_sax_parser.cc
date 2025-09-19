@@ -404,7 +404,7 @@ seastar::future<client::list_bucket_result> parse_from_stream(
                              }
                          });
                    })
-            .then([&stream] { return stream.close(); })
+            .finally([&stream] { return stream.close(); })
             .then([&p] {
                 p.end_parse();
                 return std::move(p).result();
