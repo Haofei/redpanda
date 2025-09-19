@@ -45,6 +45,7 @@ enum class feature : std::uint64_t {
     schema_registry_authz = 1ULL << 3U,
     topic_ids_api = 1ULL << 4U,
     consumer_groups_migrations = 1ULL << 7U,
+    shadow_linking = 1ULL << 8U,
     cloud_retention = 1ULL << 11U,
     node_isolation = 1ULL << 19U,
     group_offset_retention = 1ULL << 20U,
@@ -488,6 +489,12 @@ inline constexpr std::array feature_schema{
     release_version::v25_3_1,
     "topic_ids_api",
     feature::topic_ids_api,
+    feature_spec::available_policy::always,
+    feature_spec::prepare_policy::always},
+  feature_spec{
+    release_version::v25_3_1,
+    "shadow_linking",
+    feature::shadow_linking,
     feature_spec::available_policy::always,
     feature_spec::prepare_policy::always},
 };
