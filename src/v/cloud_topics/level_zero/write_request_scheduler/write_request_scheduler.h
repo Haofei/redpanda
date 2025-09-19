@@ -50,6 +50,11 @@ class write_request_scheduler
   : public ss::peering_sharded_service<write_request_scheduler> {
     friend struct write_request_balancer_accessor;
 
+    struct shard_info {
+        ss::shard_id shard;
+        size_t bytes;
+    };
+
 public:
     explicit write_request_scheduler(write_pipeline<>::stage s);
 
@@ -67,6 +72,11 @@ private:
     /// This method implements the actual fallback mechanism.
     /// It is invoked by the 'bg_time_based_fallback' method.
     ss::future<> apply_time_based_fallback();
+    /// Target shard pulls write requests from pipelines of
+    /// other shards and forwards them to its own pipeline.
+    /// Then it propagates the responses back to the original
+    /// shards.
+    ss::future<> pull_and_roundtrip(std::vector<shard_info> infos);
 
     /// This fiber runs on every shard and is triggered by
     /// the data accumulation threshold. If enough data is accumulated

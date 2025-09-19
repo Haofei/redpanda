@@ -74,11 +74,6 @@ ss::future<> write_request_scheduler::stop() {
     co_await _gate.close();
 }
 
-struct shard_info {
-    ss::shard_id shard;
-    size_t bytes;
-};
-
 size_t write_request_scheduler::shard_bytes() noexcept {
     // Count bytes but take limits into account.
     size_t total_bytes = 0;
@@ -130,6 +125,34 @@ ss::future<> write_request_scheduler::bg_data_threshold() {
               return l0::request_processing_result::advance_and_continue;
           });
     }
+}
+
+ss::future<>
+write_request_scheduler::pull_and_roundtrip(std::vector<shard_info> infos) {
+    // This method is invoked by the target shard to pull requests from
+    // other shards and forward them to its own pipeline.
+    std::vector<ss::future<>> in_flight;
+    for (const auto& info : infos) {
+        if (ss::this_shard_id() == info.shard) {
+            // Fast path: process requests locally
+            // This shard is the one that has the most data.
+            _stage.process([](write_request<>&) noexcept {
+                return request_processing_result::advance_and_continue;
+            });
+        } else {
+            // Forward requests to target shard by proxying
+            // write requests
+            if (info.bytes > 0) {
+                in_flight.push_back(
+                  container().invoke_on(
+                    info.shard,
+                    [target = ss::this_shard_id()](write_request_scheduler& s) {
+                        return s.forward_to(target);
+                    }));
+            }
+        }
+    }
+    co_await ss::when_all_succeed(in_flight.begin(), in_flight.end());
 }
 
 ss::future<> write_request_scheduler::apply_time_based_fallback() {
@@ -193,21 +216,9 @@ ss::future<> write_request_scheduler::apply_time_based_fallback() {
     // requests that are already on the target shard.
 
     if (max_shard_bytes > 0) {
-        co_await container().invoke_on_all(
-          [this, target_shard](write_request_scheduler& scheduler) {
-              if (ss::this_shard_id() == target_shard) {
-                  // Fast path: process requests locally
-                  // This shard is the one that has the most data.
-                  scheduler._stage.process([this](write_request<>& r) noexcept {
-                      _probe.register_time_fallback(r.size_bytes());
-                      return request_processing_result::advance_and_continue;
-                  });
-              } else {
-                  // Forward requests to target shard by proxying
-                  // write requests
-                  return scheduler.forward_to(target_shard);
-              }
-              return ss::now();
+        co_await container().invoke_on(
+          target_shard, [shard_bytes](write_request_scheduler& scheduler) {
+              return scheduler.pull_and_roundtrip(shard_bytes);
           });
     }
 }
