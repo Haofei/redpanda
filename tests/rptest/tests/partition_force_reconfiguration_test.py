@@ -537,7 +537,7 @@ class NodeWiseRecoveryTest(RedpandaTest):
 
     def collect_topic_partition_states(self, topic):
         states = {}
-        for p in self.rpk.describe_topic(topic):
+        for p in self.rpk.describe_topic(topic, tolerant=True):
             states[p.id] = self.admin.get_partition_state(
                 namespace="kafka",
                 topic=topic,
@@ -568,6 +568,8 @@ class NodeWiseRecoveryTest(RedpandaTest):
 
         def start_offset_advanced():
             states = self.collect_topic_partition_states(topic)
+            if len(states) == 0:
+                return False
 
             return all(
                 r["start_offset"] > 0 for s in states.values() for r in s["replicas"]
@@ -600,11 +602,6 @@ class NodeWiseRecoveryTest(RedpandaTest):
                         f"Pending manifest update: {status['ms_since_last_manifest_upload']=} {status['metadata_update_pending']=}"
                     )
                     return False
-
-                # cloud_log_las_offset is nullable, return not ready if it is not present
-                if "cloud_log_last_offset" not in status:
-                    return False
-
                 if int(status["cloud_log_last_offset"]) < fraction_uploaded * int(
                     status["local_log_last_offset"]
                 ):
