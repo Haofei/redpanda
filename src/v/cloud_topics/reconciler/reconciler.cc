@@ -374,7 +374,7 @@ reconciler::reconcile_partitions(
         vlogl(
           lg,
           ssx::is_shutdown_exception(ex) ? ss::log_level::debug
-                                         : ss::log_level::error,
+                                         : ss::log_level::warn,
           "Exception building and putting object {}: {}",
           oid,
           ex);
@@ -475,7 +475,7 @@ reconciler::put_object(const l1::object_id& oid, builder_context& ctx) {
     auto put_result = co_await _l1_io->put_object(oid, ctx.staging.get(), &_as);
     if (!put_result.has_value()) {
         vlog(
-          lg.error,
+          lg.warn,
           "Failed to put L1 object {}: {}",
           oid,
           static_cast<int>(put_result.error()));
