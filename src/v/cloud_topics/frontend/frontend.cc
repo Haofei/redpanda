@@ -633,10 +633,36 @@ frontend::get_leader_epoch_last_offset(model::term_id term) const {
     co_return start_offset();
 }
 
-ss::future<std::expected<void, frontend_errc>>
-frontend::prefix_truncate(kafka::offset, ss::lowres_clock::time_point) {
-    /// DeleteRecords API is not supported in cloud topics yet.
-    co_return std::unexpected(frontend_errc::invalid_topic_exception);
+ss::future<std::expected<void, frontend_errc>> frontend::prefix_truncate(
+  kafka::offset truncation_point, ss::lowres_clock::time_point deadline) {
+    if (!_partition->raft()->log_config().is_remotely_collectable()) {
+        vlog(
+          cd_log.info,
+          "Cannot prefix-truncate topic/partition {} retention settings not "
+          "applied",
+          _partition->ntp());
+        co_return std::unexpected(frontend_errc::invalid_topic_exception);
+    }
+    if (truncation_point <= start_offset()) {
+        // no-op, return early
+        co_return std::expected<void, frontend_errc>{};
+    }
+    if (truncation_point > high_watermark()) {
+        co_return std::unexpected(frontend_errc::offset_out_of_range);
+    }
+    auto result = co_await _ctp_stm_api->set_start_offset(
+      truncation_point, deadline);
+    if (!result.has_value()) {
+        switch (result.error()) {
+        case ctp_stm_api_errc::not_leader:
+            co_return std::unexpected(frontend_errc::not_leader_for_partition);
+        case ctp_stm_api_errc::shutdown:
+        case ctp_stm_api_errc::failure:
+        case ctp_stm_api_errc::timeout:
+            co_return std::unexpected(frontend_errc::timeout);
+        }
+    }
+    co_return std::expected<void, frontend_errc>{};
 }
 
 ss::future<std::expected<std::monostate, frontend_errc>>
