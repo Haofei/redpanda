@@ -177,16 +177,14 @@ ss::future<> ctp_stm::do_apply(const model::record_batch& batch) {
             switch (cmd_key) {
             case ctp_stm_key::advance_reconciled_offset:
                 apply_advance_reconciled_offset(std::move(r));
-                break;
+                return ss::stop_iteration::no;
 
-            default:
-                throw std::runtime_error(fmt_with_ctx(
-                  fmt::format,
-                  "Unknown ctp_stm_key({})",
-                  static_cast<int>(key)));
+            case ctp_stm_key::set_start_offset:
+                apply_set_start_offset(std::move(r));
+                return ss::stop_iteration::no;
             }
-
-            return ss::stop_iteration::no;
+            throw std::runtime_error(fmt_with_ctx(
+              fmt::format, "Unknown ctp_stm_key({})", static_cast<int>(key)));
         });
         break;
 
@@ -203,6 +201,12 @@ void ctp_stm::apply_advance_reconciled_offset(model::record record) {
     // LRO is expected to be within the translation range
     auto lro_log = _raft->log()->to_log_offset(kafka::offset_cast(lro));
     _state.advance_last_reconciled_offset(lro, lro_log);
+}
+
+void ctp_stm::apply_set_start_offset(model::record record) {
+    auto cmd = serde::from_iobuf<set_start_offset_cmd>(record.release_value());
+    vlog(_log.debug, "Setting start offset {}", cmd.new_start_offset);
+    _state.set_start_offset(cmd.new_start_offset);
 }
 
 void ctp_stm::apply_placeholder(const model::record_batch& batch) {

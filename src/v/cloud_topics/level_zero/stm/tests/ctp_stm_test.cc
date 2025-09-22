@@ -333,3 +333,32 @@ TEST_F_CORO(ctp_stm_fixture, test_truncate_all_epochs) {
     ASSERT_FALSE_CORO(inactive_epoch->has_value());
     ASSERT_EQ_CORO(max_epoch.value(), last_epoch);
 }
+
+TEST_F_CORO(ctp_stm_fixture, test_start_offset) {
+    co_await start();
+    co_await wait_for_leader(raft::default_timeout());
+    auto& leader = node(*get_leader());
+    auto& leader_api = api(leader);
+    auto b1 = make_record_batch(ct::cluster_epoch{1}, model::offset{0}, 0);
+    auto res1 = co_await replicate_record_batch(leader, std::move(b1));
+    ASSERT_TRUE_CORO(res1.has_value());
+    auto b2 = make_record_batch(ct::cluster_epoch{2}, model::offset{1}, 1);
+    auto res2 = co_await replicate_record_batch(leader, std::move(b2));
+    ASSERT_TRUE_CORO(res2.has_value());
+
+    auto start_offset = leader_api.get_start_offset();
+    ASSERT_EQ_CORO(start_offset, kafka::offset{0});
+
+    co_await leader_api.set_start_offset(kafka::offset{1});
+
+    start_offset = leader_api.get_start_offset();
+    ASSERT_EQ_CORO(start_offset, kafka::offset{1});
+
+    co_await leader_api.set_start_offset(kafka::offset{2});
+    start_offset = leader_api.get_start_offset();
+    ASSERT_EQ_CORO(start_offset, kafka::offset{2});
+
+    co_await leader_api.set_start_offset(kafka::offset{1});
+    start_offset = leader_api.get_start_offset();
+    ASSERT_EQ_CORO(start_offset, kafka::offset{2});
+}

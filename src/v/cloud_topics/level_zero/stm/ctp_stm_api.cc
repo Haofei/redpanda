@@ -91,8 +91,36 @@ ctp_stm_api::advance_reconciled_offset(kafka::offset last_reconciled_offset) {
     co_return std::monostate{};
 }
 
+ss::future<std::expected<std::monostate, ctp_stm_api_errc>>
+ctp_stm_api::set_start_offset(kafka::offset start_offset) {
+    vlog(
+      _rtclog.debug,
+      "Replicating ctp_stm_cmd::set_new_start_offset{{{}}}",
+      start_offset);
+
+    storage::record_batch_builder builder(
+      model::record_batch_type::ctp_stm_command, model::offset(0));
+
+    builder.add_raw_kv(
+      serde::to_iobuf(set_start_offset_cmd::key),
+      serde::to_iobuf(set_start_offset_cmd(start_offset)));
+
+    auto batch = std::move(builder).build();
+    auto apply_result = co_await replicated_apply(std::move(batch));
+
+    if (!apply_result.has_value()) {
+        co_return std::unexpected(apply_result.error());
+    }
+
+    co_return std::monostate{};
+}
+
 kafka::offset ctp_stm_api::get_last_reconciled_offset() const {
     return _stm->state().get_last_reconciled_offset().value_or(kafka::offset());
+}
+
+kafka::offset ctp_stm_api::get_start_offset() const {
+    return _stm->state().start_offset();
 }
 
 ss::future<std::expected<std::optional<cluster_epoch>, ctp_stm_api_errc>>

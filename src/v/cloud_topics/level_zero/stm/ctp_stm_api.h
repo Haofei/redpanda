@@ -55,6 +55,11 @@ public:
     ss::future<std::expected<std::monostate, ctp_stm_api_errc>>
     advance_reconciled_offset(kafka::offset last_reconciled_offset);
 
+    ss::future<std::expected<std::monostate, ctp_stm_api_errc>>
+    set_start_offset(kafka::offset new_start_offset);
+
+    kafka::offset get_start_offset() const;
+
     /// Return the inactive epoch which is no longer referenced by this ctp_stm.
     /// This method is guaranteed to return precise value but it creates
     // a reader and scans the log for the minimum epoch.

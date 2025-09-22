@@ -78,6 +78,7 @@ private:
     ss::future<> do_apply(const model::record_batch&) override;
     void apply_placeholder(const model::record_batch&);
     void apply_advance_reconciled_offset(model::record);
+    void apply_set_start_offset(model::record);
 
     ss::future<raft::local_snapshot_applied>
     apply_local_snapshot(raft::stm_snapshot_header, iobuf&&) override;
