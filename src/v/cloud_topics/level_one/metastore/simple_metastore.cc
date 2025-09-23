@@ -601,18 +601,18 @@ simple_metastore::get_earliest_dirty_ts(
 
 ss::future<std::expected<metastore::compaction_info_response, metastore::errc>>
 simple_metastore::get_compaction_info(const compaction_sample_spec& log) {
-    auto dirty_ratio = get_dirty_ratio(state_, log.tid_p);
+    auto dirty_ratio = get_dirty_ratio(state_, log.tidp);
     if (!dirty_ratio.has_value()) {
         co_return std::unexpected(dirty_ratio.error());
     }
 
-    auto earliest_dirty_ts = get_earliest_dirty_ts(state_, log.tid_p);
+    auto earliest_dirty_ts = get_earliest_dirty_ts(state_, log.tidp);
     if (!earliest_dirty_ts.has_value()) {
         co_return std::unexpected(earliest_dirty_ts.error());
     }
 
     auto offsets = get_compaction_offsets(
-      state_, log.tid_p, log.tombstone_removal_upper_bound_ts);
+      state_, log.tidp, log.tombstone_removal_upper_bound_ts);
     if (!offsets.has_value()) {
         co_return std::unexpected(offsets.error());
     }

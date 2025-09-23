@@ -327,7 +327,7 @@ public:
     // the metastore. Parameters are used for call to
     // `get_compaction_offsets()`.
     struct compaction_sample_spec {
-        model::topic_id_partition tid_p;
+        model::topic_id_partition tidp;
         model::timestamp tombstone_removal_upper_bound_ts;
     };
 
