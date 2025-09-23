@@ -4501,9 +4501,7 @@ configuration::error_map_t configuration::load(const YAML::Node& root_node) {
         throw std::invalid_argument("'redpanda' root is required");
     }
 
-    auto ignore = node().property_names_and_aliases();
-
-    return config_store::read_yaml(root_node["redpanda"], std::move(ignore));
+    return config_store::read_yaml(root_node["redpanda"]);
 }
 
 std::unique_ptr<configuration> make_config() {
