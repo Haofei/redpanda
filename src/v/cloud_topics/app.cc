@@ -16,6 +16,7 @@
 #include "cloud_topics/housekeeper/manager.h"
 #include "cloud_topics/level_zero/gc/level_zero_gc.h"
 #include "cloud_topics/manager/manager.h"
+#include "cloud_topics/reconciler/reconciler.h"
 #include "cluster/cluster_epoch_service.h"
 #include "cluster/controller.h"
 #include "config/node_config.h"
@@ -34,7 +35,6 @@ app::~app() = default;
 ss::future<> app::construct(
   model::node_id self,
   cluster::controller* controller,
-  ss::sharded<cluster::partition_manager>* partition_mgr,
   ss::sharded<cluster::partition_leaders_table>* leaders_table,
   ss::sharded<cluster::shard_table>* shard_table,
   ss::sharded<cloud_io::remote>* remote,
@@ -81,12 +81,8 @@ ss::future<> app::construct(
 
     co_await construct_service(
       reconciler,
-      ss::sharded_parameter(
-        [&partition_mgr] { return &partition_mgr->local(); }),
       data_plane.get(),
       ss::sharded_parameter([this] { return &l1_io.local(); }),
-      ss::sharded_parameter(
-        [&metadata_cache] { return &metadata_cache->local(); }),
       ss::sharded_parameter([this] { return &replicated_metastore.local(); }));
 
     co_await construct_service(
@@ -111,10 +107,19 @@ ss::future<> app::construct(
 
 ss::future<> app::start() {
     co_await data_plane->start();
-    co_await reconciler.invoke_on_all([](auto& r) { return r.start(); });
+    co_await reconciler.invoke_on_all(&reconciler::reconciler::start);
     co_await domain_supervisor.invoke_on_all(
       [](auto& ds) { return ds.start(); });
+    co_await housekeeper_manager.invoke_on_all(&housekeeper_manager::start);
 
+    // When start is called, we must have registered all the callbacks before
+    // this as starting the manager will invoke callbacks for partitions already
+    // on the local shard.
+    co_await wire_up_notifications();
+    co_await manager.invoke_on_all([](auto& r) { return r.start(); });
+}
+
+ss::future<> app::wire_up_notifications() {
     co_await l0_gc.invoke_on_all([this](auto& gc) {
         // Tie the starting/stopping of L0 GC to the L1 domain partition 0 so
         // that it's a cluster wide singleton.
@@ -132,7 +137,6 @@ ss::future<> app::start() {
             }
         });
     });
-    co_await housekeeper_manager.invoke_on_all(&housekeeper_manager::start);
     co_await housekeeper_manager.invoke_on_all([this](auto& hm) {
         manager.local().on_ctp_partition_leader(
           [&hm](
@@ -146,11 +150,19 @@ ss::future<> app::start() {
               }
           });
     });
-
-    // When start is called, we must have registered all the callbacks before
-    // this as starting the manager will invoke callbacks for partitions already
-    // on the local shard.
-    co_await manager.invoke_on_all([](auto& r) { return r.start(); });
+    co_await reconciler.invoke_on_all([this](auto& r) {
+        manager.local().on_ctp_partition_leader(
+          [&r](
+            const model::ntp& ntp,
+            const model::topic_id_partition& tidp,
+            auto partition) noexcept {
+              if (partition) {
+                  r.attach_partition(ntp, tidp, std::move(*partition));
+              } else {
+                  r.detach_partition(ntp);
+              }
+          });
+    });
 }
 
 ss::future<> app::stop() {

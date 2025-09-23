@@ -51,7 +51,6 @@ public:
     ss::future<> construct(
       model::node_id,
       cluster::controller*,
-      ss::sharded<cluster::partition_manager>*,
       ss::sharded<cluster::partition_leaders_table>*,
       ss::sharded<cluster::shard_table>*,
       ss::sharded<cloud_io::remote>*,
@@ -73,6 +72,8 @@ public:
     // TODO: add 'get_control_plane_api' etc
 
 private:
+    ss::future<> wire_up_notifications();
+
     ss::sstring _logger_name;
     std::unique_ptr<data_plane_api> data_plane;
     ss::sharded<state_accessors> state;
