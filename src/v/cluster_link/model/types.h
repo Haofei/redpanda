@@ -220,7 +220,7 @@ std::ostream& operator<<(std::ostream& os, const tls_file_or_value& t);
  */
 struct connection_config
   : serde::
-      envelope<connection_config, serde::version<0>, serde::compat_version<0>> {
+      envelope<connection_config, serde::version<1>, serde::compat_version<0>> {
     /// List of addresses to bootstrap the connection
     std::vector<net::unresolved_address> bootstrap_servers;
     /// Support authn variants.  Currently only SCRAM but update this to add
@@ -261,7 +261,13 @@ struct connection_config
     static constexpr auto fetch_min_bytes_default = 5_MiB;
     // Maximum number of bytes to fetch
     std::optional<int32_t> fetch_max_bytes;
-    // Default maximum number of bytes to fetch (1MiB)
+    // Maximum number of bytes to fetch per partition, this value represents the
+    // max amount of data that the broker returns for a single partition in a
+    // fetch response.
+    std::optional<int32_t> fetch_partition_max_bytes;
+    // Default maximum number of bytes to fetch per partition
+    static constexpr auto default_fetch_partition_max_bytes = 1_MiB;
+    // Default maximum number of bytes to fetch (20MiB)
     static constexpr auto fetch_max_bytes_default = 20 * 1024 * 1024;
 
     // Returns the metadata_max_age_ms value
@@ -294,6 +300,11 @@ struct connection_config
         return fetch_max_bytes.value_or(fetch_max_bytes_default);
     }
 
+    int32_t get_fetch_partition_max_bytes() const {
+        return fetch_partition_max_bytes.value_or(
+          default_fetch_partition_max_bytes);
+    }
+
     friend bool operator==(const connection_config&, const connection_config&)
       = default;
 
@@ -311,7 +322,8 @@ struct connection_config
           fetch_wait_max_ms,
           fetch_min_bytes,
           fetch_max_bytes,
-          tls_enabled);
+          tls_enabled,
+          fetch_partition_max_bytes);
     }
 
     friend std::ostream&

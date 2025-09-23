@@ -600,6 +600,7 @@ class ShadowLinkClientOptions(google.protobuf.message.Message):
     FETCH_WAIT_MAX_MS_FIELD_NUMBER: builtins.int
     FETCH_MIN_BYTES_FIELD_NUMBER: builtins.int
     FETCH_MAX_BYTES_FIELD_NUMBER: builtins.int
+    FETCH_PARTITION_MAX_BYTES_FIELD_NUMBER: builtins.int
     client_id: builtins.str
     'The Client ID for the Kafka RPC requests setn by this cluster to the\n    source cluster\n    '
     source_cluster_id: builtins.str
@@ -611,11 +612,13 @@ class ShadowLinkClientOptions(google.protobuf.message.Message):
     retry_backoff_ms: builtins.int
     'Retry base backoff\n    If 0 is provided, defaults to 100ms\n    '
     fetch_wait_max_ms: builtins.int
-    'Fetch request timeout\n    If 0 is provided, defaults to 100ms\n    '
+    'Fetch request timeout\n    If 0 is provided, defaults to 500ms\n    '
     fetch_min_bytes: builtins.int
-    'Fetch min bytes\n    If 0 is provided, defaults to 1 byte\n    '
+    'Fetch min bytes\n    If 0 is provided, defaults to 5 MiB\n    '
     fetch_max_bytes: builtins.int
-    'Fetch max bytes\n    If 0 is provided, defaults to 1MiB\n    '
+    'Fetch max bytes\n    If 0 is provided, defaults to 20 MiB\n    '
+    fetch_partition_max_bytes: builtins.int
+    'Fetch partition max bytes\n    If 0 is provided, defaults to 1 MiB\n    '
 
     @property
     def bootstrap_servers(self) -> google.protobuf.internal.containers.RepeatedScalarFieldContainer[builtins.str]:
@@ -629,13 +632,13 @@ class ShadowLinkClientOptions(google.protobuf.message.Message):
     def authentication_configuration(self) -> global___AuthenticationConfiguration:
         """Authentication settings"""
 
-    def __init__(self, *, bootstrap_servers: collections.abc.Iterable[builtins.str] | None=..., client_id: builtins.str=..., source_cluster_id: builtins.str=..., tls_settings: global___TLSSettings | None=..., authentication_configuration: global___AuthenticationConfiguration | None=..., metadata_max_age_ms: builtins.int=..., connection_timeout_ms: builtins.int=..., retry_backoff_ms: builtins.int=..., fetch_wait_max_ms: builtins.int=..., fetch_min_bytes: builtins.int=..., fetch_max_bytes: builtins.int=...) -> None:
+    def __init__(self, *, bootstrap_servers: collections.abc.Iterable[builtins.str] | None=..., client_id: builtins.str=..., source_cluster_id: builtins.str=..., tls_settings: global___TLSSettings | None=..., authentication_configuration: global___AuthenticationConfiguration | None=..., metadata_max_age_ms: builtins.int=..., connection_timeout_ms: builtins.int=..., retry_backoff_ms: builtins.int=..., fetch_wait_max_ms: builtins.int=..., fetch_min_bytes: builtins.int=..., fetch_max_bytes: builtins.int=..., fetch_partition_max_bytes: builtins.int=...) -> None:
         ...
 
     def HasField(self, field_name: typing.Literal['_authentication_configuration', b'_authentication_configuration', '_tls_settings', b'_tls_settings', 'authentication_configuration', b'authentication_configuration', 'tls_settings', b'tls_settings']) -> builtins.bool:
         ...
 
-    def ClearField(self, field_name: typing.Literal['_authentication_configuration', b'_authentication_configuration', '_tls_settings', b'_tls_settings', 'authentication_configuration', b'authentication_configuration', 'bootstrap_servers', b'bootstrap_servers', 'client_id', b'client_id', 'connection_timeout_ms', b'connection_timeout_ms', 'fetch_max_bytes', b'fetch_max_bytes', 'fetch_min_bytes', b'fetch_min_bytes', 'fetch_wait_max_ms', b'fetch_wait_max_ms', 'metadata_max_age_ms', b'metadata_max_age_ms', 'retry_backoff_ms', b'retry_backoff_ms', 'source_cluster_id', b'source_cluster_id', 'tls_settings', b'tls_settings']) -> None:
+    def ClearField(self, field_name: typing.Literal['_authentication_configuration', b'_authentication_configuration', '_tls_settings', b'_tls_settings', 'authentication_configuration', b'authentication_configuration', 'bootstrap_servers', b'bootstrap_servers', 'client_id', b'client_id', 'connection_timeout_ms', b'connection_timeout_ms', 'fetch_max_bytes', b'fetch_max_bytes', 'fetch_min_bytes', b'fetch_min_bytes', 'fetch_partition_max_bytes', b'fetch_partition_max_bytes', 'fetch_wait_max_ms', b'fetch_wait_max_ms', 'metadata_max_age_ms', b'metadata_max_age_ms', 'retry_backoff_ms', b'retry_backoff_ms', 'source_cluster_id', b'source_cluster_id', 'tls_settings', b'tls_settings']) -> None:
         ...
 
     @typing.overload

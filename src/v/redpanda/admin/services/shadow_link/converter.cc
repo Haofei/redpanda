@@ -456,6 +456,11 @@ create_connection_config(const shadow_link& sl) {
         config.fetch_max_bytes = client_options.get_fetch_max_bytes();
     }
 
+    if (client_options.get_fetch_partition_max_bytes() != 0) {
+        config.fetch_partition_max_bytes
+          = client_options.get_fetch_partition_max_bytes();
+    }
+
     return config;
 }
 
@@ -606,6 +611,8 @@ create_shadow_link_client_options(const cluster_link::model::metadata& md) {
     options.set_fetch_wait_max_ms(md.connection.fetch_wait_max_ms.value_or(0));
     options.set_fetch_min_bytes(md.connection.fetch_min_bytes.value_or(0));
     options.set_fetch_max_bytes(md.connection.fetch_max_bytes.value_or(0));
+    options.set_fetch_partition_max_bytes(
+      md.connection.fetch_partition_max_bytes.value_or(0));
 
     return options;
 }
