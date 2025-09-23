@@ -20,7 +20,6 @@
 #include "storage/fs_utils.h"
 #include "storage/segment_utils.h"
 #include "storage/spill_key_index.h"
-#include "test_utils/fixture.h"
 #include "test_utils/random_bytes.h"
 #include "test_utils/randoms.h"
 #include "test_utils/tmpbuf_file.h"
