@@ -149,6 +149,9 @@ replicated_object_builder::remove_pending_object(object_id oid) {
       "Pending objects expected to contain {}",
       oid);
     objects.pending_objects_.erase(it);
+    if (objects.pending_objects_.empty()) {
+        partitions_.erase(p_it);
+    }
     return {};
 }
 

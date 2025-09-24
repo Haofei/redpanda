@@ -181,6 +181,45 @@ TEST_F(ReplicatedMetastoreTest, TestBuilderRemovedObjects) {
     ASSERT_FALSE(ob->finish(oid, 0, 0).has_value());
 }
 
+// Regression test, where removing an object from the builder left some
+// metadata behind, which would result in a failure.
+TEST_F(ReplicatedMetastoreTest, TestBuilderRemoveObjectRemovesPartition) {
+    auto& app = get_ct_app(model::node_id{0});
+    replicated_metastore m(app.get_sharded_l1_metastore_fe()->local());
+    auto tp1 = make_tp(0);
+    auto tp2 = make_tp(1);
+    auto ob = m.object_builder().get().value();
+
+    // Add and remove an object, setting up potential for an old bug where an
+    // empty partition is left behind after removal.
+    auto oid1 = ob->get_or_create_object_for(tp1).value();
+    ASSERT_TRUE(ob->remove_pending_object(oid1).has_value());
+
+    // Now add an object as normal.
+    auto oid2 = ob->get_or_create_object_for(tp2).value();
+    auto add_res = ob->add(
+      oid2,
+      metastore::object_metadata::ntp_metadata{
+        .tidp = tp2,
+        .base_offset = o{0},
+        .last_offset = o{199},
+        .max_timestamp = ts{10000},
+        .pos = 0,
+        .size = 500,
+      });
+    ASSERT_TRUE(add_res.has_value()) << add_res.error();
+    auto fin_res = ob->finish(oid2, 500, 1000);
+    metastore::term_offset_map_t terms;
+    terms[tp2].emplace_back(
+      metastore::term_offset{.term = model::term_id{1}, .first_offset = o{0}});
+
+    // There should be no issues here. Previously Redpanda would complain that
+    // it needed term information routed to the domain for tp1, despite the
+    // object for tp1 being removed.
+    auto commit_res = m.add_objects(*ob, terms).get();
+    ASSERT_TRUE(commit_res.has_value());
+}
+
 TEST_F(ReplicatedMetastoreTest, TestBasicAdd) {
     auto& app = get_ct_app(model::node_id{0});
     replicated_metastore meta(app.get_sharded_l1_metastore_fe()->local());
