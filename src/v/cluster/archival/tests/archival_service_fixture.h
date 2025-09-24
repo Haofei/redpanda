@@ -35,7 +35,7 @@
 #include <seastar/core/shared_ptr.hh>
 #include <seastar/core/timed_out_error.hh>
 
-#include <boost/test/tools/old/interface.hpp>
+#include <boost/test/unit_test.hpp>
 
 #include <algorithm>
 #include <type_traits>
