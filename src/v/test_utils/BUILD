@@ -242,3 +242,22 @@ redpanda_test_cc_library(
         "@seastar",
     ],
 )
+
+# Test hooks are things that run before/after test cases or the entire test
+# run. This library has global test hooks which should run for every type of
+# test (gtest or btest).
+redpanda_test_cc_library(
+    name = "global_test_hooks",
+    srcs = [
+        "global_test_hooks.cc",
+    ],
+    hdrs = [
+        "global_test_hooks.h",
+    ],
+    implementation_deps = [
+        "//src/v/random:test_seeding",
+        "@fmt",
+    ],
+    visibility = ["//visibility:public"],
+)
+
