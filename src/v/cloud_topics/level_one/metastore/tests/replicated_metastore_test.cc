@@ -81,7 +81,7 @@ public:
               metastore::term_offset{
                 .term = model::term_id{0}, .first_offset = o{0}});
         }
-        auto add_res = meta.add_objects(std::move(objs), terms).get();
+        auto add_res = meta.add_objects(*objs, terms).get();
         ASSERT_TRUE_CORO(add_res.has_value());
     }
 };
@@ -139,7 +139,7 @@ TEST_F(ReplicatedMetastoreTest, TestAddNotFinished) {
         .size = 500,
       });
     ASSERT_TRUE(add_res.has_value()) << add_res.error();
-    auto commit_res = meta.add_objects(std::move(obj_builder), {}).get();
+    auto commit_res = meta.add_objects(*obj_builder, {}).get();
     ASSERT_FALSE(commit_res.has_value());
     ASSERT_EQ(commit_res.error(), metastore::errc::invalid_request);
 }
@@ -273,7 +273,7 @@ TEST_F(ReplicatedMetastoreTest, TestBasicCompact) {
         update.new_cleaned_range->last_offset = o{999};
         cmap[make_tp(i)] = std::move(update);
     }
-    auto cmp_res = meta.compact_objects(std::move(new_objs), cmap).get();
+    auto cmp_res = meta.compact_objects(*new_objs, cmap).get();
     ASSERT_TRUE(cmp_res.has_value()) << fmt::to_string(cmp_res.error());
 
     // Check across the partitions of the L1 metastore that we have the right
@@ -400,7 +400,7 @@ TEST_F(ReplicatedMetastoreTest, TestNotLeader) {
         terms[tp].emplace_back(
           metastore::term_offset{
             .term = model::term_id{0}, .first_offset = next_to_send});
-        auto commit_res = meta.add_objects(std::move(obj_builder), terms).get();
+        auto commit_res = meta.add_objects(*obj_builder, terms).get();
         if (!commit_res.has_value()) {
             while (true) {
                 if (ss::lowres_clock::now() > deadline) {
@@ -465,7 +465,7 @@ TEST_F(ReplicatedMetastoreTest, TestInvalidTermRequest) {
     }
     // This constitutes an incorrectly formed request, and is not expected
     // ever, hence overall failure.
-    auto add_res = meta.add_objects(std::move(objs), terms).get();
+    auto add_res = meta.add_objects(*objs, terms).get();
     ASSERT_FALSE(add_res.has_value());
     ASSERT_EQ(add_res.error(), metastore::errc::invalid_request);
 }
@@ -500,7 +500,7 @@ TEST_F(ReplicatedMetastoreTest, TestGetTermForOffset) {
       metastore::term_offset{
         .term = model::term_id{2}, .first_offset = o{100}});
 
-    auto add_res = meta.add_objects(std::move(obj_builder), terms).get();
+    auto add_res = meta.add_objects(*obj_builder, terms).get();
     ASSERT_TRUE(add_res.has_value());
 
     const auto assert_term_eq = [&](kafka::offset o, model::term_id t) {
@@ -559,7 +559,7 @@ TEST_F(ReplicatedMetastoreTest, TestGetEndOffsetForTerm) {
       metastore::term_offset{
         .term = model::term_id{2}, .first_offset = o{100}});
 
-    auto add_res = meta.add_objects(std::move(obj_builder), terms).get();
+    auto add_res = meta.add_objects(*obj_builder, terms).get();
     ASSERT_TRUE(add_res.has_value());
 
     auto assert_end_offset_eq = [&](

@@ -552,7 +552,7 @@ ss::future<std::expected<void, reconcile_error>> reconciler::commit_objects(
     }
 
     auto add_objects_result = co_await _metastore->add_objects(
-      std::move(meta_builder), terms);
+      *meta_builder, terms);
     if (!add_objects_result.has_value()) {
         vlog(
           lg.error,
