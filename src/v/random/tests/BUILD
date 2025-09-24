@@ -1,4 +1,4 @@
-load("//bazel:test.bzl", "redpanda_cc_btest", "redpanda_cc_btest_no_seastar", "redpanda_cc_gtest")
+load("//bazel:test.bzl", "redpanda_cc_bench", "redpanda_cc_btest", "redpanda_cc_btest_no_seastar", "redpanda_cc_gtest")
 
 redpanda_cc_btest(
     name = "random_test",
@@ -73,5 +73,15 @@ redpanda_cc_gtest(
         "@googletest//:gtest",
         "@seastar",
         "@seastar//:testing",
+    ],
+)
+
+redpanda_cc_bench(
+    name = "random_rpbench",
+    srcs = ["random_bench.cc"],
+    deps = [
+        "//src/v/random:generators",
+        "@seastar",
+        "@seastar//:benchmark",
     ],
 )
