@@ -2187,7 +2187,6 @@ void application::wire_up_redpanda_services(
           ->construct(
             node_id,
             controller.get(),
-            &controller->get_partition_manager(),
             &controller->get_partition_leaders(),
             &controller->get_shard_table(),
             &cloud_io,
