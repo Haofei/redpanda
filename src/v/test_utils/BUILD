@@ -261,3 +261,19 @@ redpanda_test_cc_library(
     visibility = ["//visibility:public"],
 )
 
+# The hook implementation for boost tests, installs the global test hooks.
+redpanda_test_cc_library(
+    name = "boost_test_hooks",
+    srcs = [
+        "boost_test_hooks.cc",
+    ],
+    hdrs = [
+    ],
+    implementation_deps = [
+        ":global_test_hooks",
+        "@boost//:test",
+    ],
+    visibility = ["//visibility:public"],
+    deps = [
+    ],
+)

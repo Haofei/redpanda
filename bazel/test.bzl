@@ -262,6 +262,10 @@ def redpanda_cc_btest(
         data = [],
         tags = [],
         flaky = False):
+    deps.append(
+        "//src/v/test_utils:boost_test_hooks",
+    )
+
     _redpanda_cc_unit_test(
         dash_dash_protocol = True,
         name = name,
@@ -321,6 +325,7 @@ def redpanda_cc_btest_no_seastar(
         local_defines = ["IS_BTEST"],
         deps = [
             "//src/v/test_utils:boost_result_redirect",
+            "//src/v/test_utils:boost_test_hooks",
             "@boost//:test.so",
         ] + deps,
     )
