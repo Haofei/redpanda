@@ -13,7 +13,7 @@
 #include "model/fundamental.h"
 #include "model/metadata.h"
 #include "random/generators.h"
-#include "test_utils/fixture.h"
+#include "test_utils/boost_fixture.h"
 
 #include <seastar/testing/thread_test_case.hh>
 

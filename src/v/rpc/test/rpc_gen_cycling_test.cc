@@ -19,7 +19,7 @@
 #include "rpc/test/rpc_integration_fixture.h"
 #include "rpc/types.h"
 #include "test_utils/async.h"
-#include "test_utils/fixture.h"
+#include "test_utils/boost_fixture.h"
 #include "test_utils/random_bytes.h"
 #include "utils/backoff_policy.h"
 

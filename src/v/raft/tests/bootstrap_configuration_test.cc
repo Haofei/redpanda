@@ -23,7 +23,7 @@
 #include "test_utils/randoms.h"
 // testing
 #include "raft/tests/simple_record_fixture.h"
-#include "test_utils/fixture.h"
+#include "test_utils/boost_fixture.h"
 
 #include <seastar/core/print.hh>
 #include <seastar/util/log.hh>

@@ -28,7 +28,7 @@
 #include "test_utils/randoms.h"
 #include "utils/copy_range.h"
 // testing
-#include "test_utils/fixture.h"
+#include "test_utils/boost_fixture.h"
 
 #include <seastar/core/do_with.hh>
 #include <seastar/core/future-util.hh>

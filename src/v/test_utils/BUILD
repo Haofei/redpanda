@@ -1,23 +1,6 @@
 load("//bazel:test.bzl", "redpanda_test_cc_library")
 
 redpanda_test_cc_library(
-    name = "fixture",
-    hdrs = [
-        "async.h",
-        "fixture.h",
-        "test_macros.h",
-        "tmp_dir.h",
-    ],
-    visibility = ["//visibility:public"],
-    deps = [
-        "//src/v/base",
-        "//src/v/model:timeout_clock",
-        "//src/v/ssx:sformat",
-        "@seastar//:testing",
-    ],
-)
-
-redpanda_test_cc_library(
     name = "gtest",
     srcs = [
         "gtest_main.cc",
@@ -25,7 +8,6 @@ redpanda_test_cc_library(
     ],
     hdrs = [
         "async.h",
-        "fixture.h",
         "gtest_exception.h",
         "gtest_utils.h",
         "test.h",
@@ -34,8 +16,9 @@ redpanda_test_cc_library(
     ],
     visibility = ["//visibility:public"],
     deps = [
-        ":fixture",
         "//src/v/base",
+        "//src/v/model:timeout_clock",
+        "//src/v/ssx:sformat",
         "@fmt",
         "@googletest//:gtest",
         "@seastar",
@@ -50,14 +33,17 @@ redpanda_test_cc_library(
     ],
     hdrs = [
         "async.h",
-        "fixture.h",
+        "boost_fixture.h",
         "test_macros.h",
         "tmp_dir.h",
     ],
+    local_defines = ["IS_BTEST"],
     visibility = ["//visibility:public"],
     deps = [
         ":boost_result_redirect",
-        ":fixture",
+        "//src/v/base",
+        "//src/v/model:timeout_clock",
+        "//src/v/ssx:sformat",
         "@seastar//:testing",
     ],
 )
@@ -87,6 +73,18 @@ redpanda_test_cc_library(
     visibility = ["//visibility:public"],
     deps = [
         "//src/v/base",
+    ],
+)
+
+redpanda_test_cc_library(
+    name = "tmp_dir",
+    hdrs = [
+        "tmp_dir.h",
+    ],
+    visibility = ["//visibility:public"],
+    deps = [
+        "//src/v/base",
+        "@seastar",
     ],
 )
 

@@ -13,7 +13,6 @@
 #include "model/fundamental.h"
 #include "model/record_batch_types.h"
 #include "random/generators.h"
-#include "test_utils/fixture.h"
 
 #include <seastar/core/file-types.hh>
 #include <seastar/core/fstream.hh>

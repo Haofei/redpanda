@@ -10,19 +10,17 @@
  * by the Apache License, Version 2.0
  */
 
-#include "cloud_io/tests/s3_imposter.h"
 #include "cloud_storage/async_manifest_view.h"
 #include "cloud_storage/download_exception.h"
 #include "cloud_storage/tests/cloud_storage_fixture.h"
 #include "cloud_storage/tests/util.h"
 #include "cloud_storage/types.h"
 #include "model/record_batch_types.h"
+#include "test_utils/boost_fixture.h"
 
 #include <seastar/core/lowres_clock.hh>
 
 #include <fmt/chrono.h>
-
-#include <random>
 
 using namespace cloud_storage;
 

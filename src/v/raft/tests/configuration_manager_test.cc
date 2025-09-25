@@ -21,7 +21,7 @@
 #include "storage/kvstore.h"
 #include "storage/log_manager.h"
 #include "storage/types.h"
-#include "test_utils/fixture.h"
+#include "test_utils/boost_fixture.h"
 #include "test_utils/randoms.h"
 
 #include <seastar/core/abort_source.hh>

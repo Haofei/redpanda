@@ -10,7 +10,6 @@
 #include "storage/log_manager.h"
 #include "storage/record_batch_builder.h"
 #include "storage/tests/utils/disk_log_builder.h"
-#include "test_utils/fixture.h"
 
 #include <seastar/core/file.hh>
 #include <seastar/core/temporary_buffer.hh>

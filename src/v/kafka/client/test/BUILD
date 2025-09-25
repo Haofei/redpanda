@@ -12,6 +12,7 @@ redpanda_test_cc_library(
         "//src/v/kafka/client",
         "//src/v/kafka/client:configuration",
         "//src/v/redpanda/tests:fixture",
+        "//src/v/storage/tests:disk_log_builder",
     ],
 )
 
