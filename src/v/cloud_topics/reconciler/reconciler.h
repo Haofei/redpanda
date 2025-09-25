@@ -55,7 +55,7 @@ enum class reconcile_error : uint8_t { build_or_put_failure, metadata_failure };
  */
 class reconciler {
 public:
-    reconciler(data_plane_api*, l1::io*, l1::metastore*);
+    reconciler(l1::io*, l1::metastore*);
 
     reconciler(const reconciler&) = delete;
     reconciler& operator=(const reconciler&) = delete;
@@ -69,9 +69,17 @@ public:
     void attach_partition(
       const model::ntp&,
       model::topic_id_partition,
+      data_plane_api*,
       ss::lw_shared_ptr<cluster::partition>);
     void attach_source(ss::shared_ptr<source>);
     void detach(const model::ntp&);
+
+    /*
+     * One round of reconciliation in which data from one or more sources
+     * may be reconciled into an L1 object. Operates on the set of currently
+     * attached partitions.
+     */
+    ss::future<> reconcile();
 
 private:
     // NB: Partition attachment is the only part using ntps instead of
@@ -130,13 +138,6 @@ private:
     // Top-level background worker that drives reconciliation.
     ss::future<> reconciliation_loop();
     ssx::semaphore _control_sem{0, "reconciler::semaphore"};
-
-    /*
-     * One round of reconciliation in which data from one or more sources
-     * may be reconciled into an L1 object. Operates on the set of currently
-     * attached partitions.
-     */
-    ss::future<> reconcile();
 
     /*
      * Reconcile a set of sources into an object with id `oid`.
@@ -212,7 +213,6 @@ private:
       const chunked_vector<built_object_metadata>& objects,
       std::unique_ptr<l1::metastore::object_metadata_builder> meta_builder);
 
-private:
     /*
      * Retry metastore add_objects calls on transport errors.
      * Other metastore errors are not retried.
@@ -222,7 +222,6 @@ private:
       std::unique_ptr<l1::metastore::object_metadata_builder> meta_builder,
       l1::metastore::term_offset_map_t terms);
 
-    data_plane_api* _data_plane;
     l1::io* _l1_io;
     l1::metastore* _metastore;
     ss::gate _gate;

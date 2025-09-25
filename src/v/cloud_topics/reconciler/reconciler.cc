@@ -40,10 +40,8 @@ ss::logger lg("reconciler");
 
 namespace cloud_topics::reconciler {
 
-reconciler::reconciler(
-  data_plane_api* data_plane, l1::io* l1_io, l1::metastore* metastore)
-  : _data_plane(data_plane)
-  , _l1_io(l1_io)
+reconciler::reconciler(l1::io* l1_io, l1::metastore* metastore)
+  : _l1_io(l1_io)
   , _metastore(metastore) {}
 
 ss::future<> reconciler::start() {
@@ -61,8 +59,9 @@ ss::future<> reconciler::stop() {
 void reconciler::attach_partition(
   const model::ntp& ntp,
   model::topic_id_partition tidp,
+  data_plane_api* data_plane,
   ss::lw_shared_ptr<cluster::partition> partition) {
-    attach_source(make_source(ntp, tidp, _data_plane, std::move(partition)));
+    attach_source(make_source(ntp, tidp, data_plane, std::move(partition)));
 }
 
 void reconciler::attach_source(ss::shared_ptr<source> src) {
@@ -442,8 +441,11 @@ reconciler::add_partition_to_object(
       partition->ntp(),
       partition->last_reconciled_offset());
 
+    // Since the LRO is the last thing inclusive of what we uploaded to L1, we
+    // want to start reading from the next offset.
+    auto start_offset = kafka::next_offset(partition->last_reconciled_offset());
     auto reader = co_await partition->make_reader(cloud_topic_log_reader_config(
-      /*start_offset=*/partition->last_reconciled_offset(),
+      /*start_offset=*/start_offset,
       /*max_offset=*/kafka::offset::max(),
       /*min_bytes=*/1,
       /*max_bytes=*/ctx.size_budget,
@@ -596,20 +598,16 @@ ss::future<std::expected<void, reconcile_error>> reconciler::commit_objects(
     for (const auto& obj_meta : objects) {
         for (const auto& partition : obj_meta.partitions) {
             auto tidp = partition.source->topic_id_partition();
-            auto next_lro = kafka::offset::min();
-            if (corrected_next_offsets.contains(tidp)) {
-                next_lro = corrected_next_offsets.at(tidp);
-            } else {
-                auto [first, last]
-                  = obj_meta.object_info.index.partitions.equal_range(tidp);
-                for (auto it = first; it != last; ++it) {
-                    const auto& obj_partition = it->second;
-                    next_lro = std::max(
-                      next_lro, kafka::next_offset(obj_partition.last_offset));
-                }
+            kafka::offset lro = partition.metadata.last_offset;
+            auto it = corrected_next_offsets.find(tidp);
+            if (it != corrected_next_offsets.end()) {
+                // We want the previous offset, because that is what was last
+                // reconciled. During next reconciliation we should get the
+                // offset *after* the LRO to start reading from.
+                lro = kafka::prev_offset(it->second);
             }
             auto result = co_await partition.source->set_last_reconciled_offset(
-              next_lro, _as);
+              lro, _as);
             if (!result.has_value()) {
                 // Don't fail early, just keep going until we're done.
                 reconcile_result = std::unexpected(
