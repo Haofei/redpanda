@@ -449,9 +449,7 @@ redpanda_cc_btest(
     deps = [
         "//src/v/cluster",
         "//src/v/model",
-        "//src/v/storage/tests:kvstore_fixture",
         "//src/v/test_utils:seastar_boost",
-        "//src/v/utils:prefix_logger",
         "//src/v/utils:unresolved_address",
         "@boost//:test",
         "@seastar",
