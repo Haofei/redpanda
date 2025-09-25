@@ -30,6 +30,7 @@
 #include <seastar/util/log.hh>
 
 #include <chrono>
+#include <expected>
 
 using namespace std::chrono_literals;
 
@@ -214,6 +215,9 @@ ss::future<> reconciler::reconcile() {
     chunked_vector<built_object_metadata> successful_objects;
     chunked_vector<l1::object_id> failed_objects;
     for (const auto& [oid, partitions] : oid_to_partitions) {
+        if (_as.abort_requested()) {
+            co_return;
+        }
         auto object_fut = co_await ss::coroutine::as_future(
           reconcile_sources(oid, partitions));
         if (object_fut.failed()) {
@@ -241,7 +245,7 @@ ss::future<> reconciler::reconcile() {
         }
 
         auto obj_metadata = std::move(result).value();
-        auto add_result = co_await add_object_metadata(
+        auto add_result = add_object_metadata(
           oid, obj_metadata, metadata_builder.get());
         if (!add_result.has_value()) {
             failed_objects.push_back(oid);
@@ -397,6 +401,9 @@ reconciler::build_object(
     chunked_vector<partition_commit_info> metas;
     metas.reserve(sources.size());
     for (const auto& src : sources) {
+        if (_as.abort_requested()) {
+            co_return std::unexpected(reconcile_error::build_or_put_failure);
+        }
         auto meta = co_await add_partition_to_object(ctx, src);
         if (meta.has_value()) {
             metas.emplace_back(src, std::move(meta).value());
@@ -475,8 +482,7 @@ reconciler::add_partition_to_object(
     co_return metadata.value();
 }
 
-ss::future<std::expected<void, reconcile_error>>
-reconciler::add_object_metadata(
+std::expected<void, reconcile_error> reconciler::add_object_metadata(
   const l1::object_id& oid,
   const built_object_metadata& obj_meta,
   l1::metastore::object_metadata_builder* meta_builder) {
@@ -508,7 +514,7 @@ reconciler::add_object_metadata(
                   add_result.error());
                 // TODO: The object has been uploaded. The reconciler could
                 //       attempt cleanup (or notify a cleanup subsystem).
-                co_return std::unexpected(reconcile_error::metadata_failure);
+                return std::unexpected(reconcile_error::metadata_failure);
             }
         }
     }
@@ -523,10 +529,10 @@ reconciler::add_object_metadata(
           meta_result.error());
         // TODO: The object has been uploaded. The reconciler could
         //       attempt cleanup (or notify a cleanup subsystem).
-        co_return std::unexpected(reconcile_error::metadata_failure);
+        return std::unexpected(reconcile_error::metadata_failure);
     }
 
-    co_return std::expected<void, reconcile_error>{};
+    return {};
 }
 
 ss::future<std::expected<l1::metastore::add_response, l1::metastore::errc>>

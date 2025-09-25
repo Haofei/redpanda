@@ -199,7 +199,7 @@ private:
      * Adds sources metadata for all sources in the object.
      * Returns an error if any metadata operation fails.
      */
-    ss::future<std::expected<void, reconcile_error>> add_object_metadata(
+    std::expected<void, reconcile_error> add_object_metadata(
       const l1::object_id& oid,
       const built_object_metadata& info,
       l1::metastore::object_metadata_builder* meta_builder);
