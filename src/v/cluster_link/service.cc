@@ -330,12 +330,30 @@ private:
 class remote_data_source_factory : public replication::data_source_factory {
 public:
     explicit remote_data_source_factory(
+      model::id_t link_id,
+      manager* manager,
       std::unique_ptr<replication::mux_remote_consumer> consumer)
-      : _consumer(std::move(consumer)) {}
+      : _link_id(link_id)
+      , _manager(manager)
+      , _consumer(std::move(consumer)) {}
 
-    ss::future<> start() final { return _consumer->start(); }
+    ss::future<> start() final {
+        _notification_id = _manager->register_link_config_changes_callback(
+          [this](model::id_t link_id, const model::metadata& md) {
+              // Ignore updates for other links
+              if (link_id != _link_id) {
+                  return;
+              }
+              _consumer->update_configuration(
+                make_remote_consumer_configuration(md.connection));
+          });
+        return _consumer->start();
+    }
 
-    ss::future<> stop() noexcept final { return _consumer->stop(); }
+    ss::future<> stop() noexcept final {
+        _manager->unregister_link_config_changes_callback(_notification_id);
+        return _consumer->stop();
+    }
 
     std::unique_ptr<replication::data_source>
     make_source(const ::model::ntp& ntp) final {
@@ -343,6 +361,9 @@ public:
     }
 
 private:
+    model::id_t _link_id;
+    manager* _manager;
+    manager::notification_id _notification_id;
     std::unique_ptr<replication::mux_remote_consumer> _consumer;
 };
 
@@ -527,6 +548,8 @@ public:
           std::move(config),
           std::move(cluster_connection),
           std::make_unique<remote_data_source_factory>(
+            link_id,
+            manager,
             std::make_unique<replication::mux_remote_consumer>(
               *cluster_connection,
               _snc_quota_mgr->local(),
