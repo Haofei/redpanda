@@ -188,6 +188,7 @@ DEFAULT_LOG_ALLOW_LIST: list[CompiledLogAllowElem] = [
     # the catalog that have "Assert" in them. These are typically benign and
     # just indicate a race in committing to Iceberg.
     re.compile(r"UpdateRequirement.*Assert"),
+    re.compile("assert-ref-snapshot-id"),
     # Temporary: https://redpandadata.atlassian.net/browse/CORE-9897
     # there is an ongoing investigation into s3_client receiving 400 Bad Request. For now, stop the CI bleed
     re.compile(
