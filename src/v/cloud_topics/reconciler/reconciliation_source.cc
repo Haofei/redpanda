@@ -149,3 +149,25 @@ ss::shared_ptr<source> make_source(
 }
 
 } // namespace cloud_topics::reconciler
+
+auto fmt::formatter<cloud_topics::reconciler::source::errc>::format(
+  const cloud_topics::reconciler::source::errc& err,
+  fmt::format_context& ctx) const -> decltype(ctx.out()) {
+    std::string_view name = "unknown";
+    switch (err) {
+    case cloud_topics::reconciler::source::errc::timeout:
+        name = "timeout";
+        break;
+    case cloud_topics::reconciler::source::errc::not_leader:
+        name = "not_leader";
+        break;
+    case cloud_topics::reconciler::source::errc::shutdown:
+        name = "shutdown";
+        break;
+    case cloud_topics::reconciler::source::errc::failure:
+        name = "failure";
+        break;
+    }
+    return fmt::format_to(
+      ctx.out(), "cloud_topics::reconciler::source::errc::{}", name);
+}

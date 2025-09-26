@@ -83,3 +83,11 @@ ss::shared_ptr<source> make_source(
   ss::lw_shared_ptr<cluster::partition>);
 
 } // namespace cloud_topics::reconciler
+
+template<>
+struct fmt::formatter<cloud_topics::reconciler::source::errc>
+  : fmt::formatter<std::string_view> {
+    auto format(
+      const cloud_topics::reconciler::source::errc&,
+      fmt::format_context& ctx) const -> decltype(ctx.out());
+};
