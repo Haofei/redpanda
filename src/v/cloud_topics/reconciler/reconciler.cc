@@ -10,6 +10,7 @@
 
 #include "cloud_topics/reconciler/reconciler.h"
 
+#include "base/source_location.h"
 #include "base/vlog.h"
 #include "cloud_topics/data_plane_api.h"
 #include "cloud_topics/frontend/frontend.h"
@@ -33,12 +34,22 @@
 
 using namespace std::chrono_literals;
 
+namespace cloud_topics::reconciler {
+
 namespace {
 ss::logger lg("reconciler");
 
-} // namespace
+void log_error(
+  const reconcile_error& err,
+  vlog::file_line file_line = vlog::file_line::current()) {
+    lg.log(
+      err.benign ? ss::log_level::debug : ss::log_level::error,
+      "{} - {}",
+      file_line,
+      err.message);
+}
 
-namespace cloud_topics::reconciler {
+} // namespace
 
 reconciler::reconciler(l1::io* l1_io, l1::metastore* metastore)
   : _l1_io(l1_io)
@@ -239,7 +250,10 @@ ss::future<> reconciler::reconcile() {
         auto result = object_fut.get();
         if (!result.has_value()) {
             failed_objects.push_back(oid);
-            // Error was already logged in reconcile_sources.
+            log_error(result.error().with_context(
+              "Exception reconciling {} partitions into object {}",
+              sources.size(),
+              oid));
             continue; // Skip this object and move to the next
         }
 
@@ -248,7 +262,10 @@ ss::future<> reconciler::reconcile() {
           oid, obj_metadata, metadata_builder.get());
         if (!add_result.has_value()) {
             failed_objects.push_back(oid);
-            // Error was already logged in add_object_metadata.
+            log_error(add_result.error().with_context(
+              "Exception reconciling {} partitions into object {}",
+              sources.size(),
+              oid));
             continue; // Skip this object and move to the next
         }
 
@@ -272,10 +289,9 @@ ss::future<> reconciler::reconcile() {
     auto commit_result = co_await commit_objects(
       successful_objects, std::move(metadata_builder));
     if (!commit_result.has_value()) {
-        vlog(
-          lg.error,
-          "Abandoning reconciliation loop because the L1 metastore operation "
-          "failed");
+        log_error(commit_result.error().with_context(
+          "Abandoning reconciliation run because the L1 metastore operation "
+          "failed"));
         co_return;
     }
 }
@@ -318,14 +334,10 @@ reconciler::reconcile_sources(
 
     if (fut.failed()) {
         auto ex = fut.get_exception();
-        vlogl(
-          lg,
-          ssx::is_shutdown_exception(ex) ? ss::log_level::debug
-                                         : ss::log_level::warn,
-          "Exception building and putting object {}: {}",
-          oid,
-          ex);
-        co_return std::unexpected(reconcile_error::build_or_put_failure);
+        co_return std::unexpected(
+          reconcile_error(
+            "Exception building and putting object {}: {}", oid, ex)
+            .mark_benign(ssx::is_shutdown_exception(ex)));
     }
 
     co_return fut.get();
@@ -344,8 +356,8 @@ reconciler::build_and_put_object(
 
     auto obj_meta = std::move(build_result.value());
     if (obj_meta.commits.empty()) {
-        vlog(lg.debug, "Skipping put for object {}: no data", oid);
-        co_return std::unexpected(reconcile_error::build_or_put_failure);
+        co_return std::unexpected(
+          reconcile_error("Skipping put for object {}: no data", oid));
     }
 
     // Upload the object.
@@ -364,11 +376,10 @@ reconciler::make_context() {
     // Create staging file.
     auto staging_result = co_await _l1_io->create_tmp_file();
     if (!staging_result.has_value()) {
-        vlog(
-          lg.warn,
-          "Failed to create staging file: {}",
-          static_cast<int>(staging_result.error()));
-        co_return std::unexpected(reconcile_error::build_or_put_failure);
+        co_return std::unexpected(
+          reconcile_error(
+            "Failed to create staging file: {}", staging_result.error())
+            .non_benign());
     }
     ctx.staging = std::move(staging_result).value();
 
@@ -377,14 +388,10 @@ reconciler::make_context() {
       ctx.staging->output_stream());
     if (stream_fut.failed()) {
         auto ex = stream_fut.get_exception();
-        vlogl(
-          lg,
-          ssx::is_shutdown_exception(ex) ? ss::log_level::debug
-                                         : ss::log_level::error,
-          "Failed to create output stream: {}",
-          ex);
         co_await ctx.cleanup_staging();
-        co_return std::unexpected(reconcile_error::build_or_put_failure);
+        co_return std::unexpected(
+          reconcile_error("Failed to create output stream: {}", ex)
+            .mark_benign(ssx::is_shutdown_exception(ex)));
     }
 
     auto output_stream = stream_fut.get();
@@ -401,7 +408,8 @@ reconciler::build_object(
     metas.reserve(sources.size());
     for (const auto& src : sources) {
         if (_as.abort_requested()) {
-            co_return std::unexpected(reconcile_error::build_or_put_failure);
+            co_return std::unexpected(
+              reconcile_error("abort requested while building object"));
         }
         auto meta = co_await add_source_to_object(ctx, src);
         if (meta.has_value()) {
@@ -427,12 +435,8 @@ ss::future<std::expected<void, reconcile_error>>
 reconciler::put_object(const l1::object_id& oid, builder_context& ctx) {
     auto put_result = co_await _l1_io->put_object(oid, ctx.staging.get(), &_as);
     if (!put_result.has_value()) {
-        vlog(
-          lg.warn,
-          "Failed to put L1 object {}: {}",
-          oid,
-          static_cast<int>(put_result.error()));
-        co_return std::unexpected(reconcile_error::build_or_put_failure);
+        co_return std::unexpected(reconcile_error(
+          "failed to put L1 object {}: {}", oid, put_result.error()));
     }
     vlog(lg.debug, "Successfully put L1 object {}", oid);
     co_return std::expected<void, reconcile_error>{};
@@ -504,15 +508,13 @@ std::expected<void, reconcile_error> reconciler::add_object_metadata(
                 .pos = obj_partition.file_position,
                 .size = obj_partition.length});
             if (!add_result.has_value()) {
-                vlog(
-                  lg.error,
+                // TODO: The object has been uploaded. The reconciler could
+                //       attempt cleanup (or notify a cleanup subsystem).
+                return std::unexpected(reconcile_error(
                   "Failed to finish metadata for partition {} of object {}: {}",
                   commit.source->topic_id_partition(),
                   oid,
-                  add_result.error());
-                // TODO: The object has been uploaded. The reconciler could
-                //       attempt cleanup (or notify a cleanup subsystem).
-                return std::unexpected(reconcile_error::metadata_failure);
+                  add_result.error()));
             }
         }
     }
@@ -520,20 +522,19 @@ std::expected<void, reconcile_error> reconciler::add_object_metadata(
     auto meta_result = meta_builder->finish(
       oid, obj_meta.object_info.footer_offset, obj_meta.object_info.size_bytes);
     if (!meta_result.has_value()) {
-        vlog(
-          lg.error,
-          "Failed to finish metadata for object {}: {}",
-          oid,
-          meta_result.error());
         // TODO: The object has been uploaded. The reconciler could
         //       attempt cleanup (or notify a cleanup subsystem).
-        return std::unexpected(reconcile_error::metadata_failure);
+        return std::unexpected(reconcile_error(
+                                 "Failed to finish metadata for object {}: {}",
+                                 oid,
+                                 meta_result.error())
+                                 .non_benign());
     }
 
     return {};
 }
 
-ss::future<std::expected<l1::metastore::add_response, l1::metastore::errc>>
+ss::future<std::expected<l1::metastore::add_response, reconcile_error>>
 reconciler::add_objects_with_retry(
   std::unique_ptr<l1::metastore::object_metadata_builder> meta_builder,
   l1::metastore::term_offset_map_t terms) {
@@ -551,17 +552,16 @@ reconciler::add_objects_with_retry(
         }
 
         if (add_result.error() != l1::metastore::errc::transport_error) {
-            vlog(
-              lg.error,
+            co_return std::unexpected(reconcile_error(
               "Non-retryable error adding objects to the L1 metastore: {}",
-              add_result.error());
-            co_return std::unexpected(add_result.error());
+              add_result.error()));
         }
 
         co_await ss::sleep_abortable(permit.delay, rtc.root_abort_source());
     }
 
-    co_return std::unexpected(l1::metastore::errc::transport_error);
+    co_return std::unexpected(reconcile_error(
+      "ran out of retries attempt to add objects to L1 metastore"));
 }
 
 ss::future<std::expected<void, reconcile_error>> reconciler::commit_objects(
@@ -585,20 +585,17 @@ ss::future<std::expected<void, reconcile_error>> reconciler::commit_objects(
     auto add_objects_result = co_await add_objects_with_retry(
       std::move(meta_builder), std::move(terms));
     if (!add_objects_result.has_value()) {
-        vlog(
-          lg.warn,
-          "Failed to add objects to the L1 metastore: {}",
-          add_objects_result.error());
         // TODO: The objects have been uploaded. The reconciler could
         //       attempt cleanup (or notify a cleanup subsystem).
-        co_return std::unexpected(reconcile_error::metadata_failure);
+        co_return std::unexpected(add_objects_result.error().with_context(
+          "Failed to add objects to the L1 metastore"));
     }
 
     // Now update the LRO, taking into account any corrections from
     // the metastore.
     const auto& corrected_next_offsets
       = add_objects_result.value().corrected_next_offsets;
-    std::expected<void, reconcile_error> reconcile_result;
+    std::optional<reconcile_error> error;
     for (const auto& obj_meta : objects) {
         for (const auto& commit : obj_meta.commits) {
             auto tidp = commit.source->topic_id_partition();
@@ -613,17 +610,28 @@ ss::future<std::expected<void, reconcile_error>> reconciler::commit_objects(
             auto result = co_await commit.source->set_last_reconciled_offset(
               lro, _as);
             if (!result.has_value()) {
-                vlog(
-                  lg.warn,
-                  "Failed to update LRO: {}",
-                  std::to_underlying(result.error()));
                 // Don't fail early, just keep going until we're done.
-                reconcile_result = std::unexpected(
-                  reconcile_error::metadata_failure);
+                if (error) {
+                    error = error->with_context(
+                      "failed to set LRO in L0: {}", result.error());
+                } else {
+                    error = reconcile_error(
+                      "failed to set LRO in L0: {}", result.error());
+                }
+                if (result.error() == source::errc::failure) {
+                    // Other errors can be expected in normal operating
+                    // conditions.
+                    error = error->non_benign();
+                }
             }
         }
     }
-    co_return reconcile_result;
+    co_return error
+      .transform(
+        [](reconcile_error& err) -> std::expected<void, reconcile_error> {
+            return std::unexpected(std::move(err));
+        })
+      .value_or(std::expected<void, reconcile_error>{});
 }
 
 } // namespace cloud_topics::reconciler

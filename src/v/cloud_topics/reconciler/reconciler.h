@@ -36,7 +36,37 @@ class frontend;
 namespace cloud_topics::reconciler {
 
 class source;
-enum class reconcile_error : uint8_t { build_or_put_failure, metadata_failure };
+struct reconcile_error {
+    // The message for this error. It can be accumulated up the stack.
+    std::string message;
+    // If the error is an expected error in normal operation.
+    bool benign = true;
+
+    reconcile_error() = default;
+    // Construct a new reconcile_error, formatting is available.
+    template<typename... T>
+    explicit reconcile_error(fmt::format_string<T...> msg, T&&... args)
+      : message(fmt::format(msg, std::forward<T>(args)...)) {}
+
+    // Add context to this message by wrapping the previous error message.
+    template<typename... T>
+    reconcile_error with_context(fmt::format_string<T...> msg, T&&... args) {
+        auto new_message = fmt::format(
+          "{}: {}", fmt::format(msg, std::forward<T>(args)...), message);
+        reconcile_error result;
+        result.message = new_message;
+        result.benign = benign;
+        return result;
+    }
+
+    // Mark this error as unexpected and not benign.
+    reconcile_error mark_benign(bool benign) {
+        auto copy = *this;
+        copy.benign = benign;
+        return copy;
+    }
+    reconcile_error non_benign() { return mark_benign(false); }
+};
 
 /*
  * The reconciler is the cloud topics subsystem responsible for lifting
@@ -148,7 +178,7 @@ private:
     ss::future<std::expected<built_object_metadata, reconcile_error>>
     reconcile_sources(
       const l1::object_id& oid,
-      const chunked_vector<ss::shared_ptr<source>>& soruces);
+      const chunked_vector<ss::shared_ptr<source>>& sources);
 
     /*
      * Build and upload an object with id `oid` using the provided context.
@@ -217,7 +247,7 @@ private:
      * Retry metastore add_objects calls on transport errors.
      * Other metastore errors are not retried.
      */
-    ss::future<std::expected<l1::metastore::add_response, l1::metastore::errc>>
+    ss::future<std::expected<l1::metastore::add_response, reconcile_error>>
     add_objects_with_retry(
       std::unique_ptr<l1::metastore::object_metadata_builder> meta_builder,
       l1::metastore::term_offset_map_t terms);
