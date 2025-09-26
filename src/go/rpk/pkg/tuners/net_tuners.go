@@ -111,6 +111,11 @@ func (f *netTunersFactory) NewRxQueueCountTuner(interfaces []string, mode irq.Mo
 			return f.checkersFactory.NewNicRxQueueCountChecker(nic, mode, cpuMask)
 		},
 		func(nic network.Nic) TuneResult {
+			if !f.t.GetAllowRxQueueTuner() {
+				zap.L().Sugar().Debugf("Skipping RxQueue Tuner as it's disabled by configuration")
+				return NewTuneResult(false)
+			}
+
 			zap.L().Sugar().Debugf("Tuning '%s' queue counts", nic.Name())
 			_, targetChannels, err := network.GetCurrentAndTargetChannels(nic, mode, cpuMask, f.cpuMasks, f.t, f.ethtool)
 			if err != nil {

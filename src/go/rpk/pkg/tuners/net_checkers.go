@@ -105,6 +105,11 @@ func (f *netCheckersFactory) NewNicRxQueueCountChecker(
 		Warning,
 		true,
 		func() (interface{}, error) {
+			if !f.t.GetAllowRxQueueTuner() {
+				zap.L().Sugar().Debugf("Skipping RxQueue Tuner as it's disabled by configuration")
+				return true, nil
+			}
+
 			currentChannels, targetChannels, err := network.GetCurrentAndTargetChannels(nic, mode, cpuMask, f.cpuMasks, f.t, f.ethtool)
 			if err != nil {
 				return false, err

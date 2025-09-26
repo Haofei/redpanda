@@ -437,6 +437,7 @@ func (rpkc *RpkNodeConfig) UnmarshalYAML(n *yaml.Node) error {
 		SMP                            *weakInt             `yaml:"smp"`
 		CoresPerDedicatedInterruptCore *weakInt             `yaml:"cores_per_dedicated_interrupt_core"`
 		AllowDedicatedInterruptMode    *weakBool            `yaml:"allow_dedicated_interrupt_mode"`
+		AllowRxQueueTuner              *weakBool            `yaml:"allow_rx_queue_tuner"`
 	}
 	if err := n.Decode(&internal); err != nil {
 		return err
@@ -484,6 +485,7 @@ func (rpkc *RpkNodeConfig) UnmarshalYAML(n *yaml.Node) error {
 	}
 	rpkc.Tuners.CoresPerDedicatedInterruptCore = (*int)(internal.CoresPerDedicatedInterruptCore)
 	rpkc.Tuners.AllowDedicatedInterruptMode = (*bool)(internal.AllowDedicatedInterruptMode)
+	rpkc.Tuners.AllowRxQueueTuner = (*bool)(internal.AllowRxQueueTuner)
 	return nil
 }
 
