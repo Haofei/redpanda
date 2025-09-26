@@ -176,14 +176,14 @@ static void update_batches(
     }
 }
 
-static ss::lw_shared_ptr<cloud_topics::ctp_stm_api> make_ctp_stm_api(
-  retry_chain_node& rtc, ss::lw_shared_ptr<cluster::partition> p) {
+static ss::lw_shared_ptr<cloud_topics::ctp_stm_api>
+make_ctp_stm_api(ss::lw_shared_ptr<cluster::partition> p) {
     auto stm = p->raft()->stm_manager()->get<cloud_topics::ctp_stm>();
     if (!stm) {
         throw std::runtime_error(
           fmt::format("ctp_stm not found for partition {}", p->ntp()));
     }
-    return ss::make_lw_shared<cloud_topics::ctp_stm_api>(rtc, stm);
+    return ss::make_lw_shared<cloud_topics::ctp_stm_api>(stm);
 }
 
 static ss::future<std::vector<cluster::tx::tx_range>>
@@ -213,10 +213,9 @@ get_aborted_transactions_local(
 
 frontend::frontend(
   ss::lw_shared_ptr<cluster::partition> p, data_plane_api* app) noexcept
-  : _rtc(_as)
-  , _partition(std::move(p))
+  : _partition(std::move(p))
   , _data_plane(app)
-  , _ctp_stm_api(make_ctp_stm_api(_rtc, _partition)) {}
+  , _ctp_stm_api(make_ctp_stm_api(_partition)) {}
 
 const model::ntp& frontend::ntp() const { return _partition->ntp(); }
 
@@ -246,9 +245,15 @@ kafka::offset frontend::start_offset() const {
 }
 
 ss::future<std::expected<kafka::offset, frontend_errc>>
-frontend::sync_effective_start(model::timeout_clock::duration duration) {
-    bool synced = co_await _ctp_stm_api->sync_in_term(
-      model::timeout_clock::now() + duration);
+frontend::sync_effective_start(
+  model::timeout_clock::duration duration, ss::abort_source& as) {
+    return sync_effective_start(model::timeout_clock::now() + duration, as);
+}
+
+ss::future<std::expected<kafka::offset, frontend_errc>>
+frontend::sync_effective_start(
+  model::timeout_clock::time_point deadline, ss::abort_source& as) {
+    bool synced = co_await _ctp_stm_api->sync_in_term(deadline, as);
     if (!synced) {
         co_return std::unexpected(frontend_errc::timeout);
     }
@@ -400,11 +405,10 @@ struct upload_and_replicate_stages {
       chunked_vector<model::record_batch> batches,
       model::batch_identity batch_id,
       raft::replicate_options opts,
-      retry_chain_node& rtc,
       std::chrono::milliseconds timeout)
       : ntp(partition->ntp())
       , partition(std::move(partition))
-      , ctp_stm_api(make_ctp_stm_api(rtc, this->partition))
+      , ctp_stm_api(make_ctp_stm_api(this->partition))
       , batches(std::move(batches))
       , batch_id(batch_id)
       , opts(update_replicate_options(opts))
@@ -640,7 +644,6 @@ raft::replicate_stages frontend::replicate(
       std::move(batch_vec),
       batch_id,
       opts,
-      _rtc,
       opts.timeout.value_or(L0_replicate_default_timeout));
 
     raft::replicate_stages out(raft::errc::success);
@@ -689,8 +692,9 @@ ss::future<std::expected<void, frontend_errc>> frontend::prefix_truncate(
     if (truncation_point > high_watermark()) {
         co_return std::unexpected(frontend_errc::offset_out_of_range);
     }
+    ss::abort_source as;
     auto result = co_await _ctp_stm_api->set_start_offset(
-      truncation_point, deadline);
+      truncation_point, deadline, as);
     if (!result.has_value()) {
         switch (result.error()) {
         case ctp_stm_api_errc::not_leader:
@@ -749,9 +753,8 @@ frontend::validate_fetch_offset(
         }
         co_return std::monostate{};
     }
-
-    auto timeout = deadline - model::timeout_clock::now();
-    auto so = co_await sync_effective_start(timeout);
+    ss::abort_source as;
+    auto so = co_await sync_effective_start(deadline, as);
     if (!so) {
         co_return std::unexpected(so.error());
     }

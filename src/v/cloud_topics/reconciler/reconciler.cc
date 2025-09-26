@@ -452,15 +452,11 @@ ss::future<std::optional<consumer_metadata>> reconciler::add_source_to_object(
 
     // Since the LRO is the last thing inclusive of what we uploaded to L1, we
     // want to start reading from the next offset.
-    auto start_offset = kafka::next_offset(src->last_reconciled_offset());
-    auto reader = co_await src->make_reader(cloud_topic_log_reader_config(
-      /*start_offset=*/start_offset,
-      /*max_offset=*/kafka::offset::max(),
-      /*min_bytes=*/1,
-      /*max_bytes=*/ctx.size_budget,
-      /*type_filter=*/std::nullopt,
-      /*time=*/std::nullopt,
-      /*as=*/_as));
+    auto reader = co_await src->make_reader(
+      source::reader_config{
+        .max_bytes = ctx.size_budget,
+        .as = &_as,
+      });
     reconciliation_consumer consumer(
       ctx.builder.get(), src->topic_id_partition());
     auto metadata = co_await std::move(reader).consume(

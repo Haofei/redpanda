@@ -41,16 +41,15 @@ public:
         if (!stm) {
             throw std::runtime_error(fmt::format("no ctp_stm for {}", tidp));
         }
-        ctp_stm_api api(_root, stm);
+        ctp_stm_api api(stm);
         co_await api.set_start_offset(
-          offset, model::timeout_clock::now() + stm_timeout);
+          offset, model::timeout_clock::now() + stm_timeout, _as);
     }
 
     void abort() { _as.request_abort(); }
 
 private:
     ss::abort_source _as;
-    retry_chain_node _root{_as};
     chunked_hash_map<model::topic_id_partition, housekeeper_manager::state>*
       _state;
 };

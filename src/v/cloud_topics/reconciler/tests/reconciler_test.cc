@@ -51,15 +51,14 @@ public:
     }
 
     ss::future<model::record_batch_reader>
-    make_reader(cloud_topic_log_reader_config cfg) override {
+    make_reader(source::reader_config cfg) override {
         chunked_vector<model::record_batch> log;
         size_t size = 0;
         for (const auto& batch : _source_log) {
-            if (model::offset_cast(batch.base_offset()) < cfg.start_offset) {
+            if (
+              model::offset_cast(batch.base_offset())
+              < last_reconciled_offset()) {
                 continue;
-            }
-            if (model::offset_cast(batch.last_offset()) > cfg.max_offset) {
-                break;
             }
             size += batch.size_bytes();
             log.push_back(batch.copy());
