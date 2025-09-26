@@ -167,9 +167,7 @@ ctp_stm_api::estimate_inactive_epoch() const noexcept {
 ss::future<bool> ctp_stm_api::sync_in_term(
   model::timeout_clock::time_point deadline, ss::abort_source& as) {
     vlog(cd_log.debug, "Syncing ctp_stm in term {}", _stm->_raft->term());
-    // TODO: plumb this into `sync_in_term`
-    std::ignore = as;
-    co_return co_await _stm->sync_in_term(deadline);
+    co_return co_await _stm->sync_in_term(deadline, as);
 }
 
 ss::future<cluster_epoch_fence> ctp_stm_api::fence_epoch(cluster_epoch e) {

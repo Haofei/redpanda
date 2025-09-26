@@ -59,9 +59,10 @@ ctp_stm::ctp_stm(ss::logger& logger, raft::consensus* raft)
 
 const model::ntp& ctp_stm::ntp() const noexcept { return _raft->ntp(); }
 
-ss::future<bool>
-ctp_stm::sync_in_term(model::timeout_clock::time_point deadline) {
-    auto sync_result = co_await sync(deadline - model::timeout_clock::now());
+ss::future<bool> ctp_stm::sync_in_term(
+  model::timeout_clock::time_point deadline, ss::abort_source& as) {
+    auto sync_result = co_await sync(
+      deadline - model::timeout_clock::now(), as);
     if (!sync_result) {
         // The replica is not a leader
         vlog(_log.debug, "Not a leader");
@@ -73,7 +74,7 @@ ctp_stm::sync_in_term(model::timeout_clock::time_point deadline) {
     auto committed_offset = _raft->committed_offset();
     if (committed_offset > last_applied()) {
         // The STM is catching up.
-        auto wait_res = co_await wait_no_throw(committed_offset, deadline);
+        auto wait_res = co_await wait_no_throw(committed_offset, deadline, as);
         if (!wait_res) {
             vlog(
               _log.warn,
