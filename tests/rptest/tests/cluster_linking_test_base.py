@@ -242,6 +242,7 @@ class ClusterLinkingProgressVerifier:
                         f"Group {g.group} partition {key} offset commit not found in target"
                     )
                     errors.append((key, "missing in target"))
+                    continue
 
                 if p.current_offset != target_partitions[key].current_offset:
                     self.logger.error(
