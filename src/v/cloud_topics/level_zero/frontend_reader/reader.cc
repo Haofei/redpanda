@@ -29,10 +29,10 @@ static constexpr size_t L0_max_bytes_per_metadata_fetch = 4_KiB;
 
 level_zero_log_reader_impl::level_zero_log_reader_impl(
   cloud_topic_log_reader_config& cfg,
-  ss::lw_shared_ptr<cluster::partition> underlying,
+  ss::lw_shared_ptr<cluster::partition> ctp,
   data_plane_api* ct_api)
   : _config(cfg)
-  , _underlying(std::move(underlying))
+  , _ctp(std::move(ctp))
   , _ct_api(ct_api) {}
 
 ss::future<model::record_batch_reader::storage_t>
@@ -86,7 +86,7 @@ level_zero_log_reader_impl::maybe_load_slices_from_cache() {
     while (materialized_bytes < _config.max_bytes
            && current <= _config.max_offset) {
         auto batch = _ct_api->cache_get(
-          _underlying->ntp(), kafka::offset_cast(current));
+          _ctp->ntp(), kafka::offset_cast(current));
         size_t batch_size = 0;
         if (!batch.has_value()) {
             // We hit a gap in the cache and have to download objects
@@ -118,7 +118,7 @@ level_zero_log_reader_impl::maybe_load_slices_from_cache() {
           batch->base_offset() <= kafka::offset_cast(current)
             && kafka::offset_cast(current) <= batch->last_offset(),
           "Unexpected batch for {}, got range: [{},{}] for offset {}",
-          _underlying->ntp(),
+          _ctp->ntp(),
           batch->base_offset(),
           batch->last_offset(),
           current);
@@ -157,8 +157,8 @@ ss::future<> level_zero_log_reader_impl::fetch_metadata(
         co_return;
     }
     try {
-        // Fetch metadata from the _underlying
-        auto ot_state = _underlying->get_offset_translator_state();
+        // Fetch metadata from the _ctp
+        auto ot_state = _ctp->get_offset_translator_state();
         auto start_offset = ot_state->to_log_offset(
           kafka::offset_cast(_config.start_offset));
         auto max_offset = ot_state->to_log_offset(
@@ -186,7 +186,7 @@ ss::future<> level_zero_log_reader_impl::fetch_metadata(
         // to fetch L0 meta batches first and then parse them.
         cfg.max_bytes = L0_max_bytes_per_metadata_fetch;
 
-        auto reader = co_await _underlying->make_local_reader(cfg);
+        auto reader = co_await _ctp->make_local_reader(cfg);
         auto placeholders = co_await model::consume_reader_to_chunked_vector(
           std::move(reader), deadline);
 
@@ -322,12 +322,12 @@ ss::future<> level_zero_log_reader_impl::materialize_batches(
         vlog(
           cd_log.trace,
           "Invoking 'materialize' for {}: {} bytes, {} batches to materialize",
-          _underlying->ntp(),
+          _ctp->ntp(),
           materialize_bytes,
           materialize_count);
         // Ask data layer to bring data from the cloud storage.
         auto mat_res = co_await _ct_api->materialize(
-          _underlying->ntp(),
+          _ctp->ntp(),
           materialize_bytes,
           std::move(to_materialize),
           deadline);
@@ -369,10 +369,10 @@ ss::future<> level_zero_log_reader_impl::materialize_batches(
                       vlog(
                         cd_log.trace,
                         "Putting batch for {} to cache: {}, term: {}",
-                        _underlying->ntp(),
+                        _ctp->ntp(),
                         batch.base_offset(),
                         batch.term());
-                      _ct_api->cache_put(_underlying->ntp(), batch.copy());
+                      _ct_api->cache_put(_ctp->ntp(), batch.copy());
                   }
                   return batch;
               },
@@ -414,7 +414,7 @@ bool level_zero_log_reader_impl::cache_enabled() const {
     if (_config.skip_cache) {
         return false;
     }
-    if (!_underlying->log()->config().cache_enabled()) {
+    if (!_ctp->log()->config().cache_enabled()) {
         return false;
     }
     if (config::shard_local_cfg().disable_batch_cache()) {

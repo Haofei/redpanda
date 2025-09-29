@@ -128,7 +128,7 @@ private:
     chunked_circular_buffer<model::record_batch> _hydrated;
 
     cloud_topic_log_reader_config _config;
-    ss::lw_shared_ptr<cluster::partition> _underlying;
+    ss::lw_shared_ptr<cluster::partition> _ctp;
     data_plane_api* _ct_api;
 };
 
