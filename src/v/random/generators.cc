@@ -11,6 +11,7 @@
 
 #include "random/generators.h"
 
+#include "absl/random/random.h"
 #include "base/vassert.h"
 
 #include <atomic>
@@ -56,9 +57,11 @@ const seeding_mode global_seeding_mode = [] {
 }();
 
 seed_type random_seed() {
-    std::random_device rd;
-    auto seed = rd();
-    return seed;
+    // use a thread-local random device as random_device creation is
+    // expensive (involves opening `/dev/urandom` and closing it again)
+    static thread_local absl::BitGen bitgen;
+    // generate a random seed with the full range of seed_type
+    return absl::Uniform<seed_type>(bitgen);
 }
 
 // state to implement the global() rng object and its reseeding semantics
