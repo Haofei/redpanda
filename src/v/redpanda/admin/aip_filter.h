@@ -52,10 +52,7 @@ struct aip_filter_config {
     ss::sstring filter_expression;
 };
 
-template<typename T>
-concept ProtobufMessage = std::derived_from<T, serde::pb::base_message>;
-
-template<ProtobufMessage MsgType>
+template<serde::pb::Message MsgType>
 aip_filter_config make_aip_filter_config(std::string_view filter_expression) {
     return aip_filter_config{
       .field_type_getter =
