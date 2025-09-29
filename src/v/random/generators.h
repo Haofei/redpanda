@@ -18,13 +18,6 @@
 
 #include <random>
 
-///
-/// @brief Forward declaration for accessor struct that can access
-/// private members of rng for testing or internal purposes.
-/// Only rng declares this as a friend.
-///
-struct random_state_accessor;
-
 // Random generators useful for testing.
 namespace random_generators {
 
@@ -135,7 +128,6 @@ public:
 private:
     engine_type gen_;
     seed_type initial_seed_;
-    friend random_state_accessor;
 };
 
 // Return a rng object which is seeded randomly regardless of
