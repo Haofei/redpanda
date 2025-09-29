@@ -1737,7 +1737,7 @@ group_manager::offset_fetch(offset_fetch_request&& r) {
     auto group = get_group(r.data.group_id);
     if (!group) {
         return ss::make_ready_future<offset_fetch_response>(
-          offset_fetch_response(r.data.topics));
+          offset_fetch_response(std::move(r.data.topics)));
     }
 
     return group->handle_offset_fetch(std::move(r)).finally([group] {});

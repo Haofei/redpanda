@@ -2504,7 +2504,7 @@ ss::future<offset_fetch_response>
 group::handle_offset_fetch(offset_fetch_request&& r) {
     if (in_state(group_state::dead)) {
         return ss::make_ready_future<offset_fetch_response>(
-          offset_fetch_response(r.data.topics));
+          offset_fetch_response(std::move(r.data.topics)));
     }
 
     offset_fetch_response resp;
