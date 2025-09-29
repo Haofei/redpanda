@@ -609,7 +609,14 @@ ss::future<std::expected<void, reconcile_error>> reconciler::commit_objects(
             }
             auto result = co_await commit.source->set_last_reconciled_offset(
               lro, _as);
-            if (!result.has_value()) {
+            if (result.has_value()) {
+                vlog(
+                  lg.debug,
+                  "successfully bumped LRO for {} (tidp: {}) to {}",
+                  commit.source->ntp(),
+                  tidp,
+                  lro);
+            } else {
                 // Don't fail early, just keep going until we're done.
                 if (error) {
                     error = error->with_context(
