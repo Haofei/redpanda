@@ -646,6 +646,32 @@ class ShadowLinkingReplicationTests(ShadowLinkPreAllocTestBase):
         ):
             target_client.delete_topic(topic.name)
 
+        shadow_link.configurations.topic_metadata_sync_options.auto_create_shadow_topic_filters.extend(
+            [
+                shadow_link_pb2.NameFilter(
+                    pattern_type=shadow_link_pb2.PATTERN_TYPE_LITERAL,
+                    filter_type=shadow_link_pb2.FILTER_TYPE_EXCLUDE,
+                    name=topic.name,
+                ),
+            ]
+        )
+        update_mask: google.protobuf.field_mask_pb2.FieldMask = google.protobuf.field_mask_pb2.FieldMask(
+            paths=[
+                "configurations.topic_metadata_sync_options.auto_create_shadow_topic_filters"
+            ]
+        )
+        updated_link = self.update_link(
+            shadow_link=shadow_link, update_mask=update_mask
+        )
+
+        # Now the topic should be deletable, as it is not in the autocreate filters
+        target_client.delete_topic(topic.name)
+        link_state = self.get_link("test-link")
+        assert len(link_state.status.shadow_topic_statuses) == 0, (
+            "Expected empty shadow_topic_statuses. "
+            f"Instead got {link_state.status.shadow_topic_statuses}"
+        )
+
 
 class ShadowLinkConsumeGroupsMirroringTest(ShadowLinkTestBase):
     def create_source_consumer(self, topic, group_name="test_group", consumer_count=1):

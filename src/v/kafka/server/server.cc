@@ -12,6 +12,7 @@
 #include "absl/container/flat_hash_map.h"
 #include "base/vlog.h"
 #include "cluster/cluster_link/frontend.h"
+#include "cluster/cluster_link/types.h"
 #include "cluster/id_allocator_frontend.h"
 #include "cluster/security_frontend.h"
 #include "cluster/topics_frontend.h"
@@ -1489,8 +1490,7 @@ delete_topics_handler::handle(request_context ctx, ss::smp_service_group) {
     valid_topic_names = std::ranges::subrange(
       valid_topic_names.begin(), nodelete_topics.begin());
 
-    const auto& cl_frontend
-      = ctx.connection()->server().cluster_link_frontend();
+    auto& cl_frontend = ctx.connection()->server().cluster_link_frontend();
     const auto is_autocreate_mirror_topic = [&cl_frontend](const auto& topic) {
         return !cl_frontend.is_autocreate_mirror_topic(topic);
     };
@@ -1554,15 +1554,57 @@ delete_topics_handler::handle(request_context ctx, ss::smp_service_group) {
           });
     }
 
-    std::vector<cluster::topic_result> do_delete_res;
-    if (!valid_topic_names.empty()) {
-        // construct namespaced topic set from request
-        auto topics = valid_topic_names | std::views::as_rvalue
-                      | std::views::transform(&as_tp_ns);
-        auto tout = request.data.timeout_ms + model::timeout_clock::now();
-        do_delete_res = co_await ctx.topics_frontend().delete_topics(
-          std::ranges::to<std::vector>(topics), tout);
+    const auto is_mirror_topic = [&cl_frontend](const auto& topic) {
+        return !cl_frontend.find_link_id_by_topic(topic).has_value();
+    };
+    auto shadow_topics = std::ranges::partition(
+      valid_topic_names, is_mirror_topic);
+    // Shadow topics are missing from this range.
+    // They need to be re-inserted before this range is forwarded to topic
+    // frontend.
+    valid_topic_names = std::ranges::subrange(
+      valid_topic_names.begin(), shadow_topics.begin());
+
+    auto timeout = request.data.timeout_ms + model::timeout_clock::now();
+    auto mirror_topic_results = co_await cl_frontend.delete_mirror_topics(
+      {shadow_topics.begin(), shadow_topics.end()}, timeout);
+    auto failed_mirror_topic_deletions = std::ranges::partition(
+      mirror_topic_results, [](const auto& tr) {
+          return tr.ec == cluster::cluster_link::errc::success;
+      });
+    auto successful_mirror_topic_deletions = std::ranges::subrange(
+      mirror_topic_results.begin(), failed_mirror_topic_deletions.begin());
+
+    for (auto& tr : failed_mirror_topic_deletions) {
+        resp.data.responses.push_back(
+          deletable_topic_result{
+            .name = std::move(tr.topic),
+            .error_code = map_cluster_link_errc(tr.ec),
+            .error_message = "Failed to delete shadow topic.",
+          });
     }
+
+    // Merge valid_topic names with successful shadow topics
+    const auto move_to_namespace = std::views::as_rvalue
+                                   | std::views::transform(&as_tp_ns);
+    auto valid_ns_topics = valid_topic_names | move_to_namespace;
+    auto shadow_ns_topics = successful_mirror_topic_deletions
+                            | std::views::transform(
+                              &cluster::cluster_link::topic_result::topic)
+                            | move_to_namespace;
+
+    std::vector<model::topic_namespace> ns_topics;
+    ns_topics.reserve(valid_ns_topics.size() + shadow_ns_topics.size());
+    ns_topics.insert(
+      ns_topics.end(), valid_ns_topics.begin(), valid_ns_topics.end());
+    ns_topics.insert(
+      ns_topics.end(), shadow_ns_topics.begin(), shadow_ns_topics.end());
+
+    // construct namespaced topic set from request
+    auto tout = request.data.timeout_ms + model::timeout_clock::now();
+    std::vector<cluster::topic_result> do_delete_res
+      = co_await ctx.topics_frontend().delete_topics(
+        std::move(ns_topics), tout);
 
     resp.data.throttle_time_ms = resp_delay;
 
