@@ -23,6 +23,7 @@
 #include <gtest/gtest.h>
 
 #include <expected>
+#include <memory>
 #include <utility>
 
 using namespace cloud_topics;
@@ -127,4 +128,88 @@ TEST_F(ReconcilerTest, SingleSource) {
     reconcile();
     EXPECT_EQ(src->last_reconciled_offset(), kafka::offset{39});
     EXPECT_THAT(metastore_next_offset(src), Optional(kafka::offset{40}));
+}
+
+TEST_F(ReconcilerTest, MultipleSources) {
+    auto src1 = add_source();
+    auto src2 = add_source();
+    auto src3 = add_source();
+
+    src1->add_batch({.count = 10});
+    src1->add_batch({.count = 5});
+
+    src2->add_batch({.count = 20});
+    src2->add_batch({.count = 15});
+    src2->add_batch({.count = 10});
+
+    src3->add_batch({.count = 8});
+
+    reconcile();
+
+    EXPECT_EQ(src1->last_reconciled_offset(), kafka::offset{14});
+    EXPECT_EQ(src2->last_reconciled_offset(), kafka::offset{44});
+    EXPECT_EQ(src3->last_reconciled_offset(), kafka::offset{7});
+
+    EXPECT_THAT(metastore_next_offset(src1), Optional(kafka::offset{15}));
+    EXPECT_THAT(metastore_next_offset(src2), Optional(kafka::offset{45}));
+    EXPECT_THAT(metastore_next_offset(src3), Optional(kafka::offset{8}));
+
+    // Add more data.
+    src1->add_batch({.count = 10});
+
+    src2->add_batch({.count = 10});
+
+    src3->add_batch({.count = 10});
+
+    reconcile();
+
+    EXPECT_EQ(src1->last_reconciled_offset(), kafka::offset{24});
+    EXPECT_EQ(src2->last_reconciled_offset(), kafka::offset{54});
+    EXPECT_EQ(src3->last_reconciled_offset(), kafka::offset{17});
+
+    EXPECT_THAT(metastore_next_offset(src1), Optional(kafka::offset{25}));
+    EXPECT_THAT(metastore_next_offset(src2), Optional(kafka::offset{55}));
+    EXPECT_THAT(metastore_next_offset(src3), Optional(kafka::offset{18}));
+
+    // Add data to only one of the sources.
+    src2->add_batch({.count = 10});
+
+    reconcile();
+
+    EXPECT_EQ(src1->last_reconciled_offset(), kafka::offset{24});
+    EXPECT_EQ(src2->last_reconciled_offset(), kafka::offset{64});
+    EXPECT_EQ(src3->last_reconciled_offset(), kafka::offset{17});
+
+    EXPECT_THAT(metastore_next_offset(src1), Optional(kafka::offset{25}));
+    EXPECT_THAT(metastore_next_offset(src2), Optional(kafka::offset{65}));
+    EXPECT_THAT(metastore_next_offset(src3), Optional(kafka::offset{18}));
+}
+
+TEST_F(ReconcilerTest, ObjectSizeLimit) {
+    auto src = add_source();
+
+    // Total size = 50 * 3 * 512KiB = 75MiB, which is greater than the 64MiB
+    // max object size.
+    constexpr auto batch_count = 50;
+    constexpr auto record_count = 3;
+    constexpr auto record_size = 512_KiB;
+    for (size_t i = 0; i < batch_count; ++i) {
+        src->add_batch(
+          {.count = record_count,
+           .record_sizes = std::vector<size_t>(record_count, record_size)});
+    }
+
+    reconcile();
+
+    // Check that some, but not all, data was reconciled.
+    constexpr auto last_offset = batch_count * record_count - 1;
+    auto lro = src->last_reconciled_offset();
+    EXPECT_GT(lro, kafka::offset{0});
+    EXPECT_LT(lro, kafka::offset{last_offset});
+
+    // Reconciling again should process the rest of the data.
+    reconcile();
+    EXPECT_EQ(src->last_reconciled_offset(), kafka::offset{last_offset});
+    EXPECT_THAT(
+      metastore_next_offset(src), Optional(kafka::offset{last_offset + 1}));
 }
