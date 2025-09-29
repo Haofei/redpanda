@@ -90,4 +90,11 @@ check_bucket_contains_cluster_names(
   const cloud_storage_clients::bucket_name& bucket,
   retry_chain_node& retry_node);
 
+ss::future<std::expected<bool, std::string>> check_cluster_name_owns_uuid(
+  cloud_storage::remote& remote,
+  const cloud_storage_clients::bucket_name& bucket,
+  const ss::sstring& cluster_name,
+  const model::cluster_uuid& cluster_uuid,
+  retry_chain_node& retry_node);
+
 } // namespace cluster::cloud_metadata

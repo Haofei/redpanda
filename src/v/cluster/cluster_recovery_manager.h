@@ -53,8 +53,9 @@ public:
     ss::future<std::optional<model::term_id>> sync_leader(ss::abort_source&);
 
     // Starts a recovery if one isn't already in progress.
-    ss::future<checked<void, errc>>
-    initialize_recovery(cloud_storage_clients::bucket_name bucket);
+    ss::future<checked<void, errc>> initialize_recovery(
+      cloud_storage_clients::bucket_name bucket,
+      std::optional<model::cluster_uuid> cluster_uuid_override);
 
     // Returns true if the update was successfuly replicated and applied.
     // Otherwise, logs a warning and returns false.

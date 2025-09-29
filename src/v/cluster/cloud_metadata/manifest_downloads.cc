@@ -438,4 +438,31 @@ check_bucket_contains_cluster_names(
       "cluster names");
 }
 
+ss::future<std::expected<bool, std::string>> check_cluster_name_owns_uuid(
+  cloud_storage::remote& remote,
+  const cloud_storage_clients::bucket_name& bucket,
+  const ss::sstring& cluster_name,
+  const model::cluster_uuid& cluster_uuid,
+  retry_chain_node& retry_node) {
+    auto td = cloud_io::transfer_details{
+      .bucket = bucket,
+      .key = cluster_name_ref_for_uuid_key(cluster_name, cluster_uuid),
+      .parent_rtc = retry_node,
+    };
+    iobuf payload;
+    auto download_result = co_await remote.download_object({
+      .transfer_details = std::move(td),
+      .type = cloud_storage::download_type::object,
+      .payload = payload,
+    });
+    if (download_result == cloud_storage::download_result::success) {
+        co_return true;
+    } else if (download_result == cloud_storage::download_result::notfound) {
+        co_return false;
+    }
+    co_return std::unexpected(
+      fmt::format(
+        "Error checking cluster name ownership: {}", download_result));
+}
+
 } // namespace cluster::cloud_metadata

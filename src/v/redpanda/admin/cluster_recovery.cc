@@ -16,6 +16,8 @@
 #include "redpanda/admin/api-doc/shadow_indexing.json.hh"
 #include "redpanda/admin/server.h"
 
+#include <optional>
+
 ss::future<std::unique_ptr<ss::http::reply>>
 admin_server::initialize_cluster_recovery(
   std::unique_ptr<ss::http::request> request,
@@ -37,8 +39,9 @@ admin_server::initialize_cluster_recovery(
     auto result = ss::httpd::shadow_indexing_json::init_recovery_result{};
     auto error_res
       = co_await _controller->get_cluster_recovery_manager().invoke_on(
-        cluster::cluster_recovery_manager::shard,
-        [bucket](auto& mgr) { return mgr.initialize_recovery(bucket); });
+        cluster::cluster_recovery_manager::shard, [bucket](auto& mgr) {
+            return mgr.initialize_recovery(bucket, std::nullopt);
+        });
     if (error_res.has_error()) {
         switch (error_res.error()) {
         case cluster::cluster_recovery_manager::errc::success:

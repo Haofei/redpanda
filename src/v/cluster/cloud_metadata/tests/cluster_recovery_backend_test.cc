@@ -231,7 +231,7 @@ TEST_P(ClusterRecoveryBackendLeadershipParamTest, TestRecoveryControllerState) {
     // Perform recovery.
     auto recover_err = app.controller->get_cluster_recovery_manager()
                          .local()
-                         .initialize_recovery(bucket)
+                         .initialize_recovery(bucket, std::nullopt)
                          .get();
     ASSERT_TRUE(recover_err.has_value());
 
@@ -410,7 +410,7 @@ TEST_F(ClusterRecoveryBackendTest, TestRecoverMissingTopicManifest) {
         // Attempt a recovery.
         auto recover_err = app.controller->get_cluster_recovery_manager()
                              .local()
-                             .initialize_recovery(bucket)
+                             .initialize_recovery(bucket, std::nullopt)
                              .get();
         ASSERT_TRUE(recover_err.has_value());
         RPTEST_REQUIRE_EVENTUALLY(10s, [&] {
@@ -508,7 +508,7 @@ TEST_F(ClusterRecoveryBackendTest, TestRecoverFailedDownload) {
     // Attempt a recovery.
     auto recover_err = app.controller->get_cluster_recovery_manager()
                          .local()
-                         .initialize_recovery(bucket)
+                         .initialize_recovery(bucket, std::nullopt)
                          .get();
     ASSERT_TRUE(recover_err.has_value());
     RPTEST_REQUIRE_EVENTUALLY(10s, [&] {
