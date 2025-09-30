@@ -3251,6 +3251,7 @@ configuration::configuration()
   , partition_autobalancing_mode(
       *this,
       model::partition_autobalancing_mode::continuous,
+      model::partition_autobalancing_mode::node_add,
       "partition_autobalancing_mode",
       "Mode of partition balancing for a cluster. * `node_add`: partition "
       "balancing happens when a node is added. * `continuous`: partition "
@@ -3267,12 +3268,14 @@ configuration::configuration()
         .example = "node_add",
         .visibility = visibility::user,
       },
-      model::partition_autobalancing_mode::node_add,
+      model::partition_autobalancing_mode::continuous,
       std::vector<model::partition_autobalancing_mode>{
         model::partition_autobalancing_mode::off,
         model::partition_autobalancing_mode::node_add,
         model::partition_autobalancing_mode::continuous,
-      })
+      },
+      legacy_default<model::partition_autobalancing_mode>{
+        model::partition_autobalancing_mode::node_add, legacy_version{16}})
   , partition_autobalancing_node_availability_timeout_sec(
       *this,
       "partition_autobalancing_node_availability_timeout_sec",
@@ -3398,6 +3401,7 @@ configuration::configuration()
   , core_balancing_continuous(
       *this,
       true,
+      false,
       "core_balancing_continuous",
       "If set to `true`, move partitions between cores in runtime to maintain "
       "balanced partition distribution.",
@@ -3405,7 +3409,9 @@ configuration::configuration()
         .needs_restart = needs_restart::no,
         .visibility = visibility::user,
       },
-      false)
+      true,
+      property<bool>::noop_validator,
+      legacy_default<bool>{false, legacy_version{16}})
   , core_balancing_debounce_timeout(
       *this,
       "core_balancing_debounce_timeout",
