@@ -151,7 +151,7 @@ ss::future<> manager::stop() {
     vlog(cllog.info, "Cluster link manager stopped");
 }
 
-ss::future<result<model::metadata>>
+ss::future<cl_result<model::metadata>>
 manager::upsert_cluster_link(model::metadata md) {
     static constexpr auto wait_for_link_creation_timeout = 30s;
     auto hold = _g.hold();
@@ -198,7 +198,8 @@ manager::upsert_cluster_link(model::metadata md) {
     co_return metadata_resp->get().copy();
 }
 
-result<model::metadata> manager::get_cluster_link(const model::name_t& name) {
+cl_result<model::metadata>
+manager::get_cluster_link(const model::name_t& name) {
     auto metadata_resp = _registry->find_link_by_name(name);
     if (!metadata_resp) {
         return err_info(
@@ -208,7 +209,7 @@ result<model::metadata> manager::get_cluster_link(const model::name_t& name) {
     return metadata_resp->get().copy();
 }
 
-result<chunked_vector<model::metadata>> manager::list_cluster_links() {
+cl_result<chunked_vector<model::metadata>> manager::list_cluster_links() {
     auto link_ids = _registry->get_all_link_ids();
     chunked_vector<model::metadata> resp;
     resp.reserve(link_ids.size());
@@ -226,7 +227,7 @@ result<chunked_vector<model::metadata>> manager::list_cluster_links() {
     return resp;
 }
 
-ss::future<result<model::metadata>> manager::update_cluster_link(
+ss::future<cl_result<model::metadata>> manager::update_cluster_link(
   model::name_t name, model::update_cluster_link_configuration_cmd cmd) {
     static constexpr auto model_timeout = 30s;
     auto hold = _g.hold();
@@ -264,7 +265,7 @@ ss::future<result<model::metadata>> manager::update_cluster_link(
     co_return metadata_resp->get().copy();
 }
 
-ss::future<result<void>> manager::delete_cluster_link(model::name_t name) {
+ss::future<cl_result<void>> manager::delete_cluster_link(model::name_t name) {
     vlog(cllog.info, "Attempting to delete cluster link named '{}'", name);
     auto cl_resp = get_cluster_link(name);
     if (cl_resp.has_error()) {

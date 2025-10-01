@@ -21,8 +21,8 @@
 
 namespace cluster_link {
 namespace {
-ss::future<result<void>> start_task(task* t) {
-    result<void> res = outcome::success();
+ss::future<cl_result<void>> start_task(task* t) {
+    cl_result<void> res = outcome::success();
     try {
         co_return co_await t->start();
     } catch (const std::exception& e) {
@@ -33,8 +33,8 @@ ss::future<result<void>> start_task(task* t) {
 
     co_return res;
 }
-ss::future<result<void>> stop_task(task* t) {
-    result<void> res = outcome::success();
+ss::future<cl_result<void>> stop_task(task* t) {
+    cl_result<void> res = outcome::success();
     try {
         co_return co_await t->stop();
     } catch (const std::exception& e) {
@@ -152,7 +152,7 @@ ss::future<> link::stop() noexcept {
     vlog(cllog.info, "Stopped link {} ({})", _config.name, _config.uuid);
 }
 
-ss::future<result<void>> link::register_task(task_factory* tf) {
+ss::future<cl_result<void>> link::register_task(task_factory* tf) {
     co_await ss::coroutine::switch_to(_manager->scheduling_group());
     vlog(
       cllog.debug,
@@ -443,7 +443,7 @@ ss::future<> link::run_task_reconciler() {
     }
 }
 
-ss::future<result<void>> link::do_register_task(std::unique_ptr<task> t) {
+ss::future<cl_result<void>> link::do_register_task(std::unique_ptr<task> t) {
     vlog(
       cllog.debug,
       "Registering task {} for cluster link {} ({})",
@@ -460,7 +460,7 @@ ss::future<result<void>> link::do_register_task(std::unique_ptr<task> t) {
           errc::task_already_registered_on_link, std::move(msg));
     }
 
-    result<void> res = outcome::success();
+    cl_result<void> res = outcome::success();
     // Do not need to unregister the task callback as the task lifetime is
     // managed by the link
     t->register_for_updates([this](

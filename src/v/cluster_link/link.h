@@ -46,7 +46,7 @@ public:
     virtual ss::future<> start();
     virtual ss::future<> stop() noexcept;
 
-    ss::future<result<void>> register_task(task_factory*);
+    ss::future<cl_result<void>> register_task(task_factory*);
 
     void update_config(model::metadata, ::model::revision_id);
 
@@ -122,7 +122,7 @@ private:
     bool should_start_task(task* t) const;
     bool should_stop_task(task* t) const;
     ss::future<> run_task_reconciler();
-    ss::future<result<void>> do_register_task(std::unique_ptr<task>);
+    ss::future<cl_result<void>> do_register_task(std::unique_ptr<task>);
     void maybe_update_sasl_configuration(
       const std::optional<model::connection_config::authn_variant>&
         authn_config);

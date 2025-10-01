@@ -21,7 +21,7 @@ ss::logger sllog("shadow_link_service");
 namespace {
 
 template<typename T>
-T handle_error(cluster_link::result<T> result) {
+T handle_error(cluster_link::cl_result<T> result) {
     if (result.has_value()) {
         return std::move(result).assume_value();
     }

@@ -57,7 +57,7 @@ private:
 };
 
 template<typename T>
-using result = result<T, err_info>;
+using cl_result = result<T, err_info>;
 } // namespace cluster_link
 
 namespace std {

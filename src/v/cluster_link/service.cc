@@ -310,25 +310,26 @@ ss::future<> service::stop() {
     }
 }
 
-ss::future<result<model::metadata>>
+ss::future<cl_result<model::metadata>>
 service::upsert_cluster_link(model::metadata md) {
     return _manager->upsert_cluster_link(std::move(md));
 }
 
-result<model::metadata> service::get_cluster_link(const model::name_t& name) {
+cl_result<model::metadata>
+service::get_cluster_link(const model::name_t& name) {
     return _manager->get_cluster_link(name);
 }
 
-result<chunked_vector<model::metadata>> service::list_cluster_links() {
+cl_result<chunked_vector<model::metadata>> service::list_cluster_links() {
     return _manager->list_cluster_links();
 }
 
-ss::future<result<model::metadata>> service::update_cluster_link(
+ss::future<cl_result<model::metadata>> service::update_cluster_link(
   model::name_t name, model::update_cluster_link_configuration_cmd cmd) {
     return _manager->update_cluster_link(std::move(name), std::move(cmd));
 }
 
-ss::future<result<void>>
+ss::future<cl_result<void>>
 service::delete_cluster_link(const model::name_t& name) {
     return _manager->delete_cluster_link(name);
 }

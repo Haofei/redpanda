@@ -61,20 +61,21 @@ public:
      * cluster link
      * @return Result containing either the created/updated link or an error
      */
-    ss::future<result<model::metadata>> upsert_cluster_link(model::metadata md);
+    ss::future<cl_result<model::metadata>>
+    upsert_cluster_link(model::metadata md);
     /**
      * @brief Get the cluster link object
      *
      * @param name The name of the link
      * @return Either the existing link or an error
      */
-    result<model::metadata> get_cluster_link(const model::name_t& name);
+    cl_result<model::metadata> get_cluster_link(const model::name_t& name);
     /**
      * @brief Returns a list of existing cluster links
      *
      * @return List of cluster links
      */
-    result<chunked_vector<model::metadata>> list_cluster_links();
+    cl_result<chunked_vector<model::metadata>> list_cluster_links();
     /**
      * @brief Updates the configuration of a cluster link
      *
@@ -82,7 +83,7 @@ public:
      * @param cmd The command containing the new configuration
      * @return Result containing the updated link
      */
-    ss::future<result<model::metadata>> update_cluster_link(
+    ss::future<cl_result<model::metadata>> update_cluster_link(
       model::name_t name, model::update_cluster_link_configuration_cmd cmd);
     /**
      * @brief Delete the cluster link object
@@ -90,7 +91,7 @@ public:
      * @param name The name of the link
      * @return nothing on success or an error
      */
-    ss::future<result<void>> delete_cluster_link(const model::name_t& name);
+    ss::future<cl_result<void>> delete_cluster_link(const model::name_t& name);
 
 private:
     void register_notifications();

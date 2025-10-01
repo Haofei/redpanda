@@ -64,24 +64,25 @@ public:
     /**
      * @brief Creates or updates a cluster link
      */
-    ss::future<result<model::metadata>> upsert_cluster_link(model::metadata md);
+    ss::future<cl_result<model::metadata>>
+    upsert_cluster_link(model::metadata md);
     /**
      * @brief Get the cluster link object by name
      */
-    result<model::metadata> get_cluster_link(const model::name_t& name);
+    cl_result<model::metadata> get_cluster_link(const model::name_t& name);
     /**
      * @brief Returns list of cluster links
      */
-    result<chunked_vector<model::metadata>> list_cluster_links();
+    cl_result<chunked_vector<model::metadata>> list_cluster_links();
     /**
      * @brief Updates the configuration of a cluster link
      */
-    ss::future<result<model::metadata>> update_cluster_link(
+    ss::future<cl_result<model::metadata>> update_cluster_link(
       model::name_t name, model::update_cluster_link_configuration_cmd cmd);
     /**
      * @brief Delete the cluster link object by name
      */
-    ss::future<result<void>> delete_cluster_link(model::name_t name);
+    ss::future<cl_result<void>> delete_cluster_link(model::name_t name);
 
     /// Used to notify that a cluster link has been updated
     void on_link_change(model::id_t id, ::model::revision_id);
