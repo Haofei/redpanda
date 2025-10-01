@@ -9,7 +9,7 @@
 
 #include "cluster/controller.h"
 #include "cluster/controller_api.h"
-#include "kafka/client/client.h"
+#include "kafka/client/transport.h"
 #include "kafka/protocol/describe_groups.h"
 #include "kafka/protocol/errors.h"
 #include "kafka/protocol/find_coordinator.h"
@@ -19,6 +19,7 @@
 #include "kafka/server/coordinator_ntp_mapper.h"
 #include "kafka/server/group.h"
 #include "kafka/server/group_manager.h"
+#include "kafka/server/handlers/offset_fetch.h"
 #include "model/fundamental.h"
 #include "model/namespace.h"
 #include "model/timeout_clock.h"
@@ -144,6 +145,116 @@ FIXTURE_TEST(empty_offset_commit_request, consumer_offsets_fixture) {
         auto resp
           = client.dispatch(std::move(req), kafka::api_version(7)).get();
         BOOST_REQUIRE(!resp.data.errored());
+    }
+}
+
+FIXTURE_TEST(offset_commit_and_fetch_request, consumer_offsets_fixture) {
+    scoped_config cfg;
+    cfg.get("group_topic_partitions").set_value(1);
+
+    static const model::topic topic_foo{"foo"};
+    static const model::topic topic_bar{"bar"};
+
+    static const kafka::group_id group_foo{"foo-partitions"};
+    static const kafka::group_id group_bar{"bar-partitions"};
+
+    // v2 supports an error_code
+    static constexpr api_version version_with_error{2};
+
+    const std::map<
+      kafka::group_id,
+      std::map<model::topic, std::map<model::partition_id, model::offset>>>
+      committed_offsets{
+        {group_foo,
+         {
+           {topic_foo, {{model::partition_id{2}, model::offset{42}}}},
+         }},
+        {group_bar,
+         {
+           {topic_bar, {{model::partition_id{1}, model::offset{24}}}},
+         }},
+      };
+
+    for (const auto& topic : {topic_foo, topic_bar}) {
+        add_topic({model::kafka_namespace, topic}, 3).get();
+    }
+
+    kafka::group_instance_id gr("instance-1");
+    wait_for_consumer_offsets_topic(gr);
+    auto client = make_kafka_client().get();
+    auto deferred = ss::defer([&client] {
+        client.stop().then([&client] { client.shutdown(); }).get();
+    });
+    client.connect().get();
+
+    // Commit offsets
+    for (const auto& [group_id, topics] : committed_offsets) {
+        offset_commit_request req{.data{.group_id = group_id}};
+        req.data.group_instance_id = gr;
+        for (const auto& [topic, partitions] : topics) {
+            auto& c_topic = req.data.topics.emplace_back(
+              offset_commit_request_topic{.name = topic});
+            for (const auto& [partition, offset] : partitions) {
+                c_topic.partitions.push_back(
+                  {.partition_index = partition, .committed_offset = offset});
+            }
+        }
+        auto resp
+          = client.dispatch(std::move(req), kafka::api_version(7)).get();
+        BOOST_REQUIRE(!resp.data.errored());
+    }
+
+    const auto fill_request =
+      [&committed_offsets](
+        auto& req, const kafka::group_id& group_id, bool all_topics) {
+          req.group_id = group_id;
+          if (!all_topics) {
+              req.topics.emplace();
+              for (const auto& [topic, partitions] :
+                   committed_offsets.at(group_id)) {
+                  req.topics->push_back(
+                    {.name{topic},
+                     .partition_indexes{
+                       std::from_range, partitions | std::views::keys}});
+              }
+          }
+      };
+
+    const auto check_response_topics = [&committed_offsets](
+                                         kafka::api_version,
+                                         auto& resp,
+                                         const kafka::group_id& group_id,
+                                         bool all_topics) {
+        const auto& c_offsets = committed_offsets.at(group_id);
+        BOOST_REQUIRE_EQUAL(
+          resp.topics.size(), all_topics ? 1 : c_offsets.size());
+        for (const auto& topic : resp.topics) {
+            const auto t_it = c_offsets.find(topic.name);
+            BOOST_REQUIRE(t_it != c_offsets.end());
+            BOOST_REQUIRE_EQUAL(topic.partitions.size(), t_it->second.size());
+            for (const auto& p : topic.partitions) {
+                const auto p_it = t_it->second.find(p.partition_index);
+                BOOST_REQUIRE(p_it != t_it->second.end());
+                BOOST_REQUIRE_EQUAL(p_it->second, p.committed_offset);
+            }
+        }
+    };
+
+    for (auto api_version = kafka::offset_fetch_handler::min_supported;
+         api_version <= kafka::offset_fetch_handler::max_supported;
+         ++api_version) {
+        for (bool all_topics : {true, false}) {
+            for (const auto& g : committed_offsets | std::views::keys) {
+                offset_fetch_request req;
+                fill_request(req.data, g, all_topics);
+                auto resp = client.dispatch(std::move(req), api_version).get();
+                if (api_version >= version_with_error) {
+                    BOOST_REQUIRE(!resp.data.errored());
+                }
+                BOOST_REQUIRE_EQUAL(resp.data.groups.size(), 0);
+                check_response_topics(api_version, resp.data, g, all_topics);
+            }
+        }
     }
 }
 
