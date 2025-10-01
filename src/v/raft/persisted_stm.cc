@@ -398,19 +398,12 @@ ss::future<> persisted_stm_base<BaseT, T>::wait_offset_committed(
     auto stop_cond = [this, offset, term] {
         return _raft->committed_offset() >= offset || _raft->term() > term;
     };
+    auto deadline = model::timeout_clock::now() + timeout;
     if (as) {
-        auto abortable_stop_cond = [&stop_cond, as] {
-            return stop_cond() || as->get().abort_requested();
-        };
-        auto sub = as->get().subscribe(
-          [this] noexcept { _raft->commit_index_updated().broadcast(); });
         co_await _raft->commit_index_updated().wait(
-          timeout, abortable_stop_cond);
-        // If the abort source signalled the updated index, we want this to
-        // throw in that case.
-        as->get().check();
+          deadline, as->get(), stop_cond);
     } else {
-        co_await _raft->commit_index_updated().wait(timeout, stop_cond);
+        co_await _raft->commit_index_updated().wait(deadline, stop_cond);
     }
 }
 
