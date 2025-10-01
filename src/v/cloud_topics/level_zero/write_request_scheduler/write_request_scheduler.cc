@@ -35,7 +35,7 @@ namespace cloud_topics::l0 {
 
 namespace {
 // Copy extents and share the payload to use on another shard
-static inline serialized_chunk shallow_copy(serialized_chunk& chunk) {
+serialized_chunk shallow_copy(serialized_chunk& chunk) {
     serialized_chunk copy;
     copy.extents = chunk.extents.copy();
     copy.payload = chunk.payload.share(0, chunk.payload.size_bytes());
