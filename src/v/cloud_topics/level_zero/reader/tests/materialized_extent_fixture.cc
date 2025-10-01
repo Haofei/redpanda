@@ -77,15 +77,10 @@ void materialized_extent_fixture::produce_placeholders(
         storage::record_batch_builder builder(
           model::record_batch_type::dl_placeholder, source.base_offset());
 
-        builder.add_raw_kv(
-          serde::to_iobuf(cloud_topics::dl_placeholder_record_key::payload),
-          serde::to_iobuf(p));
+        builder.add_raw_kv(std::nullopt, serde::to_iobuf(p));
         // Match number of records in the batch with the 'source'
         for (auto i = 1; i < source.record_count(); i++) {
-            iobuf empty;
-            builder.add_raw_kv(
-              serde::to_iobuf(cloud_topics::dl_placeholder_record_key::empty),
-              std::move(empty));
+            builder.add_raw_kv(std::nullopt, std::nullopt);
         }
         return std::move(builder).build();
     };

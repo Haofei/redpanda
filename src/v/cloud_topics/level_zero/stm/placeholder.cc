@@ -35,17 +35,13 @@ model::record_batch encode_placeholder_batch(
         builder.set_transactional_type();
     }
 
-    auto first_key = serde::to_iobuf(
-      cloud_topics::dl_placeholder_record_key::payload);
-
-    auto first_value = serde::to_iobuf(placeholder);
-
     // In case of a placeholder batch the first record contains the
     // actual placeholder and the remaining records are empty. The remaining
     // records are added to avoid confusing any other code that may expect
     // that the number of records in the batch is equal to the number of
     // offsets in the header.
-    builder.add_raw_kv(std::move(first_key), std::move(first_value));
+    auto first_value = serde::to_iobuf(placeholder);
+    builder.add_raw_kv(std::nullopt, std::move(first_value));
 
     for (int i = 1; i < header.record_count; ++i) {
         builder.add_raw_kv(std::nullopt, std::nullopt);

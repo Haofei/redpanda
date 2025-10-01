@@ -87,12 +87,9 @@ public:
         storage::record_batch_builder builder(
           model::record_batch_type::dl_placeholder, base_offset);
 
-        auto first_key = serde::to_iobuf(
-          cloud_topics::dl_placeholder_record_key::payload);
-
         auto first_value = serde::to_iobuf(placeholder);
 
-        builder.add_raw_kv(std::move(first_key), std::move(first_value));
+        builder.add_raw_kv(std::nullopt, std::move(first_value));
         if (size.has_value()) {
             for (int i = 1; i < size.value(); ++i) {
                 builder.add_raw_kv(std::nullopt, std::nullopt);
