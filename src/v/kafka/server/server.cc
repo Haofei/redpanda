@@ -1111,39 +1111,8 @@ offset_fetch_handler::handle(request_context ctx, ss::smp_service_group) {
     request.decode(ctx.reader(), ctx.header().version);
     log_request(ctx.header(), request);
 
-    if (!ctx.authorized(
-          security::acl_operation::describe, request.data.group_id)) {
-        auto error = !ctx.audit() ? error_code::broker_not_available
-                                  : error_code::group_authorization_failed;
-        co_return co_await ctx.respond(offset_fetch_response(error));
-    }
-
     constexpr auto has_topics = [](const auto& g) {
         return g.topics.has_value();
-    };
-
-    constexpr auto post_filter_authorized_topics = [](auto& ctx, auto& group) {
-        if (group.error_code != error_code::none) {
-            return;
-        }
-        /*
-         * quiet authz failures. this is checking for visibility across
-         * all topics not specifically requested topics.
-         */
-        auto unauthorized_rng = partition_auth_describe(
-          ctx,
-          group.topics,
-          &offset_fetch_response_topic::name,
-          authz_quiet::yes);
-
-        if (!ctx.audit()) {
-            group.topics.clear();
-            group.error_code = error_code::broker_not_available;
-            return;
-        }
-
-        group.topics.erase_to_end(unauthorized_rng.begin());
-        return;
     };
 
     constexpr auto pre_filter_authorized_topics = [](auto& ctx, auto& group) {
@@ -1180,7 +1149,38 @@ offset_fetch_handler::handle(request_context ctx, ss::smp_service_group) {
         return response;
     };
 
+    constexpr auto post_filter_authorized_topics = [](auto& ctx, auto& group) {
+        if (group.error_code != error_code::none) {
+            return;
+        }
+        /*
+         * quiet authz failures. this is checking for visibility across
+         * all topics not specifically requested topics.
+         */
+        auto unauthorized_rng = partition_auth_describe(
+          ctx,
+          group.topics,
+          &offset_fetch_response_topic::name,
+          authz_quiet::yes);
+
+        if (!ctx.audit()) {
+            group.topics.clear();
+            group.error_code = error_code::broker_not_available;
+            return;
+        }
+
+        group.topics.erase_to_end(unauthorized_rng.begin());
+        return;
+    };
+
     std::optional<offset_fetch_response_data> unauthorized;
+
+    if (!ctx.authorized(
+          security::acl_operation::describe, request.data.group_id)) {
+        auto error = !ctx.audit() ? error_code::broker_not_available
+                                  : error_code::group_authorization_failed;
+        co_return co_await ctx.respond(offset_fetch_response(error));
+    }
 
     /*
      * pre-filter authorized topics in request
