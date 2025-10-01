@@ -11,16 +11,18 @@
 
 #include "absl/time/clock.h"
 #include "redpanda/admin/aip_filter.h"
+#include "serde/protobuf/rpc.h"
 #include "src/v/redpanda/admin/tests/aip_filter_test_messages.proto.h"
 
 #include <fmt/ranges.h>
 #include <gmock/gmock.h>
 #include <gtest/gtest.h>
 
-#include <stdexcept>
 #include <string>
 
 namespace admin {
+
+namespace rpc = serde::pb::rpc;
 
 namespace {
 aip_filter_test::test_message create_test_message(
@@ -96,7 +98,7 @@ TEST_F(AIPFilterTest, StringFieldComparisons) {
 
     // Test only quoted strings work, unquoted strings throw
     msg.set_string_field(ss::sstring("test"));
-    EXPECT_THROW(parse("string_field = test"), std::invalid_argument);
+    EXPECT_THROW(parse("string_field = test"), rpc::invalid_argument_exception);
     EXPECT_TRUE(parse(R"(string_field = "test")")(msg));
 
     // Test escape sequences in quoted strings
@@ -111,7 +113,8 @@ TEST_F(AIPFilterTest, StringFieldComparisons) {
     msg.set_string_field(ss::sstring{chars.data(), chars.size()});
     EXPECT_TRUE(parse(R"(string_field = "\t\n\r\\\"\xC3\xA9")")(msg));
     EXPECT_THROW(
-      parse(R"(string_field = "invalid-utf8-\xA")"), std::invalid_argument);
+      parse(R"(string_field = "invalid-utf8-\xA")"),
+      rpc::invalid_argument_exception);
 
     // Empty string
     msg.set_string_field(ss::sstring(""));
@@ -133,12 +136,12 @@ TEST_F(AIPFilterTest, BooleanFieldOperations) {
     EXPECT_TRUE(parse("bool_field != true")(msg_false));
 
     // Case sensitivity of true/false
-    EXPECT_THROW(parse("bool_field = TRUE"), std::invalid_argument);
-    EXPECT_THROW(parse("bool_field = True"), std::invalid_argument);
+    EXPECT_THROW(parse("bool_field = TRUE"), rpc::invalid_argument_exception);
+    EXPECT_THROW(parse("bool_field = True"), rpc::invalid_argument_exception);
 
     // Only = and != allowed for boolean fields
-    EXPECT_THROW(parse("bool_field > true"), std::invalid_argument);
-    EXPECT_THROW(parse("bool_field < false"), std::invalid_argument);
+    EXPECT_THROW(parse("bool_field > true"), rpc::invalid_argument_exception);
+    EXPECT_THROW(parse("bool_field < false"), rpc::invalid_argument_exception);
 }
 
 TEST_F(AIPFilterTest, FloatingPointFieldOperations) {
@@ -200,9 +203,11 @@ TEST_F(AIPFilterTest, LogicalAndOperations) {
 
     // Case sensitivity for AND keyword
     EXPECT_THROW(
-      parse("int_field = 1 and bool_field = false"), std::invalid_argument);
+      parse("int_field = 1 and bool_field = false"),
+      rpc::invalid_argument_exception);
     EXPECT_THROW(
-      parse("int_field = 1 And bool_field = false"), std::invalid_argument);
+      parse("int_field = 1 And bool_field = false"),
+      rpc::invalid_argument_exception);
 }
 
 TEST_F(AIPFilterTest, EnumFieldOperations) {
@@ -223,8 +228,10 @@ TEST_F(AIPFilterTest, EnumFieldOperations) {
     EXPECT_FALSE(parse("status = status_active")(msg));
 
     // Only equality operators should work for enums
-    EXPECT_THROW(parse("status > STATUS_ACTIVE"), std::invalid_argument);
-    EXPECT_THROW(parse("status < STATUS_INACTIVE"), std::invalid_argument);
+    EXPECT_THROW(
+      parse("status > STATUS_ACTIVE"), rpc::invalid_argument_exception);
+    EXPECT_THROW(
+      parse("status < STATUS_INACTIVE"), rpc::invalid_argument_exception);
 }
 
 TEST_F(AIPFilterTest, DurationFieldOperations) {
@@ -290,9 +297,10 @@ TEST_F(AIPFilterTest, FieldOnLeftRequirement) {
     // AIP-160 requires field names on the left side of comparisons
     EXPECT_NO_THROW(parse("int_field = 42"));
     EXPECT_NO_THROW(parse("string_field = \"test\""));
-    EXPECT_THROW(parse("42 = int_field"), std::invalid_argument);
-    EXPECT_THROW(parse("\"test\" = string_field"), std::invalid_argument);
-    EXPECT_THROW(parse("true = bool_field"), std::invalid_argument);
+    EXPECT_THROW(parse("42 = int_field"), rpc::invalid_argument_exception);
+    EXPECT_THROW(
+      parse("\"test\" = string_field"), rpc::invalid_argument_exception);
+    EXPECT_THROW(parse("true = bool_field"), rpc::invalid_argument_exception);
 }
 
 TEST_F(AIPFilterTest, GrammarErrorHandling) {
@@ -301,85 +309,94 @@ TEST_F(AIPFilterTest, GrammarErrorHandling) {
     EXPECT_TRUE(parse("")(msg));
 
     // Unknown field errors
-    EXPECT_THROW(parse("unknown_field = 1"), std::invalid_argument);
+    EXPECT_THROW(parse("unknown_field = 1"), rpc::invalid_argument_exception);
     EXPECT_THROW(
-      parse("int_field = 1 AND unknown_field = 2"), std::invalid_argument);
+      parse("int_field = 1 AND unknown_field = 2"),
+      rpc::invalid_argument_exception);
 
     // Type mismatches
-    EXPECT_THROW(parse("int_field = \"not_a_number\""), std::invalid_argument);
     EXPECT_THROW(
-      parse("bool_field = \"not_a_boolean\""), std::invalid_argument);
+      parse("int_field = \"not_a_number\""), rpc::invalid_argument_exception);
+    EXPECT_THROW(
+      parse("bool_field = \"not_a_boolean\""), rpc::invalid_argument_exception);
 
     // Malformed expressions
-    EXPECT_THROW(parse("int_field ="), std::invalid_argument);
-    EXPECT_THROW(parse("= 1"), std::invalid_argument);
-    EXPECT_THROW(parse("int_field 1"), std::invalid_argument);
-    EXPECT_THROW(parse("int_field = 1 AND"), std::invalid_argument);
+    EXPECT_THROW(parse("int_field ="), rpc::invalid_argument_exception);
+    EXPECT_THROW(parse("= 1"), rpc::invalid_argument_exception);
+    EXPECT_THROW(parse("int_field 1"), rpc::invalid_argument_exception);
+    EXPECT_THROW(parse("int_field = 1 AND"), rpc::invalid_argument_exception);
 }
 
 TEST_F(AIPFilterTest, FieldPathValidation) {
     // Test malformed nested field paths
-    EXPECT_THROW(parse("nested. = 1"), std::invalid_argument);
-    EXPECT_THROW(parse(".nested = 1"), std::invalid_argument);
-    EXPECT_THROW(parse("nested..value = 1"), std::invalid_argument);
-    EXPECT_THROW(parse("nested.nonexistent = 1"), std::invalid_argument);
+    EXPECT_THROW(parse("nested. = 1"), rpc::invalid_argument_exception);
+    EXPECT_THROW(parse(".nested = 1"), rpc::invalid_argument_exception);
+    EXPECT_THROW(parse("nested..value = 1"), rpc::invalid_argument_exception);
+    EXPECT_THROW(
+      parse("nested.nonexistent = 1"), rpc::invalid_argument_exception);
 
     // Test invalid field name formats
-    EXPECT_THROW(parse("123field = 1"), std::invalid_argument);
-    EXPECT_THROW(parse("-field = 1"), std::invalid_argument);
-    EXPECT_THROW(parse("field- = 1"), std::invalid_argument);
+    EXPECT_THROW(parse("123field = 1"), rpc::invalid_argument_exception);
+    EXPECT_THROW(parse("-field = 1"), rpc::invalid_argument_exception);
+    EXPECT_THROW(parse("field- = 1"), rpc::invalid_argument_exception);
 
     // Case sensitivity for field names
-    EXPECT_THROW(parse("INT_FIELD = 1"), std::invalid_argument);
-    EXPECT_THROW(parse("Int_Field = 1"), std::invalid_argument);
+    EXPECT_THROW(parse("INT_FIELD = 1"), rpc::invalid_argument_exception);
+    EXPECT_THROW(parse("Int_Field = 1"), rpc::invalid_argument_exception);
 }
 
 TEST_F(AIPFilterTest, StringEscapingErrors) {
     // Test unterminated quoted strings
-    EXPECT_THROW(parse(R"(string_field = "unclosed)"), std::invalid_argument);
-    EXPECT_THROW(parse(R"(string_field = ")"), std::invalid_argument);
-    EXPECT_THROW(parse(R"(string_field = "\)"), std::invalid_argument);
+    EXPECT_THROW(
+      parse(R"(string_field = "unclosed)"), rpc::invalid_argument_exception);
+    EXPECT_THROW(parse(R"(string_field = ")"), rpc::invalid_argument_exception);
+    EXPECT_THROW(
+      parse(R"(string_field = "\)"), rpc::invalid_argument_exception);
 
     // Test invalid escape sequences that should fail
-    EXPECT_THROW(parse(R"(string_field = "\x")"), std::invalid_argument);
+    EXPECT_THROW(
+      parse(R"(string_field = "\x")"), rpc::invalid_argument_exception);
 }
 
 TEST_F(AIPFilterTest, NumberFormatValidation) {
     // Test invalid number formats
-    EXPECT_THROW(parse("int_field = 1.2.3"), std::invalid_argument);
-    EXPECT_THROW(parse("int_field = .123"), std::invalid_argument);
-    EXPECT_THROW(parse("int_field = 123."), std::invalid_argument);
-    EXPECT_THROW(parse("int_field = --1"), std::invalid_argument);
-    EXPECT_THROW(parse("int_field = ++1"), std::invalid_argument);
+    EXPECT_THROW(parse("int_field = 1.2.3"), rpc::invalid_argument_exception);
+    EXPECT_THROW(parse("int_field = .123"), rpc::invalid_argument_exception);
+    EXPECT_THROW(parse("int_field = 123."), rpc::invalid_argument_exception);
+    EXPECT_THROW(parse("int_field = --1"), rpc::invalid_argument_exception);
+    EXPECT_THROW(parse("int_field = ++1"), rpc::invalid_argument_exception);
 
     // Test invalid scientific notation
-    EXPECT_THROW(parse("double_field = 123e"), std::invalid_argument);
-    EXPECT_THROW(parse("double_field = e123"), std::invalid_argument);
-    EXPECT_THROW(parse("double_field = 1e+"), std::invalid_argument);
-    EXPECT_THROW(parse("double_field = 1e-"), std::invalid_argument);
+    EXPECT_THROW(parse("double_field = 123e"), rpc::invalid_argument_exception);
+    EXPECT_THROW(parse("double_field = e123"), rpc::invalid_argument_exception);
+    EXPECT_THROW(parse("double_field = 1e+"), rpc::invalid_argument_exception);
+    EXPECT_THROW(parse("double_field = 1e-"), rpc::invalid_argument_exception);
 }
 
 TEST_F(AIPFilterTest, TimeFormatValidation) {
     // Test invalid duration formats
-    EXPECT_THROW(parse("duration_field = invalid"), std::invalid_argument);
+    EXPECT_THROW(
+      parse("duration_field = invalid"), rpc::invalid_argument_exception);
     EXPECT_THROW(
       parse("duration_field = 120"),
-      std::invalid_argument); // Missing 's'
+      rpc::invalid_argument_exception); // Missing 's'
     EXPECT_THROW(
-      parse("duration_field = s"), std::invalid_argument); // No number
+      parse("duration_field = s"),
+      rpc::invalid_argument_exception); // No number
 
     // Test invalid timestamp formats
     EXPECT_THROW(
-      parse("timestamp_field = \"invalid-timestamp\""), std::invalid_argument);
+      parse("timestamp_field = \"invalid-timestamp\""),
+      rpc::invalid_argument_exception);
     EXPECT_THROW(
       parse("timestamp_field = \"2012-04-21 11:30:00\""),
-      std::invalid_argument); // Missing T
+      rpc::invalid_argument_exception); // Missing T
     EXPECT_THROW(
       parse("timestamp_field = \"2012-04-21T25:30:00Z\""),
-      std::invalid_argument); // Invalid hour
+      rpc::invalid_argument_exception); // Invalid hour
     EXPECT_THROW(
       parse("timestamp_field = \"2012-13-21T11:30:00Z\""),
-      std::invalid_argument); // Invalid month
+      rpc::invalid_argument_exception); // Invalid month
 }
 
 TEST_F(AIPFilterTest, WhitespaceHandling) {
@@ -396,7 +413,8 @@ TEST_F(AIPFilterTest, WhitespaceHandling) {
 
     // Missing space around AND should fail
     EXPECT_THROW(
-      parse("int_field=1AND bool_field=false"), std::invalid_argument);
+      parse("int_field=1AND bool_field=false"),
+      rpc::invalid_argument_exception);
 }
 
 TEST_F(AIPFilterTest, FilterLengthLimits) {
@@ -408,13 +426,13 @@ TEST_F(AIPFilterTest, FilterLengthLimits) {
     // Test filter over the limit (1024 characters)
     constexpr auto length = aip_filter_parser::max_filter_length + 1;
     std::string oversized_filter(length, 'x');
-    EXPECT_THROW(parse(oversized_filter), std::invalid_argument);
+    EXPECT_THROW(parse(oversized_filter), rpc::invalid_argument_exception);
 
     // Verify the error message mentions the limit
     try {
         parse(oversized_filter);
         FAIL() << "Expected exception for oversized filter";
-    } catch (const std::invalid_argument& e) {
+    } catch (const rpc::invalid_argument_exception& e) {
         EXPECT_THAT(std::string(e.what()), ::testing::HasSubstr("1024"));
     }
 }
@@ -449,18 +467,19 @@ TEST_F(AIPFilterTest, IntegerBoundaryValues) {
     // Test int32 boundary values
     msg.set_int32_field(std::numeric_limits<int32_t>::max());
     EXPECT_TRUE(parse("int32_field = 2147483647")(msg));
-    EXPECT_THROW(parse("int32_field < 2147483650"), std::invalid_argument);
+    EXPECT_THROW(
+      parse("int32_field < 2147483650"), rpc::invalid_argument_exception);
 
     msg.set_int32_field(std::numeric_limits<int32_t>::min());
     EXPECT_TRUE(parse("int32_field = -2147483648")(msg));
 
     // Negative values should fail for unsigned types
-    EXPECT_THROW(parse("uint_field = -1"), std::invalid_argument);
+    EXPECT_THROW(parse("uint_field = -1"), rpc::invalid_argument_exception);
 
     // Test overflow conditions
     EXPECT_THROW(
       parse("int_field = 9223372036854775808"),
-      std::invalid_argument); // max + 1
+      rpc::invalid_argument_exception); // max + 1
 }
 
 TEST_F(AIPFilterTest, CardinalityKeywords) {
@@ -473,8 +492,9 @@ TEST_F(AIPFilterTest, CardinalityKeywords) {
     // improvements to our protogen's reflection support
     EXPECT_TRUE(parse("optional_int_field = 0")(msg));
 
-    EXPECT_THROW(parse("repeated_int_field = 0")(msg), std::invalid_argument);
-    EXPECT_THROW(parse("map_field = 0")(msg), std::invalid_argument);
+    EXPECT_THROW(
+      parse("repeated_int_field = 0")(msg), rpc::invalid_argument_exception);
+    EXPECT_THROW(parse("map_field = 0")(msg), rpc::invalid_argument_exception);
 }
 
 } // namespace admin

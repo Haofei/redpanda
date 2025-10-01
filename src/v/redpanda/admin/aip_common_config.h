@@ -12,6 +12,7 @@
 #pragma once
 
 #include "serde/protobuf/base.h"
+#include "serde/protobuf/rpc.h"
 
 #include <seastar/util/noncopyable_function.hh>
 
@@ -36,7 +37,7 @@ field_type_getter_t make_field_type_getter() {
         auto default_obj = MsgType{};
         auto val = default_obj.lookup_field(field_nums);
         if (!val) {
-            throw std::runtime_error(
+            throw serde::pb::rpc::internal_exception(
               fmt::format(
                 "Unknown field lookup for field numbers: {}", field_nums));
         }

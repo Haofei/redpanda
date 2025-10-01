@@ -149,6 +149,7 @@ redpanda_cc_library(
     visibility = ["//visibility:public"],
     deps = [
         "//src/v/serde/protobuf:base",
+        "//src/v/serde/protobuf:rpc",
         "@fmt",
         "@seastar",
     ],
@@ -168,6 +169,7 @@ redpanda_cc_library(
         "//src/v/base",
         "//src/v/serde/protobuf:base",
         "//src/v/serde/protobuf:field_mask",
+        "//src/v/serde/protobuf:rpc",
         "@abseil-cpp//absl/strings",
         "@abseil-cpp//absl/time",
         "@fmt",

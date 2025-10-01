@@ -28,6 +28,7 @@ redpanda_cc_gtest(
     deps = [
         ":aip_filter_test_messages_redpanda_proto",
         "//src/v/redpanda/admin:aip_filter",
+        "//src/v/serde/protobuf:rpc",
         "//src/v/test_utils:gtest",
         "@abseil-cpp//absl/time",
         "@fmt",
