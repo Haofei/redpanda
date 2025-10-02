@@ -59,55 +59,6 @@ struct placeholder_batches_with_size {
 static constexpr auto L0_upload_default_timeout = 1s;
 static constexpr auto L0_replicate_default_timeout = 1s;
 
-// Create a placeholder batch using the original header and the extent.
-// The caller is supposed to use the correct batch header
-// that matches the extent.
-static model::record_batch make_placeholder_batch(
-  const model::record_batch_header& hdr,
-  const cloud_topics::extent_meta& extent) {
-    vassert(hdr.record_count > 0, "Empty record batch not allowed {}", hdr);
-
-    cloud_topics::dl_placeholder placeholder{
-      .id = extent.id,
-      .offset = extent.first_byte_offset,
-      .size_bytes = extent.byte_range_size,
-    };
-
-    storage::record_batch_builder builder(
-      model::record_batch_type::dl_placeholder, hdr.base_offset);
-
-    builder.set_producer_identity(hdr.producer_id, hdr.producer_epoch);
-    if (hdr.attrs.is_control()) {
-        builder.set_control_type();
-    }
-    if (hdr.attrs.is_transactional()) {
-        builder.set_transactional_type();
-    }
-
-    auto first_key = serde::to_iobuf(
-      cloud_topics::dl_placeholder_record_key::payload);
-
-    auto first_value = serde::to_iobuf(placeholder);
-
-    // In case of a placeholder batch the first record contains the
-    // actual placeholder and the remaining records are empty. The remaining
-    // records are added to avoid confusing any other code that may expect
-    // that the number of records in the batch is equal to the number of
-    // offsets in the header.
-    builder.add_raw_kv(std::move(first_key), std::move(first_value));
-
-    for (int i = 1; i < hdr.record_count; ++i) {
-        builder.add_raw_kv(std::nullopt, std::nullopt);
-    }
-
-    auto ph = std::move(builder).build();
-    ph.header().first_timestamp = hdr.first_timestamp;
-    ph.header().max_timestamp = hdr.max_timestamp;
-    ph.header().base_sequence = hdr.base_sequence;
-    ph.header().reset_size_checksum_metadata(ph.data());
-    return ph;
-}
-
 // Utility function to convert array of extent_meta structs to
 // array of placeholder batches.
 static placeholder_batches_with_size convert_to_placeholders(
@@ -132,7 +83,7 @@ static placeholder_batches_with_size convert_to_placeholders(
 
         // Every extent maps to a single batch produced by the client
         // and therefore we need to create a placeholder batch for it.
-        auto batch = make_placeholder_batch(header, extent);
+        auto batch = encode_placeholder_batch(header, extent);
 
         result.batches.push_back(std::move(batch));
         result.extent_size += extent.byte_range_size;

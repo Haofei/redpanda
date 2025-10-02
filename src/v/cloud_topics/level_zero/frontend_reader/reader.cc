@@ -218,19 +218,14 @@ ss::future<> level_zero_log_reader_impl::fetch_metadata(
                 _unhydrated.push_back(std::move(local_batch));
                 continue;
             }
-            if (header.type != model::record_batch_type::dl_placeholder) {
+            if (header.type != model::record_batch_type::ctp_placeholder) {
                 continue;
             }
             cloud_topics::extent_meta e{
               .base_offset = model::offset_cast(batch.base_offset()),
               .last_offset = model::offset_cast(batch.last_offset()),
             };
-            iobuf payload = std::move(batch).release_data();
-            iobuf_parser parser(std::move(payload));
-            auto record = model::parse_one_record_from_buffer(parser);
-            iobuf value = std::move(record).release_value();
-            auto placeholder = serde::from_iobuf<cloud_topics::dl_placeholder>(
-              std::move(value));
+            auto placeholder = parse_placeholder_batch(std::move(batch));
             e.id = placeholder.id;
             e.first_byte_offset = placeholder.offset;
             e.byte_range_size = placeholder.size_bytes;

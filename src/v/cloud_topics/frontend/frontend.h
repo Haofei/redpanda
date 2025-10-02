@@ -70,13 +70,13 @@ struct partition_info {
 /// - Data plane returns a placeholder for the record batch, containing
 ///   metadata to locate data in cloud storage.
 /// - 'cloud_topic_partition' pushes the placeholder to the metadata layer by
-///   replicating 'dl_placeholder' batch.
+///   replicating 'ctp_placeholder' batch.
 ///
 /// Read Request Path:
-/// - 'dl_placeholder' batches are queried from the metadata layer, fetched
+/// - 'ctp_placeholder' batches are queried from the metadata layer, fetched
 ///   from 'cluster::partition'.
 /// - Includes information about aborted transactions.
-/// - 'dl_placeholder' batches are 'materialized' using the data plane.
+/// - 'ctp_placeholder' batches are 'materialized' using the data plane.
 ///
 /// Currently, the data plane is explicitly a sharded service. The control
 /// plane includes 'cluster::partition' and 'ctp_stm', with no explicit API

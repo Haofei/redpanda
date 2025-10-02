@@ -78,21 +78,18 @@ public:
       int32_t seq,
       std::optional<int> size = std::nullopt) {
         ct::object_id id = ct::object_id::create(e);
-        ct::dl_placeholder placeholder{
+        ct::ctp_placeholder placeholder{
           .id = id,
           .offset = ct::first_byte_offset_t{0},
           .size_bytes = ct::byte_range_size_t{0},
         };
 
         storage::record_batch_builder builder(
-          model::record_batch_type::dl_placeholder, base_offset);
-
-        auto first_key = serde::to_iobuf(
-          cloud_topics::dl_placeholder_record_key::payload);
+          model::record_batch_type::ctp_placeholder, base_offset);
 
         auto first_value = serde::to_iobuf(placeholder);
 
-        builder.add_raw_kv(std::move(first_key), std::move(first_value));
+        builder.add_raw_kv(std::nullopt, std::move(first_value));
         if (size.has_value()) {
             for (int i = 1; i < size.value(); ++i) {
                 builder.add_raw_kv(std::nullopt, std::nullopt);
