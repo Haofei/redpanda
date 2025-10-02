@@ -455,6 +455,7 @@ reconciler::build_object(
 
 ss::future<std::expected<void, reconcile_error>>
 reconciler::put_object(const l1::object_id& oid, builder_context& ctx) {
+    auto metrics_duration = _probe.measure_object_upload_duration();
     auto put_result = co_await _l1_io->put_object(oid, ctx.staging.get(), &_as);
     if (!put_result.has_value()) {
         co_return std::unexpected(reconcile_error(
@@ -567,8 +568,11 @@ reconciler::add_objects_with_retry(
     retry_chain_node rtc(_as, ss::lowres_clock::now() + timeout, backoff);
     retry_chain_logger ctxlog(lg, rtc, "add_objects");
     for (auto permit = rtc.retry(); permit.is_allowed; permit = rtc.retry()) {
+        auto metrics_duration_add_objects
+          = _probe.measure_metastore_add_objects_duration();
         auto add_result = co_await _metastore->add_objects(
           *meta_builder, terms);
+        metrics_duration_add_objects.reset();
 
         if (add_result.has_value()) {
             co_return std::move(add_result).value();

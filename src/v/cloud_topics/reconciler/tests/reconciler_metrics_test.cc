@@ -47,6 +47,7 @@ public:
     void reconcile() { _reconciler.reconcile().get(); }
 
     unreliable_io& io() { return _io; }
+    reconciler::reconciler& reconciler() { return _reconciler; }
 
 private:
     unreliable_io _io;
@@ -175,4 +176,20 @@ TEST_F(ReconcilerMetricsTest, FailedObjectsCounter) {
 
     EXPECT_THAT(get_object_upload_failed(), Optional(1));
     EXPECT_THAT(get_objects_uploaded(), Optional(1));
+}
+
+TEST_F(ReconcilerMetricsTest, HistogramMetrics) {
+    auto src = add_source();
+    src->add_batch({.count = 10});
+
+    reconcile();
+
+    const auto& probe = reconciler().get_probe_for_tests();
+
+    auto object_upload_duration = probe.get_object_upload_duration_for_tests();
+    EXPECT_GT(object_upload_duration.sample_count, 0);
+
+    auto metastore_add_objects_duration
+      = probe.get_metastore_add_objects_duration_for_tests();
+    EXPECT_GT(metastore_add_objects_duration.sample_count, 0);
 }

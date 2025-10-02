@@ -28,6 +28,7 @@ void reconciler_probe::setup_metrics() {
     _metrics.add_group(
       prometheus_sanitize::metrics_name("cloud_topics:reconciler"),
       {
+        // Counters.
         sm::make_counter(
           "rounds",
           [this] { return _rounds; },
@@ -61,6 +62,21 @@ void reconciler_probe::setup_metrics() {
           [this] { return _empty_objects_skipped; },
           sm::description(
             "Total objects skipped because no data was available")),
+
+        // Histograms.
+        sm::make_histogram(
+          "object_upload_duration_seconds",
+          [this] {
+              return _object_upload_duration.internal_histogram_logform();
+          },
+          sm::description("Duration uploading L1 objects")),
+        sm::make_histogram(
+          "metastore_add_objects_duration_seconds",
+          [this] {
+              return _metastore_add_objects_duration
+                .internal_histogram_logform();
+          },
+          sm::description("Duration of add_objects to metastore")),
       });
 }
 

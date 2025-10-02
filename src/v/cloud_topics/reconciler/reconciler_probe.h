@@ -11,15 +11,19 @@
 #pragma once
 
 #include "metrics/metrics.h"
+#include "utils/log_hist.h"
 
 #include <seastar/core/metrics_registration.hh>
 
 #include <cstdint>
+#include <memory>
 
 namespace cloud_topics::reconciler {
 
 class reconciler_probe {
 public:
+    using hist_t = log_hist_internal;
+
     reconciler_probe() = default;
 
     reconciler_probe(const reconciler_probe&) = delete;
@@ -41,6 +45,22 @@ public:
     void increment_object_upload_failed() { ++_object_upload_failed; }
     void increment_empty_objects_skipped() { ++_empty_objects_skipped; }
 
+    std::unique_ptr<hist_t::measurement> measure_object_upload_duration() {
+        return _object_upload_duration.auto_measure();
+    }
+
+    std::unique_ptr<hist_t::measurement>
+    measure_metastore_add_objects_duration() {
+        return _metastore_add_objects_duration.auto_measure();
+    }
+
+    auto get_object_upload_duration_for_tests() const {
+        return _object_upload_duration.internal_histogram_logform();
+    }
+    auto get_metastore_add_objects_duration_for_tests() const {
+        return _metastore_add_objects_duration.internal_histogram_logform();
+    }
+
 private:
     metrics::internal_metric_groups _metrics;
 
@@ -52,6 +72,10 @@ private:
     uint64_t _object_build_failed{0};
     uint64_t _object_upload_failed{0};
     uint64_t _empty_objects_skipped{0};
+
+    // Histograms.
+    hist_t _object_upload_duration;
+    hist_t _metastore_add_objects_duration;
 };
 
 } // namespace cloud_topics::reconciler
