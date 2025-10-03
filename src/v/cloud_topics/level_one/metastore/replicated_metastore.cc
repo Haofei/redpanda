@@ -418,9 +418,10 @@ replicated_metastore::get_first_ge(
 
 ss::future<std::expected<metastore::object_response, metastore::errc>>
 replicated_metastore::get_first_ge(
-  const model::topic_id_partition& tidp, model::timestamp ts) {
+  const model::topic_id_partition& tidp, kafka::offset o, model::timestamp ts) {
     rpc::get_first_timestamp_ge_request req;
     req.tp = tidp;
+    req.o = o;
     req.ts = ts;
 
     auto reply_fut = co_await ss::coroutine::as_future(

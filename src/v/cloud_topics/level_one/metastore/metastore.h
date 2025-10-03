@@ -196,10 +196,11 @@ public:
     get_first_ge(const model::topic_id_partition&, kafka::offset) = 0;
 
     // Finds the first object of a given partition with data greater than or
-    // equal to the given timestamp. If no such timestamp exists, returns
-    // `out_of_range`.
-    virtual ss::future<std::expected<object_response, errc>>
-    get_first_ge(const model::topic_id_partition&, model::timestamp) = 0;
+    // equal to the given timestamp, that starts after the provided offset. If
+    // no such timestamp exists, returns `out_of_range`.
+    virtual ss::future<std::expected<object_response, errc>> get_first_ge(
+      const model::topic_id_partition&, kafka::offset, model::timestamp)
+      = 0;
 
     // Finds the kafka offset such that if data was truncated before this offset
     // where the total amount of data left would be ~size (within the

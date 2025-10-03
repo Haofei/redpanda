@@ -277,14 +277,15 @@ simple_metastore::get_first_ge(
 
 ss::future<std::expected<metastore::object_response, metastore::errc>>
 simple_metastore::get_first_ge(
-  const model::topic_id_partition& tpr, model::timestamp ts) {
-    co_return get_first_ge(state_, tpr, ts);
+  const model::topic_id_partition& tpr, kafka::offset o, model::timestamp ts) {
+    co_return get_first_ge(state_, tpr, o, ts);
 }
 
 std::expected<metastore::object_response, metastore::errc>
 simple_metastore::get_first_ge(
   const state& state,
   const model::topic_id_partition& tpr,
+  kafka::offset o,
   model::timestamp ts) {
     auto prt_ref = state.partition_state(tpr);
     if (!prt_ref.has_value()) {
@@ -293,6 +294,9 @@ simple_metastore::get_first_ge(
     }
     auto& prt = prt_ref->get();
     for (const auto& obj : prt.extents) {
+        if (o > obj.last_offset) {
+            continue;
+        }
         if (obj.max_timestamp >= ts) {
             auto object_it = state.objects.find(obj.oid);
             if (object_it == state.objects.end()) {

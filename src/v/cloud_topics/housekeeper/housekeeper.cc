@@ -117,7 +117,9 @@ housekeeper::do_time_retention(std::chrono::milliseconds duration) {
     }
     auto retention_point = model::timestamp_clock::now() - duration;
     auto result = co_await _l1_metastore->get_first_ge(
-      _tidp, model::to_timestamp(retention_point));
+      _tidp,
+      offsets_result->start_offset,
+      model::to_timestamp(retention_point));
     if (result.has_value()) {
         auto object = result.value();
         co_return object.first_offset;
