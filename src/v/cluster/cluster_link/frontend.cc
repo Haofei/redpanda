@@ -403,7 +403,9 @@ errc frontend::validate_mutation(const cluster_link_cmd& cmd) const {
     validator v{
       _table,
       max_links,
-      {"redpanda.remote.readreplica", "redpanda.remote.recovery"}};
+      {"redpanda.remote.readreplica",
+       "redpanda.remote.recovery",
+       "redpanda.remote.allowgaps"}};
     return v.validate_mutation(cmd);
 }
 

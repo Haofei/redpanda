@@ -251,6 +251,9 @@ TEST_F_CORO(
     });
 }
 
+static constexpr std::string_view topic_properties_remote_allowgaps
+  = "redpanda.remote.allowgaps";
+
 TEST_F_CORO(
   update_properties_invalid_describe_configs_test,
   do_not_return_topic_config_no_mod) {
@@ -263,6 +266,11 @@ TEST_F_CORO(
         }
         return mirror_topic_it->second.copy();
     }();
+    // this property is overridden by default in the source_topic_syncer
+    // to allow gaps in replication
+
+    properties.topic_configs[ss::sstring(topic_properties_remote_allowgaps)]
+      = "true";
 
     chunked_vector<kafka::describe_configs_result> response;
     response.emplace_back(
