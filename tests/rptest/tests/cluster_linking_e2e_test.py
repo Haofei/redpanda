@@ -537,6 +537,14 @@ class ShadowLinkBasicTests(ShadowLinkTestBase):
         ):
             self.delete_link(test_link)
 
+        # Now verify that we can delete the link when force=True
+        self.delete_link(test_link, force=True)
+
+        with expect_exception(
+            ConnectError, lambda e: e.code == ConnectErrorCode.NOT_FOUND
+        ):
+            self.get_link(test_link)
+
 
 class ShadowLinkingReplicationTests(ShadowLinkPreAllocTestBase):
     def leadership_shuffler(self, redpanda, topic: str, enabled: bool):

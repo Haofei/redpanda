@@ -464,9 +464,9 @@ class ShadowLinkTestBase(PreallocNodesTest):
         return req
 
     def delete_link_request(
-        self, link_name: str
+        self, link_name: str, force: bool = False
     ) -> shadow_link_pb2.DeleteShadowLinkRequest:
-        req = shadow_link_pb2.DeleteShadowLinkRequest(name=link_name)
+        req = shadow_link_pb2.DeleteShadowLinkRequest(name=link_name, force=force)
         return req
 
     def create_link(
@@ -481,9 +481,11 @@ class ShadowLinkTestBase(PreallocNodesTest):
         return self.service_client.create_shadow_link(req=req).shadow_link
 
     def delete_link(
-        self, link_name: str, *args, **kwargs
+        self, link_name: str, force: bool = False, *args, **kwargs
     ) -> shadow_link_pb2.DeleteShadowLinkResponse:
-        req = self.delete_link_request(link_name=link_name, *args, **kwargs)
+        req = self.delete_link_request(
+            link_name=link_name, force=force, *args, **kwargs
+        )
         return self.delete_link_with_request(req=req)
 
     def failover_link(self, name: str) -> shadow_link_pb2.ShadowLink:
