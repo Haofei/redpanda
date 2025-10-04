@@ -395,7 +395,12 @@ static void fill_fetch_responses(
          * Cache fetch metadata
          */
         octx.rctx.get_fetch_metadata_cache().insert_or_assign(
-          ktp, res.start_offset, res.high_watermark, res.last_stable_offset);
+          ktp,
+          res.start_offset,
+          res.high_watermark,
+          res.last_stable_offset,
+          res.offset_count(),
+          res.data_size_bytes());
         /**
          * Over response budget, we will just waste this read, it will cause
          * data to be stored in the cache so next read is fast

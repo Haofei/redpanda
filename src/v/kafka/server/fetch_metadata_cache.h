@@ -13,6 +13,7 @@
 #include "container/chunked_hash_map.h"
 #include "model/fundamental.h"
 #include "model/ktp.h"
+#include "utils/moving_average.h"
 
 #include <seastar/core/lowres_clock.hh>
 
@@ -24,7 +25,10 @@ struct partition_metadata {
     model::offset start_offset;
     model::offset high_watermark;
     model::offset last_stable_offset;
+    size_t avg_bytes_per_offset;
 };
+
+using namespace std::chrono_literals;
 
 class fetch_metadata_cache {
 public:
@@ -41,11 +45,26 @@ public:
     ~fetch_metadata_cache() = default;
 
     void insert_or_assign(
-      model::ktp_with_hash ktp,
+      const model::ktp_with_hash& ktp,
       model::offset start_offset,
       model::offset hw,
-      model::offset lso) {
-        _cache.insert_or_assign(std::move(ktp), entry(start_offset, hw, lso));
+      model::offset lso,
+      size_t offset_count,
+      size_t total_size_bytes) {
+        auto& e = _cache[ktp];
+        e.reset_ts();
+        if (offset_count > 0) {
+            e.bytes_per_offset.update(
+              total_size_bytes, e.timestamp, offset_count);
+        }
+        e.md = {
+          .start_offset = start_offset,
+          .high_watermark = hw,
+          .last_stable_offset = lso,
+          .avg_bytes_per_offset = e.bytes_per_offset.has_samples()
+                                    ? e.bytes_per_offset.get()
+                                    : 0,
+        };
     }
 
     std::optional<partition_metadata> get(const model::ktp_with_hash& ktp) {
@@ -61,13 +80,19 @@ public:
     size_t size() const { return _cache.size(); }
 
 private:
-    struct entry {
-        entry(model::offset start_offset, model::offset hw, model::offset lso)
-          : md(start_offset, hw, lso)
-          , timestamp(ss::lowres_clock::now()) {}
+    using sliding_window_t = timed_moving_average<size_t, ss::lowres_clock>;
 
+    constexpr static std::chrono::seconds eviction_timeout{60};
+    constexpr static auto bytes_per_offset_window{1h};
+    constexpr static auto bytes_per_offset_resolution{20min};
+
+    struct entry {
         partition_metadata md;
         ss::lowres_clock::time_point timestamp;
+        sliding_window_t bytes_per_offset{
+          bytes_per_offset_window, bytes_per_offset_resolution};
+
+        void reset_ts() { timestamp = ss::lowres_clock::now(); }
     };
 
     void evict() {
@@ -77,7 +102,6 @@ private:
         });
     }
 
-    constexpr static std::chrono::seconds eviction_timeout{60};
     chunked_hash_map<model::ktp_with_hash, entry> _cache;
     ss::timer<> _eviction_timer;
 };
