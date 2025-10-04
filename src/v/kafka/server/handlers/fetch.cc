@@ -135,10 +135,14 @@ static ss::future<read_result> read_from_partition(
     std::unique_ptr<iobuf> data;
     std::vector<cluster::tx::tx_range> aborted_transactions;
     std::optional<std::chrono::milliseconds> delta_from_tip_ms;
+    model::offset data_base_offset, data_last_offset;
+
     try {
         auto result = co_await rdr.reader.consume(
           kafka_batch_serializer(), deadline ? *deadline : model::no_timeout);
         data = std::make_unique<iobuf>(std::move(result.data));
+        data_base_offset = result.base_offset;
+        data_last_offset = result.last_offset;
         part.probe().add_records_fetched(result.record_count);
         part.probe().add_bytes_fetched(data->size_bytes());
         if (!part.is_leader() && config.read_from_follower) {
@@ -192,6 +196,8 @@ static ss::future<read_result> read_from_partition(
     co_return read_result(
       std::move(data),
       start_o,
+      data_base_offset,
+      data_last_offset,
       hw,
       lso,
       delta_from_tip_ms,

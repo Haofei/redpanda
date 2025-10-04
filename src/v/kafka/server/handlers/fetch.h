@@ -298,12 +298,16 @@ struct read_result {
     read_result(
       data_t data,
       model::offset start_offset,
+      model::offset data_base_offset,
+      model::offset data_last_offset,
       model::offset hw,
       model::offset lso,
       std::optional<std::chrono::milliseconds> delta,
       std::vector<cluster::tx::tx_range> aborted_transactions)
       : data(std::move(data))
       , start_offset(start_offset)
+      , data_base_offset(data_base_offset)
+      , data_last_offset(data_last_offset)
       , high_watermark(hw)
       , last_stable_offset(lso)
       , delta_from_tip_ms(delta)
@@ -331,8 +335,17 @@ struct read_result {
 
     iobuf release_data() && { return std::move(*data); }
 
+    // Returns the number of kafka offsets the result spans.
+    size_t offset_count() const {
+        return data_size_bytes() > 0
+                 ? (data_last_offset - data_base_offset)() + 1
+                 : 0;
+    }
+
     data_t data;
     model::offset start_offset;
+    model::offset data_base_offset;
+    model::offset data_last_offset;
     model::offset high_watermark;
     model::offset last_stable_offset;
     std::optional<std::chrono::milliseconds> delta_from_tip_ms;
