@@ -65,8 +65,15 @@ redpanda_test_cc_library(
         "partition_balancer_planner_fixture.h",
     ],
     deps = [
-        ":cluster_test_fixture",
+        ":utils",
+        "//src/v/base",
+        "//src/v/cluster",
+        "//src/v/config",
+        "//src/v/features",
+        "//src/v/model",
+        "//src/v/random:generators",
         "@boost//:test",
+        "@seastar",
     ],
 )
 
