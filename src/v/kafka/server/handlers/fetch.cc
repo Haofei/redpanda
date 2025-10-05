@@ -1320,10 +1320,23 @@ class simple_fetch_planner final : public fetch_planner::impl {
                   auto max_bytes = std::min(
                     bytes_left_in_plan, size_t(fp.max_bytes));
                   /**
-                   * If offset is greater, assume that fetch will read max_bytes
+                   * If the fetch offest is less than the hwm for the partition
+                   * then we try to estimate the number of bytes that can be
+                   * read via a moving average in the md cache. If there isn't
+                   * enough information in the md cache to estimate this then we
+                   * assume the `max_bytes` can be read.
                    */
                   if (fetch_md && fetch_md->high_watermark > fp.fetch_offset) {
-                      bytes_left_in_plan -= max_bytes;
+                      const auto offset_count
+                        = (fetch_md->high_watermark - fp.fetch_offset)() + 1;
+                      const auto est_read_size
+                        = offset_count * fetch_md->avg_bytes_per_offset;
+                      if (est_read_size > 0) {
+                          bytes_left_in_plan -= std::min(
+                            est_read_size, max_bytes);
+                      } else {
+                          bytes_left_in_plan -= max_bytes;
+                      }
                   }
 
                   plan.fetches_per_shard[*shard].push_back(
