@@ -63,18 +63,10 @@ static constexpr auto L0_replicate_default_timeout = 1s;
 // array of placeholder batches.
 static placeholder_batches_with_size convert_to_placeholders(
   const chunked_vector<cloud_topics::extent_meta>& extents,
-  const chunked_vector<model::record_batch_header>& original_headers) {
-    // TODO: avoid copying this buffer
-    ss::circular_buffer<model::record_batch_header> headers;
-    std::copy(
-      original_headers.begin(),
-      original_headers.end(),
-      std::back_inserter(headers));
+  const chunked_vector<model::record_batch_header>& headers) {
     placeholder_batches_with_size result;
     result.batches.reserve(extents.size());
-    for (const auto& extent : extents) {
-        auto header = headers.front();
-        headers.pop_front();
+    for (const auto& [extent, header] : std::views::zip(extents, headers)) {
         vassert(
           extent.base_offset() <= extent.last_offset(),
           "Extent base offset {} is greater than committed offset {}",
