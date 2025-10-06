@@ -9,6 +9,7 @@
 
 #include "cluster/controller.h"
 #include "cluster/controller_api.h"
+#include "cluster/security_frontend.h"
 #include "kafka/client/transport.h"
 #include "kafka/protocol/describe_groups.h"
 #include "kafka/protocol/errors.h"
@@ -24,6 +25,7 @@
 #include "model/namespace.h"
 #include "model/timeout_clock.h"
 #include "redpanda/tests/fixture.h"
+#include "security/acl.h"
 #include "test_utils/async.h"
 #include "test_utils/boost_fixture.h"
 #include "test_utils/scoped_config.h"
@@ -80,6 +82,45 @@ struct consumer_offsets_fixture : public redpanda_thread_fixture {
 
         client.stop().get();
         client.shutdown();
+    }
+
+    void create_user(const ss::sstring& user, const ss::sstring& pass) {
+        auto creds = security::scram_sha256::make_credentials(
+          pass, security::scram_sha256::min_iterations);
+        app.controller->get_security_frontend()
+          .local()
+          .create_user(
+            security::credential_user(user),
+            std::move(creds),
+            model::timeout_clock::now() + 5s)
+          .get();
+    }
+
+    template<typename T>
+    void authorize(
+      const ss::sstring& user,
+      security::acl_operation op,
+      const std::vector<T>& resources) {
+        const auto make_binding = [&user, op](const T& resource) {
+            return security::acl_binding{
+              security::resource_pattern{
+                security::get_resource_type<T>(),
+                resource,
+                security::pattern_type::literal},
+              security::acl_entry{
+                security::acl_principal{security::principal_type::user, user},
+                security::acl_host::wildcard_host(),
+                op,
+                security::acl_permission::allow}};
+        };
+
+        app.controller->get_security_frontend()
+          .local()
+          .create_acls(
+            resources | std::views::transform(make_binding)
+              | std::ranges::to<std::vector>(),
+            5s)
+          .get();
     }
 };
 
@@ -154,9 +195,11 @@ FIXTURE_TEST(offset_commit_and_fetch_request, consumer_offsets_fixture) {
 
     static const model::topic topic_foo{"foo"};
     static const model::topic topic_bar{"bar"};
+    static const model::topic topic_no_auth{"no_auth"};
 
     static const kafka::group_id group_foo{"foo-partitions"};
     static const kafka::group_id group_bar{"bar-partitions"};
+    static const kafka::group_id group_no_auth{"no_auth-partitions"};
 
     // v2 supports an error_code
     static constexpr api_version version_with_error{2};
@@ -168,14 +211,20 @@ FIXTURE_TEST(offset_commit_and_fetch_request, consumer_offsets_fixture) {
         {group_foo,
          {
            {topic_foo, {{model::partition_id{2}, model::offset{42}}}},
+           {topic_no_auth, {{model::partition_id{1}, model::offset{24}}}},
          }},
         {group_bar,
          {
            {topic_bar, {{model::partition_id{1}, model::offset{24}}}},
+           {topic_no_auth, {{model::partition_id{0}, model::offset{36}}}},
+         }},
+        {group_no_auth,
+         {
+           {topic_no_auth, {{model::partition_id{0}, model::offset{12}}}},
          }},
       };
 
-    for (const auto& topic : {topic_foo, topic_bar}) {
+    for (const auto& topic : {topic_foo, topic_bar, topic_no_auth}) {
         add_topic({model::kafka_namespace, topic}, 3).get();
     }
 
@@ -221,10 +270,18 @@ FIXTURE_TEST(offset_commit_and_fetch_request, consumer_offsets_fixture) {
       };
 
     const auto check_response_topics = [&committed_offsets](
-                                         kafka::api_version,
+                                         kafka::api_version api_version,
                                          auto& resp,
                                          const kafka::group_id& group_id,
                                          bool all_topics) {
+        if (group_id == group_no_auth) {
+            BOOST_REQUIRE(resp.topics.empty());
+            if (api_version >= version_with_error) {
+                BOOST_REQUIRE_EQUAL(
+                  resp.error_code, error_code::group_authorization_failed);
+            }
+            return;
+        }
         const auto& c_offsets = committed_offsets.at(group_id);
         BOOST_REQUIRE_EQUAL(
           resp.topics.size(), all_topics ? 1 : c_offsets.size());
@@ -233,12 +290,45 @@ FIXTURE_TEST(offset_commit_and_fetch_request, consumer_offsets_fixture) {
             BOOST_REQUIRE(t_it != c_offsets.end());
             BOOST_REQUIRE_EQUAL(topic.partitions.size(), t_it->second.size());
             for (const auto& p : topic.partitions) {
-                const auto p_it = t_it->second.find(p.partition_index);
-                BOOST_REQUIRE(p_it != t_it->second.end());
-                BOOST_REQUIRE_EQUAL(p_it->second, p.committed_offset);
+                if (topic.name == topic_no_auth) {
+                    BOOST_REQUIRE(resp.errored());
+                    BOOST_REQUIRE_EQUAL(p.committed_offset, model::offset{-1});
+                    BOOST_REQUIRE_EQUAL(
+                      p.error_code, error_code::topic_authorization_failed);
+                } else {
+                    const auto p_it = t_it->second.find(p.partition_index);
+                    BOOST_REQUIRE(p_it != t_it->second.end());
+                    BOOST_REQUIRE_EQUAL(p_it->second, p.committed_offset);
+                }
             }
         }
     };
+
+    ss::sstring user{"user_name_256"};
+    ss::sstring password{"password_256"};
+    create_user(user, password);
+    authorize(
+      user,
+      security::acl_operation::describe,
+      std::vector<model::topic>{topic_foo, topic_bar});
+    authorize(
+      user,
+      security::acl_operation::describe,
+      std::vector<kafka::group_id>{group_bar, group_foo});
+
+    enable_sasl();
+    auto disable_sasl_defer = ss::defer([this] { disable_sasl(); });
+
+    auto auth_client = make_kafka_client().get();
+    auto auth_deferred = ss::defer([&auth_client] {
+        auth_client.stop()
+          .then([&auth_client] { auth_client.shutdown(); })
+          .get();
+    });
+    auth_client.connect().get();
+
+    authn_kafka_client<security::scram_sha256_authenticator>(
+      auth_client, user, password);
 
     for (auto api_version = kafka::offset_fetch_handler::min_supported;
          api_version <= kafka::offset_fetch_handler::max_supported;
@@ -247,9 +337,11 @@ FIXTURE_TEST(offset_commit_and_fetch_request, consumer_offsets_fixture) {
             for (const auto& g : committed_offsets | std::views::keys) {
                 offset_fetch_request req;
                 fill_request(req.data, g, all_topics);
-                auto resp = client.dispatch(std::move(req), api_version).get();
+                auto resp
+                  = auth_client.dispatch(std::move(req), api_version).get();
                 if (api_version >= version_with_error) {
-                    BOOST_REQUIRE(!resp.data.errored());
+                    BOOST_REQUIRE_EQUAL(
+                      resp.data.errored(), !all_topics || g == group_no_auth);
                 }
                 BOOST_REQUIRE_EQUAL(resp.data.groups.size(), 0);
                 check_response_topics(api_version, resp.data, g, all_topics);

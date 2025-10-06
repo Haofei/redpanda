@@ -1167,7 +1167,8 @@ offset_fetch_handler::handle(request_context ctx, ss::smp_service_group) {
         for (auto partition_index : req_topic.partition_indexes) {
             auto& partition = topic.partitions.emplace_back();
             partition.partition_index = partition_index;
-            partition.error_code = error_code::group_authorization_failed;
+            partition.committed_offset = model::offset{-1};
+            partition.error_code = error_code::topic_authorization_failed;
         }
     }
 
