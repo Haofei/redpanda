@@ -131,6 +131,9 @@ func printOverview(link *adminv2.ShadowLink) {
 	defer tw.Flush()
 	tw.Print("NAME", link.GetName())
 	tw.Print("UID", link.GetUid())
+	if status := link.GetStatus(); status != nil {
+		tw.Print("STATE", strings.TrimPrefix(status.GetState().String(), "SHADOW_LINK_STATE_"))
+	}
 }
 
 func printClient(opts *adminv2.ShadowLinkClientOptions) {
