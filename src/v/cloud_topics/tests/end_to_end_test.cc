@@ -38,21 +38,45 @@ public:
         wait_for_controller_leadership().get();
     }
 
+    void SetUp() override {
+        cluster::topic_properties props;
+        props.cloud_topic_enabled = true;
+        props.shadow_indexing = model::shadow_indexing_mode::disabled;
+        add_topic({model::kafka_namespace, topic_name}, 1, props).get();
+        wait_for_leader(ntp).get();
+    }
+
+    void TearDown() override {
+        for (auto& fn : std::views::reverse(cleanup)) {
+            fn();
+        }
+    }
+
+    kafka_produce_transport* make_producer() {
+        auto producer = std::make_unique<kafka_produce_transport>(
+          make_kafka_client().get());
+        producer->start().get();
+        auto* p = producer.get();
+        cleanup.emplace_back([p = std::move(producer)] { p->stop().get(); });
+        return p;
+    }
+
+    kafka_consume_transport* make_consumer() {
+        auto consumer = std::make_unique<kafka_consume_transport>(
+          make_kafka_client().get());
+        consumer->start().get();
+        auto* c = consumer.get();
+        cleanup.emplace_back([c = std::move(consumer)] { c->stop().get(); });
+        return c;
+    }
+
+    std::vector<std::function<void()>> cleanup;
     scoped_config test_local_cfg;
+    const model::topic topic_name{"tapioca"};
+    model::ntp ntp{model::kafka_namespace, topic_name, 0};
 };
 
 TEST_F(e2e_fixture, test_create_cloud_topic) {
-    const model::topic topic_name("tapioca");
-    model::ntp ntp(model::kafka_namespace, topic_name, 0);
-
-    cluster::topic_properties props;
-    props.cloud_topic_enabled = true;
-    props.shadow_indexing = model::shadow_indexing_mode::disabled;
-
-    add_topic({model::kafka_namespace, topic_name}, 1, props).get();
-
-    wait_for_leader(ntp).get();
-
     auto partition = app.partition_manager.local().get(ntp);
     ASSERT_TRUE(
       partition->raft()->stm_manager()->get<cloud_topics::ctp_stm>()
@@ -60,23 +84,9 @@ TEST_F(e2e_fixture, test_create_cloud_topic) {
 }
 
 TEST_F(e2e_fixture, test_l0_path) {
-    const model::topic topic_name("tapioca");
-    model::ntp ntp(model::kafka_namespace, topic_name, 0);
-
-    cluster::topic_properties props;
-    props.cloud_topic_enabled = true;
-    props.shadow_indexing = model::shadow_indexing_mode::disabled;
-
-    add_topic({model::kafka_namespace, topic_name}, 1, props).get();
-
-    wait_for_leader(ntp).get();
-
     auto partition = app.partition_manager.local().get(ntp);
-    // Produce data to the partition
-    kafka_produce_transport producer(make_kafka_client().get());
-    producer.start().get();
-    auto deferred_close = ss::defer([&producer] { producer.stop().get(); });
 
+    auto* producer = make_producer();
     size_t total_records = 100;
     size_t records_per_batch = 5;
     std::vector<kv_t> records;
@@ -87,17 +97,16 @@ TEST_F(e2e_fixture, test_l0_path) {
               ssx::sformat("key{}", i + j), ssx::sformat("val{}", i + j));
             batch.push_back(records.back());
         }
-        producer.produce_to_partition(topic_name, model::partition_id(0), batch)
+        producer
+          ->produce_to_partition(topic_name, model::partition_id(0), batch)
           .get();
     }
 
-    kafka_consume_transport consumer(make_kafka_client().get());
-    consumer.start().get();
-    auto deferred_c_close = ss::defer([&consumer] { consumer.stop().get(); });
+    auto consumer = make_consumer();
     for (auto [seek_offset, start_offset] :
          std::map<int, int>{{0, 0}, {1, 0}, {5, 5}, {6, 5}, {99, 95}}) {
         auto consumed_records = consumer
-                                  .consume_from_partition(
+                                  ->consume_from_partition(
                                     topic_name,
                                     model::partition_id(0),
                                     model::offset(seek_offset))
@@ -109,5 +118,4 @@ TEST_F(e2e_fixture, test_l0_path) {
             ASSERT_EQ(records[expected_offset].val, consumed.val);
         }
     }
-    ss::sleep(1s).get();
 }
