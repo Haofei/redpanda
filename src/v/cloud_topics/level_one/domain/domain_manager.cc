@@ -459,6 +459,12 @@ domain_manager::set_start_offset(rpc::set_start_offset_request req) {
     co_return rpc::set_start_offset_reply{.ec = rpc::errc::ok};
 }
 
+ss::future<rpc::remove_topics_reply>
+domain_manager::remove_topics(rpc::remove_topics_request) {
+    // XXX: implemented in later commit!
+    co_return rpc::remove_topics_reply{};
+}
+
 ss::future<> domain_manager::gc_loop() {
     auto gate = maybe_gate();
     if (!gate.has_value()) {

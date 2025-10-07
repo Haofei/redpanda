@@ -138,6 +138,18 @@ ss::future<rpc::set_start_offset_reply> do_set_start_offset(
     co_return co_await domain_mgr->set_start_offset(std::move(req));
 }
 
+ss::future<rpc::remove_topics_reply> do_remove_topics(
+  domain_supervisor& domain_supervisor,
+  const model::ntp& ntp,
+  rpc::remove_topics_request req) {
+    auto domain_mgr = domain_supervisor.get(ntp);
+    if (!domain_mgr) {
+        co_return rpc::remove_topics_reply{
+          .ec = rpc::errc::not_leader, .not_removed = {}};
+    }
+    co_return co_await domain_mgr->remove_topics(std::move(req));
+}
+
 } // namespace
 
 template<auto Func, typename req_t>
@@ -518,6 +530,25 @@ ss::future<rpc::set_start_offset_reply> frontend::set_start_offset(
     co_return co_await process<
       &frontend::set_start_offset_locally,
       &client::set_start_offset>(std::move(request), bool(local_only_exec));
+}
+
+ss::future<rpc::remove_topics_reply> frontend::remove_topics_locally(
+  rpc::remove_topics_request request,
+  const model::ntp& metastore_ntp,
+  ss::shard_id shard) {
+    co_return co_await container().invoke_on(
+      shard, [metastore_ntp, req = std::move(request)](frontend& fe) mutable {
+          return do_remove_topics(
+            *(fe._domain_supervisor), metastore_ntp, std::move(req));
+      });
+}
+
+ss::future<rpc::remove_topics_reply> frontend::remove_topics(
+  rpc::remove_topics_request request, local_only local_only_exec) {
+    auto holder = _gate.hold();
+    co_return co_await process<
+      &frontend::remove_topics_locally,
+      &client::remove_topics>(std::move(request), bool(local_only_exec));
 }
 
 } // namespace cloud_topics::l1
