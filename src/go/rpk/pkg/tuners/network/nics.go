@@ -232,13 +232,15 @@ func GetHwInterfaceIRQsDistribution(
 	// Find the cut off for live IRQs
 	irqCutOffIndex := getIrqCutOffIndex(allIRQs, rxQueues)
 
-	fmt.Printf("Distributing '%s' IRQs handling Rx queues\n", nic.Name())
+	zap.L().Sugar().Debugf("Cut-off-index: %d, sorted irq list: %v", irqCutOffIndex, IrqInfosToIDs(allIRQs))
+
+	zap.L().Sugar().Debugf("Distributing '%s' IRQs handling Rx/Tx queues", nic.Name())
 	IRQsDistribution, err := cpuMasks.GetIRQsDistributionMasks(
 		IrqInfosToIDs(allIRQs[0:irqCutOffIndex]), irqCPUMask)
 	if err != nil {
 		return nil, err
 	}
-	fmt.Printf("Distributing rest of '%s' IRQs\n", nic.Name())
+	zap.L().Sugar().Debugf("Distributing rest of '%s' IRQs\n", nic.Name())
 	restIRQsDistribution, err := cpuMasks.GetIRQsDistributionMasks(
 		IrqInfosToIDs(allIRQs[irqCutOffIndex:]), irqCPUMask)
 	if err != nil {
