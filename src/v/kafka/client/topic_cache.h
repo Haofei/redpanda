@@ -68,6 +68,12 @@ public:
     const topics_t& cache() const noexcept;
 
 private:
+    /// \brief merges info from new_topics and _topics
+    void merge_topics(topics_t new_topics);
+
+    /// \brief merges cached and update topic data
+    static topic_data merge_topic_data(topic_data&&, topic_data&&);
+
     /// \brief Cache of topic information.
     topics_t _topics;
 };

@@ -377,6 +377,22 @@ redpanda_cc_gtest(
     ],
 )
 
+redpanda_cc_gtest(
+    name = "topic_cache_test",
+    timeout = "short",
+    srcs = [
+        "topic_cache_test.cc",
+    ],
+    deps = [
+        "//src/v/container:chunked_vector",
+        "//src/v/kafka/client:topic_cache",
+        "//src/v/kafka/protocol:metadata",
+        "//src/v/model",
+        "//src/v/test_utils:gtest",
+        "@googletest//:gtest",
+    ],
+)
+
 redpanda_cc_btest(
     name = "list_offsets",
     timeout = "short",
