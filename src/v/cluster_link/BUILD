@@ -208,6 +208,7 @@ redpanda_cc_library(
         "//src/v/cluster_link/replication:deps",
         "//src/v/cluster_link/replication:mux_remote_consumer",
         "//src/v/kafka/client/direct_consumer",
+        "//src/v/kafka/data/rpc",
         "//src/v/kafka/server",
         "//src/v/kafka/server:write_at_offset_stm",
         "//src/v/model",
