@@ -16,6 +16,8 @@
 #include <gmock/gmock.h>
 #include <gtest/gtest.h>
 
+#include <stdexcept>
+
 using namespace std::chrono_literals;
 
 namespace {
@@ -264,4 +266,146 @@ TEST(SingleFiberExecutor, constexpr_test) {
     auto fn = make_fn(5);
     auto f2 = executor_l.submit(fn);
     ASSERT_EQ(f2.get(), 5);
+}
+
+TEST(RepeaterWithRcn, basic_test) {
+    ss::abort_source as;
+    retry_chain_node parent_rcn{as, 1min, 1ms};
+
+    int counter = 0;
+    auto func = [&counter](ss::abort_source&) -> ss::future<int> {
+        return ssx::now(++counter);
+    };
+    auto stop = [](int v) {
+        return v == 3 ? ss::stop_iteration::yes : ss::stop_iteration::no;
+    };
+    auto repeater = ssx::repeater_with_rcn(func, stop, &parent_rcn);
+
+    auto f = repeater(as);
+    ASSERT_EQ(f.get(), 3);
+}
+
+TEST(RepeaterWithRcn, slow_retry_test) {
+    ss::abort_source as;
+    int counter = 0;
+    auto func = [&counter](ss::abort_source&) -> ss::future<int> {
+        return ssx::now(++counter);
+    };
+    auto stop = [](int) { return ss::stop_iteration::no; };
+    auto repeater = ssx::repeater_with_rcn(
+      std::move(func), // rvalues supported too
+      std::move(stop), // rvalues supported too
+      as,
+      1000ms,
+      100ms,
+      retry_strategy::polling);
+
+    auto f = repeater(as);
+    auto cnt_called = f.get();
+
+    // in reality, each delay was between 100 and 200ms due to jitter
+    ASSERT_GE(cnt_called, 5);
+    ASSERT_LE(cnt_called, 10);
+}
+
+TEST(RepeaterWithRcn, slow_execution_test) {
+    ss::abort_source as;
+    retry_chain_node parent_rcn{as, 350ms, 1ms};
+    int counter = 0;
+    auto func = [&counter](ss::abort_source& as) -> ss::future<int> {
+        return ss::sleep_abortable(100ms, as).then_wrapped(
+          [&counter](auto&& f) {
+              if (f.failed()) {
+                  // will not happen: RCN won't trigger abort source
+                  counter += 100;
+              } else {
+                  ++counter;
+              }
+              f.ignore_ready_future();
+              return ssx::now(counter);
+          });
+    };
+    auto stop = [](int) { return ss::stop_iteration::no; };
+    auto repeater = ssx::repeater_with_rcn(func, stop, &parent_rcn);
+
+    auto f = repeater(as);
+    ASSERT_EQ(f.get(), 4);
+}
+
+TEST(RepeaterWithRcn, aborted_during_delay_test) {
+    ss::abort_source as;
+    auto repeater = ssx::repeater_with_rcn(
+      [](ss::abort_source&) { return ssx::now(0); },
+      [](int) { return ss::stop_iteration::no; },
+      as,
+      1000ms,
+      100ms,
+      retry_strategy::polling);
+
+    auto f = repeater(as);
+    ss::sleep(50ms).get();
+    as.request_abort();
+    ASSERT_THROW(f.get(), ss::sleep_aborted);
+}
+
+TEST(RepeaterWithRcn, aborted_during_execution_test) {
+    ss::abort_source as;
+    retry_chain_node parent_rcn{as, 350ms, 1ms};
+    int counter = 0;
+    auto func = [&counter](ss::abort_source& as) -> ss::future<int> {
+        return ss::sleep_abortable(100ms, as).then_wrapped(
+          [&counter](auto&& f) {
+              if (f.failed()) {
+                  counter += 100;
+              } else {
+                  ++counter;
+              }
+              f.ignore_ready_future();
+              return ssx::now(counter);
+          });
+    };
+    auto stop = [](int r) {
+        // stopping if execution aborted, as otherwise RCN retry check throws
+        return r >= 100 ? ss::stop_iteration::yes : ss::stop_iteration::no;
+    };
+    auto repeater = ssx::repeater_with_rcn(func, stop, &parent_rcn);
+
+    auto f = repeater(as);
+    ss::sleep(350ms).get();
+    as.request_abort();
+    ASSERT_EQ(f.get(), 103);
+}
+
+TEST(RepeaterWithRcn, disallowed_retries_test) {
+    ss::abort_source as;
+    int counter = 0;
+    auto repeater = ssx::repeater_with_rcn(
+      [&counter](ss::abort_source&) { return ssx::now(++counter); },
+      [](int) { return ss::stop_iteration::no; },
+      as,
+      1min,
+      1s,
+      retry_strategy::disallow);
+
+    auto f = repeater(as);
+    ASSERT_EQ(f.get(), 1); // run once, then no retries allowed
+}
+
+TEST(RepeaterWithRcn, originally_expired_rcn_test) {
+    ss::abort_source as;
+    auto repeater = ssx::repeater_with_rcn(
+      [](ss::abort_source&) -> ss::future<int> {
+          throw std::runtime_error("should not be called");
+      },
+      [](int) -> ss::stop_iteration {
+          throw std::runtime_error("should not be called");
+      },
+      as,
+      ss::lowres_clock::now() - 1min, // deadline in the past
+      65s);
+
+    auto start = ss::lowres_clock::now();
+    auto f = repeater(as);
+    ASSERT_EQ(f.get(), 0); // run once, then no retries allowed
+    ASSERT_LT(ss::lowres_clock::now() - start, 10s); // and it was quick
 }

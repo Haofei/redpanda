@@ -14,6 +14,7 @@
 #include "base/seastarx.h"
 #include "base/vassert.h"
 #include "ssx/future-util.h"
+#include "utils/retry_chain_node.h"
 
 #include <seastar/core/abort_source.hh>
 #include <seastar/core/future-util.hh>
@@ -272,5 +273,82 @@ public:
         request_abort();
     };
 };
+
+/**
+ * A helper to create a repeater async callable that uses a retry chain node to
+ * determine when to stop repeating.
+ *
+ * @tparam Func: an `ssx::abortable_async_fn`, i.e. a callable type that
+ * accepts `ss::abort_source&` and returns `ss::future<R>` for some type `R`.
+ * May be a reference.
+ * @tparam StopCondition: a callable type that accepts `R` and returns
+ * `ss::stop_iteration`. It determines whether to stop repeating based on the
+ * result of the last invocation of `Func`. May be a reference.
+ * @tparam RcnArgs: arguments to construct a `ss::retry_chain_node`.
+ * Usually it's either a `retry_chain_node *` to use an existing instance,
+ * or some other arguments like timeouts to construct a new instance.
+ * @returns: an `ssx::abortable_async_fn` that repeats calling `Func` until
+ * `StopCondition` returns `ss::stop_iteration::yes` or the retry chain node
+ * stops allowing retries.
+ *
+ * RCN's abort source triggers the abort source passed to func, but not the
+ * other way round. Callers can always capture parent RCN's abort source if
+ * they want the whole chain to stop if the function is aborted by its local
+ * abort source.
+ */
+template<abortable_async_fn Func, typename StopCondition>
+class repeater_with_rcn {
+public:
+    template<typename... RcnArgs>
+    constexpr repeater_with_rcn(
+      Func&& func, StopCondition&& stop, RcnArgs&&... rcn_args)
+      : _func(std::forward<Func>(func))
+      , _stop(std::forward<StopCondition>(stop))
+      , _rcn(std::forward<RcnArgs>(rcn_args)...) {}
+    using future_t = decltype(std::declval<Func>()(
+      std::declval<ss::abort_source&>()));
+
+    future_t operator()(ss::abort_source& as) {
+        auto permit = _rcn.retry();
+        if (!permit.is_allowed) {
+            co_return typename future_t::value_type{};
+        }
+        auto subscription = _rcn.root_abort_source().subscribe(
+          [&as] noexcept { as.request_abort(); });
+        while (true) {
+            auto r = co_await _func(as);
+            if (_stop(r) == ss::stop_iteration::yes) {
+                co_return r;
+            }
+            auto permit = _rcn.retry();
+            if (!permit.is_allowed) {
+                co_return r;
+            }
+            // Using local abort source. If RCN's abort source is triggered,
+            // it will trigger the local one too.
+            co_await ss::sleep_abortable(permit.delay, as);
+        }
+    }
+
+private:
+    Func _func;
+    StopCondition _stop;
+    retry_chain_node _rcn;
+};
+
+namespace detail {
+template<typename T>
+using remove_rvalue_reference = std::
+  conditional_t<std::is_rvalue_reference_v<T>, std::remove_reference_t<T>, T>;
+}
+
+// Deduction guide to preserve value categories for functions.
+// If `repeater_with_rcn` was a function and `_func` and `_stop` were local
+// variables it would happen automatically. But it would be 5 nested lambdas
+// this way.
+template<abortable_async_fn Func, typename StopCondition, typename... RcnArgs>
+repeater_with_rcn(Func&&, StopCondition&&, RcnArgs&&...) -> repeater_with_rcn<
+  detail::remove_rvalue_reference<Func&&>,
+  detail::remove_rvalue_reference<StopCondition&&>>;
 
 } // namespace ssx

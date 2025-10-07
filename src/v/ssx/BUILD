@@ -269,6 +269,7 @@ redpanda_cc_library(
     visibility = ["//visibility:public"],
     deps = [
         ":future_util",
+        "//src/v/utils:retry_chain_node",
         "@seastar",
     ],
 )
