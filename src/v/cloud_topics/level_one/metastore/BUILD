@@ -240,11 +240,12 @@ redpanda_cc_library(
         "//src/v/cluster",
         "//src/v/model",
         "//src/v/model:batch_builder",
-        "//src/v/ssx:future_util",
+        "//src/v/ssx:sleep_abortable",
     ],
     visibility = ["//visibility:public"],
     deps = [
         "//src/v/base",
+        "//src/v/ssx:work_queue",
         "//src/v/utils:named_type",
         "@seastar",
     ],

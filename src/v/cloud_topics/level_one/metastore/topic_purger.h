@@ -10,15 +10,18 @@
 #pragma once
 
 #include "base/seastarx.h"
+#include "ssx/work_queue.h"
 #include "utils/named_type.h"
 
 #include <seastar/core/abort_source.hh>
 #include <seastar/core/future.hh>
+#include <seastar/core/sharded.hh>
 
 #include <expected>
 
 namespace cluster {
 class topic_table;
+class topics_frontend;
 struct nt_revision;
 } // namespace cluster
 
@@ -48,6 +51,35 @@ private:
     metastore* metastore_;
     cluster::topic_table* topics_;
     remove_tombstone_fn_t remove_tombstone_;
+};
+
+// Manages a loop to purge topics that runs only on leadership of a partition
+// (expected that the partition is partition 0 of the metastore topic).
+class topic_purge_loop;
+class topic_purger_manager {
+public:
+    using needs_loop = ss::bool_class<struct needs_loop_tag>;
+    topic_purger_manager(
+      metastore* metastore,
+      ss::sharded<cluster::topic_table>* topics,
+      ss::sharded<cluster::topics_frontend>* topics_fe);
+    ~topic_purger_manager();
+
+    // Enqueues a reset of the loop such that eventually a topic_purge_loop
+    // will be running if needs_loop is true, or not running if false.
+    void enqueue_loop_reset(needs_loop needs);
+
+    ss::future<> stop();
+
+private:
+    ss::future<> reset_purge_loop(needs_loop needs);
+
+    metastore* metastore_;
+    ss::sharded<cluster::topic_table>* topics_;
+    ss::sharded<cluster::topics_frontend>* topics_fe_;
+
+    ssx::work_queue queue_;
+    std::unique_ptr<topic_purge_loop> topic_purge_loop_;
 };
 
 } // namespace cloud_topics::l1
