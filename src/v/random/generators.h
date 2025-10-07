@@ -43,15 +43,15 @@ public:
     /// Initializes an rng object using the _default_ seed
     /// policy, which is fixed in most contexts, but random in
     /// fuzz test contexts.
-    rng();
+    rng() noexcept;
 
     /// Initializes an rng object using a random seed regardless
     /// of the default policy.
-    explicit rng(random_seed_tag);
+    explicit rng(random_seed_tag) noexcept;
 
     /// Initializes with a given seed.
     /// @param seed The seed value to initialize the generator with
-    explicit rng(seed_type seed);
+    explicit rng(seed_type seed) noexcept;
 
     /// The initial seed used to create this rng object.
     /// If you create another object with the same seed it should

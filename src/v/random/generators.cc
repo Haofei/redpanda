@@ -94,13 +94,13 @@ namespace internal {
 seeding_mode default_seeding_policy() { return global_seeding_mode; }
 } // namespace internal
 
-rng::rng()
+rng::rng() noexcept
   : rng(get_initial_seed()) {}
 
-rng::rng(random_seed_tag)
+rng::rng(random_seed_tag) noexcept
   : rng(random_seed()) {}
 
-rng::rng(seed_type seed)
+rng::rng(seed_type seed) noexcept
   : gen_(seed_to_seq(seed))
   , initial_seed_(seed) {}
 
