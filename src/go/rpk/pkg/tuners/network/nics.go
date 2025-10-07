@@ -299,6 +299,7 @@ func GetCurrentAndTargetChannels(
 
 	targetChannels = currentChannels
 	targetChannels.RxCount = min(currentChannels.MaxRx, uint32(puCount))
+	targetChannels.TxCount = min(currentChannels.MaxTx, uint32(puCount))
 	targetChannels.CombinedCount = min(currentChannels.MaxCombined, uint32(puCount))
 
 	zap.L().Sugar().Debugf("Got current channels for '%s': %+v, target channels: %+v", nic.Name(), currentChannels, targetChannels)

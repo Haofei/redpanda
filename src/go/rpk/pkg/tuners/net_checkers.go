@@ -125,10 +125,11 @@ func (f *netCheckersFactory) NewNicRxQueueCountChecker(
 			}
 
 			rxCheck := currentChannels.RxCount == targetChannels.RxCount
+			txCheck := currentChannels.TxCount == targetChannels.TxCount
 			combinedCheck := currentChannels.CombinedCount == targetChannels.CombinedCount
 
-			// We need both to be true because for the not in use one the check will always be true (0 == 0)
-			return rxCheck && combinedCheck, nil
+			// We need all to be true because for the not in use one the check will always be true (0 == 0)
+			return rxCheck && txCheck && combinedCheck, nil
 		},
 	)
 }
