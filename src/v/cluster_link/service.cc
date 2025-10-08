@@ -560,21 +560,21 @@ ss::future<> service::maybe_stop_manager() {
     co_await mgr->stop();
 }
 
-ss::future<rpc::shadow_topic_report_response> service::shard_local_topic_report(
+rpc::shadow_topic_report_response service::shard_local_topic_report(
   const model::id_t& link_id, const ::model::topic& topic) {
     auto h = _gate.hold();
     if (auto err = check_manager_state(); err != errc::success) {
-        co_return rpc::shadow_topic_report_response{.err_code = err};
+        return rpc::shadow_topic_report_response{.err_code = err};
     }
     auto& registry = _manager->registry();
     const auto& md = registry->find_link_by_id(link_id);
     if (!md.has_value()) {
-        co_return ::cluster_link::rpc::shadow_topic_report_response{
+        return ::cluster_link::rpc::shadow_topic_report_response{
           .err_code = errc::link_id_not_found};
     }
     const auto& topics = md->get().state.mirror_topics;
     if (topics.find(topic) == topics.end()) {
-        co_return ::cluster_link::rpc::shadow_topic_report_response{
+        return ::cluster_link::rpc::shadow_topic_report_response{
           .err_code = errc::topic_not_being_mirrored};
     }
     auto maybe_rev = registry->get_last_update_revision(link_id);
@@ -585,7 +585,7 @@ ss::future<rpc::shadow_topic_report_response> service::shard_local_topic_report(
           "the link revision does not exist",
           topic,
           link_id);
-        co_return ::cluster_link::rpc::shadow_topic_report_response{
+        return ::cluster_link::rpc::shadow_topic_report_response{
           .err_code = ::cluster_link::errc::link_id_not_found};
     }
     rpc::shadow_topic_report_response result;
@@ -602,7 +602,7 @@ ss::future<rpc::shadow_topic_report_response> service::shard_local_topic_report(
           ::cluster_link::rpc::shadow_topic_partition_leader_report{
             .partition = ntp.tp.partition});
     }
-    co_return result;
+    return result;
 }
 
 ss::future<rpc::shadow_topic_report_response>

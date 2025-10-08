@@ -122,7 +122,7 @@ public:
     /**
      * @brief Reports the status of a shard-local topic in the given link
      */
-    ss::future<rpc::shadow_topic_report_response>
+    rpc::shadow_topic_report_response
     shard_local_topic_report(const model::id_t&, const ::model::topic&);
 
     /**
