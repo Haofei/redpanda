@@ -13,6 +13,7 @@
 
 #include "cluster/fwd.h"
 #include "cluster_link/fwd.h"
+#include "cluster_link/model/types.h"
 #include "proto/redpanda/core/admin/v2/shadow_link.proto.h"
 #include "redpanda/admin/proxy/client.h"
 
@@ -65,6 +66,11 @@ private:
      * @p ntp
      */
     std::optional<model::node_id> redirect_to(const model::ntp& ntp);
+
+    /// Used to build a shadow link by gathering metadata and status from shadow
+    /// link service
+    ss::future<proto::admin::shadow_link>
+    build_shadow_link(cluster_link::model::name_t shadow_link_name);
 
 private:
     admin::proxy::client _proxy_client;

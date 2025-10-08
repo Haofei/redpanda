@@ -42,6 +42,7 @@ using proto::admin::tls_file_settings;
 using proto::admin::tls_settings;
 using proto::admin::tlspem_settings;
 using proto::admin::topic_metadata_sync_options;
+using proto::admin::topic_partition_information;
 using proto::admin::update_shadow_link_request;
 namespace {
 
@@ -830,25 +831,29 @@ create_shadow_link_configuration(const cluster_link::model::metadata& md) {
     return configurations;
 }
 
-chunked_vector<shadow_topic>
-create_shadow_topics(const cluster_link::model::link_state& state) {
+chunked_vector<shadow_topic> create_shadow_topics(
+  const cluster_link::model::link_state& state,
+  const cluster_link::model::shadow_link_status_report& status_report) {
     chunked_vector<shadow_topic> shadow_topics;
     shadow_topics.reserve(state.mirror_topics.size());
 
     std::ranges::transform(
       state.mirror_topics,
       std::back_inserter(shadow_topics),
-      [](const auto& p) { return model_to_shadow_topic(p.first, p.second); });
+      [&status_report](const auto& p) {
+          return model_to_shadow_topic(p.first, p.second, status_report);
+      });
 
     return shadow_topics;
 }
 
-shadow_link_status
-create_shadow_link_status(const cluster_link::model::metadata& md) {
+shadow_link_status create_shadow_link_status(
+  const cluster_link::model::metadata& md,
+  const cluster_link::model::shadow_link_status_report& status_report) {
     shadow_link_status status;
 
     status.set_state(convert_link_status(md.state.status));
-    status.set_shadow_topics(create_shadow_topics(md.state));
+    status.set_shadow_topics(create_shadow_topics(md.state, status_report));
 
     chunked_vector<ss::sstring> properties_synced;
     auto props = md.configuration.topic_metadata_mirroring_cfg
@@ -930,6 +935,25 @@ void merge_output_only_fields(
   cluster_link::model::metadata& to) {
     to.connection.client_id = from.connection.client_id;
 }
+
+chunked_vector<topic_partition_information> status_to_partition_information(
+  const cluster_link::rpc::shadow_link_status_topic_response& response) {
+    chunked_vector<topic_partition_information> resp;
+    resp.reserve(response.partition_reports.size());
+    for (const auto& [part_id, report] : response.partition_reports) {
+        topic_partition_information info;
+        info.set_partition_id(part_id);
+        info.set_source_high_watermark(report.source_partition_high_watermark);
+        info.set_source_last_stable_offset(
+          report.source_partition_last_stable_offset);
+        info.set_source_last_updated_timestamp(
+          absl::FromUnixMillis(report.last_update_time.count()));
+        info.set_high_watermark(report.shadow_partition_high_watermark);
+        resp.emplace_back(std::move(info));
+    }
+
+    return resp;
+}
 } // namespace
 
 void set_client_id(cluster_link::model::metadata& md) {
@@ -950,13 +974,15 @@ convert_create_to_metadata(create_shadow_link_request req) {
     }
 }
 
-shadow_link metadata_to_shadow_link(cluster_link::model::metadata md) {
+shadow_link metadata_to_shadow_link(
+  cluster_link::model::metadata md,
+  cluster_link::model::shadow_link_status_report status_report) {
     shadow_link sl;
 
     sl.set_name(std::move(md.name));
     sl.set_uid(ssx::sformat("{}", md.uuid));
     sl.set_configurations(create_shadow_link_configuration(md));
-    sl.set_status(create_shadow_link_status(md));
+    sl.set_status(create_shadow_link_status(md, status_report));
 
     return sl;
 }
@@ -973,7 +999,7 @@ create_update_cluster_link_config_cmd(
     // Save off client ID to reuse later
     // Client ID is an output only field so when the shadow link value is
     // converted back to metadata, the client ID is not set
-    auto current_sl = metadata_to_shadow_link(current_metadata.copy());
+    auto current_sl = metadata_to_shadow_link(current_metadata.copy(), {});
     req.get_update_mask().merge_into(
       std::move(req.get_shadow_link()), &current_sl);
     merge_input_only_fields(current_metadata, current_sl);
@@ -994,7 +1020,8 @@ create_update_cluster_link_config_cmd(
 
 shadow_topic model_to_shadow_topic(
   ::model::topic_view topic,
-  const cluster_link::model::mirror_topic_metadata& metadata) {
+  const cluster_link::model::mirror_topic_metadata& metadata,
+  const cluster_link::model::shadow_link_status_report& status_report) {
     shadow_topic st;
     st.set_name(ss::sstring{topic});
     if (metadata.destination_topic_id != model::topic_id{}) {
@@ -1007,6 +1034,11 @@ shadow_topic model_to_shadow_topic(
     }
     shadow_topic_status status;
     status.set_state(mirror_topic_state_to_shadow_topic_state(metadata.status));
+    auto it = status_report.topic_responses.find(topic);
+    if (it != status_report.topic_responses.end()) {
+        status.set_partition_information(
+          status_to_partition_information(it->second));
+    }
     st.set_status(std::move(status));
 
     return st;
