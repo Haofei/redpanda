@@ -570,8 +570,10 @@ FIXTURE_TEST(test_delete_from_archive_truncation, delete_records_e2e_fixture) {
       .get();
     BOOST_REQUIRE(archiver->sync_for_tests().get());
     archiver->housekeeping().get();
+    // Start offset is base of the last segment of the last spillover.
     BOOST_REQUIRE_EQUAL(
-      model::offset(0), stm_manifest.get_archive_start_offset());
+      kafka::offset((segs_per_spill - 1) * records_per_seg),
+      stm_manifest.get_archive_start_kafka_offset());
     BOOST_REQUIRE_EQUAL(stm_manifest.get_spillover_map().size(), 3);
     BOOST_REQUIRE_EQUAL(stm_manifest.size(), segs_per_spill);
 
