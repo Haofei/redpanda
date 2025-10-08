@@ -32,10 +32,12 @@ import (
 	"github.com/redpanda-data/redpanda/src/go/rpk/pkg/tuners/hwloc"
 	"github.com/redpanda-data/redpanda/src/go/rpk/pkg/tuners/iotune"
 	"github.com/redpanda-data/redpanda/src/go/rpk/pkg/tuners/irq"
+	"github.com/redpanda-data/redpanda/src/go/rpk/pkg/tuners/network"
 	"github.com/spf13/afero"
 	"github.com/spf13/cobra"
 	"github.com/spf13/pflag"
 	"go.uber.org/zap"
+	"gopkg.in/yaml.v3"
 )
 
 type prestartConfig struct {
@@ -498,6 +500,42 @@ func checkNetDedicatedMode(fs afero.Fs, y *config.RedpandaYaml) (string, error) 
 	return "", nil
 }
 
+// Tries to read the tuner config file and extract the RedpandaCpuset from it.
+// Returns empty string in case no cpuset/file was found.
+func readTunerConfigCpuset(fs afero.Fs) (string, error) {
+	exists, err := afero.Exists(fs, network.NetTunerConfigFile)
+	if err != nil {
+		return "", err
+	}
+
+	if !exists {
+		return "", nil
+	}
+
+	content, err := afero.ReadFile(fs, network.NetTunerConfigFile)
+	if err != nil {
+		return "", err
+	}
+
+	if len(content) == 0 {
+		fmt.Println("Net tuner config file found but empty")
+		return "", nil
+	}
+
+	config := tuners.NetTunerConfig{}
+	err = yaml.Unmarshal(content, &config)
+	if err != nil {
+		return "", err
+	}
+
+	if config.Cpusets == nil {
+		fmt.Println("Net tuner config file found but no cpusets (v1) section")
+		return "", nil
+	}
+
+	return config.Cpusets.RedpandaCpuset, nil
+}
+
 func buildRedpandaFlags(
 	fs afero.Fs,
 	y *config.RedpandaYaml,
@@ -519,10 +557,20 @@ func buildRedpandaFlags(
 
 	preserve := make(map[string]bool, 2)
 
-	// If network tuning is enabled and we are in dedicated mode, we will start
-	// redpanda with a cpuset that automatically moves it away from the
-	// interrupt cores.
-	if y.Rpk.Tuners.TuneNetwork {
+	// Check if tuner config file exists and read redpanda cpuset from it
+	tunerConfigCpuset, err := readTunerConfigCpuset(fs)
+	if err != nil {
+		return nil, fmt.Errorf("failed to read tuner config file: %w", err)
+	}
+
+	if tunerConfigCpuset != "" {
+		sFlags.cpuSet = tunerConfigCpuset
+		preserve[cpuSetFlag] = true
+		fmt.Printf("Using cpuset from tuner config: %s\n", tunerConfigCpuset)
+	} else if y.Rpk.Tuners.TuneNetwork {
+		// If network tuning is enabled and we are in dedicated mode, we will start
+		// redpanda with a cpuset that automatically moves it away from the
+		// interrupt cores.
 		mask, err := checkNetDedicatedMode(fs, y)
 		if err != nil {
 			return nil, err
