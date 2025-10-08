@@ -146,6 +146,8 @@ TEST_F(e2e_fixture, timequery) {
       // For broker time, we should be ignoring the timestamp deltas
       {.relative_timestamps = {0, 1, 2, 3, 5}, .broker_time = true},
       {.relative_timestamps = {16, 17, 17, 18, 16, 20}},
+      {.relative_timestamps = {22, 23, 24}},
+      {.relative_timestamps = {25, 26, 27}},
     };
     model::timestamp now = model::timestamp::now();
     auto* producer = make_producer();
@@ -191,7 +193,10 @@ TEST_F(e2e_fixture, timequery) {
       {.relative_timestamp = 18, .expected_offset = 24},
       {.relative_timestamp = 19, .expected_offset = 26},
       {.relative_timestamp = 20, .expected_offset = 26},
-      {.relative_timestamp = 21, .expected_offset = -1},
+      {.relative_timestamp = 21, .expected_offset = 27},
+      {.relative_timestamp = 22, .expected_offset = 27},
+      {.relative_timestamp = 23, .expected_offset = 28},
+      {.relative_timestamp = 28, .expected_offset = -1},
     };
     auto* consumer = make_consumer();
     for (const auto& testcase : timequery_tests) {
