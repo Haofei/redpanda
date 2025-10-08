@@ -145,6 +145,15 @@ struct virtual_connection_id {
     operator<<(std::ostream& o, const virtual_connection_id& id);
 };
 
+class last_value {
+public:
+    void update(std::optional<std::string_view> new_value);
+    const std::optional<ss::sstring>& get() const { return value; }
+
+private:
+    std::optional<ss::sstring> value{std::nullopt};
+};
+
 struct connection_attributes {
     using sys_clock = ss::lowres_system_clock;
     struct request_state {
@@ -168,6 +177,7 @@ struct connection_attributes {
 
     uuid_t connection_id{uuid_t::create()};
     sys_clock::time_point open_time{sys_clock::now()};
+    last_value last_client_id{};
 };
 
 class connection_context final

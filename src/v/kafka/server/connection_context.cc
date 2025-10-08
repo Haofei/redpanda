@@ -452,6 +452,7 @@ ss::future<> connection_context::process_one_request() {
         co_return;
     }
     _server.handler_probe(h->key).add_bytes_received(sz.value());
+    _attributes.last_client_id.update(h->client_id);
     /**
      * An entry point for the MPX serverless extensions. If the first request
      * for a given connection has a special client_id then MPX extensions are
@@ -900,6 +901,12 @@ proto::admin::kafka_connection connection_context::to_proto() const {
     auth_info.set_mechanism(auth_mechanism);
     res.set_authentication_info(std::move(auth_info));
 
+    constexpr auto get_last_str = [](const last_value& val) {
+        return val.get().value_or("");
+    };
+
+    res.set_client_id(get_last_str(_attributes.last_client_id));
+
     using tracker_t = connection_attributes::request_state::tracker_t;
     auto now = tracker_t::clock::now();
 
@@ -1158,6 +1165,12 @@ std::ostream& operator<<(std::ostream& o, const virtual_connection_id& id) {
       id.virtual_cluster_id,
       id.connection_id);
     return o;
+}
+
+void last_value::update(std::optional<std::string_view> new_value) {
+    if (new_value && value != *new_value) {
+        value = ss::sstring{*new_value};
+    }
 }
 
 } // namespace kafka
