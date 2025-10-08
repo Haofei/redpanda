@@ -606,7 +606,7 @@ replicated_metastore::get_compaction_offsets(
 
 ss::future<std::expected<metastore::compaction_info_response, metastore::errc>>
 replicated_metastore::get_compaction_info(
-  [[maybe_unused]] const compaction_sample_spec& log) {
+  [[maybe_unused]] const compaction_info_spec& log) {
     co_return compaction_info_response{};
 }
 

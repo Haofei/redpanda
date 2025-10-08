@@ -1533,9 +1533,9 @@ TEST(SimpleMetastoreTest, TestDirtyRatio) {
         ASSERT_TRUE(compact_res.has_value());
     }
 
-    auto to_sample = metastore::compaction_sample_spec{
+    auto to_collect = metastore::compaction_info_spec{
       .tidp = tp, .tombstone_removal_upper_bound_ts = 3000_t};
-    auto compaction_info = m.get_compaction_info(to_sample).get();
+    auto compaction_info = m.get_compaction_info(to_collect).get();
     ASSERT_TRUE(compaction_info.has_value());
     ASSERT_FLOAT_EQ(compaction_info->dirty_ratio, 1.0);
 
@@ -1552,7 +1552,7 @@ TEST(SimpleMetastoreTest, TestDirtyRatio) {
         ASSERT_TRUE(compact_res.has_value());
     }
 
-    compaction_info = m.get_compaction_info(to_sample).get();
+    compaction_info = m.get_compaction_info(to_collect).get();
     ASSERT_TRUE(compaction_info.has_value());
     ASSERT_FLOAT_EQ(compaction_info->dirty_ratio, 0.5);
 
@@ -1569,7 +1569,7 @@ TEST(SimpleMetastoreTest, TestDirtyRatio) {
         ASSERT_TRUE(compact_res.has_value());
     }
 
-    compaction_info = m.get_compaction_info(to_sample).get();
+    compaction_info = m.get_compaction_info(to_collect).get();
     ASSERT_TRUE(compaction_info.has_value());
     ASSERT_FLOAT_EQ(compaction_info->dirty_ratio, 0.0);
 }

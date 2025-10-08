@@ -95,7 +95,7 @@ public:
       const model::topic_id_partition&, model::timestamp) override;
 
     ss::future<std::expected<compaction_info_response, errc>>
-    get_compaction_info(const compaction_sample_spec&) override;
+    get_compaction_info(const compaction_info_spec&) override;
 
 private:
     friend class domain_manager;

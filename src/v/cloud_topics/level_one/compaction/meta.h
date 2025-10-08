@@ -25,11 +25,11 @@
 
 namespace cloud_topics::l1 {
 
-// Contains sampled information from the metastore and the time at which it was
-// sampled.
+// Contains compaction information collected from the metastore and the time at
+// which it was obtained.
 struct compaction_info_and_timestamp {
     metastore::compaction_info_response info;
-    model::timestamp sampled_at;
+    model::timestamp collected_at;
 };
 
 struct log_compaction_meta {
@@ -40,7 +40,7 @@ struct log_compaction_meta {
     model::topic_id_partition tidp;
     model::ntp ntp;
     // If set, this is cached compaction metadata obtained from the metastore at
-    // the `sampled_at` time.
+    // the `collected_at` time.
     std::optional<compaction_info_and_timestamp> info_and_ts{std::nullopt};
     // If set, this is the shard on which the log is currently undergoing an
     // inflight compaction.
