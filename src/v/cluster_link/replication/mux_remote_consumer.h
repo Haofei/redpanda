@@ -49,12 +49,7 @@ public:
       std::unique_ptr<kafka::client::direct_consumer> consumer,
       kafka::snc_quota_manager& snc_quota_mgr,
       size_t partition_max_buffered,
-      std::chrono::milliseconds fetch_max_wait)
-      : _client_id(std::move(client_id))
-      , _consumer(std::move(consumer))
-      , _snc_quota_mgr(snc_quota_mgr)
-      , _partition_max_buffered(partition_max_buffered)
-      , _fetch_max_wait(fetch_max_wait) {}
+      std::chrono::milliseconds fetch_max_wait);
 
     ss::future<> start();
     ss::future<> stop() noexcept;
@@ -80,6 +75,7 @@ public:
     fetch(const ::model::topic_partition&, ss::abort_source&);
 
 private:
+    bool should_throttle_produce();
     bool can_ignore_partition_data(const ::model::topic_partition&);
     ss::future<> assign_pending_partitions();
     ss::future<> fetch_loop();
@@ -102,7 +98,10 @@ private:
       _pending_assignment;
     size_t _partition_max_buffered;
     std::chrono::milliseconds _fetch_max_wait;
+    config::binding<std::vector<ss::sstring>> _kafka_tput_controlled_api_keys;
+    bool _produce_throttling_enabled;
     ss::gate _gate;
+    ss::abort_source _as;
     ss::condition_variable _cv;
     friend class ::MuxConsumerFixture;
 };
