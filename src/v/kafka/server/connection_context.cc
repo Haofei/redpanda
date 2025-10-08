@@ -36,6 +36,10 @@
 #include "net/exceptions.h"
 #include "security/authorizer.h"
 #include "security/exceptions.h"
+#include "security/gssapi_authenticator.h"
+#include "security/oidc_authenticator.h"
+#include "security/plain_authenticator.h"
+#include "security/scram_authenticator.h"
 #include "utils/windowed_sum_tracker.h"
 
 #include <seastar/core/coroutine.hh>
@@ -847,8 +851,53 @@ proto::admin::kafka_connection connection_context::to_proto() const {
     tls_info.set_enabled(conn->tls_enabled());
     res.set_tls_info(std::move(tls_info));
 
+    auto auth_state = [this]() {
+        if (_mtls_state) {
+            return proto::admin::authentication_state::success;
+        } else if (_sasl) {
+            switch (_sasl->state()) {
+            case security::sasl_server::sasl_state::initial:
+            case security::sasl_server::sasl_state::handshake:
+            case security::sasl_server::sasl_state::authenticate:
+                return proto::admin::authentication_state::unauthenticated;
+            case security::sasl_server::sasl_state::complete:
+                return proto::admin::authentication_state::success;
+            case security::sasl_server::sasl_state::failed:
+                return proto::admin::authentication_state::failure;
+            }
+        }
+        return proto::admin::authentication_state::unauthenticated;
+    }();
+    auto auth_mechanism = [this]() -> proto::admin::authentication_mechanism {
+        if (_mtls_state) {
+            return proto::admin::authentication_mechanism::mtls;
+        } else if (_sasl && _sasl->has_mechanism()) {
+            return string_switch<proto::admin::authentication_mechanism>(
+                     _sasl->mechanism().mechanism_name())
+              .match(
+                security::scram_sha256_authenticator::name,
+                proto::admin::authentication_mechanism::sasl_scram)
+              .match(
+                security::scram_sha512_authenticator::name,
+                proto::admin::authentication_mechanism::sasl_scram)
+              .match(
+                security::gssapi_authenticator::name,
+                proto::admin::authentication_mechanism::sasl_gssapi)
+              .match(
+                security::oidc::sasl_authenticator::name,
+                proto::admin::authentication_mechanism::sasl_oauthbearer)
+              .match(
+                security::plain_authenticator::name,
+                proto::admin::authentication_mechanism::sasl_plain)
+              .default_match(
+                proto::admin::authentication_mechanism::unspecified);
+        }
+        return proto::admin::authentication_mechanism::unspecified;
+    }();
     auto auth_info = proto::admin::authentication_info{};
     auth_info.set_user_principal(ss::sstring{get_principal().name()});
+    auth_info.set_state(auth_state);
+    auth_info.set_mechanism(auth_mechanism);
     res.set_authentication_info(std::move(auth_info));
 
     using tracker_t = connection_attributes::request_state::tracker_t;
