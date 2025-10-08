@@ -816,6 +816,14 @@ connection_context::dispatch_method_once(request_header hdr, size_t size) {
       shared_from_this(), std::move(rctx), rres);
 }
 
+namespace {
+absl::Time
+ss_sys_clock_to_absl(const ss::lowres_system_clock::time_point& lowres_tp) {
+    return absl::FromChrono(
+      std::chrono::system_clock::time_point{lowres_tp.time_since_epoch()});
+}
+} // namespace
+
 proto::admin::kafka_connection connection_context::to_proto() const {
     using proto::admin::kafka_connection_state;
 
@@ -828,6 +836,7 @@ proto::admin::kafka_connection connection_context::to_proto() const {
     res.set_state(
       _as.abort_requested() ? kafka_connection_state::aborting
                             : kafka_connection_state::open);
+    res.set_open_time(ss_sys_clock_to_absl(_attributes.open_time));
 
     auto src = proto::admin::source{};
     src.set_ip_address(fmt::format("{}", client_host()));

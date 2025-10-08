@@ -146,6 +146,7 @@ struct virtual_connection_id {
 };
 
 struct connection_attributes {
+    using sys_clock = ss::lowres_system_clock;
     struct request_state {
         constexpr static auto bucket_count = size_t{4};
         constexpr static auto window_ns = std::chrono::minutes(1)
@@ -166,6 +167,7 @@ struct connection_attributes {
     request_state fetch_bytes;
 
     uuid_t connection_id{uuid_t::create()};
+    sys_clock::time_point open_time{sys_clock::now()};
 };
 
 class connection_context final
