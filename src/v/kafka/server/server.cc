@@ -498,6 +498,8 @@ ss::future<response_ptr> heartbeat_handler::handle(
     log_request(ctx.header(), request);
 
     ctx.connection()->attributes().last_group_id.update(request.data.group_id);
+    ctx.connection()->attributes().last_group_instance_id.update(
+      request.data.group_instance_id);
 
     if (unlikely(ctx.recovery_mode_enabled())) {
         co_return co_await ctx.respond(
@@ -612,6 +614,8 @@ process_result_stages sync_group_handler::handle(
     log_request(ctx.header(), request);
 
     ctx.connection()->attributes().last_group_id.update(request.data.group_id);
+    ctx.connection()->attributes().last_group_instance_id.update(
+      request.data.group_instance_id);
 
     if (ctx.recovery_mode_enabled()) {
         return process_result_stages::single_stage(
@@ -847,6 +851,8 @@ process_result_stages join_group_handler::handle(
     log_request(ctx.header(), request);
 
     ctx.connection()->attributes().last_group_id.update(request.data.group_id);
+    ctx.connection()->attributes().last_group_instance_id.update(
+      request.data.group_instance_id);
 
     if (ctx.recovery_mode_enabled()) {
         return process_result_stages::single_stage(
@@ -2016,6 +2022,8 @@ offset_commit_handler::handle(request_context ctx, ss::smp_service_group ssg) {
     log_request(ctx.header(), request);
 
     ctx.connection()->attributes().last_group_id.update(request.data.group_id);
+    ctx.connection()->attributes().last_group_instance_id.update(
+      request.data.group_instance_id);
 
     // check authorization for this group
     const auto group_authorized = ctx.authorized(

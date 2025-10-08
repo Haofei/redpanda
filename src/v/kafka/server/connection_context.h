@@ -192,6 +192,7 @@ struct connection_attributes {
     last_value last_client_software_version{};
     last_value last_transactional_id{};
     last_value last_group_id{};
+    last_value last_group_instance_id{};
 };
 
 class connection_context final
