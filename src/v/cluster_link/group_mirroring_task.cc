@@ -704,8 +704,7 @@ group_mirroring_task::update_group_coordinators() {
                 errored = true;
                 continue;
             }
-            auto it = _groups_to_mirror.find(
-              kafka::group_id(std::move(coord.key)));
+            auto it = _groups_to_mirror.find(kafka::group_id(coord.key));
             if (it != _groups_to_mirror.end()) {
                 it->second.coordinator_id = coord.node_id;
                 vlog(
