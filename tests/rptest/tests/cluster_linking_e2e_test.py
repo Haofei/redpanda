@@ -30,6 +30,8 @@ from rptest.clients.admin.proto.redpanda.core.admin.v2 import (
 from rptest.clients.kafka_cli_tools import KafkaCliToolsError
 from rptest.clients.rpk import RpkTool, RPKACLInput, RpkException
 from rptest.clients.types import TopicSpec
+from rptest.clients.default import DefaultClient
+from rptest.services.cluster import TestContext
 from rptest.services.admin import Admin
 from rptest.services.cluster import cluster
 from rptest.services.kgo_verifier_services import (
@@ -38,16 +40,19 @@ from rptest.services.kgo_verifier_services import (
 )
 from rptest.services.multi_cluster_services import (
     Cluster,
+    RedpandaCluster,
     MultiClusterServices,
     SecondaryClusterArgs,
     SecondaryClusterSpec,
     ServiceType,
 )
-from rptest.services.redpanda import SchemaRegistryConfig
+from rptest.services.redpanda import SchemaRegistryConfig, SecurityConfig
+from rptest.services.tls import TLSCertManager
 from rptest.tests.cluster_linking_test_base import (
     DEFAULT_SYNCED_TOPIC_PROPERTIES,
     DISALLOWED_SYNCED_TOPIC_PROPERTIES,
     REQUIRED_SYNCED_TOPIC_PROPERTIES,
+    ClusterLinkingTLSProvider,
     ShadowLinkPreAllocTestBase,
     ShadowLinkTestBase,
 )
@@ -1697,6 +1702,103 @@ class ShadowLinkTopicFailoverTests(ShadowLinkPreAllocTestBase):
 
         self._produce_to_topics(
             topics, self.target_cluster.service, expect_failures=False
+        )
+
+
+class ShadowLinkUpdateBrokersTests(ShadowLinkPreAllocTestBase):
+    def __init__(self, test_context: TestContext, *args: Any, **kwargs: Any):
+        self.test_context = test_context
+        self.security = SecurityConfig()
+        self.tls = TLSCertManager(self.logger)
+        self.security.tls_provider = ClusterLinkingTLSProvider(self.tls)
+        self.security.require_client_auth = False
+
+        super().__init__(
+            test_context=self.test_context, security=self.security, *args, **kwargs
+        )
+
+        self.other_source_cluster = RedpandaCluster.create(
+            self.test_context,
+            num_brokers=3,
+            security=self.security,
+        )
+
+    def setUp(self):
+        super().setUp()
+        self.other_source_cluster.start()
+
+    @property
+    def target_cluster_rpk(self) -> RpkTool:
+        return RpkTool(
+            self.target_cluster.service, tls_cert=self.tls.create_cert("target-rpk")
+        )
+
+    @property
+    def other_source_cluster_rpk(self) -> RpkTool:
+        return RpkTool(
+            self.other_source_cluster.service,
+            tls_cert=self.tls.create_cert("other-source-rpk"),
+        )
+
+    @cluster(num_nodes=9)
+    def test_update_brokers(self):
+        # Create a link pointing to the old source cluster
+        shadow_link = self.create_link("test-link")
+
+        # Update bootstrap_servers
+        del shadow_link.configurations.client_options.bootstrap_servers[:]
+        shadow_link.configurations.client_options.bootstrap_servers.extend(
+            self.other_source_cluster.service.brokers_list()
+        )
+
+        # Update tls settings
+        shadow_link.configurations.client_options.tls_settings.CopyFrom(
+            shadow_link_pb2.TLSSettings(
+                enabled=True,
+                tls_file_settings=shadow_link_pb2.TLSFileSettings(
+                    ca_path=self.redpanda.TLS_CA_CRT_FILE,
+                    key_path=self.redpanda.TLS_SERVER_KEY_FILE,
+                    cert_path=self.redpanda.TLS_SERVER_CRT_FILE,
+                ),
+            )
+        )
+
+        update_mask: google.protobuf.field_mask_pb2.FieldMask = (
+            google.protobuf.field_mask_pb2.FieldMask(
+                paths=["configurations.client_options"]
+            )
+        )
+
+        # Update the link to point to the new source cluster
+        updated_link = self.update_link(
+            shadow_link=shadow_link, update_mask=update_mask
+        )
+        assert (
+            updated_link.configurations.client_options
+            == shadow_link.configurations.client_options
+        ), (
+            f"Expected updated link to be returned:\n"
+            f"{updated_link.configurations.client_options}!=\n{shadow_link.configurations.client_options}"
+        )
+
+        old_source_topic = "old-source-topic"
+        new_source_topic = "new-source-topic"
+
+        self.source_cluster_rpk.create_topic(old_source_topic)
+        self.other_source_cluster_rpk.create_topic(new_source_topic)
+
+        def topic_exists_in_target(topic: str):
+            topics = self.target_cluster_rpk.list_topics()
+            return topic in topics
+
+        self.target_cluster.service.wait_until(
+            lambda: topic_exists_in_target(new_source_topic),
+            timeout_sec=30,
+            backoff_sec=1,
+            err_msg=f"Topic {new_source_topic} not found in target cluster",
+        )
+        assert not topic_exists_in_target(old_source_topic), (
+            f"Topic {old_source_topic} should not be visible to the target cluster"
         )
 
 
