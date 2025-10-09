@@ -13,6 +13,7 @@
 #include "cluster/nt_revision.h"
 #include "cluster/topic_table.h"
 #include "cluster/types.h"
+#include "config/node_config.h"
 #include "gtest/gtest.h"
 #include "model/fundamental.h"
 #include "test_utils/test.h"
@@ -51,10 +52,14 @@ private:
 
 class TopicPurgerTest : public testing::Test {
 public:
-    TopicPurgerTest()
-      : topic_table(mr) {}
+    void SetUp() override {
+        ss::smp::invoke_on_all([] {
+            config::node().node_id.set_value(model::node_id{1});
+        }).get();
+        topic_table = std::make_unique<cluster::topic_table>(mr);
+    }
     model::offset next_topic_table_offset() const {
-        return model::offset(topic_table.last_applied_revision()() + 1);
+        return model::offset(topic_table->last_applied_revision()() + 1);
     }
     ss::future<std::error_code> register_topic(
       const model::topic& topic,
@@ -64,7 +69,7 @@ public:
           model::kafka_namespace, topic, 1, 1, tp_id);
         topic_cfg.properties.cloud_topic_enabled = true;
         topic_cfg.properties.remote_delete = true;
-        co_return co_await topic_table.apply(
+        co_return co_await topic_table->apply(
           cluster::create_topic_cmd{
             model::topic_namespace{model::kafka_namespace, topic},
             {topic_cfg, {}}},
@@ -72,7 +77,7 @@ public:
     }
     ss::future<std::error_code>
     register_tombstone(const model::topic& topic, model::revision_id rev) {
-        co_return co_await topic_table.apply(
+        co_return co_await topic_table->apply(
           cluster::topic_lifecycle_transition{
             .topic = cluster::
               nt_revision{.nt = model::topic_namespace(model::kafka_namespace, topic), .initial_revision_id = model::initial_revision_id{rev()}},
@@ -83,7 +88,7 @@ public:
     }
     ss::future<std::error_code>
     remove_tombstone(const model::topic& topic, model::revision_id rev) {
-        co_return co_await topic_table.apply(
+        co_return co_await topic_table->apply(
           cluster::topic_lifecycle_transition{
             .topic = cluster::
               nt_revision{.nt = model::topic_namespace(model::kafka_namespace, topic), .initial_revision_id = model::initial_revision_id{rev()}},
@@ -153,12 +158,12 @@ public:
 protected:
     unreliable_metastore metastore;
     cluster::data_migrations::migrated_resources mr;
-    cluster::topic_table topic_table;
+    std::unique_ptr<cluster::topic_table> topic_table;
 };
 
 TEST_F(TopicPurgerTest, TestPurgeRemovesTombstones) {
     register_topics(3).get();
-    ASSERT_EQ(3, topic_table.all_topics().size());
+    ASSERT_EQ(3, topic_table->all_topics().size());
     add_objects(3, 100).get();
 
     // Verify the metastore has offsets for all topics.
@@ -175,8 +180,8 @@ TEST_F(TopicPurgerTest, TestPurgeRemovesTombstones) {
 
     // Tombstone some of the cloud topics in the topic table.
     register_tombstones(2).get();
-    ASSERT_EQ(2, topic_table.get_cloud_topic_tombstones().size());
-    ASSERT_EQ(1, topic_table.all_topics().size());
+    ASSERT_EQ(2, topic_table->get_cloud_topic_tombstones().size());
+    ASSERT_EQ(1, topic_table->all_topics().size());
 
     auto remove_tombstones = topic_purger::remove_tombstone_fn_t{
       [this](const cluster::nt_revision& ntr) {
@@ -184,12 +189,13 @@ TEST_F(TopicPurgerTest, TestPurgeRemovesTombstones) {
       }};
 
     // Reconcile the tombstones by removing state from the metastore.
-    topic_purger purger(&metastore, &topic_table, std::move(remove_tombstones));
+    topic_purger purger(
+      &metastore, topic_table.get(), std::move(remove_tombstones));
     auto result = purger.purge_tombstoned_topics(&never_abort).get();
     ASSERT_TRUE(result.has_value());
 
     // The tombstones should be removed, as should the state in the metastore.
-    ASSERT_EQ(0, topic_table.get_cloud_topic_tombstones().size());
+    ASSERT_EQ(0, topic_table->get_cloud_topic_tombstones().size());
 
     // Verify the metastore no longer has offsets for the tombstoned topics.
     offsets0 = metastore.get_offsets(tp0).get();
@@ -199,19 +205,19 @@ TEST_F(TopicPurgerTest, TestPurgeRemovesTombstones) {
     ASSERT_FALSE(offsets1.has_value());
     ASSERT_TRUE(offsets2.has_value());
 
-    ASSERT_EQ(1, topic_table.all_topics().size());
+    ASSERT_EQ(1, topic_table->all_topics().size());
 }
 
 TEST_F(TopicPurgerTest, TestPurgeManyTopics) {
     static constexpr auto many_topics_count = 10000;
     register_topics(many_topics_count).get();
-    ASSERT_EQ(many_topics_count, topic_table.all_topics().size());
+    ASSERT_EQ(many_topics_count, topic_table->all_topics().size());
     add_objects(many_topics_count, 100).get();
 
     register_tombstones(many_topics_count).get();
     ASSERT_EQ(
-      many_topics_count, topic_table.get_cloud_topic_tombstones().size());
-    ASSERT_EQ(0, topic_table.all_topics().size());
+      many_topics_count, topic_table->get_cloud_topic_tombstones().size());
+    ASSERT_EQ(0, topic_table->all_topics().size());
 
     auto remove_tombstones = topic_purger::remove_tombstone_fn_t{
       [this](const cluster::nt_revision& ntr) {
@@ -219,7 +225,8 @@ TEST_F(TopicPurgerTest, TestPurgeManyTopics) {
       }};
 
     // Reconcile the tombstones by removing state from the metastore.
-    topic_purger purger(&metastore, &topic_table, std::move(remove_tombstones));
+    topic_purger purger(
+      &metastore, topic_table.get(), std::move(remove_tombstones));
     auto result = purger.purge_tombstoned_topics(&never_abort).get();
     ASSERT_TRUE(result.has_value());
 
@@ -229,18 +236,18 @@ TEST_F(TopicPurgerTest, TestPurgeManyTopics) {
         auto offsets = metastore.get_offsets(tp).get();
         ASSERT_FALSE(offsets.has_value());
     }
-    ASSERT_EQ(0, topic_table.get_cloud_topic_tombstones().size());
-    ASSERT_EQ(0, topic_table.all_topics().size());
+    ASSERT_EQ(0, topic_table->get_cloud_topic_tombstones().size());
+    ASSERT_EQ(0, topic_table->all_topics().size());
 }
 
 TEST_F(TopicPurgerTest, TestPurgeWithUnreliableMetastore) {
     register_topics(3).get();
-    ASSERT_EQ(3, topic_table.all_topics().size());
+    ASSERT_EQ(3, topic_table->all_topics().size());
     add_objects(3, 100).get();
 
     register_tombstones(3).get();
-    ASSERT_EQ(3, topic_table.get_cloud_topic_tombstones().size());
-    ASSERT_EQ(0, topic_table.all_topics().size());
+    ASSERT_EQ(3, topic_table->get_cloud_topic_tombstones().size());
+    ASSERT_EQ(0, topic_table->all_topics().size());
 
     metastore.fail_remove_topics(true);
 
@@ -248,7 +255,8 @@ TEST_F(TopicPurgerTest, TestPurgeWithUnreliableMetastore) {
       [this](const cluster::nt_revision& ntr) {
           return remove_tombstone_fn(ntr);
       }};
-    topic_purger purger(&metastore, &topic_table, std::move(remove_tombstones));
+    topic_purger purger(
+      &metastore, topic_table.get(), std::move(remove_tombstones));
 
     // Purge should fail due to metastore failure.
     auto result = purger.purge_tombstoned_topics(&never_abort).get();
@@ -256,24 +264,24 @@ TEST_F(TopicPurgerTest, TestPurgeWithUnreliableMetastore) {
 
     // Tombstones should still be present since we failed to update the
     // metastore.
-    ASSERT_EQ(3, topic_table.get_cloud_topic_tombstones().size());
+    ASSERT_EQ(3, topic_table->get_cloud_topic_tombstones().size());
 
     // Fix the metastore and retry purge.
     metastore.fail_remove_topics(false);
 
     result = purger.purge_tombstoned_topics(&never_abort).get();
     ASSERT_TRUE(result.has_value());
-    ASSERT_EQ(0, topic_table.get_cloud_topic_tombstones().size());
+    ASSERT_EQ(0, topic_table->get_cloud_topic_tombstones().size());
 }
 
 TEST_F(TopicPurgerTest, TestPurgeWithUnreliableController) {
     register_topics(3).get();
-    ASSERT_EQ(3, topic_table.all_topics().size());
+    ASSERT_EQ(3, topic_table->all_topics().size());
     add_objects(3, 100).get();
 
     register_tombstones(3).get();
-    ASSERT_EQ(3, topic_table.get_cloud_topic_tombstones().size());
-    ASSERT_EQ(0, topic_table.all_topics().size());
+    ASSERT_EQ(3, topic_table->get_cloud_topic_tombstones().size());
+    ASSERT_EQ(0, topic_table->all_topics().size());
 
     auto bad_remove_tombstones = topic_purger::remove_tombstone_fn_t{
       [](const cluster::nt_revision&) {
@@ -282,13 +290,13 @@ TEST_F(TopicPurgerTest, TestPurgeWithUnreliableController) {
             std::nullopt);
       }};
     topic_purger purger(
-      &metastore, &topic_table, std::move(bad_remove_tombstones));
+      &metastore, topic_table.get(), std::move(bad_remove_tombstones));
 
     // Purge should fail due to tombstone removal failure.
     auto result = purger.purge_tombstoned_topics(&never_abort).get();
     ASSERT_FALSE(result.has_value());
-    ASSERT_EQ(3, topic_table.get_cloud_topic_tombstones().size());
-    ASSERT_EQ(0, topic_table.all_topics().size());
+    ASSERT_EQ(3, topic_table->get_cloud_topic_tombstones().size());
+    ASSERT_EQ(0, topic_table->all_topics().size());
 
     // The metastore removal should have succeeded though.
     for (int i = 0; i < 3; ++i) {
@@ -304,9 +312,9 @@ TEST_F(TopicPurgerTest, TestPurgeWithUnreliableController) {
           return remove_tombstone_fn(ntr);
       }};
     topic_purger purger_retry(
-      &metastore, &topic_table, std::move(remove_tombstones));
+      &metastore, topic_table.get(), std::move(remove_tombstones));
     result = purger_retry.purge_tombstoned_topics(&never_abort).get();
     ASSERT_TRUE(result.has_value());
-    ASSERT_EQ(0, topic_table.get_cloud_topic_tombstones().size());
-    ASSERT_EQ(0, topic_table.all_topics().size());
+    ASSERT_EQ(0, topic_table->get_cloud_topic_tombstones().size());
+    ASSERT_EQ(0, topic_table->all_topics().size());
 }

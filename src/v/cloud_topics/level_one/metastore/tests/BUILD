@@ -105,6 +105,7 @@ redpanda_cc_gtest(
         "//src/v/cloud_topics/level_one/metastore:topic_purger",
         "//src/v/cluster",
         "//src/v/cluster:nt_revision",
+        "//src/v/config",
         "//src/v/model",
         "//src/v/test_utils:gtest",
         "@googletest//:gtest",
