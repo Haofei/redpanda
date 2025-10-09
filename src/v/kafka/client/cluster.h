@@ -14,6 +14,7 @@
 #include "kafka/client/configuration.h"
 #include "kafka/client/topic_cache.h"
 #include "kafka/client/types.h"
+#include "ssx/work_queue.h"
 #include "utils/notification_list.h"
 #include "utils/prefix_logger.h"
 namespace kafka::client {
@@ -195,6 +196,8 @@ private:
     void update_timer_callback();
     ss::future<> apply_metadata(metadata_update reply);
 
+    ss::future<> do_update_configuration(connection_configuration config);
+
     connection_configuration _config;
     prefix_logger _logger;
     topic_cache _topic_cache;
@@ -211,6 +214,7 @@ private:
     ss::lowres_clock::time_point _last_update_time
       = ss::lowres_clock::time_point::min();
     notification_list<metadata_callback, callback_id> _notifications;
+    ssx::work_queue _update_config_queue;
     ss::gate _gate;
     ss::abort_source _as;
 };

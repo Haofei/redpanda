@@ -15,6 +15,7 @@
 #include "kafka/client/types.h"
 #include "random/generators.h"
 #include "ssx/future-util.h"
+#include "utils/unresolved_address.h"
 
 #include <seastar/coroutine/as_future.hh>
 namespace kafka::client {
@@ -69,8 +70,10 @@ cluster::cluster(connection_configuration config)
       kclog, fmt::format("{}", _config.client_id.value_or("kafka-client")))
   , _brokers(_logger, std::make_unique<remote_broker_factory>(_config, _logger))
   , _next_seed(
-      random_generators::get_int<size_t>(
-        0, _config.initial_brokers.size() - 1)) {}
+      random_generators::get_int<size_t>(0, _config.initial_brokers.size() - 1))
+  , _update_config_queue([this](const std::exception_ptr& ex) {
+      vlog(_logger.warn, "unexpected client error: {}", ex);
+  }) {}
 
 cluster::cluster(
   connection_configuration config,
@@ -80,8 +83,10 @@ cluster::cluster(
       kclog, fmt::format("{}", _config.client_id.value_or("kafka-client")))
   , _brokers(_logger, std::move(broker_factory))
   , _next_seed(
-      random_generators::get_int<size_t>(
-        0, _config.initial_brokers.size() - 1)) {}
+      random_generators::get_int<size_t>(0, _config.initial_brokers.size() - 1))
+  , _update_config_queue([this](const std::exception_ptr& ex) {
+      vlog(_logger.warn, "unexpected client error: {}", ex);
+  }) {}
 
 ss::future<> cluster::start() {
     vlog(
@@ -112,6 +117,7 @@ ss::future<> cluster::stop() {
     _as.request_abort();
     _metadata_update_timer.cancel();
     _update_lock.broken();
+    co_await _update_config_queue.shutdown();
     co_await _gate.close();
     co_await _brokers.stop();
 }
@@ -366,17 +372,30 @@ void cluster::set_sasl_configuration(std::optional<sasl_configuration> creds) {
 }
 
 void cluster::update_configuration(connection_configuration config) {
-    if (config.sasl_cfg != _config.sasl_cfg) {
-        set_sasl_configuration(std::move(config.sasl_cfg));
-    }
+    _update_config_queue.submit([this, config = std::move(config)] {
+        return do_update_configuration(std::move(config))
+          .handle_exception([this](std::exception_ptr ex) {
+              vlog(_logger.warn, "Failed to update broker config: {}", ex);
+          });
+    });
+}
 
-    // TODO: Expand this function to handle the rest of the configs
+ss::future<> cluster::do_update_configuration(connection_configuration config) {
+    auto u = co_await _update_lock.get_units();
+
+    vlog(_logger.debug, "Updating cluster config to '{}'", config);
+    _config = std::move(config);
+
+    // all updates to the cluster brokers should happen under the
+    // metadata update lock
+    co_await _brokers.clear();
+    co_await dispatch_and_apply_metadata_updates();
 }
 
 ss::future<> cluster::apply_metadata(metadata_update reply) {
     /**
-     * this is the only place where the cluster brokers are updated. It happens
-     * under the metadata update lock.
+     * All updates to the cluster brokers should happen under the metadata
+     * update lock.
      */
 
     vlog(
