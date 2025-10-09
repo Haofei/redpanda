@@ -465,6 +465,8 @@ void service::register_notifications() {
     });
 }
 
+void service::unregister_notifications() { _notification_cleanups.clear(); }
+
 ss::future<rpc::shadow_topic_report_response> service::shard_local_topic_report(
   const model::id_t& link_id, const ::model::topic& topic) {
     auto& registry = _manager->registry();
