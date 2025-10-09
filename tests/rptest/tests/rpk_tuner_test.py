@@ -101,8 +101,6 @@ transparent_hugepages  true     true
             else expected
         )
 
-        output = rpk.tune("list")
-        if output != expected:
-            self.logger.debug(f"expected:\n{expected}\ngot:\n{output}")
+        output = rpk.tune("list", verbose=False)
 
-        assert output == expected
+        assert output == expected, f"expected:\n{expected}\ngot:\n{output}"
