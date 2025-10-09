@@ -11,6 +11,7 @@
 #pragma once
 #include "base/seastarx.h"
 #include "kafka/client/brokers.h"
+#include "kafka/client/configuration.h"
 #include "kafka/client/topic_cache.h"
 #include "kafka/client/types.h"
 #include "utils/notification_list.h"
@@ -170,6 +171,9 @@ public:
     cluster_authorized_operations get_cluster_authorized_operations() const {
         return _cluster_authorized_operations;
     }
+
+    void update_configuration(connection_configuration);
+    const connection_configuration& configuration() const { return _config; }
 
 private:
     ss::future<> update_metadata(

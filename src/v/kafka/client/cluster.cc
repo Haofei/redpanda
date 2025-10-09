@@ -11,6 +11,7 @@
 
 #include "kafka/client/cluster.h"
 
+#include "kafka/client/configuration.h"
 #include "kafka/client/types.h"
 #include "random/generators.h"
 #include "ssx/future-util.h"
@@ -362,6 +363,14 @@ cluster::dispatch_describe_cluster_request(shared_broker_t broker) {
 void cluster::set_sasl_configuration(std::optional<sasl_configuration> creds) {
     vlog(_logger.debug, "Setting SASL configuration: {}", creds);
     _config.sasl_cfg = std::move(creds);
+}
+
+void cluster::update_configuration(connection_configuration config) {
+    if (config.sasl_cfg != _config.sasl_cfg) {
+        set_sasl_configuration(std::move(config.sasl_cfg));
+    }
+
+    // TODO: Expand this function to handle the rest of the configs
 }
 
 ss::future<> cluster::apply_metadata(metadata_update reply) {
