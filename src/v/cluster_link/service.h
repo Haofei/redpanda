@@ -97,7 +97,7 @@ public:
      */
     ss::future<cl_result<model::metadata>> update_mirror_topic_status(
       model::name_t link_name,
-      const ::model::topic&,
+      ::model::topic topic,
       model::mirror_topic_status);
 
     /**
@@ -115,7 +115,7 @@ public:
      * @return nothing on success or an error
      */
     ss::future<cl_result<void>>
-    delete_cluster_link(const model::name_t& name, bool force_delete_link);
+    delete_cluster_link(model::name_t name, bool force_delete_link);
 
     /**
      * @brief Reports the status of a shard-local topic in the given link
@@ -140,6 +140,26 @@ public:
 private:
     void register_notifications();
     void unregister_notifications();
+    errc check_manager_state();
+
+    template<typename Func, typename Ret = std::invoke_result_t<Func, manager*>>
+    requires std::invocable<Func, manager*>
+    auto with_manager(Func&& func) -> Ret {
+        using return_type = Ret;
+
+        if (auto ec = check_manager_state(); ec != errc::success) {
+            if constexpr (ss::is_future<return_type>::value) {
+                // Asynchronous case - return a future
+                using inner_type = typename return_type::value_type;
+                return ss::make_ready_future<inner_type>(err_info{ec});
+
+            } else {
+                // Synchronous case - return directly
+                return err_info{ec};
+            }
+        }
+        return func(_manager.get());
+    }
 
 private:
     /**

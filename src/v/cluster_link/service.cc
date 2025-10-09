@@ -386,44 +386,61 @@ ss::future<> service::stop() {
 
     if (_manager) {
         co_await _manager->stop();
+        _manager.reset(nullptr);
     }
 }
 
 ss::future<cl_result<model::metadata>>
 service::upsert_cluster_link(model::metadata md) {
-    return _manager->upsert_cluster_link(std::move(md));
+    return with_manager([md = std::move(md)](manager* mgr) mutable {
+        return mgr->upsert_cluster_link(std::move(md));
+    });
 }
 
 cl_result<model::metadata>
 service::get_cluster_link(const model::name_t& name) {
-    return _manager->get_cluster_link(name);
+    return with_manager(
+      [&name](manager* mgr) { return mgr->get_cluster_link(name); });
 }
 
 cl_result<chunked_vector<model::metadata>> service::list_cluster_links() {
-    return _manager->list_cluster_links();
+    return with_manager([](manager* mgr) { return mgr->list_cluster_links(); });
 }
 
 ss::future<cl_result<model::metadata>> service::update_cluster_link(
   model::name_t name, model::update_cluster_link_configuration_cmd cmd) {
-    return _manager->update_cluster_link(std::move(name), std::move(cmd));
+    return with_manager(
+      [name = std::move(name), cmd = std::move(cmd)](manager* mgr) mutable {
+          return mgr->update_cluster_link(std::move(name), std::move(cmd));
+      });
 }
 
 ss::future<cl_result<model::metadata>> service::update_mirror_topic_status(
   model::name_t link_name,
-  const ::model::topic& topic,
+  ::model::topic topic,
   model::mirror_topic_status status) {
-    return _manager->update_mirror_topic_status(
-      std::move(link_name), topic, status);
+    return with_manager([link_name = std::move(link_name),
+                         topic = std::move(topic),
+                         status](manager* mgr) mutable {
+        return mgr->update_mirror_topic_status(
+          std::move(link_name), std::move(topic), status);
+    });
 }
 
 ss::future<cl_result<model::metadata>>
 service::failover_link_topics(model::name_t link_name) {
-    return _manager->failover_link_topics(std::move(link_name));
+    return with_manager(
+      [link_name = std::move(link_name)](manager* mgr) mutable {
+          return mgr->failover_link_topics(std::move(link_name));
+      });
 }
 
-ss::future<cl_result<void>> service::delete_cluster_link(
-  const model::name_t& name, bool force_delete_link) {
-    return _manager->delete_cluster_link(name, force_delete_link);
+ss::future<cl_result<void>>
+service::delete_cluster_link(model::name_t name, bool force_delete_link) {
+    return with_manager(
+      [name = std::move(name), force_delete_link](manager* mgr) mutable {
+          return mgr->delete_cluster_link(std::move(name), force_delete_link);
+      });
 }
 
 void service::register_notifications() {
@@ -467,8 +484,19 @@ void service::register_notifications() {
 
 void service::unregister_notifications() { _notification_cleanups.clear(); }
 
+errc service::check_manager_state() {
+    if (!_manager) {
+        return errc::cluster_link_disabled;
+    }
+
+    return errc::success;
+}
+
 ss::future<rpc::shadow_topic_report_response> service::shard_local_topic_report(
   const model::id_t& link_id, const ::model::topic& topic) {
+    if (auto err = check_manager_state(); err != errc::success) {
+        co_return rpc::shadow_topic_report_response{.err_code = err};
+    }
     auto& registry = _manager->registry();
     const auto& md = registry->find_link_by_id(link_id);
     if (!md.has_value()) {
@@ -511,6 +539,9 @@ ss::future<rpc::shadow_topic_report_response> service::shard_local_topic_report(
 ss::future<rpc::shadow_topic_report_response>
 service::node_local_shadow_topic_report(
   rpc::shadow_topic_report_request request) {
+    if (auto err = check_manager_state(); err != errc::success) {
+        co_return rpc::shadow_topic_report_response{.err_code = err};
+    }
     shard_report_reducer reducer{};
     const auto& link_id = request.link_id;
     const auto& topic = request.topic_name;
@@ -545,6 +576,9 @@ service::node_local_shadow_topic_report(
 ss::future<::cluster_link::rpc::shadow_topic_report_response>
 service::shadow_topic_report(
   ::model::node_id node_id, rpc::shadow_topic_report_request request) {
+    if (auto err = check_manager_state(); err != errc::success) {
+        co_return rpc::shadow_topic_report_response{.err_code = err};
+    }
     using resp_t = ::cluster_link::rpc::shadow_topic_report_response;
     if (node_id == _self) {
         co_return co_await node_local_shadow_topic_report(std::move(request));
@@ -582,6 +616,9 @@ service::shadow_topic_report(model::id_t link_id, const ::model::topic& topic) {
     // farms out requests to all nodes with replicas of the topic
     // and then aggregates the results
     // generate a list of brokers with replicas of the topic
+    if (auto err = check_manager_state(); err != errc::success) {
+        co_return std::unexpected<errc>(err);
+    }
     absl::flat_hash_set<::model::node_id> topic_nodes;
     const auto& md_cache = _metadata_cache->local();
     const auto& maybe_tp_md = md_cache.get_topic_metadata_ref(
