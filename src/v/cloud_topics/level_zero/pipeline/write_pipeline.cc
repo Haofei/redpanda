@@ -309,6 +309,9 @@ write_pipeline<Clock>::stage::choose_abort_source(ss::abort_source* maybe_as) {
           [as](const std::optional<std::exception_ptr>&) noexcept {
               as->request_abort();
           });
+        if (!sub) {
+            as->request_abort();
+        }
     }
     return std::make_pair(std::move(sub), as);
 }

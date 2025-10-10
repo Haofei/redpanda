@@ -114,6 +114,9 @@ public:
               // improved by transferring exception to the subscriber.
               flt.cancel();
           });
+        if (!sub) {
+            co_return event{.type = event_type::shutting_down};
+        }
         co_return co_await subscribe(flt);
     }
     ss::future<event> subscribe(event_filter<Clock>& flt) noexcept {
