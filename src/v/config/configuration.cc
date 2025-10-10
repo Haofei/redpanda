@@ -4487,6 +4487,13 @@ configuration::configuration()
       "upload is triggered.",
       {.needs_restart = needs_restart::no, .visibility = visibility::user},
       1000)
+  , cloud_topics_disable_reconciliation_loop(
+      *this,
+      "cloud_topics_disable_reconciliation_loop",
+      "Disables the cloud topics reconciliation loop. Disabling the loop can "
+      "negatively impact performance and stability of the cluster.",
+      {.needs_restart = needs_restart::no, .visibility = visibility::tunable},
+      false)
   , development_feature_property_testing_only(
       *this,
       "development_feature_property_testing_only",

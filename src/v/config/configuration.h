@@ -809,6 +809,7 @@ public:
     property<size_t> cloud_topics_produce_batching_size_threshold;
     property<std::chrono::milliseconds> cloud_topics_produce_upload_interval;
     property<size_t> cloud_topics_produce_cardinality_threshold;
+    property<bool> cloud_topics_disable_reconciliation_loop;
 
     development_feature_property<int> development_feature_property_testing_only;
 
