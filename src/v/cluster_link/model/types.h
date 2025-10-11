@@ -437,6 +437,8 @@ struct topic_metadata_mirroring_config
     /// If set, do not include the default properties
     bool exclude_default{false};
 
+    properties_set get_topic_properties_to_mirror() const;
+
     ss::lowres_clock::duration get_task_interval() const {
         return task_interval.value_or(task_interval_default);
     }

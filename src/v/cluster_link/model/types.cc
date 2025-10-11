@@ -142,6 +142,23 @@ mirror_topic_metadata mirror_topic_metadata::copy() const {
     return copy;
 }
 
+topic_metadata_mirroring_config::properties_set
+topic_metadata_mirroring_config::get_topic_properties_to_mirror() const {
+    properties_set props;
+    props.insert(
+      required_topic_properties_to_sync.begin(),
+      required_topic_properties_to_sync.end());
+    if (!exclude_default) {
+        props.insert(
+          default_synced_topic_properties.begin(),
+          default_synced_topic_properties.end());
+    }
+    props.insert(
+      topic_properties_to_mirror.begin(), topic_properties_to_mirror.end());
+
+    return props;
+}
+
 topic_metadata_mirroring_config topic_metadata_mirroring_config::copy() const {
     topic_metadata_mirroring_config copy;
 
