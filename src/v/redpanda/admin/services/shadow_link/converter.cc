@@ -128,6 +128,7 @@ create_topic_metadata_mirroring_config(
       std::inserter(
         config.topic_properties_to_mirror,
         config.topic_properties_to_mirror.end()));
+    config.exclude_default = options.get_exclude_default();
 
     return config;
 }
@@ -807,6 +808,7 @@ topic_metadata_sync_options create_topic_metadata_sync_options(
     }
 
     options.set_synced_shadow_topic_properties(std::move(mirrored_properties));
+    options.set_exclude_default(cfg.exclude_default);
 
     return options;
 }
