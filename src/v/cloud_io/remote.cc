@@ -10,7 +10,6 @@
 
 #include "cloud_io/remote.h"
 
-#include "base/unreachable.h"
 #include "bytes/iostream.h"
 #include "cloud_io/logger.h"
 #include "cloud_io/provider.h"
