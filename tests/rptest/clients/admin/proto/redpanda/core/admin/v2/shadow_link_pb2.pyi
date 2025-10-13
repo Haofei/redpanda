@@ -558,6 +558,7 @@ class ShadowLinkConfigurations(google.protobuf.message.Message):
     TOPIC_METADATA_SYNC_OPTIONS_FIELD_NUMBER: builtins.int
     CONSUMER_OFFSET_SYNC_OPTIONS_FIELD_NUMBER: builtins.int
     SECURITY_SYNC_OPTIONS_FIELD_NUMBER: builtins.int
+    SCHEMA_REGISTRY_SYNC_OPTIONS_FIELD_NUMBER: builtins.int
 
     @property
     def client_options(self) -> global___ShadowLinkClientOptions:
@@ -575,13 +576,17 @@ class ShadowLinkConfigurations(google.protobuf.message.Message):
     def security_sync_options(self) -> global___SecuritySettingsSyncOptions:
         """Security settings sync options"""
 
-    def __init__(self, *, client_options: global___ShadowLinkClientOptions | None=..., topic_metadata_sync_options: global___TopicMetadataSyncOptions | None=..., consumer_offset_sync_options: global___ConsumerOffsetSyncOptions | None=..., security_sync_options: global___SecuritySettingsSyncOptions | None=...) -> None:
+    @property
+    def schema_registry_sync_options(self) -> global___SchemaRegistrySyncOptions:
+        """Schema Registry sync options"""
+
+    def __init__(self, *, client_options: global___ShadowLinkClientOptions | None=..., topic_metadata_sync_options: global___TopicMetadataSyncOptions | None=..., consumer_offset_sync_options: global___ConsumerOffsetSyncOptions | None=..., security_sync_options: global___SecuritySettingsSyncOptions | None=..., schema_registry_sync_options: global___SchemaRegistrySyncOptions | None=...) -> None:
         ...
 
-    def HasField(self, field_name: typing.Literal['client_options', b'client_options', 'consumer_offset_sync_options', b'consumer_offset_sync_options', 'security_sync_options', b'security_sync_options', 'topic_metadata_sync_options', b'topic_metadata_sync_options']) -> builtins.bool:
+    def HasField(self, field_name: typing.Literal['client_options', b'client_options', 'consumer_offset_sync_options', b'consumer_offset_sync_options', 'schema_registry_sync_options', b'schema_registry_sync_options', 'security_sync_options', b'security_sync_options', 'topic_metadata_sync_options', b'topic_metadata_sync_options']) -> builtins.bool:
         ...
 
-    def ClearField(self, field_name: typing.Literal['client_options', b'client_options', 'consumer_offset_sync_options', b'consumer_offset_sync_options', 'security_sync_options', b'security_sync_options', 'topic_metadata_sync_options', b'topic_metadata_sync_options']) -> None:
+    def ClearField(self, field_name: typing.Literal['client_options', b'client_options', 'consumer_offset_sync_options', b'consumer_offset_sync_options', 'schema_registry_sync_options', b'schema_registry_sync_options', 'security_sync_options', b'security_sync_options', 'topic_metadata_sync_options', b'topic_metadata_sync_options']) -> None:
         ...
 global___ShadowLinkConfigurations = ShadowLinkConfigurations
 
@@ -718,8 +723,8 @@ class TopicMetadataSyncOptions(google.protobuf.message.Message):
         created as shadow topics on the shadow cluster.  This only controls
         automatic creation of shadow topics and does not effect the state of the
         mirror topic once it is created.
-        Literal filters for __consumer_offsets and _redpanda.audit_log will be
-        rejected as well as prefix filters to match topics prefixed with
+        Literal filters for __consumer_offsets, _redpanda.audit_log and _schemas
+        will be rejected as well as prefix filters to match topics prefixed with
         _redpanda or __redpanda.
         Wildcard `*` is permitted only for literal filters and will _not_ match
         any topics that start with _redpanda or __redpanda.  If users wish to
@@ -780,6 +785,50 @@ class TopicMetadataSyncOptions(google.protobuf.message.Message):
     def WhichOneof(self, oneof_group: typing.Literal['start_offset', b'start_offset']) -> typing.Literal['earliest', 'latest', 'timestamp'] | None:
         ...
 global___TopicMetadataSyncOptions = TopicMetadataSyncOptions
+
+@typing.final
+class SchemaRegistrySyncOptions(google.protobuf.message.Message):
+    """Options for how the Schema Registry is synced."""
+    DESCRIPTOR: google.protobuf.descriptor.Descriptor
+
+    @typing.final
+    class ShadowSchemaRegistryTopic(google.protobuf.message.Message):
+        """Shadow the entire source cluster's Schema Registry byte-for-byte.
+        If set, the Shadow Link will attempt to add the `_schemas`
+        topic to the list of Shadow Topics as long as:
+        1. The `_schemas` topic exists on the source cluster
+        2. The `_schemas` topic does not exist on the shadow cluster, or it is
+        empty.
+        If either of the above conditions are _not_ met, then the `_schemas`
+        topic will _not_ be shadowed by this cluster. Unsetting this flag will
+        _not_ remove the `_schemas` topic from shadowing if it has already been
+        added.  Once made a shadow topic, the
+        `_schemas` topic will be replicated byte-for-byte.  To stop shadowing the
+        `_schemas` topic, unset this field, then either fail-over the topic or
+        delete it.
+        """
+        DESCRIPTOR: google.protobuf.descriptor.Descriptor
+
+        def __init__(self) -> None:
+            ...
+    SHADOW_SCHEMA_REGISTRY_TOPIC_FIELD_NUMBER: builtins.int
+
+    @property
+    def shadow_schema_registry_topic(self) -> global___SchemaRegistrySyncOptions.ShadowSchemaRegistryTopic:
+        ...
+
+    def __init__(self, *, shadow_schema_registry_topic: global___SchemaRegistrySyncOptions.ShadowSchemaRegistryTopic | None=...) -> None:
+        ...
+
+    def HasField(self, field_name: typing.Literal['schema_registry_shadowing_mode', b'schema_registry_shadowing_mode', 'shadow_schema_registry_topic', b'shadow_schema_registry_topic']) -> builtins.bool:
+        ...
+
+    def ClearField(self, field_name: typing.Literal['schema_registry_shadowing_mode', b'schema_registry_shadowing_mode', 'shadow_schema_registry_topic', b'shadow_schema_registry_topic']) -> None:
+        ...
+
+    def WhichOneof(self, oneof_group: typing.Literal['schema_registry_shadowing_mode', b'schema_registry_shadowing_mode']) -> typing.Literal['shadow_schema_registry_topic'] | None:
+        ...
+global___SchemaRegistrySyncOptions = SchemaRegistrySyncOptions
 
 @typing.final
 class ConsumerOffsetSyncOptions(google.protobuf.message.Message):
