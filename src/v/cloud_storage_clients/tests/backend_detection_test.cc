@@ -20,6 +20,12 @@ TEST(BackendDetectionTest, BackendFromUrl) {
       cfg, model::cloud_credentials_source::config_file);
     EXPECT_EQ(inferred, model::cloud_storage_backend::google_s3_compat);
 
+    cfg.uri = cloud_storage_clients::access_point_uri{
+      "gb-lon-1.linodeobjects.com"};
+    inferred = cloud_storage_clients::infer_backend_from_configuration(
+      cfg, model::cloud_credentials_source::config_file);
+    EXPECT_EQ(inferred, model::cloud_storage_backend::linode_s3_compat);
+
     cfg.uri = cloud_storage_clients::access_point_uri{"minio-s3"};
     inferred = cloud_storage_clients::infer_backend_from_configuration(
       cfg, model::cloud_credentials_source::config_file);
