@@ -44,7 +44,8 @@ bool parse_and_set(
               prop,
               raw_value,
               kafka::config_resource_operation::set,
-              validator);
+              validator,
+              true);
         } else if constexpr (std::is_same_v<ValT, ss::sstring>) {
             kafka::parse_and_set_optional(
               prop,
