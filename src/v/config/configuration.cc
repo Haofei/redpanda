@@ -2525,8 +2525,7 @@ configuration::configuration()
       "cloud_storage_backend",
       "Optional object storage backend variant used to select API "
       "capabilities. If not supplied, this will be inferred from other "
-      "configuration properties. Accepted values: [`unknown`, `aws`, "
-      "`google_s3_compat`, `azure`, `minio`]",
+      "configuration properties.",
       {.needs_restart = needs_restart::yes,
        .example = "aws",
        .visibility = visibility::user,
