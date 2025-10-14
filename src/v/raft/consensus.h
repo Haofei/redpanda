@@ -225,7 +225,7 @@ public:
     /**
      * \brief Persist snapshot with given data and start offset
      *
-     * The write snaphot API is called by the state machine implementation
+     * The write snapshot API is called by the state machine implementation
      * whenever it decides to take a snapshot. Write snapshot is executed under
      * consensus operations lock.
      */
@@ -245,6 +245,14 @@ public:
     std::filesystem::path get_snapshot_path() const {
         return _snapshot_mgr.snapshot_path();
     }
+
+    // This method will snapshot the log at somepoint <= `eviction_point` and
+    // then truncate the log. This should be used by retention mechansims to
+    // truncate the log safely.
+    //
+    // Returns true if the log was evicted fully up to some possible truncation
+    // point (which is the last segment boundary <= `eviction_point`).
+    ss::future<bool> snapshot_and_truncate_log(model::offset eviction_point);
 
     /// Increment and returns next append_entries order tracking sequence for
     /// follower with given node id
@@ -615,6 +623,7 @@ private:
     ss::future<install_snapshot_reply>
       finish_snapshot(install_snapshot_request, install_snapshot_reply);
 
+    ss::future<> do_snapshot_and_truncate_log(model::offset);
     ss::future<> do_write_snapshot(model::offset, iobuf&&);
     append_entries_reply
       make_append_entries_reply(vnode, storage::append_result);

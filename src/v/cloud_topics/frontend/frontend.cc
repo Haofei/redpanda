@@ -393,7 +393,7 @@ frontend::l0_timequery(storage::timequery_config cfg) {
       /*as=*/cfg.abort_source,
       /*client_addr=*/cfg.client_address,
     });
-    auto type_filter = std::to_array({
+    static constexpr auto type_filter = std::to_array({
       model::record_batch_type::raft_data,
       model::record_batch_type::ctp_placeholder,
     });
