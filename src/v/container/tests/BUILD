@@ -127,3 +127,16 @@ redpanda_cc_bench(
         "@seastar//:benchmark",
     ],
 )
+
+redpanda_cc_gtest(
+    name = "priority_queue_test",
+    timeout = "short",
+    srcs = [
+        "priority_queue_test.cc",
+    ],
+    deps = [
+        "//src/v/container:priority_queue",
+        "//src/v/test_utils:gtest",
+        "@googletest//:gtest",
+    ],
+)
