@@ -466,11 +466,9 @@ ss::future<optional_value_outcome> single_field_to_value(
             auto enum_value_desc
               = field_descriptor.enum_type()->FindValueByNumber(enum_number);
             if (!enum_value_desc) {
-                co_return value_conversion_exception(
-                  fmt::format(
-                    "Invalid enum value {} for field {}",
-                    enum_number,
-                    field_descriptor.DebugString()));
+                // Use the default for invalid enum values (closed enums).
+                co_return iceberg::string_value(
+                  iobuf::from(field_descriptor.default_value_enum()->name()));
             }
             co_return iceberg::string_value(
               iobuf::from(enum_value_desc->name()));

@@ -890,3 +890,32 @@ TEST(values_protobuf, TestStructDepthLimit) {
         fmt::format(
           "Maximum recursion depth {} exceeded", max_recursion_depth)));
 }
+
+TEST_CORO(values_protobuf, TestInvalidEnumValue) {
+    Partition partition;
+    partition.set_id(123);
+
+    // Use reflection to set an invalid enum value.
+    auto descriptor = partition.GetDescriptor();
+    auto reflection = partition.GetReflection();
+    auto state_field = descriptor->FindFieldByName("state");
+    reflection->SetEnumValue(&partition, state_field, 99);
+
+    auto result = co_await serialize_and_convert(partition);
+    ASSERT_TRUE_CORO(result.has_value());
+    auto r_opt = std::move(result.value());
+    ASSERT_TRUE_CORO(r_opt.has_value());
+    auto struct_v = std::get<std::unique_ptr<iceberg::struct_value>>(
+      std::move(r_opt.value()));
+
+    // The partition should have:
+    // - id field with value 123
+    // - replicas field (empty list)
+    // - state field with "ACTIVE" (the default enum value, not 99)
+    EXPECT_THAT(
+      struct_v->fields,
+      ElementsAre(
+        OptionalIcebergPrimitive<int_value>(123),
+        IcebergList(ElementsAre()),
+        OptionalIcebergPrimitive<string_value>("ACTIVE")));
+}
