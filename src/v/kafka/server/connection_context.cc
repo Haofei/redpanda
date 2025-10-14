@@ -847,7 +847,7 @@ proto::admin::kafka_connection connection_context::to_proto() const {
     res.set_open_time(ss_sys_clock_to_absl(_attributes.open_time));
 
     auto src = proto::admin::source{};
-    src.set_ip_address(fmt::format("{}", client_host()));
+    src.set_ip_address(ssx::sformat("{}", client_host()));
     src.set_port(client_port());
     res.set_source(std::move(src));
 
