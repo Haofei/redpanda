@@ -18,6 +18,16 @@
 
 namespace detail {
 
+template<typename Comp>
+struct invert_comparator {
+    template<typename T, typename U>
+    constexpr bool operator()(T&& a, U&& b) const {
+        return _underlying(std::forward<U>(b), std::forward<T>(a));
+    }
+
+    [[no_unique_address]] Comp _underlying;
+};
+
 /// Base class for priority queue implementations containing common
 /// functionality.
 ///
@@ -233,5 +243,121 @@ public:
     using base::swap;
 };
 
+/// \brief The bounded priority queue is a container that maintains the top-k of
+/// inserted elements.
+///
+/// It provides logarithmic insertion.
+/// top() and pop() are not provided, since it would require O(n) time, instead,
+/// use extract_heap(), or extract_sorted().
+template<
+  typename T,
+  typename Container = std::vector<T>,
+  typename Comp = std::ranges::less>
+requires std::same_as<typename Container::value_type, T>
+         && std::is_nothrow_move_constructible_v<T>
+         && std::is_nothrow_move_assignable_v<T>
+class bounded_priority_queue
+  : public detail::
+      priority_queue_base<T, Container, detail::invert_comparator<Comp>> {
+private:
+    using base = detail::
+      priority_queue_base<T, Container, detail::invert_comparator<Comp>>;
+
+public:
+    using typename base::const_reference;
+    using typename base::container_type;
+    using typename base::reference;
+    using typename base::size_type;
+    using typename base::value_compare;
+    using typename base::value_type;
+
+    /// \brief Constructs a bounded priority queue with the specified capacity
+    /// and comparison function.
+    /// \param capacity The maximum number of elements the queue can hold.
+    /// \param comp The comparison function to use for ordering elements.
+    /// Note: Internally uses a min-heap (inverted comparator) for efficient
+    /// top-K operations.
+    explicit bounded_priority_queue(size_type capacity, Comp comp = {})
+      : base{detail::invert_comparator<Comp>{std::move(comp)}}
+      , _cap{capacity} {}
+
+    /// \brief Checks whether the container adaptor is full
+    bool full() const noexcept { return base::size() == _cap; }
+
+    /// \brief Reserves storage for at least the specified number of elements
+    /// (only available if the underlying container supports reserve).
+    /// \param cap The new capacity to reserve (bounded to capacity on
+    /// construction).
+    void reserve(size_type new_cap)
+    requires base::has_reserve
+    {
+        return base::reserve(std::min(_cap, new_cap));
+    }
+
+    /// \brief Inserts an element. The worst element may be evicted if the
+    /// container is full.
+    /// \param val The element to insert.
+    /// \return whether the element was inserted.
+    template<typename U>
+    requires std::same_as<std::remove_cvref_t<U>, value_type>
+    bool push(U&& val) {
+        if (!full()) {
+            base::_cont.push_back(std::forward<U>(val));
+            base::push_heap();
+            return true;
+        }
+
+        // Min-heap: front contains the worst of the K best elements
+        if (!comp()(base::_cont.front(), val)) {
+            return false; // New element is not better than worst
+        }
+
+        // Move worst (front) to back: O(log K)
+        base::pop_heap();
+        // Replace worst with new element
+        base::_cont.back() = std::forward<U>(val);
+        // Restore heap
+        base::push_heap();
+
+        return true;
+    }
+
+    /// \brief Inserts a range of elements. Worse elements may be evicted if the
+    /// container is full.
+    /// \param range The range of elements to insert.
+    /// \return void
+    template<std::ranges::sized_range Range>
+    requires std::is_nothrow_move_assignable_v<value_type>
+    void push_range(Range&& range) {
+        if constexpr (base::has_reserve) {
+            reserve(base::size() + std::ranges::size(range));
+        }
+
+        for (auto&& val : base::template forward_view<Range>(range)) {
+            push(std::forward<decltype(val)>(val));
+        }
+    }
+
+    /// \brief Swaps the contents of this queue with another.
+    /// \param other The other bounded_priority_queue to swap with.
+    void swap(bounded_priority_queue& other) noexcept(
+      std::is_nothrow_swappable_v<container_type>
+      && std::is_nothrow_swappable_v<value_compare>
+      && std::is_nothrow_swappable_v<Comp>) {
+        using std::swap;
+        base::swap(other);
+        swap(_cap, other._cap);
+    }
+
+private:
+    auto comp() const noexcept { return base::_comp._underlying; }
+
+    size_type _cap;
+};
+
 template<typename T, typename Comp = std::ranges::less>
 using chunked_priority_queue = priority_queue<T, chunked_vector<T>, Comp>;
+
+template<typename T, typename Comp = std::ranges::less>
+using chunked_bounded_priority_queue
+  = bounded_priority_queue<T, chunked_vector<T>, Comp>;

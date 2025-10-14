@@ -54,24 +54,47 @@ struct QueueFactory {
 
     static auto make_queue() { return Queue<ValueType>{}; }
 
+    static auto make_bounded_queue(size_t cap) { return Queue<ValueType>{cap}; }
+
     template<typename Comp>
     static auto make_queue_with_comp(Comp comp) {
         return Queue<ValueType, Comp>{comp};
     }
 
+    template<typename Comp>
+    static auto make_bounded_queue_with_comp(size_t cap, Comp comp) {
+        return Queue<ValueType, Comp>{cap, comp};
+    }
+
     static value_type make_value(int val) { return value_type{val}; }
+
+    static chunked_vector<value_type>
+    make_values(std::initializer_list<size_t> vals) {
+        chunked_vector<value_type> result;
+        result.reserve(vals.size());
+        for (auto v : vals)
+            result.push_back(make_value(v));
+        return result;
+    }
 };
 
 // Specific factory types using the generic template
 template<typename T>
 using UnboundedQueueFactory = QueueFactory<chunked_priority_queue, T>;
 
+template<typename T>
+using BoundedQueueFactory = QueueFactory<chunked_bounded_priority_queue, T>;
+
 // Types to test - both value types and move-only types
 using QueueTypes = ::testing::
   Types<UnboundedQueueFactory<int>, UnboundedQueueFactory<move_only>>;
 
+using BoundedQueueTypes
+  = ::testing::Types<BoundedQueueFactory<int>, BoundedQueueFactory<move_only>>;
+
 // Copyable types only (for tests that require copying)
-using CopyableQueueTypes = ::testing::Types<UnboundedQueueFactory<int>>;
+using CopyableQueueTypes
+  = ::testing::Types<UnboundedQueueFactory<int>, BoundedQueueFactory<int>>;
 
 // Types for std compatibility testing (unbounded only, copyable types)
 using StdCompatibilityTypes
@@ -231,4 +254,130 @@ TYPED_TEST(PriorityQueueCommonTest, CustomComparator) {
     EXPECT_EQ(sorted[2], this->make_value(3));
     EXPECT_EQ(sorted[3], this->make_value(4));
     EXPECT_EQ(sorted[4], this->make_value(5));
+}
+
+template<typename QueueFactory>
+class BoundedPriorityQueueTest
+  : public QueueFactory
+  , public ::testing::Test {};
+
+TYPED_TEST_SUITE(BoundedPriorityQueueTest, BoundedQueueTypes);
+
+TYPED_TEST(BoundedPriorityQueueTest, CapacityConstraints) {
+    auto bpq = this->make_bounded_queue(2);
+
+    // Fill to capacity
+    EXPECT_TRUE(bpq.push(this->make_value(10)));
+    EXPECT_TRUE(bpq.push(this->make_value(20)));
+    EXPECT_TRUE(bpq.full());
+
+    // Try to push a worse element (smaller value) - should be rejected
+    EXPECT_FALSE(bpq.push(this->make_value(5)));
+    EXPECT_EQ(bpq.size(), 2);
+
+    // Try to push a better element (larger value) - should evict worst element
+    // This maintains the top-K elements by comparing with the worst (minimum)
+    // and replacing it if the new element is better
+    EXPECT_TRUE(bpq.push(this->make_value(25)));
+    EXPECT_EQ(bpq.size(), 2);
+
+    // Verify the final contents - should have the 2 best elements
+    auto results = std::move(bpq).extract_sorted();
+    EXPECT_TRUE(std::ranges::is_sorted(results, std::ranges::greater{}));
+    EXPECT_EQ(results.size(), 2);
+    EXPECT_EQ(results[0], this->make_value(25));
+    EXPECT_EQ(results[1], this->make_value(20));
+}
+
+TYPED_TEST(BoundedPriorityQueueTest, PushRange) {
+    auto bpq = this->make_bounded_queue(3); // Keep top 3 elements
+
+    auto elements = this->make_values({5, 10, 2, 15, 8, 20, 1, 12});
+
+    bpq.push_range(elements | std::views::as_rvalue);
+
+    // Should contain the 3 largest elements: 20, 15, 12
+    EXPECT_EQ(bpq.size(), 3);
+
+    auto results = std::move(bpq).extract_sorted();
+
+    // Should be the top 3 elements in descending order
+    auto expected = this->make_values({20, 15, 12});
+    EXPECT_EQ(results, expected);
+}
+
+TYPED_TEST(BoundedPriorityQueueTest, Swap) {
+    auto bpq1 = this->make_bounded_queue(2);
+    auto bpq2 = this->make_bounded_queue(3);
+
+    bpq1.push(this->make_value(10));
+    bpq1.push(this->make_value(20));
+
+    bpq2.push(this->make_value(30));
+    bpq2.push(this->make_value(40));
+    bpq2.push(this->make_value(50));
+
+    bpq1.swap(bpq2);
+
+    EXPECT_EQ(bpq1.size(), 3);
+    EXPECT_EQ(bpq2.size(), 2);
+
+    EXPECT_EQ(std::move(bpq1).extract_sorted()[0], this->make_value(50));
+    EXPECT_EQ(std::move(bpq2).extract_sorted()[0], this->make_value(20));
+}
+
+TYPED_TEST(BoundedPriorityQueueTest, MoveSemantics) {
+    auto bpq1 = this->make_bounded_queue(3);
+    bpq1.push(this->make_value(10));
+    bpq1.push(this->make_value(20));
+
+    // Test move constructor
+    auto bpq2 = std::move(bpq1);
+    EXPECT_EQ(bpq2.size(), 2);
+    EXPECT_EQ(std::move(bpq2).extract_sorted()[0], this->make_value(20));
+
+    // Test move assignment
+    auto bpq3 = this->make_bounded_queue(5);
+    bpq3.push(this->make_value(5));
+    auto bpq4 = this->make_bounded_queue(3);
+    bpq4.push(this->make_value(15));
+    bpq4.push(this->make_value(25));
+
+    bpq3 = std::move(bpq4);
+    EXPECT_EQ(bpq3.size(), 2);
+    EXPECT_EQ(std::move(bpq3).extract_sorted()[0], this->make_value(25));
+}
+
+TYPED_TEST(BoundedPriorityQueueTest, LargeCapacity) {
+    constexpr size_t large_cap = 1000;
+    auto bpq = this->make_bounded_queue(large_cap);
+    bpq.reserve(500);
+
+    // Fill partially
+    for (int i = 0; i < 500; ++i) {
+        EXPECT_TRUE(bpq.push(this->make_value(i)));
+    }
+
+    EXPECT_EQ(bpq.size(), 500);
+    EXPECT_FALSE(bpq.full());
+    EXPECT_EQ(
+      std::move(bpq).extract_sorted()[0],
+      this->make_value(499)); // Largest element
+}
+
+TYPED_TEST(BoundedPriorityQueueTest, TopKBehavior) {
+    // Demonstrate proper top-K behavior with a small capacity
+    auto bpq = this->make_bounded_queue(3); // Keep top 3 elements
+
+    // Insert elements in random order
+    bpq.push_range(this->make_values({5, 10, 2, 15, 8, 20, 1, 12}));
+
+    // Should contain the 3 largest elements: 20, 15, 12
+    EXPECT_EQ(bpq.size(), 3);
+
+    auto results = std::move(bpq).extract_sorted();
+
+    // Should be the top 3 elements in descending order
+    auto expected = this->make_values({20, 15, 12});
+    EXPECT_EQ(results, expected);
 }
