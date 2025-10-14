@@ -124,6 +124,9 @@ public:
      */
     void update_configuration(configuration cfg);
 
+    std::optional<source_partition_offsets>
+    get_source_offsets(model::topic_partition_view tp) const;
+
 private:
     struct subscription {
         subscription(

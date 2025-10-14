@@ -108,6 +108,19 @@ void direct_consumer::update_configuration(configuration cfg) {
     });
 }
 
+std::optional<source_partition_offsets>
+direct_consumer::get_source_offsets(model::topic_partition_view tp) const {
+    auto it = _subscriptions.find(tp.topic);
+    if (it == _subscriptions.end()) {
+        return std::nullopt;
+    }
+    auto p_it = it->second.find(tp.partition);
+    if (p_it == it->second.end()) {
+        return std::nullopt;
+    }
+    return p_it->second.last_known_source_offsets;
+}
+
 ss::future<> direct_consumer::update_fetchers(
   [[maybe_unused]] mutex::units lock_holder,
   topic_partition_map<subscription> removals) {
