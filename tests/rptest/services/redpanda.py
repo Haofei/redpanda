@@ -5000,7 +5000,7 @@ class RedpandaService(Service, RedpandaServiceABC):
                 RedpandaService.CLUSTER_BOOTSTRAP_CONFIG_FILE, conf_yaml
             )
 
-    def get_node_by_id(self, node_id):
+    def get_node_by_id(self, node_id: int) -> ClusterNode | None:
         """
         Returns a node that has requested id or None if node is not found
         """
@@ -5010,7 +5010,7 @@ class RedpandaService(Service, RedpandaServiceABC):
 
         return None
 
-    def registered(self, node):
+    def registered(self, node: ClusterNode):
         """
         Check if a newly added node is fully registered with the cluster, such
         that a kafka metadata request to any node in the cluster will include it.
