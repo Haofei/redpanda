@@ -16,6 +16,7 @@
 #include <algorithm>
 #include <optional>
 #include <stdexcept>
+#include <variant>
 
 using namespace std::chrono_literals;
 
@@ -31,6 +32,8 @@ using proto::admin::authentication_configuration;
 using proto::admin::consumer_offset_sync_options;
 using proto::admin::create_shadow_link_request;
 using proto::admin::name_filter;
+using proto::admin::schema_registry_sync_options;
+using proto::admin::schema_registry_sync_options_shadow_schema_registry_topic;
 using proto::admin::scram_config;
 using proto::admin::scram_mechanism;
 using proto::admin::security_settings_sync_options;
@@ -147,6 +150,24 @@ create_topic_metadata_mirroring_config(
       },
       [&config](absl::Time t) {
           config.starting_offset = model::timestamp(absl::ToUnixMillis(t));
+      });
+
+    return config;
+}
+
+cluster_link::model::schema_registry_sync_config
+create_schema_registry_sync_config(
+  const schema_registry_sync_options& options) {
+    cluster_link::model::schema_registry_sync_config config;
+
+    options.visit_schema_registry_shadowing_mode(
+      [&config](
+        const schema_registry_sync_options_shadow_schema_registry_topic&) {
+          config.sync_schema_registry_topic_mode = cluster_link::model::
+            schema_registry_sync_config::shadow_entire_schema_registry{};
+      },
+      [&config](std::monostate) {
+          config.sync_schema_registry_topic_mode = std::nullopt;
       });
 
     return config;
@@ -330,6 +351,9 @@ create_link_configuration(const shadow_link& sl) {
     config.consumer_groups_mirroring_cfg
       = create_consumer_groups_mirroring_config(
         sl.get_configurations().get_consumer_offset_sync_options());
+
+    config.schema_registry_sync_cfg = create_schema_registry_sync_config(
+      sl.get_configurations().get_schema_registry_sync_options());
 
     return config;
 }
@@ -893,6 +917,23 @@ consumer_offset_sync_options create_consumer_offset_sync_options(
     return options;
 }
 
+schema_registry_sync_options create_schema_registry_sync_options(
+  const cluster_link::model::schema_registry_sync_config& cfg) {
+    schema_registry_sync_options options;
+    if (cfg.sync_schema_registry_topic_mode.has_value()) {
+        ss::visit(
+          *cfg.sync_schema_registry_topic_mode,
+          [&options](
+            const cluster_link::model::schema_registry_sync_config::
+              shadow_entire_schema_registry&) {
+              options.set_shadow_schema_registry_topic(
+                schema_registry_sync_options_shadow_schema_registry_topic{});
+          });
+    }
+
+    return options;
+}
+
 shadow_link_configurations
 create_shadow_link_configuration(const cluster_link::model::metadata& md) {
     shadow_link_configurations configurations;
@@ -907,6 +948,9 @@ create_shadow_link_configuration(const cluster_link::model::metadata& md) {
     configurations.set_security_sync_options(
       create_security_settings_sync_options(
         md.configuration.security_settings_sync_cfg));
+    configurations.set_schema_registry_sync_options(
+      create_schema_registry_sync_options(
+        md.configuration.schema_registry_sync_cfg));
 
     return configurations;
 }

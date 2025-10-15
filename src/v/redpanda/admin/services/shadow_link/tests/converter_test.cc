@@ -457,6 +457,7 @@ TEST(converter_test, create_with_metadata_sync_options) {
     proto::admin::shadow_link_configurations shadow_link_configurations;
     proto::admin::shadow_link_client_options shadow_link_client_options;
     proto::admin::topic_metadata_sync_options topic_metadata_sync_options;
+    proto::admin::schema_registry_sync_options schema_registry_sync_options;
 
     topic_metadata_sync_options.set_interval(absl::Seconds(1));
     chunked_vector<proto::admin::name_filter> filters;
@@ -473,11 +474,15 @@ TEST(converter_test, create_with_metadata_sync_options) {
     topic_metadata_sync_options.set_synced_shadow_topic_properties({"prop"});
     topic_metadata_sync_options.set_exclude_default(true);
 
+    schema_registry_sync_options.set_shadow_schema_registry_topic({});
+
     shadow_link_client_options.set_bootstrap_servers({"localhost:9092"});
     shadow_link_configurations.set_client_options(
       std::move(shadow_link_client_options));
     shadow_link_configurations.set_topic_metadata_sync_options(
       std::move(topic_metadata_sync_options));
+    shadow_link_configurations.set_schema_registry_sync_options(
+      std::move(schema_registry_sync_options));
 
     shadow_link.set_configurations(std::move(shadow_link_configurations));
     shadow_link.set_name(ss::sstring{name});
@@ -498,6 +503,13 @@ TEST(converter_test, create_with_metadata_sync_options) {
       md.configuration.topic_metadata_mirroring_cfg.topic_name_filters.size(),
       2);
     EXPECT_TRUE(md.configuration.topic_metadata_mirroring_cfg.exclude_default);
+    ASSERT_TRUE(md.configuration.schema_registry_sync_cfg
+                  .sync_schema_registry_topic_mode.has_value());
+    EXPECT_TRUE(
+      std::holds_alternative<cluster_link::model::schema_registry_sync_config::
+                               shadow_entire_schema_registry>(
+        *md.configuration.schema_registry_sync_cfg
+           .sync_schema_registry_topic_mode));
 
     chunked_vector<cluster_link::model::resource_name_filter_pattern> expected{
       cluster_link::model::resource_name_filter_pattern{
@@ -785,6 +797,10 @@ TEST(converter_test, metadata_to_shadow_link_topic_mirroring_cfg) {
       }};
     md.configuration.topic_metadata_mirroring_cfg.exclude_default = true;
 
+    md.configuration.schema_registry_sync_cfg.sync_schema_registry_topic_mode
+      = cluster_link::model::schema_registry_sync_config::
+        shadow_entire_schema_registry{};
+
     auto sl = admin::metadata_to_shadow_link(std::move(md), {});
     const auto& topic_metadata_sync_options
       = sl.get_configurations().get_topic_metadata_sync_options();
@@ -813,6 +829,11 @@ TEST(converter_test, metadata_to_shadow_link_topic_mirroring_cfg) {
       expected_filters);
 
     EXPECT_TRUE(topic_metadata_sync_options.get_exclude_default());
+
+    const auto& schema_registry_sync_options
+      = sl.get_configurations().get_schema_registry_sync_options();
+    EXPECT_TRUE(
+      schema_registry_sync_options.has_shadow_schema_registry_topic());
 }
 
 proto::admin::shadow_topic
