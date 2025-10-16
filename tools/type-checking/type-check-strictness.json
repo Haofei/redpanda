@@ -375,6 +375,7 @@
         "rptest/tests/crash_loop_checks_test.py",
         "rptest/tests/data_migrations_api_test.py",
         "rptest/tests/data_transforms_test.py",
+        "rptest/tests/datalake/admin_endpoint_test.py",
         "rptest/tests/datalake/biglake_test.py",
         "rptest/tests/datalake/compaction_test.py",
         "rptest/tests/datalake/custom_partitioning_test.py",
