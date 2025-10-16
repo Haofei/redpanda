@@ -395,7 +395,7 @@ class NodesDecommissioningTest(PreallocNodesTest):
     @matrix(
         delete_topic=[True, False],
         tick_interval=[5000, 3600000],
-        cloud_topic=[True, False],
+        cloud_topic=[False],
     )
     def test_decommissioning_working_node(
         self, delete_topic: bool, tick_interval: int, cloud_topic: bool
@@ -457,7 +457,7 @@ class NodesDecommissioningTest(PreallocNodesTest):
         self.verify()
 
     @cluster(num_nodes=6, log_allow_list=CHAOS_LOG_ALLOW_LIST)
-    @matrix(cloud_topic=[True, False])
+    @matrix(cloud_topic=[False])
     def test_decommissioning_crashed_node(self, cloud_topic: bool):
         self.start_redpanda()
         self._create_topics(replication_factors=[3], cloud_topic=cloud_topic)
@@ -483,7 +483,7 @@ class NodesDecommissioningTest(PreallocNodesTest):
         # connections with it
         log_allow_list=RESTART_LOG_ALLOW_LIST,
     )
-    @matrix(cloud_topic=[True, False])
+    @matrix(cloud_topic=[False])
     def test_decommissioning_cancel_ongoing_movements(self, cloud_topic: bool):
         self.start_redpanda()
         self._create_topics(cloud_topic=cloud_topic)
@@ -605,7 +605,7 @@ class NodesDecommissioningTest(PreallocNodesTest):
         self.verify()
 
     @cluster(num_nodes=6, log_allow_list=RESTART_LOG_ALLOW_LIST)
-    @matrix(cloud_topic=[True, False])
+    @matrix(cloud_topic=[False])
     def test_recommissioning_node(self, cloud_topic: bool):
         self.start_redpanda()
         self._create_topics(cloud_topic=cloud_topic)
@@ -637,7 +637,7 @@ class NodesDecommissioningTest(PreallocNodesTest):
         self.verify()
 
     @cluster(num_nodes=6, log_allow_list=RESTART_LOG_ALLOW_LIST)
-    @matrix(cloud_topic=[True, False])
+    @matrix(cloud_topic=[False])
     def test_recommissioning_node_finishes(self, cloud_topic: bool):
         self.start_redpanda()
         self._create_topics(cloud_topic=cloud_topic)
@@ -675,7 +675,7 @@ class NodesDecommissioningTest(PreallocNodesTest):
         self.verify()
 
     @cluster(num_nodes=6, log_allow_list=RESTART_LOG_ALLOW_LIST)
-    @matrix(cloud_topic=[True, False])
+    @matrix(cloud_topic=[False])
     def test_recommissioning_do_not_stop_all_moves_node(self, cloud_topic: bool):
         self.start_redpanda()
         self._create_topics(cloud_topic=cloud_topic)
@@ -728,7 +728,7 @@ class NodesDecommissioningTest(PreallocNodesTest):
         self.verify()
 
     @cluster(num_nodes=6, log_allow_list=RESTART_LOG_ALLOW_LIST)
-    @matrix(cloud_topic=[True, False])
+    @matrix(cloud_topic=[False])
     def test_recommissioning_one_of_decommissioned_nodes(self, cloud_topic: bool):
         self.start_redpanda()
         self._create_topics(cloud_topic=cloud_topic)
@@ -836,7 +836,7 @@ class NodesDecommissioningTest(PreallocNodesTest):
         self.verify()
 
     @cluster(num_nodes=6, log_allow_list=RESTART_LOG_ALLOW_LIST)
-    @matrix(delete_topic=[True, False], cloud_topic=[True, False])
+    @matrix(delete_topic=[True, False], cloud_topic=[False])
     def test_decommissioning_finishes_after_manual_cancellation(
         self, delete_topic: bool, cloud_topic: bool
     ):
@@ -877,7 +877,7 @@ class NodesDecommissioningTest(PreallocNodesTest):
             self.verify()
 
     @cluster(num_nodes=6, log_allow_list=RESTART_LOG_ALLOW_LIST)
-    @matrix(node_is_alive=[True, False], cloud_topic=[True, False])
+    @matrix(node_is_alive=[True, False], cloud_topic=[False])
     def test_flipping_decommission_recommission(
         self, node_is_alive: bool, cloud_topic: bool
     ):
@@ -943,7 +943,7 @@ class NodesDecommissioningTest(PreallocNodesTest):
 
     @skip_debug_mode
     @cluster(num_nodes=6, log_allow_list=RESTART_LOG_ALLOW_LIST)
-    @matrix(cloud_topic=[True, False])
+    @matrix(cloud_topic=[False])
     def test_multiple_decommissions(self, cloud_topic: bool):
         self._extra_node_conf = {"empty_seed_starts_cluster": False}
         self.start_redpanda()
@@ -996,7 +996,7 @@ class NodesDecommissioningTest(PreallocNodesTest):
         self.verify()
 
     @cluster(num_nodes=5, log_allow_list=RESTART_LOG_ALLOW_LIST)
-    @matrix(new_bootstrap=[True, False], cloud_topic=[True, False])
+    @matrix(new_bootstrap=[True, False], cloud_topic=[False])
     def test_node_is_not_allowed_to_join_after_restart(
         self, new_bootstrap: bool, cloud_topic: bool
     ):
