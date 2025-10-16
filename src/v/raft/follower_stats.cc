@@ -67,6 +67,9 @@ void follower_index_metadata::reset() {
     inflight_append_request_count = 0;
     last_sent_protocol_meta.reset();
     follower_state_change.broadcast();
+    max_cleanly_compacted_offset = {};
+    mcco_getter = std::make_unique<void_executor>();
+    mtro_sender = std::make_unique<void_executor>();
 }
 
 std::ostream& operator<<(std::ostream& o, const follower_index_metadata& i) {
@@ -75,7 +78,8 @@ std::ostream& operator<<(std::ostream& o, const follower_index_metadata& i) {
       "{{node_id: {}, last_flushed_log_index: {}, last_dirty_log_index: {}, "
       "match_index: {}, next_index: {}, expected_log_end_offset: {}, "
       "heartbeats_failed: {}, last_sent_seq: {}, last_received_seq: {}, "
-      "last_successful_received_seq: {}, is_learner: {}, is_recovering: {}}}",
+      "last_successful_received_seq: {}, is_learner: {}, is_recovering: {}, "
+      "max_cleanly_compacted_offset: {}}}",
       i.node_id,
       i.last_flushed_log_index,
       i.last_dirty_log_index,
@@ -87,7 +91,8 @@ std::ostream& operator<<(std::ostream& o, const follower_index_metadata& i) {
       i.last_received_seq,
       i.last_successful_received_seq,
       i.is_learner,
-      i.is_recovering);
+      i.is_recovering,
+      i.max_cleanly_compacted_offset);
     return o;
 }
 

@@ -153,6 +153,7 @@ redpanda_cc_library(
         "//src/v/ssx:future_util",
         "//src/v/ssx:semaphore",
         "//src/v/ssx:sformat",
+        "//src/v/ssx:single_fiber_executor",
         "//src/v/ssx:watchdog",
         "//src/v/storage",
         "//src/v/storage:record_batch_builder",

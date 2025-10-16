@@ -14,11 +14,14 @@
 #include "absl/container/node_hash_map.h"
 #include "base/vassert.h"
 #include "raft/types.h"
+#include "ssx/single_fiber_executor.h"
 
 namespace raft {
 struct follower_index_metadata {
     explicit follower_index_metadata(vnode node)
-      : node_id(node) {}
+      : node_id(node)
+      , mcco_getter{std::make_unique<void_executor>()}
+      , mtro_sender{std::make_unique<void_executor>()} {}
 
     follower_index_metadata(const follower_index_metadata&) = delete;
     follower_index_metadata& operator=(const follower_index_metadata&) = delete;
@@ -130,6 +133,19 @@ struct follower_index_metadata {
     size_t inflight_append_request_count = 0;
 
     std::optional<protocol_metadata> last_sent_protocol_meta;
+
+    /**
+     * Coordinated compaction details
+     */
+    // in the follower log; model::offset{} if follower never reported its MCCO
+    model::offset max_cleanly_compacted_offset;
+    using void_executor = ssx::single_fiber_executor<
+      ss::noncopyable_function<ss::future<>(ss::abort_source&)>>;
+    using void_executor_ptr = std::unique_ptr<void_executor>;
+    // state for requesting latest MCCO calculated on the follower
+    void_executor_ptr mcco_getter;
+    // state for sending latest MTRO to the follower
+    void_executor_ptr mtro_sender;
 
     friend std::ostream&
     operator<<(std::ostream& o, const follower_index_metadata& i);
