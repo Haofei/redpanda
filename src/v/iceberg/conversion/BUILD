@@ -29,6 +29,21 @@ redpanda_cc_library(
 )
 
 redpanda_cc_library(
+    name = "avro_utils",
+    srcs = [
+        "avro_utils.cc",
+    ],
+    hdrs = [
+        "avro_utils.h",
+    ],
+    visibility = ["//visibility:public"],
+    deps = [
+        "//src/v/iceberg:datatypes",
+        "@avro",
+    ],
+)
+
+redpanda_cc_library(
     name = "schema_avro",
     srcs = [
         "schema_avro.cc",

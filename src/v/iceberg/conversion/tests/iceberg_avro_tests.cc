@@ -10,6 +10,7 @@
 #include "bytes/iobuf_parser.h"
 #include "gtest/gtest.h"
 #include "iceberg/avro_decimal.h"
+#include "iceberg/conversion/avro_utils.h"
 #include "iceberg/conversion/schema_avro.h"
 #include "iceberg/conversion/values_avro.h"
 #include "iceberg/datatypes.h"
@@ -1194,3 +1195,51 @@ INSTANTIATE_TEST_SUITE_P(
     "tl_union",
     "big_record",
     "logical_types"));
+
+struct maybe_optional_test_case {
+    std::string_view schema;
+    std::optional<avro::Type> expected;
+};
+
+struct MaybeOptionalTest
+  : ::testing::TestWithParam<maybe_optional_test_case> {};
+
+TEST_P(MaybeOptionalTest, DetectOptionalTest) {
+    auto [schema, expected] = GetParam();
+
+    auto root = load_json_schema(schema);
+    ASSERT_NE(root, nullptr);
+
+    auto opt = iceberg::maybe_flatten_union(root);
+    if (!expected.has_value()) {
+        ASSERT_FALSE(opt.has_value());
+    } else {
+        ASSERT_EQ(opt.value()->type(), expected);
+    }
+}
+
+using tc = maybe_optional_test_case;
+INSTANTIATE_TEST_SUITE_P(
+  DetectOptionalTest,
+  MaybeOptionalTest,
+  Values(
+    tc{
+      .schema = R"J([ "null", {"type": "array", "items": "int" } ])J",
+      .expected = avro::AVRO_ARRAY,
+    },
+    tc{
+      .schema = R"J([ "long", "null" ])J",
+      .expected = avro::AVRO_LONG,
+    },
+    tc{
+      .schema = R"J([ "long", "int" ])J",
+      .expected = std::nullopt,
+    },
+    tc{
+      .schema = R"J([ "long", "int", "null" ])J",
+      .expected = std::nullopt,
+    },
+    tc{
+      .schema = R"J({"type": "long"})J",
+      .expected = std::nullopt,
+    }));

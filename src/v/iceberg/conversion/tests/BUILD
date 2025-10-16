@@ -89,6 +89,7 @@ redpanda_cc_gtest(
         "//src/v/bytes:iobuf_parser",
         "//src/v/iceberg:avro_decimal",
         "//src/v/iceberg:datatypes",
+        "//src/v/iceberg/conversion:avro_utils",
         "//src/v/iceberg/conversion:schema_avro",
         "//src/v/iceberg/conversion:values_avro",
         "//src/v/serde/avro/tests:data_generator",
