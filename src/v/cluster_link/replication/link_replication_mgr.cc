@@ -24,16 +24,25 @@ link_replication_manager::link_replication_manager(
   ss::scheduling_group sg,
   std::unique_ptr<link_configuration_provider> config_provider,
   std::unique_ptr<data_source_factory> source_factory,
-  std::unique_ptr<data_sink_factory> sink_factory)
+  std::unique_ptr<data_sink_factory> sink_factory,
+  std::optional<replication_probe::configuration> cfg_probe)
   : _sg(sg)
   , _config_provider(std::move(config_provider))
   , _source_factory(std::move(source_factory))
   , _sink_factory(std::move(sink_factory))
-  , _queue(_sg, [](const std::exception_ptr& ex) {
-      vlog(cllog.error, "unexpected error in processing notifications: {}", ex);
-  }) {}
+  , _queue(
+      _sg,
+      [](const std::exception_ptr& ex) {
+          vlog(
+            cllog.error,
+            "unexpected error in processing notifications: {}",
+            ex);
+      })
+  , _cfg_probe{std::move(cfg_probe)}
+  , _link_data_probe{nullptr} {}
 
-ss::future<> link_replication_manager::start() {
+ss::future<> link_replication_manager::start(link_data_probe_ptr ldp) {
+    set_data_probe(std::move(ldp));
     co_await _source_factory->start();
     ssx::repeat_until_gate_closed(_gate, [this] {
         return reconcile().handle_exception([](const std::exception_ptr& e) {
@@ -70,7 +79,23 @@ ss::future<> link_replication_manager::stop() {
     _replicators.clear();
     co_await std::move(gate_f);
     co_await _source_factory->stop();
+    unset_data_probe();
     vlog(cllog.trace, "Link replication manager stopped");
+}
+
+void link_replication_manager::set_data_probe(link_data_probe_ptr ldp) {
+    _link_data_probe = ldp;
+
+    for (auto& replicator : _replicators | std::views::values) {
+        replicator->set_data_probe(ldp);
+    }
+}
+
+void link_replication_manager::unset_data_probe() {
+    _link_data_probe = nullptr;
+    for (auto& replicator : _replicators | std::views::values) {
+        replicator->unset_data_probe();
+    }
 }
 
 ss::future<> link_replication_manager::do_start_replicator(
@@ -89,7 +114,14 @@ ss::future<> link_replication_manager::do_start_replicator(
     auto source = _source_factory->make_source(ntp);
     auto sink = _sink_factory->make_sink(ntp);
     auto replicator = std::make_unique<partition_replicator>(
-      ntp, term, *_config_provider, std::move(source), std::move(sink), _sg);
+      ntp,
+      term,
+      *_config_provider,
+      std::move(source),
+      std::move(sink),
+      _sg,
+      _cfg_probe,
+      _link_data_probe);
     auto [r_it, _] = _replicators.emplace(ntp, std::move(replicator));
     co_await r_it->second->start();
 }

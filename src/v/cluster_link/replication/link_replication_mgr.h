@@ -11,6 +11,8 @@
 #pragma once
 
 #include "cluster_link/replication/partition_replicator.h"
+#include "cluster_link/replication/replication_probe.h"
+#include "cluster_link/replication/types.h"
 #include "container/chunked_hash_map.h"
 #include "ssx/work_queue.h"
 
@@ -27,9 +29,10 @@ public:
       ss::scheduling_group,
       std::unique_ptr<link_configuration_provider> config_provider,
       std::unique_ptr<data_source_factory> source_factory,
-      std::unique_ptr<data_sink_factory> sink_factory);
+      std::unique_ptr<data_sink_factory> sink_factory,
+      std::optional<replication_probe::configuration> cfg_probe = std::nullopt);
 
-    ss::future<> start();
+    ss::future<> start(link_data_probe_ptr data_probe = nullptr);
 
     ss::future<> stop();
 
@@ -47,6 +50,9 @@ public:
 
     std::optional<partition_offsets_report>
     get_partition_offsets_report(const ::model::ntp&) const;
+
+    void set_data_probe(link_data_probe_ptr);
+    void unset_data_probe();
 
 private:
     static constexpr auto start_offset_synch_interval = std::chrono::seconds{
@@ -73,6 +79,8 @@ private:
     ss::condition_variable _pending_changes_cv;
     chunked_hash_map<::model::ntp, std::unique_ptr<partition_replicator>>
       _replicators;
+    std::optional<replication_probe::configuration> _cfg_probe;
+    link_data_probe_ptr _link_data_probe;
     ss::gate _gate;
     ss::abort_source _as;
 };

@@ -85,6 +85,7 @@ redpanda_cc_library(
     deps = [
         ":deps",
         ":partition_replicator",
+        ":types",
         "//src/v/base",
         "//src/v/cluster_link:logger",
         "//src/v/container:chunked_hash_map",
