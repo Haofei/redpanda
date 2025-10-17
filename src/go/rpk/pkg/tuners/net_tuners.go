@@ -35,7 +35,7 @@ type CpusetConfig struct {
 	IrqCpusetSize      int      `yaml:"interrupts_cpuset_size,omitempty" json:"interrupts_cpuset_size"`
 }
 
-type NetTunerConfig struct {
+type NodeTunerState struct {
 	Cpusets *CpusetConfig `yaml:"cpusets,omitempty" json:"cpusets"`
 }
 
@@ -52,10 +52,10 @@ func NewNetTuner(
 	ethtool ethtool.EthtoolWrapper,
 	executor executors.Executor,
 	proc os.Proc,
-	configPath string,
+	statePath string,
 ) Tunable {
 	factory := NewNetTunersFactory(
-		fs, t, irqProcFile, irqDeviceInfo, ethtool, irqBalanceService, cpuMasks, executor, proc, configPath)
+		fs, t, irqProcFile, irqDeviceInfo, ethtool, irqBalanceService, cpuMasks, executor, proc, statePath)
 	return NewAggregatedTunable(
 		[]Tunable{
 			factory.NewAllNicsSameModeTuner(interfaces, mode, cpuMask),
@@ -101,7 +101,7 @@ type netTunersFactory struct {
 	checkersFactory NetCheckersFactory
 	executor        executors.Executor
 	proc            os.Proc
-	ConfigPath      string
+	statePath       string
 }
 
 func NewNetTunersFactory(
@@ -114,7 +114,7 @@ func NewNetTunersFactory(
 	cpuMasks irq.CPUMasks,
 	executor executors.Executor,
 	proc os.Proc,
-	configPath string,
+	statePath string,
 ) NetTunersFactory {
 	return &netTunersFactory{
 		fs:             fs,
@@ -126,7 +126,7 @@ func NewNetTunersFactory(
 		cpuMasks:       cpuMasks,
 		executor:       executor,
 		proc:           proc,
-		ConfigPath:     configPath,
+		statePath:      statePath,
 		checkersFactory: NewNetCheckersFactory(
 			fs, t, irqProcFile, irqDeviceInfo, ethtool, balanceService, cpuMasks),
 	}
@@ -277,10 +277,10 @@ func (f *netTunersFactory) NewNICsIRQsAffinityTuner(
 	)
 }
 
-func (f *netTunersFactory) getNetTunerConfig(nic network.Nic, mode irq.Mode, cpuMask string) (NetTunerConfig, error) {
+func (f *netTunersFactory) getNetTunerConfig(nic network.Nic, mode irq.Mode, cpuMask string) (NodeTunerState, error) {
 	networkConfig, err := network.GetEffectiveNicConfig(nic, mode, cpuMask, f.cpuMasks, f.t)
 	if err != nil {
-		return NetTunerConfig{}, err
+		return NodeTunerState{}, err
 	}
 
 	// All the below transformations we could also do in rpk:start but we just
@@ -288,22 +288,22 @@ func (f *netTunersFactory) getNetTunerConfig(nic network.Nic, mode irq.Mode, cpu
 
 	redpandaCpusetListForm, err := f.cpuMasks.MaskToListFormat(networkConfig.ComputationsCPUMask)
 	if err != nil {
-		return NetTunerConfig{}, err
+		return NodeTunerState{}, err
 	}
 	redpandaSize, err := f.cpuMasks.GetNumberOfPUs(networkConfig.ComputationsCPUMask)
 	if err != nil {
-		return NetTunerConfig{}, err
+		return NodeTunerState{}, err
 	}
 	irqCpusetListForm, err := f.cpuMasks.MaskToListFormat(networkConfig.IRQCPUMask)
 	if err != nil {
-		return NetTunerConfig{}, err
+		return NodeTunerState{}, err
 	}
 	irqSize, err := f.cpuMasks.GetNumberOfPUs(networkConfig.IRQCPUMask)
 	if err != nil {
-		return NetTunerConfig{}, err
+		return NodeTunerState{}, err
 	}
 
-	config := NetTunerConfig{
+	config := NodeTunerState{
 		Cpusets: &CpusetConfig{
 			IrqMode:            networkConfig.Mode,
 			RedpandaCpuset:     redpandaCpusetListForm,
@@ -334,23 +334,23 @@ func (f *netTunersFactory) NewInterruptConfigFileTuner(interfaces []string, mode
 			return NewTuneError(err)
 		}
 
-		tunerConfigPath := network.DefaultNetTunerConfigFile
-		if f.ConfigPath != "" {
-			tunerConfigPath = f.ConfigPath
+		statePath := network.DefaultNodeTunerStateFile
+		if f.statePath != "" {
+			statePath = f.statePath
 		}
 
 		if config.Cpusets.IrqMode == irq.Mq {
 			// Only do in dedicated mode to keep legacy behaviour otherwise. Remove the file if it exists.
 			zap.L().Sugar().Debugf("Not writing net tuner config as irq mode is %s", config.Cpusets.IrqMode)
 
-			exists, err := afero.Exists(f.fs, tunerConfigPath)
+			exists, err := afero.Exists(f.fs, statePath)
 			if err != nil {
 				return NewTuneError(err)
 			}
 			if exists {
-				err := f.fs.Remove(tunerConfigPath)
+				err := f.fs.Remove(statePath)
 				if err != nil {
-					return NewTuneError(fmt.Errorf("failed to remove existing net tuner config file %s: %w", tunerConfigPath, err))
+					return NewTuneError(fmt.Errorf("failed to remove existing net tuner config file %s: %w", statePath, err))
 				}
 			}
 
@@ -363,9 +363,9 @@ func (f *netTunersFactory) NewInterruptConfigFileTuner(interfaces []string, mode
 		}
 
 		err = f.executor.Execute(
-			commands.NewWriteFileCmd(f.fs, tunerConfigPath, string(marshalled)))
+			commands.NewWriteFileCmd(f.fs, statePath, string(marshalled)))
 		if err != nil {
-			return NewTuneError(fmt.Errorf("failed to write to net tuner config file %s: %w", tunerConfigPath, err))
+			return NewTuneError(fmt.Errorf("failed to write to net tuner config file %s: %w", statePath, err))
 		}
 
 		return NewTuneResult(false)
@@ -381,12 +381,12 @@ func (f *netTunersFactory) NewInterruptConfigFileTuner(interfaces []string, mode
 				return false, err
 			}
 
-			tunerConfigPath := network.DefaultNetTunerConfigFile
-			if f.ConfigPath != "" {
-				tunerConfigPath = f.ConfigPath
+			statePath := network.DefaultNodeTunerStateFile
+			if f.statePath != "" {
+				statePath = f.statePath
 			}
 
-			exists, err := afero.Exists(f.fs, tunerConfigPath)
+			exists, err := afero.Exists(f.fs, statePath)
 			if err != nil {
 				return false, err
 			}
@@ -400,12 +400,12 @@ func (f *netTunersFactory) NewInterruptConfigFileTuner(interfaces []string, mode
 				return false, nil
 			}
 
-			content, err := afero.ReadFile(f.fs, tunerConfigPath)
+			content, err := afero.ReadFile(f.fs, statePath)
 			if err != nil {
 				return false, err
 			}
 
-			currentConfig := NetTunerConfig{}
+			currentConfig := NodeTunerState{}
 			err = yaml.Unmarshal(content, &currentConfig)
 			if err != nil {
 				return false, err

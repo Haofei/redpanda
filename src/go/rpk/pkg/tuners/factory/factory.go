@@ -58,8 +58,8 @@ type TunerParams struct {
 	Disks         []string
 	Directories   []string
 	Nics          []string
-	// Alternative path to where to write the net tuner config file to
-	NetConfigPath string
+	// Alternative path to write the tuner state file
+	NodeTunerStatePath string
 }
 
 type TunersFactory interface {
@@ -249,7 +249,7 @@ func (factory *tunersFactory) newNetworkTuner(
 		ethtool,
 		factory.executor,
 		factory.proc,
-		params.NetConfigPath,
+		params.NodeTunerStatePath,
 	)
 }
 

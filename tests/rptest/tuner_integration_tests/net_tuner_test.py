@@ -19,7 +19,7 @@ import re
 # only works with --max-parallel 1
 
 CORE_COUNT = 4
-NET_TUNER_CONFIG_FILE_PATH = "/var/run/redpanda_net_tuner_config"
+NET_TUNER_CONFIG_FILE_PATH = "/var/run/redpanda_node_tuner_state.yaml"
 
 
 class NetTunerTest(RedpandaTest):
@@ -321,8 +321,8 @@ class AwsNetTunerTest(NetTunerTest):
         self._test_tune_net_dedicated_core(
             expected_interrupt_setup,
             4,
-            additional_tune_args=["--tuner-config-path", alternative_path],
-            additional_start_args=f"--tuner-config-path={alternative_path}",
+            additional_tune_args=["--node-tuner-state-path", alternative_path],
+            additional_start_args=f"--node-tuner-state-path={alternative_path}",
         )
 
         self.node.account.ssh(f"test -e {alternative_path}")

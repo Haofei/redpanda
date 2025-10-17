@@ -26,6 +26,7 @@ import (
 	"github.com/redpanda-data/redpanda/src/go/rpk/pkg/tuners/factory"
 	"github.com/redpanda-data/redpanda/src/go/rpk/pkg/tuners/hwloc"
 	"github.com/redpanda-data/redpanda/src/go/rpk/pkg/tuners/irq"
+	"github.com/redpanda-data/redpanda/src/go/rpk/pkg/tuners/network"
 	"github.com/spf13/afero"
 	"github.com/spf13/cobra"
 	"go.uber.org/zap"
@@ -137,7 +138,7 @@ func addTunerParamsFlags(cmd *cobra.Command, tunerParams *factory.TunerParams) {
 	cmd.Flags().StringSliceVarP(&tunerParams.Nics, "nic", "n", nil, "Network Interface Controllers to tune")
 	cmd.Flags().StringSliceVarP(&tunerParams.Directories, "dirs", "r", nil, "List of *data* directories or places to store data (e.g. /var/vectorized/redpanda/); usually your XFS filesystem on an NVMe SSD device")
 	cmd.Flags().BoolVar(&tunerParams.RebootAllowed, "reboot-allowed", false, "Allow tuners to tune boot parameters and request system reboot")
-	cmd.Flags().StringVar(&tunerParams.NetConfigPath, "tuner-config-path", "", "Alternative path to where to write the net tuner config file to")
+	cmd.Flags().StringVar(&tunerParams.NodeTunerStatePath, "node-tuner-state-path", "", fmt.Sprintf("Alternative path to write the tuner state file to (default: %s)", network.DefaultNodeTunerStateFile))
 }
 
 func tune(
