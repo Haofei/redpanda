@@ -60,8 +60,6 @@ ss::future<model::record_batch_reader::storage_t>
 level_one_log_reader_impl::do_load_slice(
   model::timeout_clock::time_point deadline) {
     try {
-        chunked_circular_buffer<model::record_batch> res;
-
         // First switch: ensure batches are materialized or the reader
         // reaches end-of-stream.
         switch (_state) {
@@ -105,12 +103,13 @@ level_one_log_reader_impl::do_load_slice(
               _tidp,
               std::to_underlying(_state));
         case state::materialized:
-            consume_materialized_batches(&res);
+            _state = state::empty;
+            co_return consume_materialized_batches();
             [[fallthrough]];
         case state::end_of_stream:
-            break;
+            co_return chunked_circular_buffer<model::record_batch>{};
         }
-        co_return res;
+
     } catch (...) {
         vlog(
           _log.error, "Reader caught exception: {}", std::current_exception());
@@ -378,27 +377,28 @@ level_one_log_reader_impl::materialize_batches_from_object_offset(
     co_return read_fut.get();
 }
 
-void level_one_log_reader_impl::consume_materialized_batches(
-  chunked_circular_buffer<model::record_batch>* dest) {
+chunked_circular_buffer<model::record_batch>
+level_one_log_reader_impl::consume_materialized_batches() {
     vlog(_log.debug, "Consuming {} materialized batches", _batches.size());
 
-    dest->swap(_batches);
+    auto batches = std::exchange(_batches, {});
 
     // Increment the next offset for the next metastore query.
     // The offset is always incremented so the reader makes
     // progress even if the offset range in the object is
     // smaller than the metastore's metadata about the offset
     // range covered by the object (because of, e.g. compaction).
-    auto last_offset = dest->empty()
+    auto last_offset = batches.empty()
                          ? _current_obj
                              .transform(
                                [](const auto& obj) { return obj.last_offset; })
                              .value_or(_next_offset)
-                         : model::offset_cast(dest->back().last_offset());
+                         : model::offset_cast(batches.back().last_offset());
     _next_offset = kafka::next_offset(last_offset);
 
     _current_obj.reset();
-    _state = state::empty;
+
+    return batches;
 }
 
 void level_one_log_reader_impl::print(std::ostream& o) {

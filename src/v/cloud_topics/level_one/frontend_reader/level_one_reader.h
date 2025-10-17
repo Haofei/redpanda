@@ -115,8 +115,12 @@ private:
     ss::future<chunked_circular_buffer<model::record_batch>>
     read_batches(l1::object_reader& reader);
 
-    void consume_materialized_batches(
-      chunked_circular_buffer<model::record_batch>* dest);
+    /*
+     * Prepare the result set to return to the record batch reader and configure
+     * the reader for the next request to load slice which will be the next
+     * offset that should be fetched.
+     */
+    chunked_circular_buffer<model::record_batch> consume_materialized_batches();
 
     ss::future<l1::footer>
     read_footer(l1::object_id oid, size_t footer_pos, size_t object_size);
