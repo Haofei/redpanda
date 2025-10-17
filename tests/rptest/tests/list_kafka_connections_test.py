@@ -75,8 +75,7 @@ class AdminV2ListKafkaConnectionsTest(RedpandaTest):
         )
         node_id = self.redpanda.node_id(self.redpanda.nodes[0])
         req = broker_pb.ListKafkaConnectionsRequest(
-            node_id=node_id,
-            page_size=10,
+            node_id=node_id, page_size=10, order_by="source.port desc"
         )
 
         def valid_response() -> bool:
@@ -88,7 +87,10 @@ class AdminV2ListKafkaConnectionsTest(RedpandaTest):
             self.logger.debug(f"ListKafkaConnectionsResponse: {resp}")
 
             # Sanity check the response
-            assert len(resp.connections) > 0
+            assert len(resp.connections) >= 2
+
+            # Check the ordering is correct
+            assert resp.connections[0].source.port >= resp.connections[1].source.port
 
             # Find the connection used for franz-go consumer group requests
             # Note: this is different from the connection used for fetch requests
