@@ -77,7 +77,11 @@ level_one_log_reader_impl::do_load_slice(
         }
             [[fallthrough]];
         case state::ready:
+            if (_state == state::end_of_stream) {
+                break;
+            }
             _batches = co_await materialize_batches(deadline);
+            _state = state::materialized;
             [[fallthrough]];
         case state::materialized:
         case state::end_of_stream:
@@ -297,10 +301,6 @@ level_one_log_reader_impl::materialize_batches(
       _batches.empty(),
       "Materialize batches called with batches already materialized");
 
-    if (_state == state::end_of_stream) {
-        co_return chunked_circular_buffer<model::record_batch>{};
-    }
-
     vassert(
       _state == state::ready,
       "Invalid state to materialize batches: {}",
@@ -320,7 +320,6 @@ level_one_log_reader_impl::materialize_batches(
           _log.debug,
           "No data in object {}: materializing 0 batches",
           _current_obj->oid);
-        _state = state::materialized;
         co_return chunked_circular_buffer<model::record_batch>{};
     }
 
@@ -342,7 +341,6 @@ level_one_log_reader_impl::materialize_batches(
           "Exception opening stream for L1 object {}: {}",
           _current_obj->oid,
           ex);
-        _state = state::end_of_stream;
         std::rethrow_exception(ex);
     }
     auto stream_result = stream_fut.get();
@@ -352,7 +350,6 @@ level_one_log_reader_impl::materialize_batches(
           "Failed to open stream for L1 object {}: {}",
           _current_obj->oid,
           std::to_underlying(stream_result.error()));
-        _state = state::end_of_stream;
         throw std::runtime_error(_log.format(
           "Failed to open stream for L1 object {}: {}",
           _current_obj->oid,
@@ -369,7 +366,6 @@ level_one_log_reader_impl::materialize_batches(
           _current_obj->oid,
           ex);
         co_await close_reader_safe(reader);
-        _state = state::end_of_stream;
         std::rethrow_exception(ex);
     }
 
@@ -382,7 +378,6 @@ level_one_log_reader_impl::materialize_batches(
       _batches.size(),
       _current_obj->oid);
 
-    _state = state::materialized;
     co_return read_fut.get();
 }
 
