@@ -167,7 +167,17 @@ write_request_scheduler::pull_and_roundtrip(std::vector<shard_info> infos) {
             }
         }
     }
-    // Wait until all shards have scheduled their requests
+    // Wait until all shards have scheduled their requests.
+    // This gate is only closed after every shard has forwarded all its
+    // requests to the target shard's pipeline. This means that we can
+    // notify the next pipeline stage about the requests and await futures
+    // accumulated in the 'in_flight' vector. Instead of simply signalling
+    // the gate we first forwarding target shard's own requests to the pipeline
+    // which also signals the pipeline stage.
+    // After the gate is closed the method awaits in-flight futures. Every
+    // future awaits until the target shard uploads its write requests to the
+    // cloud storage and then it acknowledges the source write requests (which
+    // were proxied).
     co_await target_gate.close();
     // Submit own requests to the pipeline
     bool signaled = false;
@@ -343,7 +353,7 @@ write_request_scheduler::proxy_write_request(
         // Normal errors (S3 upload failure or timeout)
         // are handled here
         errc e = extents.error();
-        vlog(cd_log.error, "Proxy write request failed: {}", e);
+        vlog(cd_log.info, "Proxy write request failed: {}", e);
         co_return std::unexpected(e);
     }
     auto ptr = ss::make_lw_shared<chunked_vector<extent_meta>>();
