@@ -249,12 +249,7 @@ ss::future<storage::translating_reader> frontend::make_reader(
       cfg.start_offset,
       lro);
 
-    auto impl = [&] {
-        if (level_one) {
-            return make_l1_reader(cfg);
-        }
-        return make_l0_reader(cfg);
-    }();
+    auto impl = level_one ? make_l1_reader(cfg) : make_l0_reader(cfg);
 
     co_return storage::translating_reader{
       model::record_batch_reader(std::move(impl)),
