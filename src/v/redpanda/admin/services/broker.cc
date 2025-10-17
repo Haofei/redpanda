@@ -11,11 +11,13 @@
 
 #include "redpanda/admin/services/broker.h"
 
+#include "container/priority_queue.h"
 #include "features/feature_table.h"
 #include "kafka/server/connection_context.h"
 #include "kafka/server/server.h"
 #include "proto/redpanda/core/admin/v2/kafka_connections.proto.h"
 #include "redpanda/admin/aip_filter.h"
+#include "redpanda/admin/aip_ordering.h"
 #include "serde/protobuf/rpc.h"
 #include "ssx/async_algorithm.h"
 #include "version/version.h"
@@ -119,6 +121,31 @@ public:
     }
 
     size_t size() const final { return _connections.size(); }
+};
+
+template<typename Comparator>
+class ordered_collector : public connection_collector {
+    // Invert the order here to get the min-k instead of the max-k
+    chunked_bounded_priority_queue<
+      proto::kafka_connection,
+      detail::invert_comparator<Comparator>>
+      _pq;
+
+public:
+    ordered_collector(size_t limit, Comparator comp)
+      : _pq(limit, detail::invert_comparator<Comparator>(std::move(comp))) {}
+
+    void add(proto::kafka_connection conn) final { _pq.push(std::move(conn)); }
+
+    chunked_vector<proto::kafka_connection> extract() && final {
+        return std::move(_pq).extract_heap();
+    }
+
+    size_t size() const final { return _pq.size(); }
+
+    ss::future<chunked_vector<proto::kafka_connection>> extract_sorted() && {
+        return std::move(_pq).async_extract_sorted();
+    }
 };
 
 struct connection_gather_result {
@@ -232,17 +259,39 @@ broker_service_impl::list_kafka_connections(
       req.get_filter());
     auto filter = aip_filter_parser::create_aip_filter(std::move(filter_cfg));
 
-    auto global_collector = unordered_collector{limit};
+    if (req.get_order_by().empty()) {
+        auto global_collector = unordered_collector{limit};
 
-    auto make_local_collector = [limit](size_t accumulated_count) {
-        return ss::make_shared<unordered_collector>(limit - accumulated_count);
-    };
+        auto make_local_collector = [limit](size_t accumulated_count) {
+            return ss::make_shared<unordered_collector>(
+              limit - accumulated_count);
+        };
 
-    auto total_matching_connections = co_await gather_all_shards(
-      _kafka_server, filter, make_local_collector, global_collector);
+        auto total_matching_connections = co_await gather_all_shards(
+          _kafka_server, filter, make_local_collector, global_collector);
 
-    resp.set_connections(std::move(global_collector).extract());
-    resp.set_total_size(total_matching_connections);
+        resp.set_connections(std::move(global_collector).extract());
+        resp.set_total_size(total_matching_connections);
+    } else {
+        auto ordering_conf
+          = make_ordering_config<proto::admin::kafka_connection>(
+            req.get_order_by());
+        auto comp = sort_order::parse(ordering_conf);
+
+        auto global_collector = ordered_collector{limit, comp};
+
+        auto make_local_collector = [limit, &comp](size_t) {
+            return ss::make_shared<ordered_collector<decltype(comp)>>(
+              limit, comp);
+        };
+
+        auto total_matching_connections = co_await gather_all_shards(
+          _kafka_server, filter, make_local_collector, global_collector);
+
+        resp.set_connections(
+          co_await std::move(global_collector).extract_sorted());
+        resp.set_total_size(total_matching_connections);
+    }
 
     vlog(
       brlog.trace,
