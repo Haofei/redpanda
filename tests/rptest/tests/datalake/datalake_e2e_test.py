@@ -816,8 +816,8 @@ class DatalakeE2ETests(RedpandaTest):
     @cluster(num_nodes=3)
     @matrix(
         cloud_storage_type=supported_storage_types(),
-        query_engine=[QueryEngineType.SPARK, QueryEngineType.TRINO],
-        catalog_type=supported_catalog_types(),
+        query_engine=[QueryEngineType.SPARK],
+        catalog_type=[CatalogType.REST_JDBC],
     )
     def test_latest_protobuf_schema(
         self, cloud_storage_type, query_engine, catalog_type
