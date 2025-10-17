@@ -10,6 +10,7 @@
 
 #include "cluster_link/replication/tests/deps_test_impl.h"
 
+#include "kafka/protocol/errors.h"
 #include "model/tests/random_batch.h"
 #include "random/generators.h"
 
@@ -55,7 +56,24 @@ raft::replicate_stages accounting_sink::replicate(
 
 void accounting_sink::notify_replicator_failure(model::term_id) {}
 
-kafka::offset accounting_sink::high_watermark() const { return {}; }
+kafka::offset accounting_sink::high_watermark() const { return _last_offset; }
+
+ss::future<kafka::error_code> accounting_sink::prefix_truncate(
+  kafka::offset truncation_offset, ss::lowres_clock::time_point) {
+    if (truncation_offset <= start_offset()) {
+        co_return kafka::error_code::none;
+    }
+
+    if (truncation_offset > high_watermark()) {
+        co_return kafka::error_code::offset_out_of_range;
+    }
+
+    _start_offset = truncation_offset;
+
+    co_return kafka::error_code::none;
+}
+
+kafka::offset accounting_sink::start_offset() { return _start_offset; }
 
 ss::future<> random_data_source::start(kafka::offset offset) noexcept {
     _next = offset;

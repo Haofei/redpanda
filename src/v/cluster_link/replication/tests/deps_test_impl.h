@@ -34,9 +34,14 @@ public:
       ss::abort_source& as) override;
     void notify_replicator_failure(::model::term_id) override;
     kafka::offset high_watermark() const final;
+    ss::future<kafka::error_code> prefix_truncate(
+      kafka::offset truncation_offset,
+      ss::lowres_clock::time_point deadline) final;
+    kafka::offset start_offset() final;
 
 private:
     size_t _records_consumed;
+    kafka::offset _start_offset{0};
     kafka::offset _last_offset{};
     ss::gate _gate;
 };

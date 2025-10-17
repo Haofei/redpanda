@@ -8,6 +8,9 @@ redpanda_test_cc_library(
     hdrs = [
         "deps_test_impl.h",
     ],
+    implementation_deps = [
+        "//src/v/kafka/protocol",
+    ],
     visibility = ["//visibility:public"],
     deps = [
         "//src/v/cluster_link/replication:deps",
@@ -28,6 +31,7 @@ redpanda_cc_gtest(
         ":deps_test_impl",
         "//src/v/base",
         "//src/v/cluster_link/replication:partition_replicator",
+        "//src/v/kafka/protocol",
         "//src/v/model/tests:random",
         "//src/v/random:generators",
         "//src/v/ssx:future_util",

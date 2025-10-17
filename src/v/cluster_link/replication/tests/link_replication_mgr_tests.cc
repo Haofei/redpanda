@@ -14,6 +14,8 @@
 #include "test_utils/randoms.h"
 #include "test_utils/test.h"
 
+#include <system_error>
+
 using namespace std::chrono_literals;
 
 namespace {
@@ -94,6 +96,13 @@ public:
     void notify_replicator_failure(model::term_id) final {}
 
     kafka::offset high_watermark() const final { return {}; }
+
+    ss::future<kafka::error_code>
+    prefix_truncate(kafka::offset, ss::lowres_clock::time_point) final {
+        co_return kafka::error_code::none;
+    }
+
+    kafka::offset start_offset() final { return {}; }
 
 private:
     ss::gate _gate;

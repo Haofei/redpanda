@@ -11,6 +11,7 @@
 #include "base/units.h"
 #include "cluster_link/replication/partition_replicator.h"
 #include "cluster_link/replication/tests/deps_test_impl.h"
+#include "kafka/protocol/errors.h"
 #include "model/tests/random_batch.h"
 #include "ssx/future-util.h"
 #include "test_utils/async.h"
@@ -19,6 +20,8 @@
 #include "utils/mutex.h"
 
 #include <seastar/core/sleep.hh>
+
+#include <system_error>
 
 using namespace std::chrono_literals;
 
@@ -140,12 +143,33 @@ public:
 
     void set_fail_replication(bool value) { _fail_replication = value; }
 
-    kafka::offset high_watermark() const final { return {}; }
+    kafka::offset high_watermark() const final {
+        return _last_replicated_offset;
+    }
+
+    ss::future<kafka::error_code> prefix_truncate(
+      kafka::offset truncation_offset, ss::lowres_clock::time_point) final {
+        if (truncation_offset <= start_offset()) {
+            // No-op, return early
+            co_return kafka::error_code::none;
+        }
+
+        if (truncation_offset > high_watermark()) {
+            co_return kafka::error_code::offset_out_of_range;
+        }
+
+        _start_offset = truncation_offset;
+
+        co_return kafka::error_code::none;
+    }
+
+    kafka::offset start_offset() final { return _start_offset; }
 
 private:
     model::ntp _ntp{"kafka", "test", model::partition_id(0)};
     mutex _replication_mu{"test_replication"};
     bool _fail_replication = false;
+    kafka::offset _start_offset{0};
     kafka::offset _last_replicated_offset;
 };
 

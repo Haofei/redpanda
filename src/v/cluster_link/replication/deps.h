@@ -10,6 +10,7 @@
 #pragma once
 
 #include "container/chunked_vector.h"
+#include "kafka/protocol/errors.h"
 #include "model/fundamental.h"
 #include "model/record.h"
 #include "model/timeout_clock.h"
@@ -49,6 +50,13 @@ public:
 
     // Returns the HWM of the partition
     virtual kafka::offset high_watermark() const = 0;
+
+    // Performs a prefix truncation on the sink partition
+    virtual ss::future<kafka::error_code> prefix_truncate(
+      kafka::offset truncation_offset, ss::lowres_clock::time_point deadline)
+      = 0;
+
+    virtual kafka::offset start_offset() = 0;
 };
 
 class data_sink_factory {

@@ -27,6 +27,7 @@
 #include "cluster_link/shadow_linking_rpc_service.h"
 #include "cluster_link/source_topic_syncer.h"
 #include "kafka/client/direct_consumer/direct_consumer.h"
+#include "kafka/data/partition_proxy.h"
 #include "kafka/server/group_router.h"
 #include "kafka/server/snc_quota_manager.h"
 #include "kafka/server/write_at_offset_stm.h"
@@ -490,6 +491,20 @@ public:
         _gate.check();
         return ::model::offset_cast(
           _partition->log()->from_log_offset(_partition->high_watermark()));
+    }
+
+    ss::future<kafka::error_code> prefix_truncate(
+      kafka::offset truncation_offset,
+      ss::lowres_clock::time_point deadline) final {
+        auto h = _gate.hold();
+        co_return co_await kafka::make_partition_proxy(_partition)
+          .prefix_truncate(kafka::offset_cast(truncation_offset), deadline);
+    }
+
+    kafka::offset start_offset() final {
+        _gate.check();
+        return ::model::offset_cast(
+          kafka::make_partition_proxy(_partition).start_offset());
     }
 
 private:

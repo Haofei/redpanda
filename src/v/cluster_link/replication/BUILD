@@ -27,6 +27,7 @@ redpanda_cc_library(
     deps = [
         "//src/v/container:chunked_hash_map",
         "//src/v/container:chunked_vector",
+        "//src/v/kafka/protocol",
         "//src/v/model",
         "//src/v/raft",
         "//src/v/ssx:semaphore",
