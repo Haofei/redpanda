@@ -151,11 +151,10 @@ ss::future<> level_one_log_reader_impl::fetch_metadata(
               _next_offset,
               response.error());
             _state = state::end_of_stream;
-            throw std::runtime_error(
-              fmt::format(
-                "Metastore query failed offset {}: {}",
-                _next_offset,
-                response.error()));
+            throw std::runtime_error(_log.format(
+              "Metastore query failed offset {}: {}",
+              _next_offset,
+              response.error()));
         }
     }
 
@@ -210,13 +209,12 @@ ss::future<l1::footer> level_one_log_reader_impl::read_footer(
           extent.position,
           object_size,
           std::to_underlying(read_result.error()));
-        throw std::runtime_error(
-          fmt::format(
-            "Failed to read footer from object {} (pos {} size {}): {}",
-            oid,
-            extent.position,
-            object_size,
-            std::to_underlying(read_result.error())));
+        throw std::runtime_error(_log.format(
+          "Failed to read footer from object {} (pos {} size {}): {}",
+          oid,
+          extent.position,
+          object_size,
+          std::to_underlying(read_result.error())));
     }
 
     // Parse the footer - we have the complete footer so this should succeed.
@@ -231,12 +229,11 @@ ss::future<l1::footer> level_one_log_reader_impl::read_footer(
           oid,
           extent.position,
           object_size);
-        throw std::runtime_error(
-          fmt::format(
-            "Failed to parse footer from object {} (pos {} size {})",
-            oid,
-            extent.position,
-            object_size));
+        throw std::runtime_error(_log.format(
+          "Failed to parse footer from object {} (pos {} size {})",
+          oid,
+          extent.position,
+          object_size));
     }
 
     co_return std::get<l1::footer>(std::move(footer_result));
@@ -340,11 +337,10 @@ ss::future<> level_one_log_reader_impl::materialize_batches(
           _current_obj->oid,
           std::to_underlying(stream_result.error()));
         _state = state::end_of_stream;
-        throw std::runtime_error(
-          fmt::format(
-            "Failed to open stream for L1 object {}: {}",
-            _current_obj->oid,
-            std::to_underlying(stream_result.error())));
+        throw std::runtime_error(_log.format(
+          "Failed to open stream for L1 object {}: {}",
+          _current_obj->oid,
+          std::to_underlying(stream_result.error())));
     }
 
     auto reader = l1::object_reader::create(std::move(stream_result).value());
