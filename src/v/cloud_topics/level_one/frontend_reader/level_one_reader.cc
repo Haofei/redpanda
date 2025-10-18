@@ -60,6 +60,19 @@ ss::future<model::record_batch_reader::storage_t>
 level_one_log_reader_impl::do_load_slice(
   model::timeout_clock::time_point deadline) {
     try {
+        return read_some(deadline);
+    } catch (...) {
+        vlog(
+          _log.error, "Reader caught exception: {}", std::current_exception());
+        set_end_of_stream();
+        throw;
+    }
+}
+
+ss::future<model::record_batch_reader::storage_t>
+level_one_log_reader_impl::read_some(
+  model::timeout_clock::time_point deadline) {
+    while (true) {
         auto object = co_await lookup_object_for_offset(_next_offset, deadline);
         if (!object.has_value()) {
             set_end_of_stream();
@@ -88,15 +101,8 @@ level_one_log_reader_impl::do_load_slice(
         } else {
             _next_offset = kafka::next_offset(
               model::offset_cast(batches.back().last_offset()));
+            co_return batches;
         }
-
-        co_return batches;
-
-    } catch (...) {
-        vlog(
-          _log.error, "Reader caught exception: {}", std::current_exception());
-        set_end_of_stream();
-        throw;
     }
 }
 

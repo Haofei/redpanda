@@ -110,6 +110,13 @@ private:
     ss::future<l1::footer>
     read_footer(l1::object_id oid, size_t footer_pos, size_t object_size);
 
+    /*
+     * Returns batches starting at next offset. It will continue to advance next
+     * offset until batches are read or end-of-stream is reached.
+     */
+    ss::future<model::record_batch_reader::storage_t>
+      read_some(model::timeout_clock::time_point);
+
     bool is_over_limit(size_t size) const;
 
     ss::future<> close_reader_safe(l1::object_reader&);
