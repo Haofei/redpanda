@@ -667,7 +667,14 @@ class ShadowLinkBasicTests(ShadowLinkTestBase):
             backoff_sec=1,
         )
 
-    @cluster(num_nodes=6)
+    @cluster(
+        num_nodes=6,
+        log_allow_list=[
+            re.compile(
+                ".*Failed to process mirror topic command: cluster::cluster_link::errc::feature_disabled.*"
+            )
+        ],
+    )
     def test_rapid_shadow_link_toggling(self):
         self.create_link("test-link")
 
