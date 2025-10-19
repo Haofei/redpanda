@@ -939,6 +939,10 @@ service::node_local_shadow_topic_report(
         service& s,
         const ::cluster_link::model::id_t& link_id,
         const ::model::topic& topic) {
+          if (!s.container().local_is_initialized()) {
+              return rpc::shadow_topic_report_response{
+                .err_code = errc::service_not_ready};
+          }
           return s.shard_local_topic_report(link_id, topic);
       },
       link_id,
@@ -1080,6 +1084,10 @@ service::node_local_shadow_link_report(
     co_await container().map_reduce(
       reducer,
       [](service& s, const model::id_t& id) {
+          if (!s.container().local_is_initialized()) {
+              return rpc::shadow_link_status_report_response{
+                .err_code = errc::service_not_ready};
+          }
           return s.shard_local_shadow_link_report(id);
       },
       link_id);
@@ -1099,6 +1107,9 @@ service::node_local_shadow_link_report(
 
 rpc::shadow_link_status_report_response
 service::shard_local_shadow_link_report(model::id_t id) {
+    if (auto err = check_manager_state(); err != errc::success) {
+        return rpc::shadow_link_status_report_response{.err_code = err};
+    }
     rpc::shadow_link_status_report_response result;
     result.link_id = id;
 
