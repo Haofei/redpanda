@@ -173,11 +173,11 @@ AVRO_SCHEMA_TEST_CASES = {
         record_generator=lambda t: {"number": int(t), "timestamp_us": int(t * 1000000)},
         expected_trino=[
             ("number", "bigint", "", ""),
-            ("timestamp_us", "timestamp(6)", "", ""),
+            ("timestamp_us", "timestamp(6) with time zone", "", ""),
         ],
         expected_spark=[
             ("number", "bigint", None),
-            ("timestamp_us", "timestamp_ntz", None),
+            ("timestamp_us", "timestamp", None),
             ("", "", ""),
             ("# Partitioning", "", ""),
             ("Part 0", "hours(redpanda.timestamp)", ""),
@@ -192,12 +192,12 @@ AVRO_SCHEMA_TEST_CASES = {
         },
         expected_trino=[
             ("number", "bigint", "", ""),
-            ("timestamp_us", "timestamp(6)", "", ""),
+            ("timestamp_us", "timestamp(6) with time zone", "", ""),
             ("suit", "bigint", "", ""),
         ],
         expected_spark=[
             ("number", "bigint", None),
-            ("timestamp_us", "timestamp_ntz", None),
+            ("timestamp_us", "timestamp", None),
             ("suit", "bigint", None),
             ("", "", ""),
             ("# Partitioning", "", ""),
@@ -213,12 +213,12 @@ AVRO_SCHEMA_TEST_CASES = {
         },
         expected_trino=[
             ("number", "bigint", "", ""),
-            ("timestamp_us", "timestamp(6)", "", ""),
+            ("timestamp_us", "timestamp(6) with time zone", "", ""),
             ("arr", "array(bigint)", "", ""),
         ],
         expected_spark=[
             ("number", "bigint", None),
-            ("timestamp_us", "timestamp_ntz", None),
+            ("timestamp_us", "timestamp", None),
             ("arr", "array<bigint>", None),
             ("", "", ""),
             ("# Partitioning", "", ""),
@@ -234,12 +234,12 @@ AVRO_SCHEMA_TEST_CASES = {
         },
         expected_trino=[
             ("number", "bigint", "", ""),
-            ("timestamp_us", "timestamp(6)", "", ""),
+            ("timestamp_us", "timestamp(6) with time zone", "", ""),
             ("kv", "map(varchar, bigint)", "", ""),
         ],
         expected_spark=[
             ("number", "bigint", None),
-            ("timestamp_us", "timestamp_ntz", None),
+            ("timestamp_us", "timestamp", None),
             ("kv", "map<string,bigint>", None),
             ("", "", ""),
             ("# Partitioning", "", ""),
@@ -255,12 +255,12 @@ AVRO_SCHEMA_TEST_CASES = {
         },
         expected_trino=[
             ("number", "bigint", "", ""),
-            ("timestamp_us", "timestamp(6)", "", ""),
+            ("timestamp_us", "timestamp(6) with time zone", "", ""),
             ("str_or_long", "row(string varchar, long bigint)", "", ""),
         ],
         expected_spark=[
             ("number", "bigint", None),
-            ("timestamp_us", "timestamp_ntz", None),
+            ("timestamp_us", "timestamp", None),
             ("str_or_long", "struct<string:string,long:bigint>", None),
             ("", "", ""),
             ("# Partitioning", "", ""),
@@ -276,12 +276,12 @@ AVRO_SCHEMA_TEST_CASES = {
         },
         expected_trino=[
             ("number", "bigint", "", ""),
-            ("timestamp_us", "timestamp(6)", "", ""),
+            ("timestamp_us", "timestamp(6) with time zone", "", ""),
             ("optional_long", "bigint", "", ""),
         ],
         expected_spark=[
             ("number", "bigint", None),
-            ("timestamp_us", "timestamp_ntz", None),
+            ("timestamp_us", "timestamp", None),
             ("optional_long", "bigint", None),
             ("", "", ""),
             ("# Partitioning", "", ""),

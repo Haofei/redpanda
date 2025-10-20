@@ -478,9 +478,9 @@ TEST(AvroSchema, TestLogicalTypes) {
     EXPECT_TRUE(field_matches(
       struct_t.fields[5], "long_time_micro", iceberg::time_type{}));
     EXPECT_TRUE(field_matches(
-      struct_t.fields[6], "long_ts_ms", iceberg::timestamp_type{}));
+      struct_t.fields[6], "long_ts_ms", iceberg::timestamptz_type{}));
     EXPECT_TRUE(field_matches(
-      struct_t.fields[7], "long_ts_micro", iceberg::timestamp_type{}));
+      struct_t.fields[7], "long_ts_micro", iceberg::timestamptz_type{}));
     // Duration logical type is not intrepreted in as a separate iceberg type
     EXPECT_TRUE(field_matches(
       struct_t.fields[8], "duration_fixed", iceberg::fixed_type{12}));
@@ -922,22 +922,22 @@ AssertionResult value_matches(
               });
         }
         if (datum.logicalType().type() == avro::LogicalType::TIMESTAMP_MILLIS) {
-            return primitive_equal<iceberg::timestamp_value>(
+            return primitive_equal<iceberg::timestamptz_value>(
               datum,
               value,
               [](
-                const iceberg::timestamp_value& current,
+                const iceberg::timestamptz_value& current,
                 const avro::GenericDatum& expected) {
                   ASSERT_VALUES_EQUAL(
                     current.val / 1000, expected.value<int64_t>());
               });
         }
         if (datum.logicalType().type() == avro::LogicalType::TIMESTAMP_MICROS) {
-            return primitive_equal<iceberg::timestamp_value>(
+            return primitive_equal<iceberg::timestamptz_value>(
               datum,
               value,
               [](
-                const iceberg::timestamp_value& current,
+                const iceberg::timestamptz_value& current,
                 const avro::GenericDatum& expected) {
                   ASSERT_VALUES_EQUAL(current.val, expected.value<int64_t>());
               });

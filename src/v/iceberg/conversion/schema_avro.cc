@@ -127,7 +127,7 @@ inner_field_type_from_avro(const avro::NodePtr& node, state& state) {
         if (
           lt == avro::LogicalType::TIMESTAMP_MILLIS
           || lt == avro::LogicalType::TIMESTAMP_MICROS) {
-            return iceberg::timestamp_type{};
+            return iceberg::timestamptz_type{};
         }
         return iceberg::long_type{};
     }
