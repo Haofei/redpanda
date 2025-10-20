@@ -218,6 +218,7 @@ TEST(converter_test, create_with_tls_flag_only) {
     EXPECT_FALSE(md.connection.ca.has_value());
     EXPECT_FALSE(md.connection.key.has_value());
     EXPECT_FALSE(md.connection.cert.has_value());
+    EXPECT_TRUE(md.connection.tls_provide_sni);
 
     auto sl = admin::metadata_to_shadow_link(std::move(md), {});
 
@@ -256,6 +257,7 @@ TEST(converter_test, create_with_tls_files) {
     tls_file_settings.set_key_path(ss::sstring{key_file});
     tls_file_settings.set_cert_path(ss::sstring{cert_file});
     tls_settings.set_tls_file_settings(std::move(tls_file_settings));
+    tls_settings.set_do_not_set_sni_hostname(true);
     shadow_link_client_options.set_tls_settings(std::move(tls_settings));
 
     shadow_link_client_options.set_bootstrap_servers({"localhost:9092"});
@@ -268,6 +270,7 @@ TEST(converter_test, create_with_tls_files) {
 
     auto md = admin::convert_create_to_metadata(std::move(req));
     EXPECT_TRUE(md.connection.tls_enabled);
+    EXPECT_FALSE(md.connection.tls_provide_sni);
     ASSERT_TRUE(md.connection.ca.has_value());
     ASSERT_TRUE(
       std::holds_alternative<cluster_link::model::tls_file_path>(
@@ -612,12 +615,15 @@ TEST(converter_test, metadata_to_shadow_link_tls_file) {
     EXPECT_EQ(tls_file_settings.get_ca_path(), ca_file);
     EXPECT_EQ(tls_file_settings.get_key_path(), key_file);
     EXPECT_EQ(tls_file_settings.get_cert_path(), cert_file);
+    EXPECT_FALSE(tls_settings.get_do_not_set_sni_hostname());
 }
 
 TEST(converter_test, metadata_to_shadow_link_tls_file_on_ca) {
     const auto ca_file = "ca_file.pem";
     cluster_link::model::metadata md;
     md.connection.ca = cluster_link::model::tls_file_path(ca_file);
+    md.connection.tls_provide_sni
+      = cluster_link::model::connection_config::tls_provide_sni_t::no;
 
     auto sl = admin::metadata_to_shadow_link(std::move(md), {});
 
@@ -629,6 +635,7 @@ TEST(converter_test, metadata_to_shadow_link_tls_file_on_ca) {
     EXPECT_EQ(tls_file_settings.get_ca_path(), ca_file);
     EXPECT_TRUE(tls_file_settings.get_key_path().empty());
     EXPECT_TRUE(tls_file_settings.get_cert_path().empty());
+    EXPECT_TRUE(tls_settings.get_do_not_set_sni_hostname());
 }
 
 TEST(converter_test, metadata_to_shadow_link_tls_value) {

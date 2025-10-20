@@ -237,6 +237,9 @@ struct connection_config
     std::optional<tls_file_or_value> key;
     /// The CA file to use
     std::optional<tls_file_or_value> ca;
+    using tls_provide_sni_t = ss::bool_class<struct tls_provide_sni_tag>;
+    /// Whether or not to set the SNI hostname when TLS is enabled
+    tls_provide_sni_t tls_provide_sni{tls_provide_sni_t::yes};
     /// The client ID to use
     ss::sstring client_id;
     // Max metadata age
@@ -323,7 +326,8 @@ struct connection_config
           fetch_min_bytes,
           fetch_max_bytes,
           tls_enabled,
-          fetch_partition_max_bytes);
+          fetch_partition_max_bytes,
+          tls_provide_sni);
     }
 
     friend std::ostream&

@@ -352,6 +352,8 @@ message TLSSettings {
         // Certificates and keys are provided in PEM format
         TLSPEMSettings tls_pem_settings = 2;
     }
+    // If true, the SNI hostname will not be provided when TLS is used
+    bool do_not_set_sni_hostname = 4;
 }
 // Authentication config.  Currently only supporting SASL/SCRAM,
 // however made as a oneof for expansion

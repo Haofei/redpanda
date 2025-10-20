@@ -404,6 +404,10 @@ void set_tls_settings(
           }
       },
       [](std::monostate) {});
+
+    config.tls_provide_sni
+      = cluster_link::model::connection_config::tls_provide_sni_t{
+        !tls.get_do_not_set_sni_hostname()};
 }
 /// \brief Creates a connection config from the create cluster link
 /// request
@@ -571,6 +575,8 @@ tls_settings create_tls_settings(const cluster_link::model::metadata& md) {
           md.connection.key.value(),
           md.connection.cert.value());
     }
+
+    tls.set_do_not_set_sni_hostname(!bool(md.connection.tls_provide_sni));
 
     return tls;
 }

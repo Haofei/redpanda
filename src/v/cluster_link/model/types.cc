@@ -430,15 +430,16 @@ auto fmt::formatter<cluster_link::model::connection_config>::format(
     return fmt::format_to(
       ctx.out(),
       "{{bootstrap_servers: {}, authn_config: {}, tls_enabled: {}, cert: {}, "
-      "key: {:s}, ca: {}, client_id: {}, metadata_max_age_ms: {}, "
-      "connection_timeout_ms: {}, retry_backoff_ms: {}, fetch_wait_max_ms: {}, "
-      "fetch_min_bytes: {}, fetch_max_bytes: {}}}",
+      "key: {:s}, ca: {}, tls_provide_sni: {}, client_id: {}, "
+      "metadata_max_age_ms: {}, connection_timeout_ms: {}, retry_backoff_ms: "
+      "{}, fetch_wait_max_ms: {}, fetch_min_bytes: {}, fetch_max_bytes: {}}}",
       c.bootstrap_servers,
       c.authn_config,
       c.tls_enabled,
       c.cert,
       c.key,
       c.ca,
+      c.tls_provide_sni,
       c.client_id,
       c.metadata_max_age_ms,
       c.connection_timeout_ms,
