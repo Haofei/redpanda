@@ -50,6 +50,9 @@ class NetTunerTest(RedpandaTest):
 
         self.logger.info(f"Found interface {self.interface_name}")
 
+        uname = self.node.account.ssh_output("uname -m").decode("utf-8")
+        self.is_arm = "aarch64" in uname
+
     def teardown(self):
         super().teardown()
 
@@ -276,6 +279,10 @@ class AwsNetTunerTest(NetTunerTest):
 
     @cluster(num_nodes=1)
     def test_tune_net_mq(self):
+        if self.is_arm:
+            self.start_rp()
+            return
+
         expected_interrupt_setup = self.ExpectedInterruptSetup(
             interrupts_masks=["1", "4", "2", "8"],
             redpanda_cores={0, 1, 2, 3},
@@ -338,6 +345,10 @@ class AwsNetTunerTest(NetTunerTest):
 
     @cluster(num_nodes=1)
     def test_tune_net_dedicated_2_cores(self):
+        if self.is_arm:
+            self.start_rp()
+            return
+
         expected_interrupt_setup = self.ExpectedInterruptSetup(
             interrupts_masks=["4", "8"],
             redpanda_cores={0, 1},
