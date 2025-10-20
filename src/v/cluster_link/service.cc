@@ -480,7 +480,8 @@ public:
 
     kafka::offset high_watermark() const final {
         _gate.check();
-        return ::model::offset_cast(_partition->high_watermark());
+        return ::model::offset_cast(
+          _partition->log()->from_log_offset(_partition->high_watermark()));
     }
 
 private:
