@@ -48,14 +48,14 @@ FieldTuple = tuple[str | None, ...]
 
 TRINO_RP_FIELD_TYPE: FieldTuple = (
     "redpanda",
-    "row(partition integer, offset bigint, timestamp timestamp(6), headers array(row(key varchar, value varbinary)), key varbinary, timestamp_type integer)",
+    "row(partition integer, offset bigint, timestamp timestamp(6) with time zone, headers array(row(key varchar, value varbinary)), key varbinary, timestamp_type integer)",
     "",
     "",
 )
 
 SPARK_RP_FIELD_TYPE: FieldTuple = (
     "redpanda",
-    "struct<partition:int,offset:bigint,timestamp:timestamp_ntz,headers:array<struct<key:string,value:binary>>,key:binary,timestamp_type:int>",
+    "struct<partition:int,offset:bigint,timestamp:timestamp,headers:array<struct<key:string,value:binary>>,key:binary,timestamp_type:int>",
     None,
 )
 
