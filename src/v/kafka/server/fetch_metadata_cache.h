@@ -10,7 +10,10 @@
  */
 #pragma once
 
+#include "config/configuration.h"
 #include "container/chunked_hash_map.h"
+#include "metrics/metrics.h"
+#include "metrics/prometheus_sanitize.h"
 #include "model/fundamental.h"
 #include "model/ktp.h"
 #include "utils/moving_average.h"
@@ -38,7 +41,7 @@ public:
     }
 
     fetch_metadata_cache(const fetch_metadata_cache&) = delete;
-    fetch_metadata_cache(fetch_metadata_cache&&) = default;
+    fetch_metadata_cache(fetch_metadata_cache&&) = delete;
 
     fetch_metadata_cache& operator=(const fetch_metadata_cache&) = delete;
     fetch_metadata_cache& operator=(fetch_metadata_cache&&) = delete;
@@ -54,6 +57,18 @@ public:
         auto& e = _cache[ktp];
         e.reset_ts();
         if (offset_count > 0) {
+            if (e.bytes_per_offset.has_samples()) {
+                auto avg_bytes_per_offset = static_cast<double>(
+                  e.bytes_per_offset.get());
+                auto bytes_per_offset = static_cast<double>(total_size_bytes)
+                                        / static_cast<double>(offset_count);
+                auto abs_err = std::abs(
+                  bytes_per_offset - avg_bytes_per_offset);
+                const auto epsilon = 1e-6; // prevent division by zero
+                auto re = abs_err / (bytes_per_offset + epsilon);
+                _error.update(re, e.timestamp);
+            }
+
             e.bytes_per_offset.update(
               total_size_bytes, e.timestamp, offset_count);
         }
@@ -79,8 +94,28 @@ public:
      */
     size_t size() const { return _cache.size(); }
 
+    void setup_metrics() {
+        if (config::shard_local_cfg().disable_metrics()) {
+            return;
+        }
+
+        namespace sm = ss::metrics;
+        _metrics.add_group(
+          prometheus_sanitize::metrics_name("kafka:fetch_metadata_cache"),
+          {sm::make_gauge(
+            "error",
+            [this] { return _error.has_samples() ? _error.get() : 0.0; },
+            sm::description(
+              "A moving average of the relative error for bytes per offset."))},
+          {},
+          {sm::shard_label});
+    }
+
 private:
-    using sliding_window_t = timed_moving_average<size_t, ss::lowres_clock>;
+    using entry_sliding_window_t
+      = timed_moving_average<size_t, ss::lowres_clock>;
+    using error_sliding_window_t
+      = timed_moving_average<double, ss::lowres_clock>;
 
     constexpr static std::chrono::seconds eviction_timeout{60};
     constexpr static auto bytes_per_offset_window{1h};
@@ -89,7 +124,7 @@ private:
     struct entry {
         partition_metadata md;
         ss::lowres_clock::time_point timestamp;
-        sliding_window_t bytes_per_offset{
+        entry_sliding_window_t bytes_per_offset{
           bytes_per_offset_window, bytes_per_offset_resolution};
 
         void reset_ts() { timestamp = ss::lowres_clock::now(); }
@@ -104,5 +139,8 @@ private:
 
     chunked_hash_map<model::ktp_with_hash, entry> _cache;
     ss::timer<> _eviction_timer;
+    error_sliding_window_t _error{
+      bytes_per_offset_window, bytes_per_offset_resolution};
+    metrics::internal_metric_groups _metrics;
 };
 } // namespace kafka
