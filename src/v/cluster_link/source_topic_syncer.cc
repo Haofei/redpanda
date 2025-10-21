@@ -548,9 +548,7 @@ source_topic_syncer::submit_commands(reconciler_commands_vector commands) {
           });
         if (res != ::cluster::cluster_link::errc::success) {
             vlog(
-              logger().error,
-              "Failed to process mirror topic command: {}",
-              res);
+              logger().warn, "Failed to process mirror topic command: {}", res);
         } else {
             vlog(logger().trace, "Successfully processed mirror topic command");
         }
