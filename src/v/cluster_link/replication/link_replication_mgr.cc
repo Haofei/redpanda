@@ -79,7 +79,7 @@ void link_replication_manager::start_replicator(
           [this, term, ntp = std::move(ntp)](
             const std::exception_ptr& e) mutable {
               vlog(
-                cllog.error,
+                cllog.warn,
                 "Failed to start replicator for {} at term {}: {},",
                 ntp,
                 term,
