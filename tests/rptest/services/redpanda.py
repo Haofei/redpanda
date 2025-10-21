@@ -4573,11 +4573,12 @@ class RedpandaService(Service, RedpandaServiceABC):
             pid, signal.SIGKILL if forced else signal.SIGTERM, allow_fail=False
         )
 
+        stop_timeout = timeout or 30
         try:
             wait_until(
                 lambda: self.redpanda_pid(node) is None,
-                timeout_sec=timeout or 30,
-                err_msg=f"Redpanda node {node.account.hostname} failed to stop in {timeout} seconds",
+                timeout_sec=stop_timeout,
+                err_msg=f"Redpanda node {node.account.hostname} failed to stop in {stop_timeout} seconds",
             )
         except TimeoutError:
             sleep_sec = 10
