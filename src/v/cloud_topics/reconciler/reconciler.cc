@@ -512,7 +512,10 @@ reconciler::add_source_to_object(
             .as = &_as,
           });
         metadata = co_await build_from_reader(
-          src->topic_id_partition(), std::move(reader), ctx.builder.get());
+          src->topic_id_partition(),
+          std::move(reader),
+          ctx.builder.get(),
+          &_probe);
     } catch (...) {
         co_return std::unexpected(reconcile_error(
           "unable to consume from L0 partition: {}", std::current_exception()));

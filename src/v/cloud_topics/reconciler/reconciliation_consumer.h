@@ -12,6 +12,7 @@
 
 #include "absl/container/btree_map.h"
 #include "cloud_topics/level_one/common/object.h"
+#include "cloud_topics/reconciler/reconciler_probe.h"
 #include "model/fundamental.h"
 #include "model/record_batch_reader.h"
 #include "model/timestamp.h"
@@ -34,8 +35,9 @@ struct consumer_metadata {
 /// Produces metadata about the consumed range including offsets, timestamps,
 /// and term transitions.
 ss::future<std::optional<consumer_metadata>> build_from_reader(
-  model::topic_id_partition tidp,
+  model::topic_id_partition,
   model::record_batch_reader,
-  l1::object_builder* builder);
+  l1::object_builder*,
+  reconciler_probe*);
 
 } // namespace cloud_topics::reconciler

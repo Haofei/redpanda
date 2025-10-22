@@ -10,8 +10,6 @@
 
 #include "cloud_topics/reconciler/reconciliation_consumer.h"
 
-#include "model/timestamp.h"
-
 #include <seastar/core/coroutine.hh>
 
 namespace cloud_topics::reconciler {
@@ -19,11 +17,17 @@ namespace cloud_topics::reconciler {
 ss::future<std::optional<consumer_metadata>> build_from_reader(
   model::topic_id_partition tidp,
   model::record_batch_reader reader,
-  l1::object_builder* builder) {
+  l1::object_builder* builder,
+  reconciler_probe* probe) {
     auto gen = std::move(reader).slice_generator(model::no_timeout);
+    auto build_duration = probe->measure_object_build_duration();
     co_await builder->start_partition(tidp);
+    build_duration->stop();
+    auto read_duration = probe->measure_l0_read_duration();
     consumer_metadata metadata;
     while (auto batches = co_await gen()) {
+        read_duration->stop();
+        build_duration->start();
         for (auto& batch : *batches) {
             if (metadata.base_offset == kafka::offset::min()) {
                 metadata.base_offset = model::offset_cast(batch.base_offset());
@@ -39,6 +43,8 @@ ss::future<std::optional<consumer_metadata>> build_from_reader(
             ++metadata.batch_count;
             co_await builder->add_batch(std::move(batch));
         }
+        build_duration->stop();
+        read_duration->start();
     }
     co_return metadata.batch_count == 0
       ? std::nullopt

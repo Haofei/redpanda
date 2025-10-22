@@ -9,6 +9,7 @@
  */
 #include "bytes/iostream.h"
 #include "cloud_topics/level_one/common/object.h"
+#include "cloud_topics/reconciler/reconciler_probe.h"
 #include "cloud_topics/reconciler/reconciliation_consumer.h"
 #include "model/record_batch_reader.h"
 #include "storage/record_batch_builder.h"
@@ -37,6 +38,7 @@ model::record_batch_reader make_reader(
 }
 
 TEST(ReconciliationConsumerTest, EmptyReader) {
+    cloud_topics::reconciler::reconciler_probe probe;
     // Test that reading no batches produces no metadata.
     auto reader = model::make_empty_record_batch_reader();
     iobuf output;
@@ -47,7 +49,7 @@ TEST(ReconciliationConsumerTest, EmptyReader) {
     model::topic_id_partition tidp{
       model::topic_id(uuid_t::create()), model::partition_id(0)};
     auto metadata
-      = build_from_reader(tidp, std::move(reader), builder.get()).get();
+      = build_from_reader(tidp, std::move(reader), builder.get(), &probe).get();
     ASSERT_FALSE(metadata.has_value());
 }
 
@@ -58,6 +60,7 @@ TEST(ReconciliationConsumerTest, BuildObject) {
       make_iobuf_ref_output_stream(output), object_builder::options{});
     auto _ = ss::defer([&builder] { builder->close().get(); });
 
+    cloud_topics::reconciler::reconciler_probe probe;
     auto topic1 = model::topic_id(uuid_t::create());
     auto topic2 = model::topic_id(uuid_t::create());
     model::topic_id_partition tidp1{topic1, model::partition_id(0)};
@@ -67,8 +70,9 @@ TEST(ReconciliationConsumerTest, BuildObject) {
     // Consumer 1: Partition 0 of topic1, offset range 100-109.
     {
         auto reader1 = make_reader(100, 50, 2, 5);
-        auto metadata1
-          = build_from_reader(tidp1, std::move(reader1), builder.get()).get();
+        auto metadata1 = build_from_reader(
+                           tidp1, std::move(reader1), builder.get(), &probe)
+                           .get();
         ASSERT_TRUE(metadata1.has_value());
         ASSERT_EQ(metadata1->base_offset(), 100);
         ASSERT_EQ(metadata1->last_offset(), 109);
@@ -77,8 +81,9 @@ TEST(ReconciliationConsumerTest, BuildObject) {
     // Consumer 2: Partition 1 of topic1, offset range 200-204.
     {
         auto reader2 = make_reader(200, 75, 1, 5);
-        auto metadata2
-          = build_from_reader(tidp2, std::move(reader2), builder.get()).get();
+        auto metadata2 = build_from_reader(
+                           tidp2, std::move(reader2), builder.get(), &probe)
+                           .get();
         ASSERT_TRUE(metadata2.has_value());
         ASSERT_EQ(metadata2->base_offset(), 200);
         ASSERT_EQ(metadata2->last_offset(), 204);
@@ -87,8 +92,9 @@ TEST(ReconciliationConsumerTest, BuildObject) {
     // Consumer 3: Partition 0 of topic2, offset range 300-311.
     {
         auto reader3 = make_reader(300, 25, 3, 4);
-        auto metadata3
-          = build_from_reader(tidp3, std::move(reader3), builder.get()).get();
+        auto metadata3 = build_from_reader(
+                           tidp3, std::move(reader3), builder.get(), &probe)
+                           .get();
         ASSERT_TRUE(metadata3.has_value());
         ASSERT_EQ(metadata3->base_offset(), 300);
         ASSERT_EQ(metadata3->last_offset(), 311);
