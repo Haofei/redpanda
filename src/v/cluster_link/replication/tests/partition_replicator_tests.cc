@@ -13,6 +13,7 @@
 #include "cluster_link/replication/tests/deps_test_impl.h"
 #include "cluster_link/replication/types.h"
 #include "kafka/protocol/errors.h"
+#include "model/fundamental.h"
 #include "model/tests/random_batch.h"
 #include "ssx/future-util.h"
 #include "test_utils/async.h"
@@ -83,7 +84,11 @@ public:
 
     std::optional<data_source::source_partition_offsets_report>
     get_offsets() final {
-        return std::nullopt;
+        source_partition_offsets_report ret;
+        ret.source_start_offset = _start_offset.value_or(kafka::offset{-1});
+        ret.source_hwm = _next_to_consume;
+        ret.source_lso = _next_to_consume;
+        return ret;
     }
 
 private:
@@ -145,7 +150,7 @@ public:
     void set_fail_replication(bool value) { _fail_replication = value; }
 
     kafka::offset high_watermark() const final {
-        return _last_replicated_offset;
+        return kafka::next_offset(_last_replicated_offset);
     }
 
     ss::future<kafka::error_code> prefix_truncate(
@@ -263,6 +268,22 @@ TEST_F_CORO(PartitionReplicatorFixture, TestMemoryExhaustion) {
       3s, [&] { return _source->available_memory() == 5_MiB; });
     RPTEST_REQUIRE_EVENTUALLY_CORO(
       3s, [&] { return _source->num_fetches() > num_fetches; });
+}
+
+TEST_F_CORO(PartitionReplicatorFixture, ShadowPartitionLag) {
+    co_await push_data();
+    RPTEST_REQUIRE_EVENTUALLY_CORO(
+      5s, [&] { return _sink->last_replicated_offset() == kafka::offset(9); });
+
+    auto units = co_await _sink->block_replication();
+    co_await push_data();
+    RPTEST_REQUIRE_EQ_CORO(_replicator->get_partition_lag(), kafka::offset(10));
+    co_await push_data();
+    RPTEST_REQUIRE_EQ_CORO(_replicator->get_partition_lag(), kafka::offset(20));
+
+    units.return_all();
+    RPTEST_REQUIRE_EVENTUALLY_CORO(
+      3s, [&] { return _replicator->get_partition_lag() == kafka::offset{0}; });
 }
 
 } // namespace cluster_link::replication

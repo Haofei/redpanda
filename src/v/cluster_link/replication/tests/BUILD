@@ -34,6 +34,7 @@ redpanda_cc_gtest(
         "//src/v/cluster_link/replication:partition_replicator",
         "//src/v/cluster_link/replication:types",
         "//src/v/kafka/protocol",
+        "//src/v/model",
         "//src/v/model/tests:random",
         "//src/v/random:generators",
         "//src/v/ssx:future_util",

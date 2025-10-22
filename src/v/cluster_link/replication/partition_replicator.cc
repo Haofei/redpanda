@@ -200,6 +200,23 @@ partition_replicator::get_partition_offsets_report() const {
     };
 }
 
+kafka::offset partition_replicator::get_partition_lag() const {
+    constexpr kafka::offset invalid{-1};
+
+    auto source_info = _source->get_offsets();
+    if (!source_info.has_value()) {
+        return invalid;
+    }
+
+    auto lso = source_info->source_lso;
+    if (lso == kafka::offset{-1}) {
+        return invalid;
+    }
+
+    auto hwm = _sink->high_watermark();
+    return lso - hwm;
+}
+
 ss::future<> partition_replicator::fetch_and_replicate() {
     _gate.check();
     // abort source for this iteration of fetch_and_replicate

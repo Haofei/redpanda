@@ -73,6 +73,8 @@ public:
 
     void maybe_synchronize_start_offset();
 
+    kafka::offset get_partition_lag() const;
+
 private:
     struct replicate_ctx {
         ::model::offset begin;
