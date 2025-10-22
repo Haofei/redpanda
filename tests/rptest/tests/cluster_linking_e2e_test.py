@@ -183,6 +183,104 @@ class ShadowLinkBasicTests(ShadowLinkTestBase):
         return True
 
     @cluster(num_nodes=6)
+    def test_create_default_link(self):
+        """
+        This test creates a Shadow Link with all default values and
+        verifies that the default values are what are in use
+        """
+        link_request = self.create_default_link_request(
+            link_name="test-link",
+            mirror_all_acls=False,
+            mirror_all_groups=False,
+            mirror_all_topics=False,
+        )
+        link_request.shadow_link.configurations.topic_metadata_sync_options.interval.CopyFrom(
+            google.protobuf.duration_pb2.Duration(seconds=0)
+        )
+        link_request.shadow_link.configurations.consumer_offset_sync_options.interval.CopyFrom(
+            google.protobuf.duration_pb2.Duration(seconds=0)
+        )
+        link_request.shadow_link.configurations.security_sync_options.interval.CopyFrom(
+            google.protobuf.duration_pb2.Duration(seconds=0)
+        )
+
+        shadow_link = self.create_link_with_request(req=link_request)
+
+        self.logger.info(f"Shadow link configurations: {shadow_link.configurations}")
+
+        client_options = shadow_link.configurations.client_options
+        assert client_options.metadata_max_age_ms == 0, (
+            f"Expected 0, got {client_options.metadata_max_age_ms}"
+        )
+        assert client_options.effective_metadata_max_age_ms == 10000, (
+            f"Expected 10000, got {client_options.effective_metadata_max_age_ms}"
+        )
+        assert client_options.connection_timeout_ms == 0, (
+            f"Expected 0, got {client_options.connection_timeout_ms}"
+        )
+        assert client_options.effective_connection_timeout_ms == 1000, (
+            f"Expected 1000, got {client_options.effective_connection_timeout_ms}"
+        )
+        assert client_options.retry_backoff_ms == 0, (
+            f"Expected 0, got {client_options.retry_backoff_ms}"
+        )
+        assert client_options.effective_retry_backoff_ms == 100, (
+            f"Expected 100, got {client_options.effective_retry_backoff_ms}"
+        )
+        assert client_options.fetch_wait_max_ms == 0, (
+            f"Expected 0, got {client_options.fetch_wait_max_ms}"
+        )
+        assert client_options.effective_fetch_wait_max_ms == 500, (
+            f"Expected 500, got {client_options.effective_fetch_wait_max_ms}"
+        )
+        assert client_options.fetch_min_bytes == 0, (
+            f"Expected 0, got {client_options.fetch_min_bytes}"
+        )
+        assert client_options.effective_fetch_min_bytes == (5 * 1024 * 1024), (
+            f"Expected {5 * 1024 * 1024}, got {client_options.effective_fetch_min_bytes}"
+        )
+        assert client_options.fetch_max_bytes == 0, (
+            f"Expected 0, got {client_options.fetch_max_bytes}"
+        )
+        assert client_options.effective_fetch_max_bytes == (20 * 1024 * 1024), (
+            f"Expected {20 * 1024 * 1024}, got {client_options.effective_fetch_max_bytes}"
+        )
+        assert client_options.fetch_partition_max_bytes == 0, (
+            f"Expected 0, got {client_options.fetch_partition_max_bytes}"
+        )
+        assert client_options.effective_fetch_partition_max_bytes == (
+            1 * 1024 * 1024
+        ), (
+            f"Expected {1 * 1024 * 1024}, got {client_options.effective_fetch_partition_max_bytes}"
+        )
+
+        topic_metadata_config = shadow_link.configurations.topic_metadata_sync_options
+        assert topic_metadata_config.interval == google.protobuf.duration_pb2.Duration(
+            seconds=0
+        ), f"Expected 0s, got {topic_metadata_config.interval}"
+        assert (
+            topic_metadata_config.effective_interval
+            == google.protobuf.duration_pb2.Duration(seconds=30)
+        ), f"Expected 30s, got {topic_metadata_config.effective_interval}"
+
+        cg_config = shadow_link.configurations.consumer_offset_sync_options
+        assert cg_config.interval == google.protobuf.duration_pb2.Duration(seconds=0), (
+            f"Expected 0s, got {cg_config.interval}"
+        )
+        assert cg_config.effective_interval == google.protobuf.duration_pb2.Duration(
+            seconds=30
+        ), f"Expected 30s, got {cg_config.effective_interval}"
+
+        security_config = shadow_link.configurations.security_sync_options
+        assert security_config.interval == google.protobuf.duration_pb2.Duration(
+            seconds=0
+        ), f"Expected 0s, got {security_config.interval}"
+        assert (
+            security_config.effective_interval
+            == google.protobuf.duration_pb2.Duration(seconds=30)
+        ), f"Expected 30s, got {security_config.effective_interval}"
+
+    @cluster(num_nodes=6)
     def test_create_simple_link(self):
         shadow_link = self.create_link("test-link")
         self.logger.info(f"Create shadow link result: {shadow_link}")
