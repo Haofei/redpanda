@@ -68,7 +68,7 @@ class LicenseEnforcementTest(RedpandaTest):
             err_msg="The cluster hasn't stabilized",
         )
 
-        self.logger.info(f"Enabling an enterprise feature")
+        self.logger.info("Enabling an enterprise feature")
         self.redpanda.set_cluster_config({"partition_autobalancing_mode": "continuous"})
 
         self.logger.info(
@@ -142,7 +142,7 @@ class LicenseEnforcementTest(RedpandaTest):
             err_msg="The cluster hasn't stabilized",
         )
 
-        self.logger.info(f"Enabling an enterprise feature")
+        self.logger.info("Enabling an enterprise feature")
         self.redpanda.set_cluster_config({"partition_autobalancing_mode": "continuous"})
 
         self.logger.info(
@@ -236,7 +236,7 @@ class LicenseEnforcementTest(RedpandaTest):
         try:
             self.rpk.cluster_config_set("iceberg_enabled", "true")
             assert False, "Enabling iceberg must fail without the license"
-        except RpkException as e:
+        except RpkException:
             pass
 
 
@@ -314,7 +314,7 @@ class LicenseEnforcementPermittedTopicParams(RedpandaTest):
             assert False, (
                 "Should have failed to create topic with iceberg enabled set and cloud_storage_enabled set to True"
             )
-        except RpkException as e:
+        except RpkException:
             pass
 
     @cluster(num_nodes=3)
@@ -364,7 +364,7 @@ class LicenseEnforcementPermittedTopicParams(RedpandaTest):
         try:
             self.rpk.cluster_config_set(CLOUD_TOPICS_CONFIG_STR, "true")
             assert False, "Enabling cloud_topics_enabled must fail without the license"
-        except RpkException as e:
+        except RpkException:
             pass
 
     @cluster(num_nodes=1)
@@ -394,7 +394,7 @@ class LicenseEnforcementPermittedTopicParams(RedpandaTest):
             assert False, (
                 "Should have failed to create topic with redpanda.cloud_topic.enabled set"
             )
-        except RpkException as e:
+        except RpkException:
             pass
 
     @cluster(num_nodes=3)
