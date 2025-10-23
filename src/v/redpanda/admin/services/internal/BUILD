@@ -9,7 +9,7 @@ redpanda_cc_library(
     srcs = ["debug.cc"],
     hdrs = ["debug.h"],
     deps = [
-        "//proto/redpanda/core/admin/v2/internal:debug_redpanda_proto",
+        "//proto/redpanda/core/admin/internal/v1:debug_redpanda_proto",
         "//src/v/base",
         "//src/v/finjector",
         "//src/v/redpanda/admin/proxy:client",
@@ -25,7 +25,7 @@ redpanda_cc_library(
     srcs = ["breakglass.cc"],
     hdrs = ["breakglass.h"],
     deps = [
-        "//proto/redpanda/core/admin/v2/internal:breakglass_redpanda_proto",
+        "//proto/redpanda/core/admin/internal/v1:breakglass_redpanda_proto",
         "//src/v/base",
         "//src/v/cluster",
         "//src/v/finjector",

@@ -12,7 +12,7 @@
 #pragma once
 
 #include "cluster/controller.h"
-#include "proto/redpanda/core/admin/v2/internal/breakglass.proto.h"
+#include "proto/redpanda/core/admin/internal/v1/breakglass.proto.h"
 
 #include <seastar/core/distributed.hh>
 
