@@ -36,6 +36,9 @@ import json
 import re
 import socket
 
+import base64
+import hashlib
+
 
 class ClusterLinkingTopicSyncingTestBase(ShadowLinkTestBase):
     """
@@ -492,6 +495,10 @@ class ClusterLinkingTopicSyncingWithTlsValues(ClusterLinkingTopicSyncingTestBase
             **kwargs,
         )
 
+        self._ca_value: str = ""
+        self._key_value: str = ""
+        self._cert_value: str = ""
+
     def validate_created_link(self, shadow_link: shadow_link_pb2.ShadowLink) -> None:
         assert (
             shadow_link.configurations.client_options.tls_settings.WhichOneof(
@@ -501,8 +508,23 @@ class ClusterLinkingTopicSyncingWithTlsValues(ClusterLinkingTopicSyncingTestBase
         ), (
             f"Expected 'tls_pem_settings' but got {shadow_link.configurations.client_options.tls_settings.WhichOneof('tls_settings')}"
         )
-
-        # TODO: Add key fingerprint
+        pem_settings = (
+            shadow_link.configurations.client_options.tls_settings.tls_pem_settings
+        )
+        assert pem_settings.ca == self._ca_value, (
+            f"CA value does not match: {pem_settings.ca} != {self._ca_value}"
+        )
+        assert pem_settings.cert == self._cert_value, (
+            f"Cert value does not match: {pem_settings.cert} != {self._cert_value}"
+        )
+        assert pem_settings.key == "", (
+            f"Key value should not be returned: {pem_settings.key}"
+        )
+        key_hash = hashlib.sha256(self._key_value.encode()).digest()
+        key_fingerprint = base64.b64encode(key_hash).decode()
+        assert pem_settings.key_fingerprint == key_fingerprint, (
+            f"Key fingerprint does not match: {pem_settings.key_fingerprint} != {key_fingerprint}"
+        )
 
     def setUp(self):
         super().setUp()
@@ -517,10 +539,13 @@ class ClusterLinkingTopicSyncingWithTlsValues(ClusterLinkingTopicSyncingTestBase
 
         ca_content = open(self.client_cert.ca.crt, "r").read()
         self.logger.debug(f"ca: {ca_content}")
+        self._ca_value = ca_content
         cert_content = open(self.client_cert.crt, "r").read()
         self.logger.debug(f"cert: {cert_content}")
+        self._cert_value = cert_content
         key_content = open(self.client_cert.key, "r").read()
         self.logger.debug(f"key: {key_content}")
+        self._key_value = key_content
 
         shadow_link.configurations.client_options.tls_settings.CopyFrom(
             tls_pb2.TLSSettings(
