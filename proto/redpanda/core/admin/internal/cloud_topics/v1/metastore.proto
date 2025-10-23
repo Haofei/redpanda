@@ -18,7 +18,7 @@ package redpanda.core.admin.internal.cloud_topics.v1;
 
 import "proto/redpanda/core/pbgen/options.proto";
 import "proto/redpanda/core/pbgen/rpc.proto";
-import "proto/redpanda/core/common/ntp.proto";
+import "proto/redpanda/core/common/v1/ntp.proto";
 
 option (redpanda.core.pbgen.cpp_namespace) = "proto::admin::metastore";
 
@@ -59,7 +59,7 @@ service MetastoreService {
 // for a topic partition.
 message GetOffsetsRequest {
     // The topic partition to lookup the offstes for.
-    redpanda.core.common.TopicPartition partition = 1;
+    common.v1.TopicPartition partition = 1;
 }
 
 // GetOffsetsResponse is the response for looking up the offsets in the

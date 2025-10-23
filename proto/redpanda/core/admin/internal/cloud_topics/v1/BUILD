@@ -6,7 +6,7 @@ proto_library(
     srcs = ["metastore.proto"],
     visibility = ["//visibility:public"],
     deps = [
-        "//proto/redpanda/core/common:ntp_proto",
+        "//proto/redpanda/core/common/v1:ntp_proto",
         "//proto/redpanda/core/pbgen:options_proto",
         "//proto/redpanda/core/pbgen:rpc_proto",
     ],
@@ -17,6 +17,6 @@ redpanda_proto_library(
     protos = [":metastore_proto"],
     visibility = ["//visibility:public"],
     deps = [
-        "//proto/redpanda/core/common:ntp_redpanda_proto",
+        "//proto/redpanda/core/common/v1:ntp_redpanda_proto",
     ],
 )
