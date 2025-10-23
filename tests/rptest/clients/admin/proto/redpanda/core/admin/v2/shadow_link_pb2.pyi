@@ -1091,14 +1091,14 @@ class ACLResourceFilter(google.protobuf.message.Message):
     RESOURCE_TYPE_FIELD_NUMBER: builtins.int
     PATTERN_TYPE_FIELD_NUMBER: builtins.int
     NAME_FIELD_NUMBER: builtins.int
-    resource_type: proto.redpanda.core.common.acl_pb2.ACLResource.ValueType
+    resource_type: proto.redpanda.core.common.v1.acl_pb2.ACLResource.ValueType
     'The ACL resource type to match'
-    pattern_type: proto.redpanda.core.common.acl_pb2.ACLPattern.ValueType
+    pattern_type: proto.redpanda.core.common.v1.acl_pb2.ACLPattern.ValueType
     'The pattern to apply to name'
     name: builtins.str
     'Name, if not given will default to match all items in `resource_type`.\n    Note that asterisk `*` is literal and matches resource ACLs\n    that are named `*`\n    '
 
-    def __init__(self, *, resource_type: proto.redpanda.core.common.acl_pb2.ACLResource.ValueType=..., pattern_type: proto.redpanda.core.common.acl_pb2.ACLPattern.ValueType=..., name: builtins.str=...) -> None:
+    def __init__(self, *, resource_type: proto.redpanda.core.common.v1.acl_pb2.ACLResource.ValueType=..., pattern_type: proto.redpanda.core.common.v1.acl_pb2.ACLPattern.ValueType=..., name: builtins.str=...) -> None:
         ...
 
     def ClearField(self, field_name: typing.Literal['name', b'name', 'pattern_type', b'pattern_type', 'resource_type', b'resource_type']) -> None:
@@ -1115,14 +1115,14 @@ class ACLAccessFilter(google.protobuf.message.Message):
     HOST_FIELD_NUMBER: builtins.int
     principal: builtins.str
     'The name of the principal, if not set will default to match\n    all principals with the specified `operation` and `permission_type`\n    '
-    operation: proto.redpanda.core.common.acl_pb2.ACLOperation.ValueType
+    operation: proto.redpanda.core.common.v1.acl_pb2.ACLOperation.ValueType
     'The ACL operation to match'
-    permission_type: proto.redpanda.core.common.acl_pb2.ACLPermissionType.ValueType
+    permission_type: proto.redpanda.core.common.v1.acl_pb2.ACLPermissionType.ValueType
     'The permission type'
     host: builtins.str
     'The host to match.  If not set, will default to match all hosts\n    with the specified `operation` and `permission_type`. Note that\n    the asterisk `*` is literal and matches hosts that are set to `*`\n    '
 
-    def __init__(self, *, principal: builtins.str=..., operation: proto.redpanda.core.common.acl_pb2.ACLOperation.ValueType=..., permission_type: proto.redpanda.core.common.acl_pb2.ACLPermissionType.ValueType=..., host: builtins.str=...) -> None:
+    def __init__(self, *, principal: builtins.str=..., operation: proto.redpanda.core.common.v1.acl_pb2.ACLOperation.ValueType=..., permission_type: proto.redpanda.core.common.v1.acl_pb2.ACLPermissionType.ValueType=..., host: builtins.str=...) -> None:
         ...
 
     def ClearField(self, field_name: typing.Literal['host', b'host', 'operation', b'operation', 'permission_type', b'permission_type', 'principal', b'principal']) -> None:

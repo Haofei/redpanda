@@ -29,11 +29,11 @@ class ControllerForcedReconfigurationRequest(google.protobuf.message.Message):
     DEAD_NODE_IDS_FIELD_NUMBER: builtins.int
     SURVIVING_NODE_COUNT_FIELD_NUMBER: builtins.int
     surviving_node_count: builtins.int
-    'the number of surviving nodes remaining'
+    'the number of surviving nodes remaining.'
 
     @property
     def dead_node_ids(self) -> google.protobuf.internal.containers.RepeatedScalarFieldContainer[builtins.int]:
-        """node ids of lost brokers to be forcibly removed"""
+        """node ids of lost brokers to be forcibly removed."""
 
     def __init__(self, *, dead_node_ids: collections.abc.Iterable[builtins.int] | None=..., surviving_node_count: builtins.int=...) -> None:
         ...

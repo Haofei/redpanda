@@ -25,7 +25,7 @@ from rptest.util import wait_until_result
 
 from connectrpc.unary import UnaryOutput
 from rptest.clients.admin.v2 import Admin as AdminV2
-from rptest.clients.admin.proto.redpanda.core.admin.v2.internal import (
+from rptest.clients.admin.proto.redpanda.core.admin.internal.v1 import (
     breakglass_pb2,
     breakglass_pb2_connect,
 )

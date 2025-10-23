@@ -24,7 +24,7 @@ from rptest.clients.admin.proto.redpanda.core.admin.v2 import (
     shadow_link_pb2,
     shadow_link_pb2_connect,
 )
-from rptest.clients.admin.proto.redpanda.core.common import acl_pb2
+from rptest.clients.admin.proto.redpanda.core.common.v1 import acl_pb2
 from rptest.clients.admin.v2 import Admin as AdminV2
 from rptest.clients.default import DefaultClient
 from rptest.clients.rpk import RpkTool

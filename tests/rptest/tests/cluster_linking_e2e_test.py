@@ -23,7 +23,7 @@ from contextlib import nullcontext
 from ducktape.mark import matrix
 from ducktape.mark import ignore
 
-from rptest.clients.admin.proto.redpanda.core.common import acl_pb2
+from rptest.clients.admin.proto.redpanda.core.common.v1 import acl_pb2
 from rptest.clients.admin.proto.redpanda.core.admin.v2 import (
     shadow_link_pb2,
 )

@@ -34,12 +34,12 @@ class BreakglassServiceClient:
         self.base_url = base_url
         self._connect_client = ConnectClient(http_client, protocol)
 
-    def call_controller_forced_reconfiguration(self, req: proto.redpanda.core.admin.v2.internal.breakglass_pb2.ControllerForcedReconfigurationRequest, extra_headers: HeaderInput | None=None, timeout_seconds: float | None=None) -> UnaryOutput[proto.redpanda.core.admin.v2.internal.breakglass_pb2.ControllerForcedReconfigurationResponse]:
+    def call_controller_forced_reconfiguration(self, req: proto.redpanda.core.admin.internal.v1.breakglass_pb2.ControllerForcedReconfigurationRequest, extra_headers: HeaderInput | None=None, timeout_seconds: float | None=None) -> UnaryOutput[proto.redpanda.core.admin.internal.v1.breakglass_pb2.ControllerForcedReconfigurationResponse]:
         """Low-level method to call ControllerForcedReconfiguration, granting access to errors and metadata"""
-        url = self.base_url + '/redpanda.core.admin.v2.internal.BreakglassService/ControllerForcedReconfiguration'
-        return self._connect_client.call_unary(url, req, proto.redpanda.core.admin.v2.internal.breakglass_pb2.ControllerForcedReconfigurationResponse, extra_headers, timeout_seconds)
+        url = self.base_url + '/redpanda.core.admin.internal.v1.BreakglassService/ControllerForcedReconfiguration'
+        return self._connect_client.call_unary(url, req, proto.redpanda.core.admin.internal.v1.breakglass_pb2.ControllerForcedReconfigurationResponse, extra_headers, timeout_seconds)
 
-    def controller_forced_reconfiguration(self, req: proto.redpanda.core.admin.v2.internal.breakglass_pb2.ControllerForcedReconfigurationRequest, extra_headers: HeaderInput | None=None, timeout_seconds: float | None=None) -> proto.redpanda.core.admin.v2.internal.breakglass_pb2.ControllerForcedReconfigurationResponse:
+    def controller_forced_reconfiguration(self, req: proto.redpanda.core.admin.internal.v1.breakglass_pb2.ControllerForcedReconfigurationRequest, extra_headers: HeaderInput | None=None, timeout_seconds: float | None=None) -> proto.redpanda.core.admin.internal.v1.breakglass_pb2.ControllerForcedReconfigurationResponse:
         response = self.call_controller_forced_reconfiguration(req, extra_headers, timeout_seconds)
         err = response.error()
         if err is not None:
@@ -55,12 +55,12 @@ class AsyncBreakglassServiceClient:
         self.base_url = base_url
         self._connect_client = AsyncConnectClient(http_client, protocol)
 
-    async def call_controller_forced_reconfiguration(self, req: proto.redpanda.core.admin.v2.internal.breakglass_pb2.ControllerForcedReconfigurationRequest, extra_headers: HeaderInput | None=None, timeout_seconds: float | None=None) -> UnaryOutput[proto.redpanda.core.admin.v2.internal.breakglass_pb2.ControllerForcedReconfigurationResponse]:
+    async def call_controller_forced_reconfiguration(self, req: proto.redpanda.core.admin.internal.v1.breakglass_pb2.ControllerForcedReconfigurationRequest, extra_headers: HeaderInput | None=None, timeout_seconds: float | None=None) -> UnaryOutput[proto.redpanda.core.admin.internal.v1.breakglass_pb2.ControllerForcedReconfigurationResponse]:
         """Low-level method to call ControllerForcedReconfiguration, granting access to errors and metadata"""
-        url = self.base_url + '/redpanda.core.admin.v2.internal.BreakglassService/ControllerForcedReconfiguration'
-        return await self._connect_client.call_unary(url, req, proto.redpanda.core.admin.v2.internal.breakglass_pb2.ControllerForcedReconfigurationResponse, extra_headers, timeout_seconds)
+        url = self.base_url + '/redpanda.core.admin.internal.v1.BreakglassService/ControllerForcedReconfiguration'
+        return await self._connect_client.call_unary(url, req, proto.redpanda.core.admin.internal.v1.breakglass_pb2.ControllerForcedReconfigurationResponse, extra_headers, timeout_seconds)
 
-    async def controller_forced_reconfiguration(self, req: proto.redpanda.core.admin.v2.internal.breakglass_pb2.ControllerForcedReconfigurationRequest, extra_headers: HeaderInput | None=None, timeout_seconds: float | None=None) -> proto.redpanda.core.admin.v2.internal.breakglass_pb2.ControllerForcedReconfigurationResponse:
+    async def controller_forced_reconfiguration(self, req: proto.redpanda.core.admin.internal.v1.breakglass_pb2.ControllerForcedReconfigurationRequest, extra_headers: HeaderInput | None=None, timeout_seconds: float | None=None) -> proto.redpanda.core.admin.internal.v1.breakglass_pb2.ControllerForcedReconfigurationResponse:
         response = await self.call_controller_forced_reconfiguration(req, extra_headers, timeout_seconds)
         err = response.error()
         if err is not None:
@@ -73,11 +73,11 @@ class AsyncBreakglassServiceClient:
 @typing.runtime_checkable
 class BreakglassServiceProtocol(typing.Protocol):
 
-    def controller_forced_reconfiguration(self, req: ClientRequest[proto.redpanda.core.admin.v2.internal.breakglass_pb2.ControllerForcedReconfigurationRequest]) -> ServerResponse[proto.redpanda.core.admin.v2.internal.breakglass_pb2.ControllerForcedReconfigurationResponse]:
+    def controller_forced_reconfiguration(self, req: ClientRequest[proto.redpanda.core.admin.internal.v1.breakglass_pb2.ControllerForcedReconfigurationRequest]) -> ServerResponse[proto.redpanda.core.admin.internal.v1.breakglass_pb2.ControllerForcedReconfigurationResponse]:
         ...
-BREAKGLASS_SERVICE_PATH_PREFIX = '/redpanda.core.admin.v2.internal.BreakglassService'
+BREAKGLASS_SERVICE_PATH_PREFIX = '/redpanda.core.admin.internal.v1.BreakglassService'
 
 def wsgi_breakglass_service(implementation: BreakglassServiceProtocol) -> WSGIApplication:
     app = ConnectWSGI()
-    app.register_unary_rpc('/redpanda.core.admin.v2.internal.BreakglassService/ControllerForcedReconfiguration', implementation.controller_forced_reconfiguration, proto.redpanda.core.admin.v2.internal.breakglass_pb2.ControllerForcedReconfigurationRequest)
+    app.register_unary_rpc('/redpanda.core.admin.internal.v1.BreakglassService/ControllerForcedReconfiguration', implementation.controller_forced_reconfiguration, proto.redpanda.core.admin.internal.v1.breakglass_pb2.ControllerForcedReconfigurationRequest)
     return app

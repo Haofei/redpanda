@@ -31,10 +31,10 @@ class GetOffsetsRequest(google.protobuf.message.Message):
     PARTITION_FIELD_NUMBER: builtins.int
 
     @property
-    def partition(self) -> proto.redpanda.core.common.ntp_pb2.TopicPartition:
+    def partition(self) -> proto.redpanda.core.common.v1.ntp_pb2.TopicPartition:
         """The topic partition to lookup the offstes for."""
 
-    def __init__(self, *, partition: proto.redpanda.core.common.ntp_pb2.TopicPartition | None=...) -> None:
+    def __init__(self, *, partition: proto.redpanda.core.common.v1.ntp_pb2.TopicPartition | None=...) -> None:
         ...
 
     def HasField(self, field_name: typing.Literal['partition', b'partition']) -> builtins.bool:
@@ -50,24 +50,19 @@ class GetOffsetsResponse(google.protobuf.message.Message):
     metastore.
     """
     DESCRIPTOR: google.protobuf.descriptor.Descriptor
-    PARTITION_FIELD_NUMBER: builtins.int
     OFFSETS_FIELD_NUMBER: builtins.int
-
-    @property
-    def partition(self) -> proto.redpanda.core.common.ntp_pb2.TopicPartition:
-        """The topic partition for this request."""
 
     @property
     def offsets(self) -> global___Offsets:
         """The offsets for this ntp in the metastore."""
 
-    def __init__(self, *, partition: proto.redpanda.core.common.ntp_pb2.TopicPartition | None=..., offsets: global___Offsets | None=...) -> None:
+    def __init__(self, *, offsets: global___Offsets | None=...) -> None:
         ...
 
-    def HasField(self, field_name: typing.Literal['offsets', b'offsets', 'partition', b'partition']) -> builtins.bool:
+    def HasField(self, field_name: typing.Literal['offsets', b'offsets']) -> builtins.bool:
         ...
 
-    def ClearField(self, field_name: typing.Literal['offsets', b'offsets', 'partition', b'partition']) -> None:
+    def ClearField(self, field_name: typing.Literal['offsets', b'offsets']) -> None:
         ...
 global___GetOffsetsResponse = GetOffsetsResponse
 

@@ -14,9 +14,11 @@ from rptest.clients.admin.proto.redpanda.core.admin.v2 import (
     shadow_link_pb2,
     shadow_link_pb2_connect,
 )
-from rptest.clients.admin.proto.redpanda.core.admin.v2.internal import (
+from rptest.clients.admin.proto.redpanda.core.admin.internal.datalake.v1 import (
     datalake_pb2,
     datalake_pb2_connect,
+)
+from rptest.clients.admin.proto.redpanda.core.admin.internal.v1 import (
     debug_pb2,
     debug_pb2_connect,
     breakglass_pb2,
@@ -26,7 +28,7 @@ from rptest.clients.admin.proto.redpanda.core.admin.internal.cloud_topics.v1 imp
     metastore_pb2,
     metastore_pb2_connect,
 )
-from rptest.clients.admin.proto.redpanda.core.common import ntp_pb2
+from rptest.clients.admin.proto.redpanda.core.common.v1 import ntp_pb2
 
 
 class RedpandaServiceProto(Protocol):
