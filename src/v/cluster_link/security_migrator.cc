@@ -352,8 +352,28 @@ ss::future<task::state_transition> security_migrator::run_impl() {
           .reason = std::move(msg)};
     }
 
-    auto acls = co_await fetch_acls(describe_acls_version);
+    auto acls_f = co_await ss::coroutine::as_future(
+      fetch_acls(describe_acls_version));
+
+    if (acls_f.failed()) {
+        auto ex = acls_f.get_exception();
+        auto level = ssx::is_shutdown_exception(ex) ? ss::log_level::trace
+                                                    : ss::log_level::warn;
+        auto msg = ssx::sformat("Failed to fetch ACLs: {}", ex);
+        vlogl(logger(), level, "{}", msg);
+        co_return state_transition{
+          .desired_state = model::task_state::link_unavailable,
+          .reason = std::move(msg)};
+    }
+    auto acls = std::move(acls_f).get();
     vlog(logger().trace, "Fetched ACLs: {}", acls);
+
+    if (acls.empty()) {
+        vlog(logger().trace, "No ACLS fetched, nothing to migrate");
+        co_return state_transition{
+          .desired_state = model::task_state::active,
+          .reason = "Security migrator task run successfully"};
+    }
 
     std::vector<security::acl_binding> bindings;
     try {
@@ -400,10 +420,12 @@ security_migrator::fetch_acls(kafka::api_version describe_acls_version) {
 
     chunked_vector<kafka::describe_acls_resource> acls;
 
+    std::exception_ptr ex = nullptr;
+
     co_await ss::max_concurrent_for_each(
       requests,
       describe_acls_request_limit,
-      [this, &cluster, describe_acls_version, &acls](
+      [this, &cluster, describe_acls_version, &acls, &ex](
         kafka::describe_acls_request& req) {
           vlog(logger().trace, "Requesting ACLs: {}", req);
           return cluster.dispatch_to_any(std::move(req), describe_acls_version)
@@ -422,10 +444,17 @@ security_migrator::fetch_acls(kafka::api_version describe_acls_version) {
                 std::ranges::move(
                   response.data.resources, std::back_inserter(acls));
             })
-            .handle_exception([this](std::exception_ptr ex) {
-                vlog(logger().warn, "Failed to fetch ACLs: {}", ex);
+            .handle_exception([this, &ex](const std::exception_ptr& e) {
+                vlog(logger().warn, "Failed to fetch ACLs: {}", e);
+                if (!ex) {
+                    ex = e;
+                }
             });
       });
+
+    if (ex) {
+        std::rethrow_exception(ex);
+    }
 
     co_return acls;
 }
