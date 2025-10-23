@@ -34,6 +34,7 @@
         "rptest/scale_tests/ht_partition_movement_test.py",
         "rptest/scale_tests/large_controller_snapshot_test.py",
         "rptest/scale_tests/large_messages_test.py",
+        "rptest/scale_tests/list_kafka_connections_scale_test.py",
         "rptest/scale_tests/log_storage_target_size_test.py",
         "rptest/scale_tests/many_clients_test.py",
         "rptest/scale_tests/partition_balancer_scale_test.py",
