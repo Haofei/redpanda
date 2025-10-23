@@ -200,10 +200,14 @@ struct scram_credentials
     ss::sstring password;
     /// SASL-SCRAM mechanism to use
     ss::sstring mechanism;
+    /// This records the time point when the password was last updated
+    ::model::timestamp password_last_updated;
 
     friend bool operator==(const scram_credentials&, const scram_credentials&)
       = default;
-    auto serde_fields() { return std::tie(username, password, mechanism); }
+    auto serde_fields() {
+        return std::tie(username, password, mechanism, password_last_updated);
+    }
 
     friend std::ostream&
     operator<<(std::ostream& os, const scram_credentials& creds);

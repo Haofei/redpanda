@@ -12,6 +12,7 @@
 #include "cluster_link/model/types.h"
 
 #include "base/format_to.h"
+#include "model/timestamp.h"
 #include "utils/to_string.h"
 
 #include <seastar/util/variant_utils.hh>
@@ -405,11 +406,15 @@ auto fmt::formatter<cluster_link::model::task_state>::format(
 auto fmt::formatter<cluster_link::model::scram_credentials>::format(
   const cluster_link::model::scram_credentials& c, format_context& ctx)
   -> decltype(ctx.out()) {
+    auto time = std::format(
+      "{:%FT%H:%M:%S}", ::model::to_time_point(c.password_last_updated));
     return fmt::format_to(
       ctx.out(),
-      "{{username: {}, password: ****, mechanism: {}}}",
+      "{{username: {}, password: ****, mechanism: {}, password_last_updated: "
+      "{}}}",
       c.username,
-      c.mechanism);
+      c.mechanism,
+      time);
 }
 
 auto fmt::formatter<
