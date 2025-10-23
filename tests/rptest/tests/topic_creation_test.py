@@ -69,19 +69,16 @@ class RapidTopicRecreateTest(RedpandaTest):
             "Creating topic with {self._current_partitions} partitions "
             "and {replication_factor=}"
         )
-        self.client().create_topic(
-            TopicSpec(
-                name=self.topic_name,
-                partition_count=self._current_partitions,
-                replication_factor=replication_factor,
-            )
+        self.rpk.create_topic(
+            topic=self.topic_name,
+            partitions=self._current_partitions,
+            replicas=replication_factor,
         )
-        self.client().create_topic(
-            TopicSpec(
-                name=self.cloud_topic_name,
-                partition_count=self._current_partitions,
-                replication_factor=replication_factor,
-            )
+        self.rpk.create_topic(
+            topic=self.cloud_topic_name,
+            partitions=self._current_partitions,
+            replicas=replication_factor,
+            config={TopicSpec.PROPERTY_CLOUD_TOPIC_ENABLE: "true"},
         )
 
     def delete(self):
@@ -207,18 +204,19 @@ class TopicRecreateTest(RedpandaTest):
         Test that we are able to recreate topic multiple times
         """
         self._client = DefaultClient(self.redpanda)
+        rpk = RpkTool(self.redpanda)
 
         # scaling parameters
         partition_count = 30
         producer_count = 10
 
-        spec = TopicSpec(
-            partition_count=partition_count,
-            replication_factor=3,
-            cloud_topics_enabled=True,
-        )
+        topic = topic_name()
 
-        self.client().create_topic(spec)
+        rpk.create_topic(
+            topic=topic,
+            partitions=partition_count,
+            config={TopicSpec.PROPERTY_CLOUD_TOPIC_ENABLE: "true"},
+        )
 
         producer_properties = {
             "acks": -1,
@@ -228,7 +226,7 @@ class TopicRecreateTest(RedpandaTest):
         swarm = ProducerSwarm(
             self.test_context,
             self.redpanda,
-            spec.name,
+            topic,
             producer_count,
             10000000000,
             log_level="ERROR",
@@ -236,13 +234,11 @@ class TopicRecreateTest(RedpandaTest):
         )
         swarm.start()
 
-        rpk = RpkTool(self.redpanda)
-
         def topic_is_healthy():
             if not swarm.is_alive():
                 swarm.stop()
                 swarm.start()
-            partitions = rpk.describe_topic(spec.name)
+            partitions = rpk.describe_topic(topic)
             hw_offsets = [p.high_watermark for p in partitions]
             offsets_present = [hw > 0 for hw in hw_offsets]
             self.logger.debug(f"High watermark offsets: {hw_offsets}")
@@ -250,10 +246,14 @@ class TopicRecreateTest(RedpandaTest):
 
         for i in range(1, 20):
             rf = 3 if i % 2 == 0 else 1
-            self.client().delete_topic(spec.name)
-            spec.replication_factor = rf
-            self.client().create_topic(spec)
-            wait_until(topic_is_healthy, 30, 2, err_msg=f"Topic {spec.name} health")
+            self.client().delete_topic(topic)
+            rpk.create_topic(
+                topic=topic,
+                partitions=partition_count,
+                replicas=rf,
+                config={TopicSpec.PROPERTY_CLOUD_TOPIC_ENABLE: "true"},
+            )
+            wait_until(topic_is_healthy, 30, 2, err_msg=f"Topic {topic} health")
             sleep(5)
 
         swarm.stop()
