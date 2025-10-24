@@ -13,7 +13,6 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"os"
 
 	"github.com/redpanda-data/redpanda/src/go/rpk/pkg/config"
 	"github.com/redpanda-data/redpanda/src/go/rpk/pkg/kafka"
@@ -25,7 +24,7 @@ import (
 	"go.uber.org/zap"
 )
 
-func newCreateCommand(fs afero.Fs, p *config.Params) *cobra.Command {
+func newCreateCommand(fs afero.Fs, p *config.Params, osExit func(int)) *cobra.Command {
 	var (
 		ifNotExists bool
 		dry         bool
@@ -92,7 +91,7 @@ the cleanup.policy=compact config option set.
 			var exit1 bool
 			defer func() {
 				if exit1 {
-					os.Exit(1)
+					osExit(1)
 				}
 			}()
 
