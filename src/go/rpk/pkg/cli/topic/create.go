@@ -27,11 +27,12 @@ import (
 
 func newCreateCommand(fs afero.Fs, p *config.Params) *cobra.Command {
 	var (
-		dry        bool
-		partitions int32
-		replicas   int16
-		compact    bool
-		configKVs  []string
+		ifNotExists bool
+		dry         bool
+		partitions  int32
+		replicas    int16
+		compact     bool
+		configKVs   []string
 	)
 	cmd := &cobra.Command{
 		Use:   "create [TOPICS...]",
@@ -124,7 +125,14 @@ the cleanup.policy=compact config option set.
 							}
 						}
 					}
-					exit1 = true
+
+					if errors.Is(err, kerr.TopicAlreadyExists) && ifNotExists {
+						// This error is ignored when --if-not-exists is set so we don't
+						// set the exit1 flag.
+						msg = "OK (topic already exists)"
+					} else {
+						exit1 = true
+					}
 				}
 				tw.Print(topic.Topic, msg)
 			}
@@ -134,6 +142,7 @@ the cleanup.policy=compact config option set.
 	cmd.Flags().Int32VarP(&partitions, "partitions", "p", -1, "Number of partitions to create per topic; -1 defaults to the cluster's default_topic_partitions")
 	cmd.Flags().Int16VarP(&replicas, "replicas", "r", -1, "Replication factor (must be odd); -1 defaults to the cluster's default_topic_replications")
 	cmd.Flags().BoolVarP(&dry, "dry", "d", false, "Dry run: validate the topic creation request; do not create topics")
+	cmd.Flags().BoolVar(&ifNotExists, "if-not-exists", false, "Only create the topic if it does not already exist")
 
 	// Sept 2021
 	cmd.Flags().BoolVar(&compact, "compact", false, "Alias for -c cleanup.policy=compact")
