@@ -548,13 +548,30 @@ ss::future<> bg_upload_and_replicate(
         op->replicate_finished.set_value(raft::errc::timeout);
     });
 
+    /*
+     * L0 GC relies on a minimum epoch associated with each NTP for calculating
+     * the name of an L0 object. The minimum is based on the topic revision, but
+     * from the perspective of cloud topics this is largely an implementation
+     * detail. So here we go ahead and translate into a cluster_epoch type for
+     * the rest of its journey.
+     */
+    auto min_epoch = cluster_epoch(partition->get_topic_revision_id());
+    vassert(
+      min_epoch() > 0L,
+      "Unexpected invalid min epoch {} for {}",
+      min_epoch,
+      op->ntp);
+
     chunked_vector<model::record_batch> rb_copy;
     if (cache_enabled) {
         rb_copy = clone_batches(op->batches);
     }
     auto timeout = op->timeout == 0ms ? L0_upload_default_timeout : op->timeout;
     auto res = co_await api->write_and_debounce(
-      op->ntp, std::move(op->batches), model::timeout_clock::now() + timeout);
+      op->ntp,
+      min_epoch,
+      std::move(op->batches),
+      model::timeout_clock::now() + timeout);
 
     if (res.has_error()) {
         vlog(
@@ -680,9 +697,24 @@ ss::future<std::expected<kafka::offset, std::error_code>> frontend::replicate(
         rb_copy = clone_batches(batches);
     }
 
+    /*
+     * L0 GC relies on a minimum epoch associated with each NTP for calculating
+     * the name of an L0 object. The minimum is based on the topic revision, but
+     * from the perspective of cloud topics this is largely an implementation
+     * detail. So here we go ahead and translate into a cluster_epoch type for
+     * the rest of its journey.
+     */
+    auto min_epoch = cluster_epoch(_partition->get_topic_revision_id());
+    vassert(
+      min_epoch() > 0L,
+      "Unexpected invalid min epoch {} for {}",
+      min_epoch,
+      ntp());
+
     // Dataplane.
     auto res = co_await _data_plane->write_and_debounce(
       ntp(),
+      min_epoch,
       std::move(batches),
       model::timeout_clock::now()
         + opts.timeout.value_or(L0_replicate_default_timeout));
