@@ -146,6 +146,7 @@
 #include "redpanda/admin/services/datalake/datalake.h"
 #include "redpanda/admin/services/internal/breakglass.h"
 #include "redpanda/admin/services/internal/debug.h"
+#include "redpanda/admin/services/internal/metastore.h"
 #include "redpanda/admin/services/shadow_link/shadow_link.h"
 #include "resource_mgmt/memory_groups.h"
 #include "resource_mgmt/memory_sampling.h"
@@ -1182,6 +1183,12 @@ void application::configure_admin_server(model::node_id node_id) {
           s.add_service(
             std::make_unique<admin::internal::breakglass_service_impl>(
               controller.get()));
+          if (cloud_topics_app) {
+              s.add_service(
+                std::make_unique<admin::metastore_service_impl>(
+                  cloud_topics_app->get_sharded_replicated_metastore(),
+                  &controller->get_topics_state()));
+          }
       })
       .get();
 }

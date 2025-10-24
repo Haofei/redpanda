@@ -2,14 +2,27 @@ load("@rules_proto//proto:defs.bzl", "proto_library")
 load("//bazel/pbgen:pbgen.bzl", "redpanda_proto_library")
 
 proto_library(
-    name = "common_proto",
+    name = "acl_proto",
     srcs = ["acl.proto"],
     visibility = ["//visibility:public"],
     deps = ["//proto/redpanda/core/pbgen:options_proto"],
 )
 
 redpanda_proto_library(
-    name = "common_redpanda_proto",
-    protos = [":common_proto"],
+    name = "acl_redpanda_proto",
+    protos = [":acl_proto"],
+    visibility = ["//visibility:public"],
+)
+
+proto_library(
+    name = "ntp_proto",
+    srcs = ["ntp.proto"],
+    visibility = ["//visibility:public"],
+    deps = ["//proto/redpanda/core/pbgen:options_proto"],
+)
+
+redpanda_proto_library(
+    name = "ntp_redpanda_proto",
+    protos = [":ntp_proto"],
     visibility = ["//visibility:public"],
 )

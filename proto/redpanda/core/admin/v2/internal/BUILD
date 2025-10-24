@@ -38,7 +38,6 @@ proto_library(
     srcs = ["datalake.proto"],
     visibility = ["//visibility:public"],
     deps = [
-        "//proto/redpanda/core/common:common_proto",
         "//proto/redpanda/core/pbgen:options_proto",
         "//proto/redpanda/core/pbgen:rpc_proto",
     ],
@@ -48,7 +47,4 @@ redpanda_proto_library(
     name = "datalake_redpanda_proto",
     protos = [":datalake_proto"],
     visibility = ["//visibility:public"],
-    deps = [
-        "//proto/redpanda/core/common:common_redpanda_proto",
-    ],
 )

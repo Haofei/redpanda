@@ -22,6 +22,11 @@ from rptest.clients.admin.proto.redpanda.core.admin.v2.internal import (
     breakglass_pb2,
     breakglass_pb2_connect,
 )
+from rptest.clients.admin.proto.redpanda.core.admin.internal.cloud_topics.v1 import (
+    metastore_pb2,
+    metastore_pb2_connect,
+)
+from rptest.clients.admin.proto.redpanda.core.common import ntp_pb2
 
 
 class RedpandaServiceProto(Protocol):
@@ -36,6 +41,8 @@ shadow_link_pb = shadow_link_pb2
 debug_pb = debug_pb2
 kafka_connections_pb = kafka_connections_pb2
 breakglass_pb = breakglass_pb2
+metastore_pb = metastore_pb2
+ntp_pb = ntp_pb2
 
 
 # A hacky workaround for https://github.com/connectrpc/connect-python/issues/37
@@ -122,4 +129,9 @@ class Admin:
     ) -> breakglass_pb2_connect.BreakglassServiceClient:
         return self._make_service(
             breakglass_pb2_connect.BreakglassServiceClient, **kwargs
+        )
+
+    def metastore(self, **kwargs: Any) -> metastore_pb2_connect.MetastoreServiceClient:
+        return self._make_service(
+            metastore_pb2_connect.MetastoreServiceClient, **kwargs
         )

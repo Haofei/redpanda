@@ -37,3 +37,18 @@ redpanda_cc_library(
         "@seastar",
     ],
 )
+
+redpanda_cc_library(
+    name = "metastore",
+    srcs = ["metastore.cc"],
+    hdrs = ["metastore.h"],
+    deps = [
+        "//proto/redpanda/core/admin/internal/cloud_topics/v1:metastore_redpanda_proto",
+        "//src/v/base",
+        "//src/v/cloud_topics/level_one/metastore:replicated_metastore",
+        "//src/v/cluster",
+        "//src/v/serde/protobuf:rpc",
+        "@fmt",
+        "@seastar",
+    ],
+)
