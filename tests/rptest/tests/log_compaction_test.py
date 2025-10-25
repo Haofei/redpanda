@@ -28,7 +28,7 @@ from rptest.tests.redpanda_test import RedpandaTest
 from rptest.utils.mode_checks import skip_debug_mode
 
 
-class LogCompactionTestBase:
+class LogCompactionTestBase(PartitionMovementMixin):
     def topic_setup(
         self,
         cleanup_policy,
@@ -128,6 +128,47 @@ class LogCompactionTestBase:
         assert consumer.consumer_status.validator.tombstones_consumed > 0
         assert consumer.consumer_status.validator.invalid_reads == 0
 
+    def start_partition_movement(self):
+        class PartitionMoveExceptionReporter:
+            exc = None
+
+        def background_test_loop(
+            reporter, fn, iterations=10, sleep_sec=1, allowable_retries=3
+        ):
+            try:
+                while iterations > 0:
+                    try:
+                        fn()
+                    except Exception as e:
+                        if allowable_retries == 0:
+                            raise e
+                    time.sleep(sleep_sec)
+                    iterations -= 1
+                    allowable_retries -= 1
+            except Exception as e:
+                reporter.exc = e
+
+        def issue_partition_move():
+            self._dispatch_random_partition_move(self.topic_spec.name, 0)
+            self._wait_for_move_in_progress(self.topic_spec.name, 0, timeout=5)
+
+        self.partition_move_thread = threading.Thread(
+            target=background_test_loop,
+            args=(PartitionMoveExceptionReporter, issue_partition_move),
+            kwargs={"iterations": 5, "sleep_sec": 1},
+        )
+        self.partition_movement_exception = PartitionMoveExceptionReporter.exc
+
+        # Start partition movement thread
+        self.partition_move_thread.start()
+
+    def stop_partition_movement(self):
+        # Clean up partition movement thread
+        self.partition_move_thread.join()
+
+        if self.partition_movement_exception is not None:
+            raise self.partition_movement_exception
+
     def get_removed_tombstones(self):
         return self.redpanda.metric_sum(
             metric_name="vectorized_storage_log_tombstones_removed_total",
@@ -189,9 +230,7 @@ class LogCompactionTestBase:
         )
 
 
-class LogCompactionTest(
-    LogCompactionTestBase, PreallocNodesTest, PartitionMovementMixin
-):
+class LogCompactionTest(LogCompactionTestBase, PreallocNodesTest):
     def __init__(self, test_context):
         self.test_context = test_context
         # Run with small segments, a low retention value and a very frequent compaction interval.
@@ -355,38 +394,7 @@ class LogCompactionTest(
             key_set_cardinality=key_set_cardinality,
         )
 
-        class PartitionMoveExceptionReporter:
-            exc = None
-
-        def background_test_loop(
-            reporter, fn, iterations=10, sleep_sec=1, allowable_retries=3
-        ):
-            try:
-                while iterations > 0:
-                    try:
-                        fn()
-                    except Exception as e:
-                        if allowable_retries == 0:
-                            raise e
-                    time.sleep(sleep_sec)
-                    iterations -= 1
-                    allowable_retries -= 1
-            except Exception as e:
-                reporter.exc = e
-
-        def issue_partition_move():
-            self._dispatch_random_partition_move(self.topic_spec.name, 0)
-            self._wait_for_move_in_progress(self.topic_spec.name, 0, timeout=5)
-
-        partition_move_thread = threading.Thread(
-            target=background_test_loop,
-            args=(PartitionMoveExceptionReporter, issue_partition_move),
-            kwargs={"iterations": 5, "sleep_sec": 1},
-        )
-
-        # Start partition movement thread
-        partition_move_thread.start()
-
+        self.start_partition_movement()
         self.produce_and_consume()
 
         self.validate_log(cleanup_policy)
@@ -394,11 +402,7 @@ class LogCompactionTest(
         if cleanup_policy == TopicSpec.CLEANUP_COMPACT_DELETE:
             self.wait_for_log_truncation()
 
-        # Clean up partition movement thread
-        partition_move_thread.join()
-
-        if PartitionMoveExceptionReporter.exc is not None:
-            raise PartitionMoveExceptionReporter.exc
+        self.stop_partition_movement()
 
 
 class LogCompactionSchedulingTest(LogCompactionTestBase, PreallocNodesTest):
