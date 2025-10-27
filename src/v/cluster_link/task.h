@@ -60,6 +60,8 @@ public:
 
     /// Returns true if the task should be stopped on the current node shard
     bool should_stop(ss::shard_id shard, ::model::node_id current_node) const;
+    /// Returns true if the task should be paused
+    bool should_pause(ss::shard_id shard, ::model::node_id current_node) const;
     /// Updates config of the task
     virtual void update_config(const model::metadata&) = 0;
 
