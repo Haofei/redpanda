@@ -78,6 +78,8 @@ struct error_category final : public std::error_category {
             return "link broker verification failed";
         case errc::link_verification_unknown_error:
             return "link verification unknown error";
+        case errc::failed_to_stop_task:
+            return "failed to stop task";
         }
 
         return "(unknown error code)";

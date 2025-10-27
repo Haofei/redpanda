@@ -45,7 +45,7 @@ ss::future<cl_result<void>> stop_task(task* t) {
         co_return co_await t->stop();
     } catch (const std::exception& e) {
         res = err_info(
-          errc::failed_to_start_task,
+          errc::failed_to_stop_task,
           ssx::sformat("Failed to stop task {}: {}", t->name(), e.what()));
     }
 
