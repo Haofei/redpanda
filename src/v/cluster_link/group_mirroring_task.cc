@@ -623,7 +623,7 @@ group_mirroring_task::list_groups_from_broker(::model::node_id broker_id) {
       broker_id, kafka::list_groups_api::key);
     if (!versions) {
         vlog(
-          logger().error,
+          logger().warn,
           "Broker {} does not support list groups API",
           broker_id);
         co_return std::unexpected<error>(ssx::sformat(
