@@ -1027,7 +1027,21 @@ class ShadowLinkBasicTests(ShadowLinkTestBase):
             max_compaction_lag_ms=topic_properties["max.compaction.lag.ms"],
         )
         self.source_default_client().create_topic(topic)
-        source_topic = self.source_cluster_rpk.describe_topic_configs(topic.name)
+
+        def get_source_topic_properties() -> tuple[bool, dict[str, tuple[str, str]]]:
+            try:
+                return True, self.source_cluster_rpk.describe_topic_configs(topic.name)
+            except RpkException as e:
+                self.logger.debug(f"Failed to get topic configs for {topic.name}: {e}")
+                return False, {}
+
+        source_topic = wait_until_result(
+            get_source_topic_properties,
+            timeout_sec=10,
+            backoff_sec=1,
+            err_msg=f"Topic {topic.name} not found in source cluster",
+            retry_on_exc=True,
+        )
 
         def validate_topic_properties(properties_to_check: dict[str, tuple[str, str]]):
             for key, val in topic_properties.items():
