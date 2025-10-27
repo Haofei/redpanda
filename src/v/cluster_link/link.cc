@@ -226,6 +226,14 @@ void link::update_config(
         t->update_config(_config);
     }
 
+    // Configuration updates may change whether or not the tasks have been
+    // enabled, spawn off a task reconciler fiber to handle this
+    ssx::spawn_with_gate(_gate, [this] {
+        return ss::with_scheduling_group(_manager->scheduling_group(), [this] {
+            return run_task_reconciler();
+        });
+    });
+
     // reconcile the replicators. We do not need replicators running
     // if the link is not active or a specific topic in the link is not
     // active.
