@@ -26,18 +26,18 @@ import (
 )
 
 type NetCheckersFactory interface {
-	NewNicRxTxQueueCountCheckers(interfaces []string, mode irq.Mode, cpuMask string) []Checker
+	NewNicRxTxQueueCountCheckers(interfaces []network.Nic, mode irq.Mode, cpuMask string) []Checker
 	NewNicRxTxQueueCountChecker(nic network.Nic, mode irq.Mode, cpuMask string) Checker
-	NewNicIRQBalanceChecker(interfaces []string) Checker
-	NewNicIRQAffinityCheckers(interfaces []string, mode irq.Mode, mask string) []Checker
+	NewNicIRQBalanceChecker(interfaces []network.Nic) Checker
+	NewNicIRQAffinityCheckers(interfaces []network.Nic, mode irq.Mode, mask string) []Checker
 	NewNicIRQAffinityChecker(nic network.Nic, mode irq.Mode, mask string) Checker
-	NewNicRpsSetCheckers(interfaces []string, mode irq.Mode, mask string) []Checker
+	NewNicRpsSetCheckers(interfaces []network.Nic, mode irq.Mode, mask string) []Checker
 	NewNicRpsSetChecker(nic network.Nic, mode irq.Mode, mask string) Checker
-	NewNicRfsCheckers(interfaces []string, mode irq.Mode, mask string) []Checker
+	NewNicRfsCheckers(interfaces []network.Nic, mode irq.Mode, mask string) []Checker
 	NewNicRfsChecker(nic network.Nic, mode irq.Mode, mask string) Checker
-	NewNicNTupleCheckers(interfaces []string) []Checker
+	NewNicNTupleCheckers(interfaces []network.Nic) []Checker
 	NewNicNTupleChecker(nic network.Nic) Checker
-	NewNicXpsCheckers(interfaces []string) []Checker
+	NewNicXpsCheckers(interfaces []network.Nic) []Checker
 	NewNicXpsChecker(nic network.Nic) Checker
 	NewRfsTableSizeChecker() Checker
 	NewListenBacklogChecker() Checker
@@ -114,16 +114,16 @@ func (f *netCheckersFactory) NewNicRxTxQueueCountChecker(
 }
 
 func (f *netCheckersFactory) NewNicRxTxQueueCountCheckers(
-	interfaces []string, mode irq.Mode, cpuMask string,
+	interfaces []network.Nic, mode irq.Mode, cpuMask string,
 ) []Checker {
-	return f.forNonVirtualInterfaces(interfaces,
+	return f.forInterfaces(interfaces,
 		func(nic network.Nic) Checker {
 			return f.NewNicRxTxQueueCountChecker(nic, mode, cpuMask)
 		})
 }
 
 func (f *netCheckersFactory) NewNicIRQBalanceChecker(
-	interfaces []string,
+	interfaces []network.Nic,
 ) Checker {
 	return NewEqualityChecker(
 		NicIRQBalanceChecker,
@@ -132,8 +132,7 @@ func (f *netCheckersFactory) NewNicIRQBalanceChecker(
 		true,
 		func() (interface{}, error) {
 			var IRQs []int
-			for _, ifaceName := range interfaces {
-				nic := network.NewNic(f.fs, f.irqProcFile, f.irqDeviceInfo, f.ethtool, ifaceName)
+			for _, nic := range interfaces {
 				nicIRQs, err := network.CollectIRQs(nic)
 				if err != nil {
 					return false, err
@@ -179,18 +178,18 @@ func (f *netCheckersFactory) NewNicIRQAffinityChecker(
 }
 
 func (f *netCheckersFactory) NewNicIRQAffinityCheckers(
-	interfaces []string, mode irq.Mode, cpuMask string,
+	interfaces []network.Nic, mode irq.Mode, cpuMask string,
 ) []Checker {
-	return f.forNonVirtualInterfaces(interfaces,
+	return f.forInterfaces(interfaces,
 		func(nic network.Nic) Checker {
 			return f.NewNicIRQAffinityChecker(nic, mode, cpuMask)
 		})
 }
 
 func (f *netCheckersFactory) NewNicRpsSetCheckers(
-	interfaces []string, mode irq.Mode, cpuMask string,
+	interfaces []network.Nic, mode irq.Mode, cpuMask string,
 ) []Checker {
-	return f.forNonVirtualInterfaces(
+	return f.forInterfaces(
 		interfaces,
 		func(nic network.Nic) Checker {
 			return f.NewNicRpsSetChecker(nic, mode, cpuMask)
@@ -234,8 +233,8 @@ func (f *netCheckersFactory) NewNicRpsSetChecker(
 	)
 }
 
-func (f *netCheckersFactory) NewNicRfsCheckers(interfaces []string, mode irq.Mode, cpuMask string) []Checker {
-	return f.forNonVirtualInterfaces(interfaces,
+func (f *netCheckersFactory) NewNicRfsCheckers(interfaces []network.Nic, mode irq.Mode, cpuMask string) []Checker {
+	return f.forInterfaces(interfaces,
 		func(nic network.Nic) Checker {
 			return f.NewNicRfsChecker(nic, mode, cpuMask)
 		})
@@ -273,9 +272,9 @@ func (f *netCheckersFactory) NewNicRfsChecker(nic network.Nic, mode irq.Mode, cp
 }
 
 func (f *netCheckersFactory) NewNicNTupleCheckers(
-	interfaces []string,
+	interfaces []network.Nic,
 ) []Checker {
-	return f.forNonVirtualInterfaces(interfaces, f.NewNicNTupleChecker)
+	return f.forInterfaces(interfaces, f.NewNicNTupleChecker)
 }
 
 func (*netCheckersFactory) NewNicNTupleChecker(nic network.Nic) Checker {
@@ -299,8 +298,8 @@ func (*netCheckersFactory) NewNicNTupleChecker(nic network.Nic) Checker {
 	)
 }
 
-func (f *netCheckersFactory) NewNicXpsCheckers(interfaces []string) []Checker {
-	return f.forNonVirtualInterfaces(interfaces, f.NewNicXpsChecker)
+func (f *netCheckersFactory) NewNicXpsCheckers(interfaces []network.Nic) []Checker {
+	return f.forInterfaces(interfaces, f.NewNicXpsChecker)
 }
 
 func (f *netCheckersFactory) NewNicXpsChecker(nic network.Nic) Checker {
@@ -425,17 +424,12 @@ func isSet(
 	return true, nil
 }
 
-func (f *netCheckersFactory) forNonVirtualInterfaces(
-	interfaces []string, checkerFactory func(network.Nic) Checker,
+func (*netCheckersFactory) forInterfaces(
+	interfaces []network.Nic, checkerFactory func(network.Nic) Checker,
 ) []Checker {
 	var chkrs []Checker
 	for _, iface := range interfaces {
-		nic := network.NewNic(f.fs, f.irqProcFile, f.irqDeviceInfo, f.ethtool, iface)
-		if !nic.IsHwInterface() && !nic.IsBondIface() {
-			zap.L().Sugar().Debugf("Skipping '%s' virtual interface", nic.Name())
-			continue
-		}
-		chkrs = append(chkrs, checkerFactory(nic))
+		chkrs = append(chkrs, checkerFactory(iface))
 	}
 	return chkrs
 }

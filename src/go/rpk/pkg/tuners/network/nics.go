@@ -20,6 +20,7 @@ import (
 	"github.com/redpanda-data/redpanda/src/go/rpk/pkg/tuners/ethtool"
 	"github.com/redpanda-data/redpanda/src/go/rpk/pkg/tuners/irq"
 	et "github.com/safchain/ethtool"
+	"github.com/spf13/afero"
 	"go.uber.org/zap"
 )
 
@@ -533,4 +534,35 @@ func OneRPSQueueLimit(limits []string, nic Nic, mode irq.Mode, cpuMask string, c
 		return 0, nil
 	}
 	return RfsTableSize / len(limits), nil
+}
+
+func checkNic(nic Nic, nicMap map[string]Nic) {
+	if _, exists := nicMap[nic.Name()]; exists {
+		return
+	}
+	if !nic.IsHwInterface() && !nic.IsBondIface() {
+		zap.L().Sugar().Debugf("Skipping tuning of '%s' virtual interface", nic.Name())
+		return
+	}
+
+	nicMap[nic.Name()] = nic
+}
+
+func MapInterfaces(interfaces []string, fs afero.Fs,
+	irqProcFile irq.ProcFile,
+	irqDeviceInfo irq.DeviceInfo,
+	ethtool ethtool.EthtoolWrapper,
+) []Nic {
+	nics := make(map[string]Nic)
+
+	for _, iface := range interfaces {
+		nic := NewNic(fs, irqProcFile, irqDeviceInfo, ethtool, iface)
+		checkNic(nic, nics)
+	}
+
+	var nicsList []Nic
+	for _, nic := range nics {
+		nicsList = append(nicsList, nic)
+	}
+	return nicsList
 }
