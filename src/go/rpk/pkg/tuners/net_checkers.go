@@ -26,15 +26,15 @@ import (
 )
 
 type NetCheckersFactory interface {
-	NewNicRxTxQueueCountCheckers(interfaces []network.Nic, mode irq.Mode, cpuMask string) []Checker
-	NewNicRxTxQueueCountChecker(nic network.Nic, mode irq.Mode, cpuMask string) Checker
+	NewNicRxTxQueueCountCheckers(interfaces []network.Nic, effectiveConfig network.EffectiveNicConfig) []Checker
+	NewNicRxTxQueueCountChecker(nic network.Nic, effectiveConfig network.EffectiveNicConfig) Checker
 	NewNicIRQBalanceChecker(interfaces []network.Nic) Checker
-	NewNicIRQAffinityCheckers(interfaces []network.Nic, mode irq.Mode, mask string) []Checker
-	NewNicIRQAffinityChecker(nic network.Nic, mode irq.Mode, mask string) Checker
-	NewNicRpsSetCheckers(interfaces []network.Nic, mode irq.Mode, mask string) []Checker
-	NewNicRpsSetChecker(nic network.Nic, mode irq.Mode, mask string) Checker
-	NewNicRfsCheckers(interfaces []network.Nic, mode irq.Mode, mask string) []Checker
-	NewNicRfsChecker(nic network.Nic, mode irq.Mode, mask string) Checker
+	NewNicIRQAffinityCheckers(interfaces []network.Nic, effectiveConfig network.EffectiveNicConfig) []Checker
+	NewNicIRQAffinityChecker(nic network.Nic, effectiveConfig network.EffectiveNicConfig) Checker
+	NewNicRpsSetCheckers(interfaces []network.Nic, effectiveConfig network.EffectiveNicConfig) []Checker
+	NewNicRpsSetChecker(nic network.Nic, effectiveConfig network.EffectiveNicConfig) Checker
+	NewNicRfsCheckers(interfaces []network.Nic, effectiveConfig network.EffectiveNicConfig) []Checker
+	NewNicRfsChecker(nic network.Nic, effectiveConfig network.EffectiveNicConfig) Checker
 	NewNicNTupleCheckers(interfaces []network.Nic) []Checker
 	NewNicNTupleChecker(nic network.Nic) Checker
 	NewNicXpsCheckers(interfaces []network.Nic) []Checker
@@ -75,7 +75,7 @@ func NewNetCheckersFactory(
 }
 
 func (f *netCheckersFactory) NewNicRxTxQueueCountChecker(
-	nic network.Nic, mode irq.Mode, cpuMask string,
+	nic network.Nic, effectiveConfig network.EffectiveNicConfig,
 ) Checker {
 	return NewEqualityChecker(
 		NicRxTxQueueCountChecker,
@@ -98,7 +98,7 @@ func (f *netCheckersFactory) NewNicRxTxQueueCountChecker(
 					return true, nil
 				}
 
-				currentChannels, targetChannels, err := network.GetCurrentAndTargetChannels(currentNic, mode, cpuMask, f.cpuMasks, f.rnc, f.ethtool)
+				currentChannels, targetChannels, err := network.GetCurrentAndTargetChannels(currentNic, effectiveConfig, f.ethtool)
 				if err != nil {
 					return false, err
 				}
@@ -114,11 +114,11 @@ func (f *netCheckersFactory) NewNicRxTxQueueCountChecker(
 }
 
 func (f *netCheckersFactory) NewNicRxTxQueueCountCheckers(
-	interfaces []network.Nic, mode irq.Mode, cpuMask string,
+	interfaces []network.Nic, effectiveConfig network.EffectiveNicConfig,
 ) []Checker {
 	return f.forInterfaces(interfaces,
 		func(nic network.Nic) Checker {
-			return f.NewNicRxTxQueueCountChecker(nic, mode, cpuMask)
+			return f.NewNicRxTxQueueCountChecker(nic, effectiveConfig)
 		})
 }
 
@@ -145,7 +145,7 @@ func (f *netCheckersFactory) NewNicIRQBalanceChecker(
 }
 
 func (f *netCheckersFactory) NewNicIRQAffinityChecker(
-	nic network.Nic, mode irq.Mode, cpuMask string,
+	nic network.Nic, effectiveConfig network.EffectiveNicConfig,
 ) Checker {
 	return NewEqualityChecker(
 		NicIRQsAffinitChecker,
@@ -155,7 +155,7 @@ func (f *netCheckersFactory) NewNicIRQAffinityChecker(
 		func() (interface{}, error) {
 			return isSet(nic, func(currentNic network.Nic) (bool, error) {
 				dist, err := network.GetHwInterfaceIRQsDistribution(
-					currentNic, mode, cpuMask, f.cpuMasks, f.rnc)
+					currentNic, effectiveConfig, f.cpuMasks)
 				if err != nil {
 					return false, err
 				}
@@ -178,26 +178,26 @@ func (f *netCheckersFactory) NewNicIRQAffinityChecker(
 }
 
 func (f *netCheckersFactory) NewNicIRQAffinityCheckers(
-	interfaces []network.Nic, mode irq.Mode, cpuMask string,
+	interfaces []network.Nic, effectiveConfig network.EffectiveNicConfig,
 ) []Checker {
 	return f.forInterfaces(interfaces,
 		func(nic network.Nic) Checker {
-			return f.NewNicIRQAffinityChecker(nic, mode, cpuMask)
+			return f.NewNicIRQAffinityChecker(nic, effectiveConfig)
 		})
 }
 
 func (f *netCheckersFactory) NewNicRpsSetCheckers(
-	interfaces []network.Nic, mode irq.Mode, cpuMask string,
+	interfaces []network.Nic, effectiveConfig network.EffectiveNicConfig,
 ) []Checker {
 	return f.forInterfaces(
 		interfaces,
 		func(nic network.Nic) Checker {
-			return f.NewNicRpsSetChecker(nic, mode, cpuMask)
+			return f.NewNicRpsSetChecker(nic, effectiveConfig)
 		})
 }
 
 func (f *netCheckersFactory) NewNicRpsSetChecker(
-	nic network.Nic, mode irq.Mode, cpuMask string,
+	nic network.Nic, effectiveConfig network.EffectiveNicConfig,
 ) Checker {
 	return NewEqualityChecker(
 		NicRpsChecker,
@@ -210,7 +210,7 @@ func (f *netCheckersFactory) NewNicRpsSetChecker(
 				if err != nil {
 					return false, err
 				}
-				rfsMask, err := network.GetRpsCPUMask(currentNic, mode, cpuMask, f.cpuMasks, f.rnc)
+				rfsMask, err := network.GetRpsCPUMask(currentNic, effectiveConfig, f.rnc)
 				if err != nil {
 					return false, err
 				}
@@ -233,14 +233,14 @@ func (f *netCheckersFactory) NewNicRpsSetChecker(
 	)
 }
 
-func (f *netCheckersFactory) NewNicRfsCheckers(interfaces []network.Nic, mode irq.Mode, cpuMask string) []Checker {
+func (f *netCheckersFactory) NewNicRfsCheckers(interfaces []network.Nic, effectiveConfig network.EffectiveNicConfig) []Checker {
 	return f.forInterfaces(interfaces,
 		func(nic network.Nic) Checker {
-			return f.NewNicRfsChecker(nic, mode, cpuMask)
+			return f.NewNicRfsChecker(nic, effectiveConfig)
 		})
 }
 
-func (f *netCheckersFactory) NewNicRfsChecker(nic network.Nic, mode irq.Mode, cpuMask string) Checker {
+func (f *netCheckersFactory) NewNicRfsChecker(nic network.Nic, effectiveConfig network.EffectiveNicConfig) Checker {
 	return NewEqualityChecker(
 		NicRfsChecker,
 		fmt.Sprintf("NIC %s RFS set", nic.Name()),
@@ -252,7 +252,7 @@ func (f *netCheckersFactory) NewNicRfsChecker(nic network.Nic, mode irq.Mode, cp
 				if err != nil {
 					return false, err
 				}
-				queueLimit, err := network.OneRPSQueueLimit(limits, currentNic, mode, cpuMask, f.cpuMasks, f.rnc)
+				queueLimit, err := network.OneRPSQueueLimit(limits, currentNic, effectiveConfig, f.rnc)
 				if err != nil {
 					return false, err
 				}
