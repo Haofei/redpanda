@@ -1316,6 +1316,70 @@ class ShadowLinkBasicTests(ShadowLinkTestBase):
                 "test-wasm", "wasm-input", [topic.name], file="tinygo/identity.wasm"
             )
 
+    def _execute_task_pausing(self, num_topics: int):
+        link_name = "test-link"
+        created_link = self.create_link(link_name=link_name)
+
+        for i in range(num_topics):
+            # First disable the task
+            created_link.configurations.topic_metadata_sync_options.paused = True
+            update_mask = google.protobuf.field_mask_pb2.FieldMask(
+                paths=["configurations.topic_metadata_sync_options.paused"]
+            )
+            self.logger.debug("Disabling topic_metadata_sync task")
+            self.update_link(shadow_link=created_link, update_mask=update_mask)
+
+            topic_name = f"source-topic-{i}"
+            self.logger.debug(f"Creating topic {topic_name} in source cluster")
+            topic = TopicSpec(name=topic_name, partition_count=3, replication_factor=3)
+            self.source_default_client().create_topic(topic)
+
+            self.logger.debug(
+                f"Verifying that topic {topic_name} is NOT created in target cluster"
+            )
+            # Verify that the topic is NOT created in the target cluster
+            with expect_exception(ducktape.errors.TimeoutError, lambda _: True):
+                self.target_cluster.service.wait_until(
+                    lambda: self.topic_exists_in_target(topic_name),
+                    timeout_sec=10,
+                    backoff_sec=1,
+                )
+
+            # Now re-enable the task
+            created_link.configurations.topic_metadata_sync_options.paused = False
+            update_mask = google.protobuf.field_mask_pb2.FieldMask(
+                paths=["configurations.topic_metadata_sync_options.paused"]
+            )
+            self.logger.debug("Enabling topic_metadata_sync task")
+            self.update_link(shadow_link=created_link, update_mask=update_mask)
+
+            self.logger.debug(
+                f"Verifying that topic {topic_name} IS created in target cluster"
+            )
+            self.target_cluster.service.wait_until(
+                lambda: self.topic_exists_in_target(topic_name),
+                timeout_sec=10,
+                backoff_sec=1,
+            )
+
+    @cluster(num_nodes=6)
+    @matrix(shuffle_leadership=[True, False])
+    def test_task_pausing(self, shuffle_leadership: bool):
+        """
+        This test will verify that the pausing and resuming of shadow linking tasks
+        works as expected.  The test will create 10 topics, one at a time, pausing
+        and unpausing the source topic syncer task and verify that the topic is/is not
+        created in the target cluster as expected
+        """
+        num_topics = 5
+        with self.leadership_shuffler(
+            redpanda=self.target_cluster.service,
+            namespace="redpanda",
+            topic="controller",
+            enabled=shuffle_leadership,
+        ):
+            self._execute_task_pausing(num_topics=num_topics)
+
 
 class ShadowLinkingReplicationTests(ShadowLinkPreAllocTestBase):
     def _get_shadow_topic(
