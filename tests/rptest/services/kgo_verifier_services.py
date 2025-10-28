@@ -638,6 +638,7 @@ class KgoVerifierProducer(KgoVerifierService):
         tombstone_probability=0.0,
         validate_latest_values=False,
         client_name=None,
+        wait_for_acks=True,
     ):
         super(KgoVerifierProducer, self).__init__(
             context,
@@ -669,6 +670,7 @@ class KgoVerifierProducer(KgoVerifierService):
         self._tombstone_probability = tombstone_probability
         self._validate_latest_values = validate_latest_values
         self._client_name = client_name
+        self._wait_for_acks = wait_for_acks
 
     @property
     def produce_status(self) -> ProduceStatus:
@@ -685,10 +687,19 @@ class KgoVerifierProducer(KgoVerifierService):
 
         what = f"{self.who_am_i()} wait: awaiting message count"
         self.logger.debug(what)
+
+        def is_finished():
+            has_error = self.status_thread.errored
+            msg_count = (
+                self.produce_status.acked
+                if self._wait_for_acks
+                else self.produce_status.sent
+            )
+            return has_error or msg_count >= self._msg_count
+
         try:
             self._redpanda.wait_until(
-                lambda: self.status_thread.errored
-                or self.produce_status.acked >= self._msg_count,
+                is_finished,
                 timeout_sec=timeout_sec if timeout_sec is not None else 30,
                 backoff_sec=self._status_thread.INTERVAL,
                 err_msg=what,
