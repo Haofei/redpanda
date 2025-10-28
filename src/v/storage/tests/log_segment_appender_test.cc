@@ -77,7 +77,7 @@ struct storage::segment_appender_test_accessor {
     }
     auto inflight_dispatched() { return sa._inflight_dispatched; }
     auto total_dispatched() { return sa._dispatched_writes; }
-    auto total_merged() { return sa._merged_writes; }
+    auto total_merged() { return sa.get_stats().merged_writes; }
     auto info() {
         return segment_appender_info{
           .committed_offset = sa._committed_offset,

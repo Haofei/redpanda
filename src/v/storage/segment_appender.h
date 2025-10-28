@@ -50,6 +50,31 @@ namespace storage {
 /// may be called even if other flushes or appends are in progress.
 class segment_appender {
 public:
+    struct stats {
+        // A counter of the number of writes that were successfully merged into
+        // a queued write prior to dispatch, hence don't need to be separately
+        // dispatched
+        size_t merged_writes{0};
+        // A counter of number of bytes requested to be written via append()
+        size_t bytes_requested{0};
+        // A counter of number of bytes actually written via dma_write calls
+        size_t bytes_written{0};
+        // A counter of number of append requests
+        size_t appends{0};
+        // A counter of number of flush calls
+        size_t flushes{0};
+        // A counter of number of disk fsync calls
+        size_t fsyncs{0};
+        // A counter of number of truncates
+        size_t truncates{0};
+        // A counter of number of fallocations
+        size_t fallocations{0};
+        // A counter of number of last page hydrations
+        size_t last_page_hydrations{0};
+
+        fmt::iterator format_to(fmt::iterator it) const;
+    };
+
     using chunk = segment_appender_chunk;
     using committed_offset_clb = ss::noncopyable_function<void(size_t)>;
 
@@ -129,6 +154,8 @@ public:
     }
 
     fmt::iterator format_to(fmt::iterator) const;
+
+    const stats& get_stats() const { return _stats; }
 
 private:
     using chunk_ptr = ss::lw_shared_ptr<chunk>;
@@ -273,10 +300,6 @@ private:
     // A counter of the number of dispatched writes (i.e., dma_write calls) over
     // the lifetime of the appender
     size_t _dispatched_writes{0};
-    // A counter of the number of writes that were succesfully merged into a
-    // queued write prior to dispatch, hence don't need to be separately
-    // dispatched
-    size_t _merged_writes{0};
     committed_offset_clb _committed_offset_clb;
     ss::future<>
     maybe_advance_stable_offset(const ss::lw_shared_ptr<inflight_write>&);
@@ -286,7 +309,7 @@ private:
     void handle_inactive_timer();
 
     size_t _chunk_size{0};
-
+    stats _stats;
     // Bit-map tracking the types of batches in the `_head` chunk that have
     // not been written to disk yet.
     static_assert(static_cast<uint8_t>(model::record_batch_type::MAX) <= 63);
