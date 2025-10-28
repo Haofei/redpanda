@@ -679,6 +679,7 @@ class LogCompactionTxRemovalTestBase(LogCompactionTestBase, PreallocNodesTest):
             "log_segment_size": 2 * 1024**2,  # 2 MiB
             "compacted_log_segment_size": 1024**2,  # 1 MiB
         }
+        self.transaction_timeout_ms = 2000
 
         super().__init__(
             test_context=test_context,
@@ -694,12 +695,16 @@ class LogCompactionTxRemovalTestBase(LogCompactionTestBase, PreallocNodesTest):
             context=self.test_context,
             redpanda=self.redpanda,
             topic=self.topic_spec.name,
-            use_transactions=True,
             msg_size=test_case.msg_size,
             msg_count=test_case.msg_count,
+            use_transactions=True,
+            transaction_timeout_ms=self.transaction_timeout_ms,
             transaction_abort_rate=test_case.abort_rate,
             msgs_per_transaction=test_case.msgs_per_transaction,
             custom_node=self.preallocated_nodes,
+            tolerate_failed_produce=True,
+            tolerate_data_loss=True,
+            wait_for_acks=False,
         )
 
         producer.start()
@@ -738,6 +743,9 @@ class LogCompactionTxRemovalTestBase(LogCompactionTestBase, PreallocNodesTest):
 
         # Restart the redpanda broker to roll segments
         self.redpanda.restart_nodes(self.redpanda.nodes)
+
+        # Sleep in order to allow any open transaction to be closed.
+        time.sleep(2 * self.transaction_timeout_ms / 1000)
 
         self.wait_for_sliding_window_compaction()
 
