@@ -18,6 +18,8 @@ SCRIPT_ROOT = Path(__file__).parent
 
 SCRIPT_RELPATH = "/".join(Path(__file__).parts[-2:])
 
+TASK_INVOCATION = "task rp:type-check -- "
+
 
 class Level(Enum):
     SKIP = "skip"
@@ -467,7 +469,7 @@ class TypeCheck:
         else:
             print(f"{self._red('✗ check failed')}")
             print(f"{self.info} run this command locally to reproduce:")
-            print(f"{SCRIPT_RELPATH} check")
+            print(f"{TASK_INVOCATION} check")
 
         print()
         print(self._blue("== Running promotion-check =="))
@@ -476,7 +478,7 @@ class TypeCheck:
         else:
             print(f"{self._red('✗ promotion-check failed')}")
             print(f"{self.info} run this command locally to fix:")
-            print(f"{SCRIPT_RELPATH} promotion-check --update")
+            print(f"{TASK_INVOCATION} promotion-check --update")
 
         if promotion_check_passed and check_passed:
             print(self._green("✓ All CI checks passed"))
