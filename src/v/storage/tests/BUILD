@@ -982,6 +982,27 @@ redpanda_cc_gtest(
     ],
 )
 
+redpanda_cc_gtest(
+    name = "segment_appender_test",
+    timeout = "short",
+    srcs = [
+        "segment_appender_test.cc",
+    ],
+    deps = [
+        "//src/v/base",
+        "//src/v/bytes:iostream",
+        "//src/v/container:chunked_vector",
+        "//src/v/model",
+        "//src/v/random:generators",
+        "//src/v/storage",
+        "//src/v/storage:segment_appender",
+        "//src/v/test_utils:gtest",
+        "//src/v/test_utils:random_bytes",
+        "@googletest//:gtest",
+        "@seastar",
+    ],
+)
+
 redpanda_cc_bench(
     name = "storage_rpbench",
     srcs = ["compaction_idx_bench.cc"],
