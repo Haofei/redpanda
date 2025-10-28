@@ -863,6 +863,22 @@ class ShadowLinkTestBase(PreallocNodesTest):
         finally:
             fi.stop()
 
+    @contextmanager
+    def superuser_access(self):
+        self.admin_v2 = AdminV2(
+            self.target_cluster_service,
+            auth=(
+                self.redpanda.SUPERUSER_CREDENTIALS.username,
+                self.redpanda.SUPERUSER_CREDENTIALS.password,
+            ),
+        )
+        self.service_client = self.admin_v2.shadow_link()
+        try:
+            yield
+        finally:
+            self.admin_v2 = AdminV2(self.target_cluster_service)
+            self.service_client = self.admin_v2.shadow_link()
+
 
 class ShadowLinkPreAllocTestBase(ShadowLinkTestBase):
     """

@@ -1454,6 +1454,72 @@ class ShadowLinkBasicTests(ShadowLinkTestBase):
             self._execute_task_pausing(num_topics=num_topics)
 
 
+class ShadowLinkingAuthzTests(ShadowLinkTestBase):
+    SUPERUSER_ERROR = "[permission_denied] Forbidden (superuser role required)"
+
+    def expect_superuser_error(self):
+        return expect_exception(
+            ConnectError,
+            lambda e: str(e) == self.SUPERUSER_ERROR,
+        )
+
+    @cluster(num_nodes=6)
+    def test_shadow_link_admin_api_authz(self):
+        topic = TopicSpec(name="source-topic", partition_count=3, replication_factor=1)
+        self.source_default_client().create_topic(topic)
+
+        link_name = "test-link"
+
+        shadow_link = self.create_link(link_name)
+        links = self.list_links()
+        assert len(links) == 1, (
+            f"Expected exactly one shadow link, got {len(links)}. Setup failed"
+        )
+
+        self.target_cluster.service.wait_until(
+            lambda: self.topic_exists_in_target(topic.name),
+            timeout_sec=60,
+            backoff_sec=1,
+            err_msg=f"Topic {topic.name} not found in target cluster",
+        )
+
+        self.target_cluster_service.set_cluster_config(
+            values={"admin_api_require_auth": True}
+        )
+
+        # Verify that an unauthorised user can't access any of the sl api
+        with self.expect_superuser_error():
+            self.create_link(link_name)
+
+        with self.expect_superuser_error():
+            self.list_links()
+
+        with self.expect_superuser_error():
+            self.get_link(link_name)
+
+        with self.expect_superuser_error():
+            self.update_link(shadow_link)
+
+        with self.expect_superuser_error():
+            self.failover_link(link_name)
+
+        with self.expect_superuser_error():
+            self.get_shadow_topic(link_name, topic.name)
+
+        with self.expect_superuser_error():
+            self.list_shadow_topics(link_name)
+
+        with self.expect_superuser_error():
+            self.delete_link(link_name)
+
+        # And a spot check that a superuser can actually use them
+        with self.superuser_access():
+            links = self.list_links()
+            assert len(links) == 1, (
+                f"Expected exactly one shadow link, got {len(links)}."
+            )
+
+
 class ShadowLinkingReplicationTests(ShadowLinkPreAllocTestBase):
     def _get_shadow_topic(
         self,
