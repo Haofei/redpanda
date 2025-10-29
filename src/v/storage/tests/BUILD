@@ -1019,3 +1019,17 @@ redpanda_cc_bench(
         "@seastar//:benchmark",
     ],
 )
+
+redpanda_cc_bench(
+    name = "segment_appender_rpbench",
+    srcs = ["segment_appender_bench.cc"],
+    deps = [
+        "//src/v/model",
+        "//src/v/ssx:future_util",
+        "//src/v/storage",
+        "//src/v/storage:segment_appender",
+        "//src/v/test_utils:tmpbuf_file",
+        "@seastar",
+        "@seastar//:benchmark",
+    ],
+)
