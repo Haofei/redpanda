@@ -1677,7 +1677,11 @@ class ShadowLinkingReplicationTests(ShadowLinkPreAllocTestBase):
         )
 
         self.start_producer_consumer(
-            topic=topic.name, msg_size=128, msg_cnt=10000, use_transactions=True
+            topic=topic.name,
+            msg_size=128,
+            msg_cnt=10000,
+            use_transactions=True,
+            producer_properties={"transaction_abort_rate": "0.3"},
         )
         self.verify()
 
@@ -1874,8 +1878,10 @@ class ShadowLinkingReplicationTests(ShadowLinkPreAllocTestBase):
             topic=topic.name,
             msg_size=128,
             msg_cnt=msg_cnt,
-            fake_timestamp_ms=base_ts,
-            producer_rate_limit_bps=1024,
+            producer_properties={
+                "fake_timestamp_ms": base_ts,
+                "rate_limit_bps": 1024,
+            },
         )
         self.verify()
 
@@ -3002,7 +3008,10 @@ class ShadowLinkingMetricsTests(ShadowLinkPreAllocTestBase):
             msg_size=128,
             msg_cnt=100000,
             use_transactions=True,
-            msgs_per_transaction=10000,
+            producer_properties={
+                "msgs_per_transaction": "10000",
+                "transaction_abort_rate": "0.3",
+            },
         )
         validate_metrics(
             timeout_sec=30,
