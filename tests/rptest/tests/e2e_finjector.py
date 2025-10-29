@@ -137,7 +137,7 @@ class Finjector:
 
             delay = self.failure_delay_provier()
             if f_injector.cnt_in_flight() >= self.max_concurrent_failures:
-                delay = max(delay, f_injector.time_till_next_recovery())
+                delay = f_injector.time_till_next_recovery() + delay
             self.redpanda.logger.info(f"waiting {delay} seconds before next failure")
             time.sleep(delay)
 
