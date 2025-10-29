@@ -620,7 +620,7 @@ class ShadowLinkTestBase(PreallocNodesTest):
         return self.service_client.create_shadow_link(req=req).shadow_link
 
     def delete_link(
-        self, link_name: str, force: bool = False, *args, **kwargs
+        self, link_name: str, force: bool = False, *args: Any, **kwargs: Any
     ) -> shadow_link_pb2.DeleteShadowLinkResponse:
         req = self.delete_link_request(
             link_name=link_name, force=force, *args, **kwargs
