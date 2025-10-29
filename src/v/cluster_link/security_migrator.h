@@ -40,7 +40,7 @@ public:
     void update_config(const model::metadata& config) override;
 
 protected:
-    ss::future<> run_impl() override;
+    ss::future<state_transition> run_impl() override;
 
 private:
     ss::future<chunked_vector<kafka::describe_acls_resource>>

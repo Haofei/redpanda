@@ -87,6 +87,10 @@ public:
     model::task_status_report get_status_report() const;
 
 protected:
+    struct state_transition {
+        model::task_state desired_state;
+        ss::sstring reason;
+    };
     /// Returns true if the task should be started on the current node shard,
     /// this is only called when the task state allows it to be started
     virtual bool should_start_impl(ss::shard_id, ::model::node_id) const = 0;
@@ -95,16 +99,13 @@ protected:
     /// this is only called when the task state allows it to be stopped
     virtual bool should_stop_impl(ss::shard_id, ::model::node_id) const = 0;
 
-    /// Used by the implementation to change the state of the task
-    /// \return The previous state
-    cl_result<model::task_state>
-      change_state(model::task_state, ss::sstring = "");
     /// Changes the run interval
     void set_run_interval(ss::lowres_clock::duration);
     /// Returns the logger
     prefix_logger& logger();
     /// Implementation of the task logic that will run periodically
-    virtual ss::future<> run_impl() = 0;
+    /// It shall return the state the task should be in after running
+    virtual ss::future<state_transition> run_impl() = 0;
     /// Returns the owning link
     link* get_link() const noexcept;
 
@@ -113,6 +114,10 @@ private:
     void run_callbacks(const state_change&);
     /// Validates that the state change is valid
     bool valid_previous_state(model::task_state st) const;
+    /// Used by the task runner to change the state of the task
+    /// \return The previous state
+    cl_result<model::task_state>
+      change_state(model::task_state, ss::sstring = "");
 
 private:
     link* _link;
