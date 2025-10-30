@@ -833,9 +833,12 @@ class TopicRecoveryTest(RedpandaTest):
         num_nodes = len(self.redpanda.nodes)
         queue = Queue(num_nodes)
         for node in self.redpanda.nodes:
-            checksummer = lambda: queue.put(
-                NodeChecksums(node, self._get_data_log_segment_checksums(node))
-            )
+
+            def checksummer():
+                queue.put(
+                    NodeChecksums(node, self._get_data_log_segment_checksums(node))
+                )
+
             Thread(target=checksummer, daemon=True).start()
             self.logger.debug(f"Started checksum thread for {node.account.hostname}..")
         for i in range(num_nodes):

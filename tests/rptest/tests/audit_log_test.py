@@ -760,7 +760,10 @@ class AuditLogTestBase(RedpandaTest):
 
         Matched records
         """
-        stop_cond = lambda records: valid_check_fn(self.aggregate_count(records))
+
+        def stop_cond(records):
+            return valid_check_fn(self.aggregate_count(records))
+
         return self.read_all_from_audit_log(filter_fn=filter_fn, stop_cond=stop_cond)
 
 
@@ -961,7 +964,9 @@ class AuditLogTestAdminApi(AuditLogTestBase):
         def number_of_records_matching(filter_by, n_expected):
             filter_fn = partial(is_api_match, filter_by)
 
-            stop_cond = lambda records: self.aggregate_count(records) >= n_expected
+            def stop_cond(records):
+                return self.aggregate_count(records) >= n_expected
+
             records = self.read_all_from_audit_log(filter_fn, stop_cond)
             assert self.aggregate_count(records) == n_expected, (
                 f"Expected: {n_expected}, Actual: {self.aggregate_count(records)}"
@@ -977,7 +982,10 @@ class AuditLogTestAdminApi(AuditLogTestBase):
             "cluster/health_overview": self.admin.get_cluster_health_overview,
         }
         api_keys = api_calls.keys()
-        call_apis = lambda: [fn() for fn in api_calls.values()]
+
+        def call_apis():
+            return [fn() for fn in api_calls.values()]
+
         self.logger.debug("Starting 500 api calls with management enabled")
         for _ in range(0, 500):
             call_apis()

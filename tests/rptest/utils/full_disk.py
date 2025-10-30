@@ -17,7 +17,8 @@ class FullDiskHelper:
 
     # TODO factor out similar code in cluster_config_test.py
     def _wait_for_node_config_value(self, key: str, value: int) -> None:
-        _get = lambda k: self.admin.get_cluster_config()[k]
+        def _get(k):
+            return self.admin.get_cluster_config()[k]
 
         def match(key: str, val: int) -> bool:
             v = _get(key)

@@ -72,7 +72,9 @@ class RaftAvailabilityTest(RedpandaTest):
         result = {}
 
         if condition is None:
-            condition = lambda x: x is not None
+
+            def condition(x):
+                return x is not None
 
         def check():
             result[0] = self._get_leader()
