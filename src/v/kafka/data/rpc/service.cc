@@ -64,9 +64,11 @@ cluster::errc map_errc(std::error_code ec) {
 
 local_service::local_service(
   std::unique_ptr<kafka::data::rpc::topic_metadata_cache> metadata_cache,
-  std::unique_ptr<kafka::data::rpc::partition_manager> partition_manager)
+  std::unique_ptr<kafka::data::rpc::partition_manager> partition_manager,
+  std::unique_ptr<kafka::data::rpc::shadow_link_registry> shadow_link_registry)
   : _metadata_cache(std::move(metadata_cache))
-  , _partition_manager(std::move(partition_manager)) {}
+  , _partition_manager(std::move(partition_manager))
+  , _shadow_link_registry(std::move(shadow_link_registry)) {}
 
 ss::future<ss::chunked_fifo<kafka_topic_data_result>> local_service::produce(
   ss::chunked_fifo<kafka_topic_data> topic_data,

@@ -2017,6 +2017,10 @@ void application::wire_up_redpanda_services(
             &shard_table,
             &partition_manager,
             smp_service_groups.transform_smp_sg());
+      }),
+      ss::sharded_parameter([this] {
+          return kafka::data::rpc::shadow_link_registry::make_default(
+            &controller->get_cluster_link_frontend());
       }))
       .get();
 
