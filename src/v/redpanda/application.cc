@@ -1380,6 +1380,10 @@ void application::wire_up_runtime_services(
           }),
           ss::sharded_parameter([this] {
               return transform::service::create_reporter(&_transform_service);
+          }),
+          ss::sharded_parameter([this] {
+              return kafka::data::rpc::shadow_link_registry::make_default(
+                &controller->get_cluster_link_frontend());
           }))
           .get();
         construct_service(
