@@ -13,6 +13,7 @@
 #include "absl/container/flat_hash_set.h"
 #include "absl/strings/escaping.h"
 #include "absl/strings/str_join.h"
+#include "cluster/cluster_link/frontend.h"
 #include "cluster/controller_service.h"
 #include "cluster/controller_stm.h"
 #include "cluster/logger.h"
@@ -89,6 +90,7 @@ plugin_frontend::plugin_frontend(
   partition_leaders_table* l,
   plugin_table* t,
   topic_table* tp,
+  ss::sharded<cluster::cluster_link::frontend>* slfe,
   controller_stm* c,
   rpc::connection_cache* r,
   ss::abort_source* a)
@@ -97,6 +99,7 @@ plugin_frontend::plugin_frontend(
   , _connections(r)
   , _table(t)
   , _topics(tp)
+  , _shadow_link_frontend(slfe)
   , _abort_source(a)
   , _controller(c) {}
 

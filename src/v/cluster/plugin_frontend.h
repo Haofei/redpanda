@@ -10,6 +10,7 @@
  */
 #include "absl/container/flat_hash_set.h"
 #include "base/seastarx.h"
+#include "cluster/cluster_link/fwd.h"
 #include "cluster/commands.h"
 #include "cluster/fwd.h"
 #include "cluster/plugin_table.h"
@@ -46,6 +47,7 @@ public:
       partition_leaders_table*,
       plugin_table*,
       topic_table*,
+      ss::sharded<cluster::cluster_link::frontend>*,
       controller_stm*,
       rpc::connection_cache*,
       ss::abort_source*);
@@ -161,6 +163,7 @@ private:
     rpc::connection_cache* _connections;
     plugin_table* _table;
     topic_table* _topics;
+    ss::sharded<cluster::cluster_link::frontend>* _shadow_link_frontend;
     ss::abort_source* _abort_source;
 
     // is null if not on shard0
