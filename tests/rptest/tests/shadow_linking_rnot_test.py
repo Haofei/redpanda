@@ -126,6 +126,7 @@ class ClusterLinkingWorkloadWorker:
             topic=self.spec.topic,
             preallocated_nodes=self.preallocated_nodes,
             logger=self.logger,
+            use_transactions=self.spec.use_transactions,
             msg_count=self.spec.msg_count,
             msg_size=self.spec.msg_size,
             producer_properties=self.spec.producer_properties,
