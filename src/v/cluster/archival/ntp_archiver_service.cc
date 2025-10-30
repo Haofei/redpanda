@@ -2986,6 +2986,10 @@ ss::future<> ntp_archiver::garbage_collect_archive() {
               _rtclog.info,
               "Failed to clean up metadata after garbage collection: {}",
               error);
+            throw std::runtime_error(fmt_with_ctx(
+              fmt::format,
+              "Failed to clean up metadata after archive GC: {}",
+              error));
         } else {
             std::ignore = co_await _remote.delete_objects(
               get_bucket_name(), manifests_to_remove, fib);
@@ -3439,6 +3443,9 @@ ss::future<> ntp_archiver::garbage_collect() {
               _rtclog.info,
               "Failed to clean up metadata after garbage collection: {}",
               error);
+
+            throw std::runtime_error(fmt_with_ctx(
+              fmt::format, "Failed to clean up metadata after GC: {}", error));
         }
     } else {
         vlog(
