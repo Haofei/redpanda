@@ -309,7 +309,7 @@ class RedpandaInstaller:
         # Verify that the installations on each node match.
         for node in nodes:
             vers = self._redpanda.get_version(node)
-            if initial_version == None:
+            if initial_version is None:
                 initial_version = vers
             assert initial_version == vers, (
                 f"Mismatch version {node.account.hostname} has {vers}, {nodes[0].account.hostname} has {initial_version}"

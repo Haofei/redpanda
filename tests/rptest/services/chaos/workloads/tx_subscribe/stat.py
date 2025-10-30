@@ -240,7 +240,7 @@ class LogPlayer:
         if parts[2] not in cmds:
             raise Exception(f'unknown cmd "{parts[2]}"')
 
-        if self.ts_us == None:
+        if self.ts_us is None:
             self.ts_us = int(parts[1])
             self.started_us = self.ts_us
         else:
@@ -271,7 +271,7 @@ class LogPlayer:
             self.curr_state[thread_id] = None
             if self.thread_type[thread_id] not in threads:
                 raise Exception(f"unknown thread type: {parts[4]}")
-        if self.curr_state[thread_id] == None:
+        if self.curr_state[thread_id] is None:
             if new_state != State.STARTED:
                 raise Exception(
                     f'first logged command of a new thread should be started, got: "{parts[2]}"'
@@ -362,7 +362,7 @@ def render_overview(title, workload_dir, stat, source_partitions):
             max_unavailability_ms = max(max_unavailability_ms, ts_ms - last_ok)
             last_ok = ts_ms
             duration_ms = max(duration_ms, ts_ms)
-            if min_latency_us == None:
+            if min_latency_us is None:
                 min_latency_us = latency_us
             min_latency_us = min(min_latency_us, latency_us)
             max_latency_us = max(max_latency_us, latency_us)
@@ -544,7 +544,7 @@ def collect(title, workload_dir, workload_nodes, source_partitions):
             with open(os.path.join(node_dir, "workload.log"), "r") as workload_file:
                 last_line = None
                 for line in workload_file:
-                    if last_line != None:
+                    if last_line is not None:
                         player.apply(last_line)
                     last_line = line
 

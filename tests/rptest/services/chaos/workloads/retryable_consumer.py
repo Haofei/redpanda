@@ -42,7 +42,7 @@ class RetryableConsumer:
             if retries == 0:
                 raise Exception("Can't connect to the redpanda cluster")
             retries -= 1
-            if self.consumer != None:
+            if self.consumer is not None:
                 try:
                     self.consumer.close()
                 except:

@@ -576,7 +576,7 @@ class Admin:
                 f'requesting "{namespace}/{topic}/{partition}" details from {host})'
             )
             meta = self._get_configuration(host, namespace, topic, partition)
-            if meta == None:
+            if meta is None:
                 return None
             if "replicas" not in meta:
                 self.redpanda.logger.debug("replicas are missing")
@@ -584,7 +584,7 @@ class Admin:
             if "status" not in meta:
                 self.redpanda.logger.debug("status is missing")
                 return None
-            if status == None:
+            if status is None:
                 status = meta["status"]
                 self.redpanda.logger.debug(f"get status:{status}")
             if status != meta["status"]:
@@ -601,7 +601,7 @@ class Admin:
                     f"get conflicting replicas:{read_replicas} from {host}"
                 )
                 return None
-            if replication != None:
+            if replication is not None:
                 if len(meta["replicas"]) != replication:
                     self.redpanda.logger.debug(
                         f"expected replication:{replication} got:{len(meta['replicas'])}"
@@ -645,7 +645,7 @@ class Admin:
 
         When the timeout is exhaust it throws TimeoutException
         """
-        if hosts == None:
+        if hosts is None:
             hosts = [n.account.hostname for n in self.redpanda.started_nodes()]
         hosts = list(hosts)
 
@@ -663,7 +663,7 @@ class Admin:
                     namespace=namespace,
                     replication=replication,
                 )
-                if info == None:
+                if info is None:
                     return False
                 return True, info
             except RequestException:
@@ -1420,7 +1420,7 @@ class Admin:
 
         #  check which node is current leader
 
-        if leader_id == None:
+        if leader_id is None:
             leader_id = self.await_stable_leader(
                 topic,
                 partition=partition,

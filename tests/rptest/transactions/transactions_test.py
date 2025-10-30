@@ -200,7 +200,7 @@ class TransactionsTest(RedpandaTest, TransactionsMixin):
             producer.begin_transaction()
 
             for record in records:
-                assert record.error() == None
+                assert record.error() is None
                 consumed_from_input_topic.append(record)
                 producer.produce(
                     self.output_t.name,
@@ -333,7 +333,7 @@ class TransactionsTest(RedpandaTest, TransactionsMixin):
         producer.begin_transaction()
 
         for record in records:
-            assert record.error() == None
+            assert record.error() is None
             producer.produce(self.output_t.name, record.value(), record.key())
 
         offsets = consumer1.position(consumer1.assignment())
@@ -400,7 +400,7 @@ class TransactionsTest(RedpandaTest, TransactionsMixin):
         producer.begin_transaction()
 
         for record in records:
-            assert record.error() == None
+            assert record.error() is None
             producer.produce(self.output_t.name, record.value(), record.key())
 
         offsets = consumer1.position(consumer1.assignment())

@@ -627,7 +627,7 @@ class ArchivalTest(RedpandaTest):
         self.admin.set_log_level(name="cluster", level="trace")
 
         # Verify assumptions
-        assert self.topics[0].cleanup_policy == None, (
+        assert self.topics[0].cleanup_policy is None, (
             "The compaction setting is assumed to be `delete` by default"
         )
         assert not self._archiver_restart_msg_seen(), (
@@ -655,7 +655,7 @@ class ArchivalTest(RedpandaTest):
         self.admin.set_log_level(name="cluster", level="trace")
 
         # Verify assumptions
-        assert self.topics[0].cleanup_policy == None, (
+        assert self.topics[0].cleanup_policy is None, (
             "The compaction setting is assumed to be `delete` by default"
         )
         assert not self._archiver_restart_msg_seen(), (

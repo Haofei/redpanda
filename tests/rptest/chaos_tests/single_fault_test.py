@@ -172,7 +172,7 @@ class SingleFaultTestBase(RedpandaTest):
         for node in workload.nodes:
             workload.emit_event(node, "measure")
 
-        if fault == None:
+        if fault is None:
             if timings.no_fault_steady_s > 0:
                 self.logger.info(
                     f"wait for {timings.no_fault_steady_s} seconds "

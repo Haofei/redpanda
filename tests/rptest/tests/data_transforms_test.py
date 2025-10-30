@@ -950,7 +950,7 @@ class BaseDataTransformsLoggingTest(BaseDataTransformsTest):
             # we get a record.
             return record.offset == offset, record
 
-        if timeout != None:
+        if timeout is not None:
             return consume(timeout)[1]
 
         return wait_until_result(

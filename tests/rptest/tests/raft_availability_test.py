@@ -569,7 +569,7 @@ class RaftAvailabilityTest(RedpandaTest):
             follower = node
             break
 
-        assert follower != None
+        assert follower is not None
 
         with FailureInjector(self.redpanda) as fi:
             # isolate one of the followers

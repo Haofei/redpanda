@@ -232,7 +232,7 @@ class FailureInjector(FailureInjectorBase):
         self.redpanda.signal_redpanda(node, signal=signal.SIGKILL, idempotent=True)
         timeout_sec = 10
         wait_until(
-            lambda: self.redpanda.redpanda_pid(node) == None,
+            lambda: self.redpanda.redpanda_pid(node) is None,
             timeout_sec=timeout_sec,
             err_msg="Redpanda failed to kill in %d seconds" % timeout_sec,
         )
@@ -331,7 +331,7 @@ class FailureInjector(FailureInjectorBase):
         self.redpanda.signal_redpanda(node, signal=signal.SIGTERM)
         timeout_sec = 30
         wait_until(
-            lambda: self.redpanda.redpanda_pid(node) == None,
+            lambda: self.redpanda.redpanda_pid(node) is None,
             timeout_sec=timeout_sec,
             err_msg="Redpanda failed to terminate in %d seconds" % timeout_sec,
         )
@@ -343,7 +343,7 @@ class FailureInjector(FailureInjectorBase):
     def _start(self, node):
         # make this idempotent
         pid = self.redpanda.redpanda_pid(node)
-        if pid == None:
+        if pid is None:
             self.redpanda.logger.info(f"starting redpanda on {node.account.hostname}")
             self.redpanda.start_redpanda(node)
         else:

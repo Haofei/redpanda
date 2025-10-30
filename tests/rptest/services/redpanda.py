@@ -3624,7 +3624,7 @@ class RedpandaService(Service, RedpandaServiceABC):
 
             if expect_fail:
                 wait_until(
-                    lambda: self.redpanda_pid(node) == None,
+                    lambda: self.redpanda_pid(node) is None,
                     timeout_sec=timeout,
                     backoff_sec=0.2,
                     err_msg=f"Redpanda processes did not terminate on {node.name} during startup as expected in {timeout} sec",
@@ -3978,7 +3978,7 @@ class RedpandaService(Service, RedpandaServiceABC):
         The key must be equal to the current broker time expressed as unix epoch
         in seconds, and be within 1 hour.
         """
-        key = int(time.time()) if key == None else key
+        key = int(time.time()) if key is None else key
         self.set_cluster_config(
             dict(
                 enable_developmental_unrecoverable_data_corrupting_features=key,

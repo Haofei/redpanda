@@ -279,7 +279,7 @@ class PartitionBalancerService(EndToEndTest):
             self.make_available(wait_for_previous_node)
             self.logger.info(f"making {node.account.hostname} unavailable")
 
-            if failure_types == None:
+            if failure_types is None:
                 failure_types = [
                     FailureSpec.FAILURE_KILL,
                     FailureSpec.FAILURE_TERMINATE,

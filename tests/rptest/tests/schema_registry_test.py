@@ -2054,7 +2054,7 @@ class SchemaRegistryTestMethods(SchemaRegistryEndpoints):
         )
         assert result_raw.status_code == requests.codes.ok
         assert result_raw.json()["is_compatible"] == True
-        assert result_raw.json().get("messages", None) == None
+        assert result_raw.json().get("messages", None) is None
 
         self.logger.debug("Set subject config - BACKWARD")
         result_raw = self.sr_client.set_config_subject(
@@ -2068,7 +2068,7 @@ class SchemaRegistryTestMethods(SchemaRegistryEndpoints):
         )
         assert result_raw.status_code == requests.codes.ok
         assert result_raw.json()["is_compatible"] == True
-        assert result_raw.json().get("messages", None) == None
+        assert result_raw.json().get("messages", None) is None
 
         self.logger.debug("Check compatibility backward, no default, verbose")
         result_raw = self.sr_client.post_compatibility_subject_version(
@@ -2083,7 +2083,7 @@ class SchemaRegistryTestMethods(SchemaRegistryEndpoints):
         )
         assert result_raw.status_code == requests.codes.ok
         assert result_raw.json()["is_compatible"] == False
-        assert result_raw.json().get("messages", None) == None, (
+        assert result_raw.json().get("messages", None) is None, (
             f"Expected no messages, got {result_raw.json()['messages']}"
         )
 
