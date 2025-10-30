@@ -2725,6 +2725,15 @@ class ShadowLinkingMetricsTests(ShadowLinkPreAllocTestBase):
             total_value = _get_total_value(node_samples, metric_name)
             return total_value is not None and total_value > 0
 
+        # This function checks that the result is at least min_value.
+        def check_value_at_least(
+            node_samples: list[dict[str, MetricSamples]],
+            metric_name: str,
+            min_value: int,
+        ) -> bool:
+            total_value = _get_total_value(node_samples, metric_name)
+            return total_value is not None and total_value >= min_value
+
         def check_metric_exists(
             node_samples: list[dict[str, MetricSamples]], metric_name: str
         ) -> bool:
@@ -2754,8 +2763,14 @@ class ShadowLinkingMetricsTests(ShadowLinkPreAllocTestBase):
         def check_bytes_fetched(samples: list[dict[str, MetricSamples]]):
             return check_value_positive(samples, "total_bytes_fetched")
 
+        def check_bytes_fetched_128000(samples: list[dict[str, MetricSamples]]):
+            return check_value_at_least(samples, "total_bytes_fetched", 128000)
+
         def check_bytes_written(samples: list[dict[str, MetricSamples]]):
             return check_value_positive(samples, "total_bytes_written")
+
+        def check_bytes_written_128000(samples: list[dict[str, MetricSamples]]):
+            return check_value_at_least(samples, "total_bytes_written", 128000)
 
         def check_shadow_lag_zero(node_samples: list[dict[str, MetricSamples]]) -> bool:
             return check_total_value(node_samples, "shadow_lag", 0)
@@ -2774,8 +2789,8 @@ class ShadowLinkingMetricsTests(ShadowLinkPreAllocTestBase):
             ("shadow_topic_state", active_shadow_topics_1),
             ("total_records_fetched", check_records_fetched_1000),
             ("total_records_written", check_records_written_1000),
-            ("total_bytes_fetched", check_bytes_fetched),
-            ("total_bytes_written", check_bytes_written),
+            ("total_bytes_fetched", check_bytes_fetched_128000),
+            ("total_bytes_written", check_bytes_written_128000),
             ("shadow_lag", check_shadow_lag_zero),
             ("client_errors", check_client_errors),
         ]
