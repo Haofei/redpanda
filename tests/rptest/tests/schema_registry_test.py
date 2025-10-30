@@ -1435,7 +1435,7 @@ class SchemaRegistryTestMethods(SchemaRegistryEndpoints):
             if result_raw.status_code != requests.codes.ok:
                 return False
             res_subjects = result_raw.json()
-            if type(res_subjects) != type([]):
+            if type(res_subjects) is not type([]):
                 return False
             subjects.sort()
             return res_subjects == subjects and res_subjects == sorted(res_subjects)
@@ -3030,7 +3030,7 @@ class SchemaRegistryTestMethods(SchemaRegistryEndpoints):
             assert result_raw.status_code == requests.codes.ok
             res_subjects = result_raw.json()
             self.logger.debug(res_subjects)
-            assert type(res_subjects) == type([])
+            assert type(res_subjects) is type([])
             res_subjects.sort()
             subjects.sort()
             assert res_subjects == subjects
@@ -3042,7 +3042,7 @@ class SchemaRegistryTestMethods(SchemaRegistryEndpoints):
             assert result_raw.status_code == requests.codes.ok
             res_versions = result_raw.json()
             self.logger.debug(res_versions)
-            assert type(res_versions) == type([])
+            assert type(res_versions) is type([])
             assert res_versions == subject_versions
 
         # Given the subject, list of schemas, list of versions, and list of ids,
@@ -3064,7 +3064,7 @@ class SchemaRegistryTestMethods(SchemaRegistryEndpoints):
                 assert result_raw.status_code == requests.codes.ok
                 res = result_raw.json()
                 self.logger.debug(res)
-                assert type(res) == type({})
+                assert type(res) is type({})
                 assert "subject" in res
                 assert "version" in res
                 assert "id" in res

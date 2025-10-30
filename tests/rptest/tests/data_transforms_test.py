@@ -845,7 +845,7 @@ class LogRecord:
             return (
                 self.key == other.key
                 and self.value_type == other.value_type
-                and type(self.value) == type(other.value)
+                and type(self.value) is type(other.value)
             )
 
     EXPECTED_ATTRS = [

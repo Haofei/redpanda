@@ -1617,7 +1617,7 @@ class PandaProxyBasicAuthTest(PandaProxyEndpoints):
             ]
         }
 
-        if offset_value is not None and type(offset_value) == int:
+        if offset_value is not None and type(offset_value) is int:
             for p in offset_data["partitions"]:
                 p["offset"] = offset_value
 
