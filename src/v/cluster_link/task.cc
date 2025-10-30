@@ -101,7 +101,26 @@ private:
         vlog(_task->logger().trace, "run_task started");
         try {
             vlog(_task->logger().trace, "running task");
-            co_await _task->run_impl();
+            auto state_change = co_await _task->run_impl();
+            vlog(
+              _task->logger().trace,
+              "task run_impl completed, desired state: {}, reason: {}",
+              state_change.desired_state,
+              state_change.reason);
+            if (_task->get_state() == model::task_state::stopped) {
+                vlog(
+                  _task->logger().debug,
+                  "task is stopped, skipping state change");
+                co_return;
+            }
+            auto res = _task->change_state(
+              state_change.desired_state, state_change.reason);
+            if (!res.has_value()) {
+                vlog(
+                  _task->logger().warn,
+                  "Failed to change task state: {}",
+                  res.assume_error().message());
+            }
         } catch (...) {
             auto e = std::current_exception();
             auto log_level = ssx::is_shutdown_exception(e)

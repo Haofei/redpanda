@@ -270,13 +270,15 @@ void security_migrator::update_config(const model::metadata& config) {
       config.configuration.security_settings_sync_cfg.get_task_interval());
 }
 
-ss::future<> security_migrator::run_impl() {
+ss::future<task::state_transition> security_migrator::run_impl() {
     vlog(logger().trace, "Running security migrator task");
     constexpr auto acl_creation_timeout = 5s;
 
     if (_config.acl_filters.empty()) {
         vlog(logger().debug, "No ACL filters configured, skipping task");
-        co_return;
+        co_return state_transition{
+          .desired_state = model::task_state::active,
+          .reason = "No ACL filters configured, skipping task"};
     }
 
     auto& cluster = get_link()->get_cluster_connection();
@@ -286,8 +288,9 @@ ss::future<> security_migrator::run_impl() {
     } catch (const std::exception& e) {
         auto msg = ssx::sformat("Failed to update metadata: {}", e.what());
         vlog(logger().warn, "{}", msg);
-        std::ignore = change_state(model::task_state::link_unavailable, msg);
-        co_return;
+        co_return state_transition{
+          .desired_state = model::task_state::link_unavailable,
+          .reason = std::move(msg)};
     }
 
     if (!has_required_permissions(
@@ -299,8 +302,9 @@ ss::future<> security_migrator::run_impl() {
           security_migrator::required_permissions,
           cluster.get_cluster_authorized_operations());
         vlog(logger().warn, "{}", msg);
-        std::ignore = change_state(model::task_state::link_unavailable, msg);
-        co_return;
+        co_return state_transition{
+          .desired_state = model::task_state::link_unavailable,
+          .reason = std::move(msg)};
     }
 
     kafka::api_version describe_acls_version;
@@ -311,9 +315,9 @@ ss::future<> security_migrator::run_impl() {
             auto msg = ssx::sformat(
               "Failed to get supported API version for DescribeACLs");
             vlog(logger().warn, "{}", msg);
-            std::ignore = change_state(
-              model::task_state::link_unavailable, msg);
-            co_return;
+            co_return state_transition{
+              .desired_state = model::task_state::link_unavailable,
+              .reason = std::move(msg)};
         }
 
         if (
@@ -323,9 +327,9 @@ ss::future<> security_migrator::run_impl() {
               "Unsupported API version for DescribeACLs: {}",
               supported_api_versions.value().min);
             vlog(logger().warn, "{}", msg);
-            std::ignore = change_state(
-              model::task_state::link_unavailable, msg);
-            co_return;
+            co_return state_transition{
+              .desired_state = model::task_state::link_unavailable,
+              .reason = std::move(msg)};
         }
 
         describe_acls_version = std::min(
@@ -339,8 +343,9 @@ ss::future<> security_migrator::run_impl() {
         auto msg = ssx::sformat(
           "Failed to get supported API version for DescribeACLs: {}", e.what());
         vlog(logger().warn, "{}", msg);
-        std::ignore = change_state(model::task_state::link_unavailable, msg);
-        co_return;
+        co_return state_transition{
+          .desired_state = model::task_state::link_unavailable,
+          .reason = std::move(msg)};
     }
 
     auto acls = co_await fetch_acls(describe_acls_version);
@@ -351,7 +356,10 @@ ss::future<> security_migrator::run_impl() {
         bindings = to_acl_bindings(acls);
     } catch (const std::exception& e) {
         vlog(logger().warn, "Error transforming received ACLs: {}", e.what());
-        co_return;
+        co_return state_transition{
+          .desired_state = model::task_state::faulted,
+          .reason = ssx::sformat(
+            "Error transforming received ACLs: {}", e.what())};
     }
     vlog(logger().trace, "bindings fetched from source cluster: {}", bindings);
 
@@ -364,10 +372,10 @@ ss::future<> security_migrator::run_impl() {
         }
     });
 
-    if (get_state() != model::task_state::active) {
-        std::ignore = change_state(
-          model::task_state::active, "Security migrator task ran successfully");
-    }
+    vlog(logger().trace, "Security migrator task completed");
+    co_return state_transition{
+      .desired_state = model::task_state::active,
+      .reason = "Security migrator task completed"};
 }
 
 ss::future<chunked_vector<kafka::describe_acls_resource>>

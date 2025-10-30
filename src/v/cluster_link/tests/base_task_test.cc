@@ -54,10 +54,12 @@ public:
         set_run_interval(cfg->run_interval);
     }
 
-    ss::future<> run_impl() override {
+    ss::future<state_transition> run_impl() override {
         _last_run = ss::lowres_clock::now();
         _count++;
-        return ss::now();
+        co_return state_transition{
+          .desired_state = model::task_state::active,
+          .reason = "ran successfully"};
     }
 
     unsigned count() const noexcept { return _count; }
@@ -252,7 +254,7 @@ public:
 
     void update_config(const model::metadata&) override {}
 
-    ss::future<> run_impl() override {
+    ss::future<state_transition> run_impl() override {
         throw std::runtime_error("evil task failed");
     }
 };
@@ -287,26 +289,21 @@ public:
 
     void update_config(const model::metadata&) override {}
 
-    ss::future<> run_impl() override {
+    ss::future<state_transition> run_impl() override {
         if (get_state() == model::task_state::active) {
             vlog(logger().info, "Simulating link unavailability");
-            auto res = change_state(
-              model::task_state::link_unavailable, "Simulated link down");
-            vassert(
-              res.has_value()
-                && res.assume_value() == model::task_state::active,
-              "Failed to change state to link_unavailable");
+            co_return state_transition{
+              .desired_state = model::task_state::link_unavailable,
+              .reason = "Simulated link down"};
         } else if (get_state() == model::task_state::link_unavailable) {
             vlog(logger().info, "Simulating link availability");
-            auto res = change_state(
-              model::task_state::active, "Simulated link up");
-            vassert(
-              res.has_value()
-                && res.assume_value() == model::task_state::link_unavailable,
-              "Failed to change state to active");
+            co_return state_transition{
+              .desired_state = model::task_state::active,
+              .reason = "Simulated link up"};
         }
 
-        return ss::now();
+        co_return state_transition{
+          .desired_state = get_state(), .reason = "no state change"};
     }
 };
 
