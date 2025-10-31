@@ -219,6 +219,13 @@ public:
         return _plf->failover_link_topics(id, timeout);
     }
 
+    ss::future<::cluster::cluster_link::errc> delete_shadow_topic(
+      model::id_t id,
+      model::delete_mirror_topic_cmd cmd,
+      ::model::timeout_clock::time_point timeout) final {
+        return _plf->delete_mirror_topic(id, std::move(cmd), timeout);
+    }
+
 private:
     frontend* _plf;
     service* _svc;
