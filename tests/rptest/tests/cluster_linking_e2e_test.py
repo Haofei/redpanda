@@ -29,7 +29,7 @@ from rptest.clients.admin.proto.redpanda.core.admin.v2 import (
     shadow_link_pb2,
 )
 from rptest.clients.kafka_cli_tools import KafkaCliToolsError
-from rptest.clients.rpk import RpkTool, RPKACLInput, RpkException
+from rptest.clients.rpk import RpkTool, RPKACLInput, RpkException, RpkGroup
 from rptest.clients.types import TopicSpec
 from rptest.services.cluster import TestContext
 from rptest.services.admin import Admin
@@ -1712,9 +1712,93 @@ class ShadowLinkingReplicationTests(ShadowLinkPreAllocTestBase):
         with self._maybe_failure_injector(with_failures):
             self._perform_auto_prefix_trimming(topic.name, partition_count)
 
+    @cluster(num_nodes=8)
+    @matrix(
+        timestamp_type=[
+            "CreateTime",
+            "LogAppendTime",
+        ],
+        source_cluster_spec=[
+            SecondaryClusterSpec(ServiceType.REDPANDA),
+            SecondaryClusterSpec(
+                ServiceType.KAFKA, kafka_version="3.8.0", kafka_quorum="COMBINED_KRAFT"
+            ),
+        ],
+    )
+    def test_replication_timestamps_match(self, timestamp_type, source_cluster_spec):
+        partition_count = 1
+        topic = TopicSpec(
+            name="source-topic",
+            partition_count=partition_count,
+            replication_factor=3,
+            message_timestamp_type=timestamp_type,
+        )
+
+        self.source_default_client().create_topic(topic)
+        self.create_link("test-link")
+
+        self.target_cluster.service.wait_until(
+            lambda: self.topic_exists_in_target(topic.name),
+            timeout_sec=30,
+            backoff_sec=1,
+            err_msg=f"Topic {topic.name} not found in target cluster",
+        )
+        msg_cnt = 100
+        base_ts = 1664453149000
+        self.start_producer_consumer(
+            topic=topic.name,
+            msg_size=128,
+            msg_cnt=msg_cnt,
+            fake_timestamp_ms=base_ts,
+            producer_rate_limit_bps=1024,
+        )
+        self.verify()
+
+        def get_timestamps(rpk: RpkTool, n: int, offset: str):
+            return {
+                int(o): int(t)
+                for o, t in [
+                    tuple(s.split(","))
+                    for s in rpk.consume(
+                        topic=topic.name,
+                        n=n,
+                        offset=offset,
+                        format="%o,%d\n",
+                    ).splitlines()
+                ]
+            }
+
+        expected_timestamps = get_timestamps(
+            self.source_cluster_rpk, msg_cnt, offset="start"
+        )
+
+        consume_from = msg_cnt // 2
+        n_to_consume = msg_cnt - consume_from
+        consume_from_ts = expected_timestamps[msg_cnt // 2]
+
+        consumed = get_timestamps(
+            self.target_cluster_rpk, n=n_to_consume, offset=f"@{consume_from_ts}"
+        )
+
+        assert len(consumed) > 0, "No messages consumed"
+
+        assert min(consumed) == consume_from, (
+            f"Expected to {consume_from=}, but min consumed offset was {min(consumed)}"
+        )
+
+        assert all(ts == expected_timestamps[o] for o, ts in consumed.items()), (
+            f"Timestamps don't match {expected_timestamps=} vs {consumed=}"
+        )
+
 
 class ShadowLinkConsumeGroupsMirroringTest(ShadowLinkTestBase):
-    def create_source_consumer(self, topic, group_name="test_group", consumer_count=1):
+    def create_source_consumer(
+        self,
+        topic: str,
+        group_name: str = "test_group",
+        consumer_count: int = 1,
+        continuous: bool = False,
+    ):
         return KgoVerifierConsumerGroupConsumer(
             self.test_context,
             self.source_cluster.service,
@@ -1722,6 +1806,24 @@ class ShadowLinkConsumeGroupsMirroringTest(ShadowLinkTestBase):
             group_name=group_name,
             msg_size=128,
             readers=consumer_count,
+            continuous=continuous,
+        )
+
+    def create_target_consumer(
+        self,
+        topic: str,
+        group_name: str = "test_group",
+        consumer_count: int = 1,
+        continuous: bool = False,
+    ):
+        return KgoVerifierConsumerGroupConsumer(
+            self.test_context,
+            self.target_cluster.service,
+            topic=topic,
+            group_name=group_name,
+            msg_size=128,
+            readers=consumer_count,
+            continuous=continuous,
         )
 
     @cluster(num_nodes=7)
@@ -1786,7 +1888,10 @@ class ShadowLinkConsumeGroupsMirroringTest(ShadowLinkTestBase):
         ),
     )
     @matrix(
-        with_failures=[True, False],
+        with_failures=[
+            True,
+            False,
+        ],
         source_cluster_spec=[
             SecondaryClusterSpec(ServiceType.REDPANDA),
             SecondaryClusterSpec(
@@ -1819,10 +1924,20 @@ class ShadowLinkConsumeGroupsMirroringTest(ShadowLinkTestBase):
             else:
                 return self._nop_context_manager()
 
-        def _consume_with_group(topic: str, group_id: str):
+        def _consume_with_group(
+            topic: str,
+            group_id: str,
+            rpk: RpkTool = source_rpk,
+            format: str | None = None,
+        ) -> str | None:
             try:
-                source_rpk.consume(
-                    topic=topic, group=group_id, n=1, timeout=5, offset="start"
+                return rpk.consume(
+                    topic=topic,
+                    group=group_id,
+                    n=1,
+                    timeout=5,
+                    offset="start",
+                    format=format,
                 )
             except Exception as e:
                 self.logger.debug(
@@ -1880,6 +1995,165 @@ class ShadowLinkConsumeGroupsMirroringTest(ShadowLinkTestBase):
                     err_msg="Group states not consistent between source and target clusters",
                     retry_on_exc=True,
                 )
+
+            # now fail over all the topics and confirm that we start consuming at the right spot
+            for topic in topics:
+                metadata = self.failover_link_topic(
+                    link_name="test-link", topic=topic.name
+                )
+                self.logger.debug(f"Failover response: {metadata}")
+                t_status = [
+                    s.status.state
+                    for s in metadata.status.shadow_topics
+                    if s.name == topic.name
+                ]
+                assert next(iter(t_status), None) in [
+                    shadow_link_pb2.ShadowTopicState.SHADOW_TOPIC_STATE_FAILING_OVER,
+                    shadow_link_pb2.ShadowTopicState.SHADOW_TOPIC_STATE_FAILED_OVER,
+                ], (
+                    "Topic state should be FAILING_OVER or FAILED_OVER after failover request"
+                )
+                self.wait_for_topic_status(
+                    link="test-link",
+                    topic=topic.name,
+                    target_status=shadow_link_pb2.ShadowTopicState.SHADOW_TOPIC_STATE_FAILED_OVER,
+                )
+
+            wait_until(
+                lambda: _wait_for_group_states_consistent(),
+                timeout_sec=120,
+                backoff_sec=3,
+                err_msg="Group states not consistent after failover",
+                retry_on_exc=True,
+            )
+
+            target_groups: dict[str, RpkGroup] = {
+                g: target_rpk.group_describe(group=g) for g in groups
+            }
+
+            for group_name, g_desc in target_groups.items():
+                partitions: dict[tuple[str, int], int | None] = {
+                    (p.topic, p.partition): p.current_offset for p in g_desc.partitions
+                }
+
+                assigned_topics = set(t for t, _ in partitions)
+
+                # make sure we can consume from every topic in the group
+                for topic in assigned_topics:
+                    r = _consume_with_group(
+                        topic,
+                        group_name,
+                        rpk=target_rpk,
+                        format="%p,%o\n",
+                    )
+                    assert r is not None, f"Failed to consume from {group_name=}"
+                    p, consumed = (int(v) for v in r.split(","))
+                    # sanity check the result against group description
+                    # assume the CG protocol works correctly for the rest of the partitions
+                    expected = partitions[(topic, p)]
+                    assert consumed == expected, (
+                        f"{group_name=}: {topic}/{p} {consumed=} but {expected=}"
+                    )
+
+    @cluster(num_nodes=8)
+    @matrix(
+        source_cluster_spec=[
+            SecondaryClusterSpec(ServiceType.REDPANDA),
+            SecondaryClusterSpec(
+                ServiceType.KAFKA, kafka_version="3.8.0", kafka_quorum="COMBINED_KRAFT"
+            ),
+        ],
+    )
+    def test_consumer_group_rebalance(self, source_cluster_spec):
+        partition_count = 120
+
+        topic = TopicSpec(
+            name=f"source-topic",
+            partition_count=int(partition_count),
+            replication_factor=3,
+        )
+
+        group = "test_group"
+        self.create_link("test-link")
+        source_rpk = RpkTool(self.source_cluster.service)
+        target_rpk = RpkTool(self.target_cluster.service)
+
+        n_messages = 1024 * 1024
+
+        self.source_default_client().create_topic(topic)
+
+        producer = KgoVerifierProducer(
+            self.test_context,
+            self.source_cluster.service,
+            topic.name,
+            128,
+            n_messages,
+            rate_limit_bps=1024,
+        )
+        producer.start()
+
+        n_consumers = 10
+
+        def group_is_ready(rpk: RpkTool):
+            gr = rpk.group_describe(group=group, summary=True)
+            return gr.members == n_consumers and gr.state == "Stable"
+
+        consumer = self.create_source_consumer(
+            topic.name,
+            group_name=group,
+            consumer_count=n_consumers,
+            continuous=True,
+        )
+        try:
+            consumer.start()
+            wait_until(
+                lambda: group_is_ready(source_rpk),
+                timeout_sec=60,
+                backoff_sec=1,
+                err_msg="Group never stabilized on source cluster",
+            )
+        finally:
+            consumer.stop()
+            consumer.free()
+
+        metadata = self.failover_link_topic(link_name="test-link", topic=topic.name)
+        self.logger.debug(f"Failover response: {metadata}")
+        t_status = [
+            s.status.state
+            for s in metadata.status.shadow_topics
+            if s.name == topic.name
+        ]
+        assert next(iter(t_status), None) in [
+            shadow_link_pb2.ShadowTopicState.SHADOW_TOPIC_STATE_FAILING_OVER,
+            shadow_link_pb2.ShadowTopicState.SHADOW_TOPIC_STATE_FAILED_OVER,
+        ], "Topic state should be FAILING_OVER or FAILED_OVER after failover request"
+        self.wait_for_topic_status(
+            link="test-link",
+            topic=topic.name,
+            target_status=shadow_link_pb2.ShadowTopicState.SHADOW_TOPIC_STATE_FAILED_OVER,
+        )
+
+        consumer = self.create_target_consumer(
+            topic.name,
+            group_name=group,
+            consumer_count=n_consumers,
+            continuous=True,
+        )
+        try:
+            consumer.start()
+            wait_until(
+                lambda: group_is_ready(target_rpk),
+                timeout_sec=60,
+                backoff_sec=1,
+                err_msg="Group never stabilized on target cluster",
+            )
+            consumer.wait()
+        finally:
+            consumer.stop()
+            consumer.free()
+
+        producer.stop()
+        producer.free()
 
 
 class ShadowLinkSecurityTests(ShadowLinkTestBase):
@@ -2011,8 +2285,22 @@ class ShadowLinkTopicFailoverTests(ShadowLinkPreAllocTestBase):
                 producer.do_free()
 
     @cluster(num_nodes=7)
-    @matrix(with_failures=[True, False])
-    def test_link_topic_failover(self, with_failures):
+    @ignore(
+        with_failures=True,
+        source_cluster_spec=SecondaryClusterSpec(
+            ServiceType.KAFKA, kafka_version="3.8.0", kafka_quorum="COMBINED_KRAFT"
+        ),
+    )
+    @matrix(
+        with_failures=[True, False],
+        source_cluster_spec=[
+            SecondaryClusterSpec(ServiceType.REDPANDA),
+            SecondaryClusterSpec(
+                ServiceType.KAFKA, kafka_version="3.8.0", kafka_quorum="COMBINED_KRAFT"
+            ),
+        ],
+    )
+    def test_link_topic_failover(self, with_failures, source_cluster_spec):
         num_failover_topics = random.choice([1, 3, 5, 10])
         num_non_failover_topics = random.choice([0, 3, 5, 10])
 
@@ -2123,8 +2411,22 @@ class ShadowLinkTopicFailoverTests(ShadowLinkPreAllocTestBase):
             )
 
     @cluster(num_nodes=7)
-    @matrix(with_failures=[True, False])
-    def test_link_failover(self, with_failures):
+    @ignore(
+        with_failures=True,
+        source_cluster_spec=SecondaryClusterSpec(
+            ServiceType.KAFKA, kafka_version="3.8.0", kafka_quorum="COMBINED_KRAFT"
+        ),
+    )
+    @matrix(
+        with_failures=[True, False],
+        source_cluster_spec=[
+            SecondaryClusterSpec(ServiceType.REDPANDA),
+            SecondaryClusterSpec(
+                ServiceType.KAFKA, kafka_version="3.8.0", kafka_quorum="COMBINED_KRAFT"
+            ),
+        ],
+    )
+    def test_link_failover(self, with_failures, source_cluster_spec):
         self.create_link("test-link")
         num_topics = random.choice([0, 1, 3, 5, 10])
         if num_topics == 0:

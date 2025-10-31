@@ -795,6 +795,8 @@ class ShadowLinkPreAllocTestBase(ShadowLinkTestBase):
         use_transactions: bool = False,
         msgs_per_transaction: int | None = None,
         transaction_abort_rate: float = 0.3,
+        fake_timestamp_ms: int | None = None,
+        producer_rate_limit_bps: int | None = None,
     ):
         self.verifier = ClusterLinkingProgressVerifier(
             self.test_context,
@@ -809,6 +811,8 @@ class ShadowLinkPreAllocTestBase(ShadowLinkTestBase):
             producer_properties={
                 "transaction_abort_rate": transaction_abort_rate,
                 "msgs_per_transaction": msgs_per_transaction,
+                "fake_timestamp_ms": fake_timestamp_ms,
+                "rate_limit_bps": producer_rate_limit_bps,
             },
             timeout_sec=180,
         )
