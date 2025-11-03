@@ -29,6 +29,7 @@ from rptest.clients.admin.proto.redpanda.core.common.v1 import acl_pb2
 from rptest.clients.admin.v2 import Admin as AdminV2
 from rptest.clients.default import DefaultClient
 from rptest.clients.rpk import RpkTool
+from rptest.clients.types import TopicSpec
 from rptest.services.admin import Admin
 from rptest.services.cluster import TestContext
 from rptest.services.kgo_verifier_services import (
@@ -674,7 +675,7 @@ class ShadowLinkTestBase(PreallocNodesTest):
     def topic_exists_in_target(
         self,
         topic: str,
-        partition_count: int | None = None,
+        partition_count: Optional[int] = None,
         rpk: Optional[RpkTool] = None,
     ) -> bool:
         rpk = rpk or RpkTool(self.target_cluster.service)
@@ -684,9 +685,7 @@ class ShadowLinkTestBase(PreallocNodesTest):
         if partition_count is None:
             return topic_exists
 
-        partitions = [
-            p for p in RpkTool(self.target_cluster.service).describe_topic(topic)
-        ]
+        partitions = list(rpk.describe_topic(topic))
         return topic_exists and len(partitions) == partition_count
 
     def wait_for_topic_status(
