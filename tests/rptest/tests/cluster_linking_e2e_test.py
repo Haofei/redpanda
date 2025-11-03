@@ -2175,7 +2175,7 @@ class ShadowLinkConsumeGroupsMirroringTest(ShadowLinkTestBase):
                     p, consumed = (int(v) for v in r.split(","))
                     # sanity check the result against group description
                     # assume the CG protocol works correctly for the rest of the partitions
-                    expected = partitions[(topic, p)]
+                    expected = partitions[(topic, p)] or 0
                     assert consumed == expected, (
                         f"{group_name=}: {topic}/{p} {consumed=} but {expected=}"
                     )
