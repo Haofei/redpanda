@@ -281,9 +281,9 @@ class ManyPartitionsTest(PreallocNodesTest):
             consumer.free()
 
     def _repeater_worker_count(self, scale: ScaleParameters):
-        workers = 32 * scale.node_cpus
+        # Takes about half of the memory on 4GB per core nodes
+        workers = 16 * scale.node_cpus
         if self.redpanda.dedicated_nodes:
-            # 768 workers on a 24 core node has been seen to work well.
             return workers
         else:
             return min(workers, 4)
