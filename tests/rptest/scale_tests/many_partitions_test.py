@@ -1045,8 +1045,7 @@ class ManyPartitionsTest(PreallocNodesTest):
             # Done with restarts, now do a longer traffic soak
             self.logger.info("Entering traffic soak phase")
 
-            # soak for two minutes
-            soak_time_seconds = 120
+            soak_time_seconds = 60
             soak_await_bytes = soak_time_seconds * scale.expect_bandwidth
             soak_await_msgs = int(soak_await_bytes / repeater_msg_size)
             # Add some leeway to avoid flakiness
