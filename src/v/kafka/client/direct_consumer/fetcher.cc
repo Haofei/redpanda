@@ -125,7 +125,8 @@ fetcher::fetcher(
   , _state_lock("fetcher/state") {}
 
 void fetcher::start() {
-    ssx::repeat_until_gate_closed(_gate, [this] { return do_fetch(); });
+    ssx::repeat_until_gate_closed_or_aborted(
+      _gate, _as, [this] { return do_fetch(); });
 }
 
 ss::future<> fetcher::stop() {
