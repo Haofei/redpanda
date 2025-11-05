@@ -486,12 +486,12 @@ fetcher::process_fetch_response(
             // no partitions in the response, skip it
             continue;
         }
-        fetched_topic_data topic_data;
+        fetched_topic_data topic_data{};
         topic_data.topic = std::move(topic_response.topic);
         topic_data.partitions.reserve(topic_response.partitions.size());
 
         for (auto& part_response : topic_response.partitions) {
-            fetched_partition_data part_data;
+            fetched_partition_data part_data{};
             part_data.error = part_response.error_code;
             part_data.partition_id = part_response.partition_index;
 
