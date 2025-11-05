@@ -426,6 +426,7 @@ redpanda_cc_gtest(
     deps = [
         "//src/v/kafka/client:brokers",
         "//src/v/kafka/client:cluster",
+        "//src/v/kafka/client:configuration",
         "//src/v/kafka/client:utils",
         "//src/v/kafka/data:log_reader_config",
         "//src/v/kafka/protocol",
