@@ -14,10 +14,13 @@
 #include "kafka/protocol/metadata.h"
 #include "model/fundamental.h"
 
+#include <seastar/core/sleep.hh>
+
 #include <gtest/gtest.h>
 
 using namespace kafka;
 using namespace kafka::client;
+using namespace std::chrono_literals;
 
 metadata_response::topic make_response_topic(
   model::topic name,
@@ -126,4 +129,36 @@ TEST(TopicCache, TestCacheUpdate) {
             ASSERT_EQ(par_data.leader_epoch, kafka::leader_epoch{par_id});
         }
     }
+}
+
+TEST(TopicCache, TestCacheUpdateStaleTopic) {
+    topic_cache cache;
+    cache.set_topic_timeout(1s);
+
+    const auto topic_a = model::topic{"topic-a"};
+    const auto topic_b = model::topic{"topic-b"};
+    const auto topic_a_id = model::topic_id::create();
+    const auto topic_b_id = model::topic_id::create();
+
+    // Set up cache with both topics.
+    chunked_vector<metadata_response::topic> init_update;
+    init_update.push_back(make_response_topic(topic_a, 3, topic_a_id));
+    init_update.push_back(make_response_topic(topic_b, 5, topic_b_id));
+
+    cache.apply(init_update);
+
+    ASSERT_TRUE(std::ranges::contains(cache.topics(), topic_a));
+    ASSERT_TRUE(std::ranges::contains(cache.topics(), topic_b));
+
+    // Wait enough time for the topics to be considered stale
+    ss::sleep(2s).get();
+
+    // Update only topic-a
+    chunked_vector<metadata_response::topic> update_topic_a;
+    update_topic_a.push_back(make_response_topic(topic_a, 3, topic_a_id));
+
+    cache.apply(update_topic_a);
+
+    ASSERT_TRUE(std::ranges::contains(cache.topics(), topic_a));
+    ASSERT_FALSE(std::ranges::contains(cache.topics(), topic_b));
 }

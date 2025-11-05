@@ -26,6 +26,7 @@ void topic_cache::apply(
     topics_t cache_update;
     cache_update.reserve(topics.size());
 
+    auto now = ss::lowres_clock::now();
     const auto get_successful = std::views::filter([](const auto& resp) {
         return resp.error_code == kafka::error_code::none;
     });
@@ -35,6 +36,7 @@ void topic_cache::apply(
           "topic::name is nullable in v12+");
         auto& cache_t
           = cache_update.emplace(*t.name, topic_data{}).first->second;
+        cache_t.last_seen_time = now;
         cache_t.authorized_operations = t.topic_authorized_operations;
         if (t.topic_id != model::topic_id{}) {
             cache_t.topic_id = t.topic_id;
@@ -52,6 +54,7 @@ void topic_cache::apply(
     }
 
     merge_topics(std::move(cache_update));
+    remove_timeout_topics();
 }
 
 topic_cache::topic_data topic_cache::merge_topic_data(
@@ -109,6 +112,17 @@ void topic_cache::merge_topics(topics_t cache_update) {
     }
 
     _topics = std::move(merged);
+}
+
+void topic_cache::remove_timeout_topics() {
+    auto now = ss::lowres_clock::now();
+    for (auto it = _topics.begin(); it != _topics.end();) {
+        if (now - it->second.last_seen_time > _topic_timeout) {
+            it = _topics.erase(it);
+        } else {
+            ++it;
+        }
+    }
 }
 
 std::optional<model::node_id>
