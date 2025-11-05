@@ -34,12 +34,15 @@ class DatalakeManyTopicsTest(RedpandaTest):
         super(DatalakeManyTopicsTest, self).__init__(
             test_ctx,
             num_brokers=6,
-            si_settings=SISettings(test_context=test_ctx),
+            si_settings=SISettings(
+                test_context=test_ctx, skip_end_of_test_scrubbing=True
+            ),
             extra_rp_conf={
                 "iceberg_enabled": True,
                 "iceberg_catalog_commit_interval_ms": 5000,
                 "iceberg_target_lag_ms": 5000,
             },
+            disable_cloud_storage_diagnostics=True,
             schema_registry_config=SchemaRegistryConfig(),
             *args,
             **kwargs,
