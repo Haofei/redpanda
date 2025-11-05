@@ -187,6 +187,9 @@ DEFAULT_LOG_ALLOW_LIST: list[CompiledLogAllowElem] = [
     # just indicate a race in committing to Iceberg.
     re.compile(r"UpdateRequirement.*Assert"),
     re.compile("assert-ref-snapshot-id"),
+    re.compile("assert-current-schema-id"),
+    re.compile("assert-last-assigned-partition-id"),
+    re.compile("assert-default-spec-id"),
     # Temporary: https://redpandadata.atlassian.net/browse/CORE-9897
     # there is an ongoing investigation into s3_client receiving 400 Bad Request. For now, stop the CI bleed
     re.compile(
