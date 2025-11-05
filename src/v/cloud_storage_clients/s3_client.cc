@@ -286,7 +286,7 @@ struct delete_objects_body : public ss::data_source_impl {
 
 result<std::tuple<http::client::request_header, ss::input_stream<char>>>
 request_creator::make_delete_objects_request(
-  const bucket_name& name, std::span<const object_key> keys) {
+  const bucket_name& name, chunked_vector<object_key> keys) {
     // https://docs.aws.amazon.com/AmazonS3/latest/API/API_DeleteObjects.html
     // will generate this request:
     //
@@ -1156,10 +1156,11 @@ iobuf_to_delete_objects_result(iobuf&& buf) {
 
 auto s3_client::do_delete_objects(
   const bucket_name& bucket,
-  std::span<const object_key> keys,
+  chunked_vector<object_key> keys,
   ss::lowres_clock::duration timeout)
   -> ss::future<client::delete_objects_result> {
-    auto request = _requestor.make_delete_objects_request(bucket, keys);
+    auto request = _requestor.make_delete_objects_request(
+      bucket, std::move(keys));
     if (!request) {
         return ss::make_exception_future<delete_objects_result>(
           std::system_error(request.error()));
@@ -1199,11 +1200,11 @@ auto s3_client::do_delete_objects(
 
 auto s3_client::delete_objects(
   const bucket_name& bucket,
-  std::vector<object_key> keys,
+  chunked_vector<object_key> keys,
   ss::lowres_clock::duration timeout)
   -> ss::future<result<delete_objects_result, error_outcome>> {
     const object_key dummy{""};
     co_return co_await send_request(
-      do_delete_objects(bucket, keys, timeout), bucket, dummy);
+      do_delete_objects(bucket, std::move(keys), timeout), bucket, dummy);
 }
 } // namespace cloud_storage_clients
