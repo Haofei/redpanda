@@ -30,7 +30,9 @@ go_library(
         "@com_github_spf13_cobra//:cobra",
         "@in_gopkg_yaml_v2//:yaml_v2",
         "@org_golang_google_protobuf//types/known/durationpb",
+        "@org_golang_google_protobuf//types/known/fieldmaskpb",
         "@org_golang_google_protobuf//types/known/timestamppb",
+        "@org_uber_go_zap//:zap",
     ],
 )
 
@@ -40,6 +42,7 @@ go_test(
         "create_test.go",
         "mapper_test.go",
         "types_test.go",
+        "update_test.go",
     ],
     embed = [":shadow"],
     deps = [
