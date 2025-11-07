@@ -36,7 +36,9 @@ go_library(
         "@org_golang_google_protobuf//reflect/protoreflect",
         "@org_golang_google_protobuf//types/descriptorpb",
         "@org_golang_google_protobuf//types/known/durationpb",
+        "@org_golang_google_protobuf//types/known/fieldmaskpb",
         "@org_golang_google_protobuf//types/known/timestamppb",
+        "@org_uber_go_zap//:zap",
     ],
 )
 
@@ -47,6 +49,7 @@ go_test(
         "create_test.go",
         "mapper_test.go",
         "types_test.go",
+        "update_test.go",
     ],
     embed = [":shadow"],
     deps = [
