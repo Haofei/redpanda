@@ -276,16 +276,6 @@ request_creator::make_delete_object_request(
     return header;
 }
 
-struct delete_objects_body : public ss::data_source_impl {
-    ss::temporary_buffer<char> data;
-    explicit delete_objects_body(std::string_view body) noexcept
-      : data{body.data(), body.size()} {}
-    auto get() -> ss::future<ss::temporary_buffer<char>> override {
-        return ss::make_ready_future<ss::temporary_buffer<char>>(
-          std::exchange(data, {}));
-    }
-};
-
 result<std::tuple<http::client::request_header, ss::input_stream<char>>>
 request_creator::make_delete_objects_request(
   const bucket_name& name, const chunked_vector<object_key>& keys) {
