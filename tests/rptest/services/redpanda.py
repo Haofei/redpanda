@@ -2922,7 +2922,7 @@ class RedpandaService(Service, RedpandaServiceABC):
 
         allow_list = prepare_allow_list(allow_list)
 
-        _searchable_nodes = []
+        _searchable_nodes: list[tuple[str | None, Any]] = []
         for node in self.nodes:
             if self._skip_if_no_redpanda_log and not node.account.exists(
                 RedpandaService.STDOUT_STDERR_CAPTURE
@@ -4457,7 +4457,7 @@ class RedpandaService(Service, RedpandaServiceABC):
         version_str = self.get_version(node)
         return ri_int_tuple(RI_VERSION_RE.findall(version_str)[0])
 
-    def get_version_if_not_head(self, node):
+    def get_version_if_not_head(self, node: ClusterNode) -> str | None:
         """
         Returns the redpanda binary version as a string if it differs from HEAD.
         I.e., if this node is running a previous version of redpanda.
