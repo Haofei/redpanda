@@ -659,6 +659,7 @@ ss::future<> segment_appender::flush() {
         vunreachable("Could not flush: {} - {}", e, *this);
     };
 
+    ++_stats.fsyncs;
 }
 
 ss::future<> segment_appender::hard_flush() {
