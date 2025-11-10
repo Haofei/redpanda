@@ -262,16 +262,12 @@ class LargeMessagesTest(RedpandaTest):
         # label options: kafka, internal
         def _get_samples(name: str, label: str = "kafka") -> tuple[list[float], float]:
             metrics = self.redpanda.metrics_sample(
-                name, metrics_endpoint=MetricsEndpoint.PUBLIC_METRICS
+                name=name, metrics_endpoint=MetricsEndpoint.PUBLIC_METRICS
             )
-            if metrics is not None:
-                samples: list[float] = [
-                    s.value
-                    for s in metrics.samples
-                    if s.labels["redpanda_server"] == label
-                ]
-            else:
-                samples = []
+            assert metrics is not None
+            samples: list[float] = [
+                s.value for s in metrics.samples if s.labels["redpanda_server"] == label
+            ]
             total = sum(samples)
             return samples, total
 
@@ -373,6 +369,7 @@ class LargeMessagesTest(RedpandaTest):
         # Enable large node-wide throughput limits to verify they work at scale
         # To avoid affecting the result of the test with the limit, set them
         # somewhat above the expect_bandwidth value per node.
+        per_broker_throttle: int | None = None
         if apply_throughput_limits:
             per_broker_throttle = int(
                 self.expected_throughput // len(self.redpanda.nodes) * 3
