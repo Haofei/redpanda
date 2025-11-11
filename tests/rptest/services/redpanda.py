@@ -7,6 +7,7 @@
 # the Business Source License, use of this software will be governed
 # by the Apache License, Version 2.0
 import concurrent.futures
+from contextlib import contextmanager
 import copy
 import dataclasses
 import enum
@@ -3505,6 +3506,18 @@ class RedpandaService(Service, RedpandaServiceABC):
                 ["python3", script_path, str(tgid), str(tid), str(signal.value)]
             )
             node.account.ssh(cmd, allow_fail=False)
+
+    @contextmanager
+    def paused_node(self, node: ClusterNode):
+        """Context manager to pause redpanda on a node by sending SIGSTOP"""
+        # rpk requires all nodes up to operate, so remove from started nodes
+        self.remove_from_started_nodes(node)
+        self.signal_redpanda(node, signal=signal.SIGSTOP)
+        try:
+            yield
+        finally:
+            self.signal_redpanda(node, signal=signal.SIGCONT)
+            self.add_to_started_nodes(node)
 
     def sockets_clear(self, node: RemoteClusterNode):
         """
