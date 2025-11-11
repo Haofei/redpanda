@@ -132,6 +132,9 @@ class ManyTopicsTest(RedpandaTest):
         self._target_port = None
         self._target_downtime_sec = 2 * 60  # 2 mins
 
+        # lots of topic operations going on
+        self.redpanda.set_expected_controller_records(10000)
+
     def setUp(self):
         # start the nodes manually
         pass
