@@ -366,7 +366,7 @@ class DatalakeVerifier:
         try:
             while not self._all_offsets_translated():
                 wait_until(
-                    lambda: self._made_progress(),
+                    lambda: self._made_progress() or self._all_offsets_translated(),
                     progress_timeout_sec,
                     backoff_sec=3,
                     err_msg=f"Error waiting for the query to make progress for topic {self.topic}",
