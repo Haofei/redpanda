@@ -1444,7 +1444,7 @@ class Admin:
         ret = self._request("post", path=path, node=leader)
         return ret.status_code == 200
 
-    def maintenance_start(self, node, dst_node=None):
+    def maintenance_start(self, node: ClusterNode, dst_node: ClusterNode | None = None):
         """
         Start maintenance on 'node', sending the request to 'dst_node'.
         """
@@ -1453,7 +1453,7 @@ class Admin:
         self.redpanda.logger.info(f"Starting maintenance on node {node.name}/{id}")
         return self._request("put", url, node=dst_node)
 
-    def maintenance_stop(self, node, dst_node=None):
+    def maintenance_stop(self, node: ClusterNode, dst_node: ClusterNode | None = None):
         """
         Stop maintenance on 'node', sending the request to 'dst_node'.
         """
@@ -1462,7 +1462,7 @@ class Admin:
         self.redpanda.logger.info(f"Stopping maintenance on node {node.name}/{id}")
         return self._request("delete", url, node=dst_node)
 
-    def maintenance_status(self, node):
+    def maintenance_status(self, node: ClusterNode):
         """
         Get maintenance status of a node.
         """

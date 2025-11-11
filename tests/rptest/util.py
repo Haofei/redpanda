@@ -21,6 +21,7 @@ from requests.exceptions import HTTPError
 
 from rptest.clients.kafka_cli_tools import KafkaCliTools
 from rptest.services.storage import Segment
+from ducktape.cluster.cluster import ClusterNode
 
 T = TypeVar("T")
 E = TypeVar("E", bound=Exception)
@@ -416,7 +417,7 @@ def expect_http_error(status_code: int):
     return expect_exception(HTTPError, lambda e: e.response.status_code == status_code)
 
 
-def inject_remote_script(node, script_name):
+def inject_remote_script(node: ClusterNode, script_name: str) -> str:
     """
     Copy a script from the remote_scripts/ directory onto
     a remote node, ready for execution.
