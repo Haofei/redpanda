@@ -14,7 +14,7 @@ import threading
 import time
 from enum import Enum
 from functools import partial, reduce
-from typing import Any, Dict, Optional, Sequence, Union
+from typing import Any, Optional, Sequence, Union
 from urllib.parse import urlparse
 
 import confluent_kafka as ck
@@ -44,7 +44,7 @@ from rptest.services.redpanda import (
     SecurityConfig,
     TLSProvider,
 )
-from rptest.services.redpanda_installer import RedpandaInstaller, RedpandaVersion
+from rptest.services.redpanda_installer import RedpandaInstaller
 from rptest.services.redpanda_types import SaslCredentials
 from rptest.services.rpk_consumer import RpkConsumer
 from rptest.tests.cluster_config_test import wait_for_version_sync
