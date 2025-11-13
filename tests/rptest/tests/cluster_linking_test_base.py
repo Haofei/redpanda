@@ -442,7 +442,7 @@ class ShadowLinkTestBase(PreallocNodesTest):
                 "info",
                 logger_levels={
                     "cluster": "trace",
-                    "cluster_link": "trace",
+                    "shadow_link": "trace",
                     "kafka/client": "trace",
                     "kafka": "trace",
                     "archival": "trace",
