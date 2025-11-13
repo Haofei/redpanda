@@ -69,6 +69,11 @@ router::router(
       _set_group_offsets_router.request_stop();
   })) {}
 
+ss::future<> router::stop() {
+    co_await _set_group_offsets_router.stop();
+    co_await _get_group_offsets_router.stop();
+}
+
 ss::future<get_group_offsets_reply>
 router::get_group_offsets(get_group_offsets_request&& req) {
     auto pid = req.co_partition;

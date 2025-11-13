@@ -41,6 +41,8 @@ public:
       ss::sharded<partition_leaders_table>&,
       ss::abort_source&);
 
+    ss::future<> stop();
+
     ss::future<get_group_offsets_reply>
     get_group_offsets(get_group_offsets_request&& req);
 
