@@ -74,7 +74,12 @@ class RedpandaMixedTestSelfTest(RedpandaMixedTest):
     def test_metrics(self):
         """Test metrics_sample() can retrieve internal metrics."""
 
+        # gauge
         uptime = "vectorized_application_uptime"
+        # counter, doesn't end in total
+        polls = "vectorized_reactor_polls"
+        # counter, ends in total
+        awake = "vectorized_reactor_awake_time_ms_total"
         utilization = "vectorized_reactor_utilization"
 
         # single-pattern fuzzy

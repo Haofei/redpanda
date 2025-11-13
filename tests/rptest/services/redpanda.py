@@ -1555,6 +1555,38 @@ class RedpandaServiceABC(ABC, RedpandaServiceConstants):
 
         return f"?__name__={name}"
 
+    @staticmethod
+    def _metric_basename(name: str) -> str:
+        """The prom text client has an annoying behavior for counter metrics:
+        changes either the family or sample name by appending or removing _total,
+        depending on if it is present.
+
+        That is, ONLY for TYPE: counter metrics if the scaped metric name is foo, then
+        in the Metric object m, m.family = foo, m.samples[].name = foo_total. If
+        the metric name was instead foo_total, the result is actually the same! So
+        you cannot tell what the _true_ metric name was from the Metric object.
+
+        This interferes with matching metrics by name, since the __name__= filter
+        on seastar needs the true metric name. So our policy: always strip _total
+        when preparing the the name for querying and then check equality on family.name,
+        which also doesn't include total. This means both metrics variations above can
+        be successfully queried with foo or foo_total.
+
+        This is *further* complicated by the fact that we have non-counters, like gauges
+        which also end in total, e.g., redpanda_application_uptime_seconds_total which
+        is a gauge but ends in total. These don't get the above treatment: the family
+        and sample name will be the true metric names. So when matching we also strip
+        _total from the returned family name to handle this case (essentially we always
+        compare the base (stripped) names on both sides, even when that isn't necessary
+        because the metric is not a counter - but we don't know it's a counter until
+        the query has been returned and the filter applied).
+
+        That's not necessarily desirable, but it's the best we can do without changing
+        the prometheus text parser (i.e., using our own).
+
+        See: prometheus_client/parser.py.text_fd_to_metric_families.build_metric"""
+        return name.removesuffix("_total")
+
     def metric_sum(
         self,
         metric_name: str,
@@ -1573,12 +1605,19 @@ class RedpandaServiceABC(ABC, RedpandaServiceConstants):
 
         value = 0.0
         metric_seen = False
+        basename = self._metric_basename(metric_name)
+
+        matched_families: set[str] = set()
+
         for n in nodes:
-            metrics = self.metrics(n, metrics_endpoint=metrics_endpoint)
+            metrics = self.metrics(
+                n, metrics_endpoint=metrics_endpoint, name=basename + "*"
+            )
             for family in metrics:
+                if self._metric_basename(family.name) != basename:
+                    continue
+                matched_families.add(family.name)
                 for sample in family.samples:
-                    if sample.name != metric_name:
-                        continue
                     labels = sample.labels
                     if namespace:
                         assert (
