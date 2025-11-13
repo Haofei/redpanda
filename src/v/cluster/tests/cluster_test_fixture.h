@@ -94,9 +94,7 @@ public:
     using fixture_ptr = std::unique_ptr<redpanda_thread_fixture>;
 
     cluster_test_fixture()
-      : _sgroups(create_scheduling_groups())
-      , _group_deleter([this] { _sgroups.destroy_groups().get(); })
-      , _base_dir(
+      : _base_dir(
           "cluster_test."
           + random_generators::with_random_seed().gen_alphanum_string(6)) {
         // Disable all metrics to guard against double_registration errors
@@ -137,7 +135,6 @@ public:
           schema_reg_port,
           seeds,
           ssx::sformat("{}.{}", _base_dir, node_id()),
-          _sgroups,
           false,
           s3_config,
           archival_cfg,
@@ -296,16 +293,6 @@ public:
         return _instances[id]->wait_for_controller_leadership();
     }
 
-    /**
-     * Common scheduling groups instance for all nodes, we are limited by
-     * max_scheduling_group == 16
-     */
-    scheduling_groups create_scheduling_groups() {
-        scheduling_groups groups;
-        groups.create_groups().get();
-        return groups;
-    }
-
     ss::future<> create_topic(
       model::topic_namespace_view tp_ns,
       int partitions = 1,
@@ -434,10 +421,7 @@ protected:
         return _instances[id].get();
     }
 
-    scheduling_groups _sgroups;
-
 private:
-    ss::deferred_action<std::function<void()>> _group_deleter;
     absl::flat_hash_map<model::node_id, fixture_ptr> _instances;
 
 protected:

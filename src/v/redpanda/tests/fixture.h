@@ -74,7 +74,6 @@ public:
       std::optional<int32_t> schema_reg_port,
       std::vector<config::seed_server> seed_servers,
       ss::sstring base_dir,
-      std::optional<scheduling_groups> sch_groups,
       bool remove_on_shutdown,
       std::optional<cloud_storage_clients::s3_configuration> s3_config
       = std::nullopt,

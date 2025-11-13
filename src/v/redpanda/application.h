@@ -101,8 +101,7 @@ public:
       std::optional<YAML::Node> proxy_client_cfg = std::nullopt,
       std::optional<YAML::Node> schema_reg_cfg = std::nullopt,
       std::optional<YAML::Node> schema_reg_client_cfg = std::nullopt,
-      std::optional<YAML::Node> audit_log_client_cfg = std::nullopt,
-      std::optional<scheduling_groups> = std::nullopt);
+      std::optional<YAML::Node> audit_log_client_cfg = std::nullopt);
     void check_environment();
     void wire_up_and_start(::stop_signal&, bool test_mode = false);
     void post_start_tasks();
@@ -119,7 +118,6 @@ public:
     ss::future<> set_proxy_client_config(ss::sstring name, std::any val);
 
     smp_groups smp_service_groups;
-    scheduling_groups sched_groups;
     ss::sharded<stress_fiber_manager> stress_fiber_manager;
 
     // Sorted list of services (public members)
