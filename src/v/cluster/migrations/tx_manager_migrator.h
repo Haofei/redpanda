@@ -173,7 +173,8 @@ public:
       ss::sharded<partition_leaders_table>& leaders,
       model::node_id self,
       int16_t internal_topic_replication_factor,
-      config::binding<int> requested_partition_count);
+      config::binding<int> requested_partition_count,
+      ss::abort_source& as);
 
     ss::future<std::error_code> migrate();
 
@@ -221,7 +222,7 @@ private:
     config::binding<int> _manager_partition_count;
     int32_t _requested_partition_count;
     mutex _migration_mutex{"tx_manager_migrator"};
-
-    ss::abort_source _as;
+    ss::abort_source& _as;
+    ss::optimized_optional<ss::abort_source::subscription> _as_sub;
 };
 } // namespace cluster
