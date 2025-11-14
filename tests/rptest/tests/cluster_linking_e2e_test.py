@@ -1547,6 +1547,25 @@ class ShadowLinkBasicTests(ShadowLinkTestBase):
         )
 
 
+class ShadowLinkSmallerShadowCluster(ShadowLinkTestBase):
+    """
+    Tests for when the Shadow Cluster is smaller than the source cluster
+    """
+
+    def __init__(self, test_context, *args, **kwargs):
+        super().__init__(test_context, num_brokers=1, *args, **kwargs)
+
+    def _expect_connect_error(self, expected_code: ConnectErrorCode):
+        return expect_exception(ConnectError, lambda e: e.code == expected_code)
+
+    @cluster(num_nodes=4)
+    def test_warn_on_smaller_cluster(self):
+        self.create_link("test-link")
+        assert self.target_cluster_service.search_log_any(
+            "Cluster link 'test-link' connecting to source cluster with 3 brokers, which is more than the shadow cluster's 1 nodes"
+        ), "Did not find expected warning about smaller shadow cluster"
+
+
 class ShadowLinkingAuthzTests(ShadowLinkTestBase):
     SUPERUSER_ERROR = "[permission_denied] Forbidden (superuser role required)"
 

@@ -302,6 +302,15 @@ ss::future<err_info> manager::link_preflight_checks(const model::metadata& md) {
         const auto& brokers = cluster->get_brokers();
         auto reported_brokers = brokers.get_broker_ids();
         auto num_reported_brokers = reported_brokers.size();
+        if (num_reported_brokers > _members_table_provider->node_count()) {
+            vlog(
+              cllog.warn,
+              "Cluster link '{}' connecting to source cluster with {} brokers, "
+              "which is more than the shadow cluster's {} nodes",
+              md.name,
+              num_reported_brokers,
+              _members_table_provider->node_count());
+        }
         chunked_vector<ss::sstring> broker_errors;
         broker_errors.reserve(brokers.size());
         co_await ss::max_concurrent_for_each(
