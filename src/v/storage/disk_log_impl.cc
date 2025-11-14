@@ -225,6 +225,9 @@ size_t disk_log_impl::compute_max_segment_size() {
 ss::future<> disk_log_impl::remove() {
     vassert(!_closed, "Invalid double closing of log - {}", *this);
 
+    vlog(
+      stlog.debug, "waiting for locks before removing log {}", config().ntp());
+
     // Request abort of compaction before obtaining rewrite lock holder.
     _compaction_as.request_abort();
 
@@ -284,6 +287,9 @@ ss::future<> disk_log_impl::start(
 
 ss::future<std::optional<ss::sstring>> disk_log_impl::close() {
     vassert(!_closed, "Invalid double closing of log - {}", *this);
+
+    vlog(
+      stlog.debug, "waiting for locks before closing log {}", config().ntp());
 
     // Request abort of compaction before obtaining rewrite lock holder.
     _compaction_as.request_abort();
