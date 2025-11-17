@@ -310,7 +310,8 @@ type pollConfig struct {
 }
 
 // pollOperationStatus polls the operation status with adaptive backoff until the context deadline is reached.
-// Uses aggressive polling (500ms) in the first 5 seconds for fast operations, then falls back to 1s polling.
+// Uses aggressive polling (500ms) in the first 5 seconds for fast operations, then exponential backoff
+// (1s, 2s, 4s, 8s, 16s, 32s) for longer-running operations to reduce server load.
 // Returns the final operation state and whether it completed within the timeout.
 func pollOperationStatus(ctx context.Context, cloudClient *publicapi.CloudClientSet, operationID string, isTerminal bool) (*controlplanev1.Operation, bool, error) {
 	return pollOperationStatusWithConfig(ctx, cloudClient, operationID, isTerminal, nil)
@@ -334,6 +335,10 @@ func pollOperationStatusWithConfig(ctx context.Context, cloudClient *publicapi.C
 	fastPollInterval := cfg.fastPollInterval
 	slowPollInterval := cfg.slowPollInterval
 	fastPollThreshold := cfg.fastPollThreshold
+
+	// For exponential backoff in slow polling phase
+	currentSlowInterval := slowPollInterval
+	maxSlowInterval := 32 * time.Second
 
 	// Wait for initial delay before first poll
 	select {
@@ -375,10 +380,19 @@ func pollOperationStatusWithConfig(ctx context.Context, cloudClient *publicapi.C
 			fmt.Printf("\rProcessing configuration... (%ds elapsed)", int(elapsed.Seconds()))
 		}
 
-		// Adaptive polling: fast polling (500ms) for first 5 seconds, then slow polling (1s)
-		pollInterval := slowPollInterval
+		// Adaptive polling with exponential backoff:
+		// - Fast polling (500ms) for first 5 seconds
+		// - Exponential backoff after 5 seconds: 1s, 2s, 4s, 8s, 16s, 32s (max)
+		var pollInterval time.Duration
 		if elapsed < fastPollThreshold {
 			pollInterval = fastPollInterval
+		} else {
+			pollInterval = currentSlowInterval
+			nextInterval := currentSlowInterval * 2
+			if nextInterval > maxSlowInterval {
+				nextInterval = maxSlowInterval
+			}
+			currentSlowInterval = nextInterval
 		}
 
 		// Wait for next poll or context cancellation
