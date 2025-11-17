@@ -129,8 +129,7 @@ Use the flag '--no-confirm' to avoid the confirmation prompt.`,
 						fmt.Printf("Configuration update failed. Operation ID: %s\n", operationID)
 					}
 				} else {
-					// Timeout - operation still in progress
-					fmt.Print("Processing configuration, this operation may take up to 10 minutes. To check the status, run 'rpk cluster config status'\n\n")
+					fmt.Printf("Configuration update is in progress and may take up to 10 minutes. We've waited for %s. To check the status, run 'rpk cluster config status' with the operation ID below.\n\n", timeout)
 					fmt.Printf("Operation ID: %s\n", operationID)
 				}
 			} else {
@@ -171,7 +170,7 @@ Use the flag '--no-confirm' to avoid the confirmation prompt.`,
 	}
 
 	cmd.Flags().BoolVar(&noConfirm, "no-confirm", false, "Disable confirmation prompt")
-	cmd.Flags().DurationVar(&timeout, "timeout", 10*time.Second, "Maximum time to wait for the operation to complete (e.g. 300ms, 1.5s, 30s)")
+	cmd.Flags().DurationVar(&timeout, "timeout", 10*time.Second, "Maximum time to poll for operation completion before displaying operation ID for manual status checking (e.g. 300ms, 1.5s, 30s)")
 	return cmd
 }
 
@@ -308,7 +307,9 @@ func pollOperationStatus(ctx context.Context, cloudClient *publicapi.CloudClient
 	deadline := time.Now().Add(timeout)
 	startTime := time.Now()
 
-	// Start with 2 second delay to allow fast operations to complete before first check
+	// Initial 2 second delay before first poll:
+	// This avoids unnecessary early checks for operations that typically take at least a few seconds,
+	// reducing load and noise from polling. Most operations are not expected to complete instantly.
 	initialDelay := 2 * time.Second
 	fastPollInterval := 500 * time.Millisecond
 	slowPollInterval := 1 * time.Second
