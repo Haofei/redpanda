@@ -7,6 +7,7 @@
 // the Business Source License, use of this software will be governed
 // by the Apache License, Version 2.0
 
+#include "redpanda_lambda_coroutine_deduces_this_check.h"
 #include "redpanda_noop_check.h"
 
 #include <clang-tidy/ClangTidyModule.h>
@@ -29,6 +30,8 @@ public:
     void addCheckFactories(ClangTidyCheckFactories& check_factories) override {
         // register checks here. for example:
         check_factories.registerCheck<NoopCheck>("redpanda-noop");
+        check_factories.registerCheck<LambdaCoroutineDeducesThis>(
+          "redpanda-lambda-coroutine-deduces-this");
     }
 
     // this is where you might set default options for any configurable checks
