@@ -2458,7 +2458,7 @@ class RedpandaServiceCloud(KubeServiceMixin, RedpandaServiceABC):
                         f"bash {remote_path} '{pod.name}' '{test_start_time}'".split(),
                         capture=True,
                     ):
-                        lfile.writelines([line])  # type: ignore
+                        lfile.writelines([line])
             except Exception as e:
                 self.logger.warning(f"Error getting logs for {pod.name}: {e}")
             return pod.name
@@ -3371,10 +3371,10 @@ class RedpandaService(Service, RedpandaServiceABC):
             if node not in to_start:  # pyright: ignore[reportUnnecessaryContains]
                 continue
             raise RuntimeError("unreachable")
-            unexpected_ns = set(node.ns) - {"redpanda"}
+            unexpected_ns = set(node.ns) - {"redpanda"}  # pyright: ignore[reportUnreachable]
             if unexpected_ns:
-                for ns in unexpected_ns:
-                    self.logger.error(
+                for ns in unexpected_ns:  # pyright: ignore[reportUnreachable]
+                    self.logger.error(  # pyright: ignore[reportUnreachable]
                         f"node {node.name}: unexpected namespace: {ns}, "
                         f"topics: {set(node.ns[ns].topics)}"
                     )
@@ -3385,7 +3385,7 @@ class RedpandaService(Service, RedpandaServiceABC):
                 "kvstore",
             }
             if unexpected_rp_topics:
-                self.logger.error(
+                self.logger.error(  # pyright: ignore[reportUnreachable]
                     f"node {node.name}: unexpected topics in redpanda namespace: "
                     f"{unexpected_rp_topics}"
                 )
