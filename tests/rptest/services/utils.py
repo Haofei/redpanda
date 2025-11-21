@@ -1,9 +1,9 @@
-from collections import defaultdict
 from logging import Logger
 import re
 import time
 from abc import ABC, abstractmethod
-from typing import Any, Generator, Iterable, Mapping, TypedDict
+from typing import Any, Generator, Iterable, TypedDict
+from concurrent.futures import ThreadPoolExecutor, as_completed
 
 from rptest.clients.kubectl import KubectlTool
 
@@ -62,7 +62,7 @@ class Stopwatch:
             return time.time() - self._start
 
     def elapseds(self) -> str:
-        return f"{self.elapsed:.2f}s"
+        return f"{self.elapsed:.3f}s"
 
     def elapsedf(self, note: str) -> str:
         return f"{note}: {self.elapseds()}"
@@ -150,7 +150,7 @@ class LogSearch(ABC):
         )
 
         # Prepare matching terms
-        self.match_terms: list[str] = self.DEFAULT_MATCH_TERMS
+        self.match_terms: list[str] = list(self.DEFAULT_MATCH_TERMS)
         if self._raise_on_errors:
             self.match_terms.append("^ERROR")
         self.match_expr: str = " ".join(f'-e "{t}"' for t in self.match_terms)
@@ -203,20 +203,18 @@ class LogSearch(ABC):
         return False
 
     def _search(self, versioned_nodes: VersionedNodes) -> NodeToLines:
-        def make_vl() -> VersionAndLines:
-            return {"version": None, "lines": []}
-
-        bad_lines: defaultdict[ClusterNode | CloudBroker, VersionAndLines] = (
-            defaultdict(make_vl)
-        )
         test_name = self._context.function_name
-        sw = Stopwatch()
-        for version, node in versioned_nodes:
-            sw.start()
+        overall_sw = Stopwatch()
+        overall_sw.start()
+
+        def scan_one(
+            version: str | None, node: ClusterNode | CloudBroker
+        ) -> tuple[ClusterNode | CloudBroker, VersionAndLines]:
+            node_sw = Stopwatch()
+            node_sw.start()
             hostname = self._get_hostname(node)
             self.logger.info(f"Scanning node {hostname} log for errors...")
-            # Prepare/Build capture func shortcut
-            # Iterate
+            vl: VersionAndLines = {"version": version, "lines": []}
             for line in self._capture_log(node, self.match_expr):
                 line = line.strip()
                 # Check if this line holds error
@@ -229,15 +227,27 @@ class LogSearch(ABC):
                     allowed = self._check_oversized_allocations(line)
                 # If detected bad lines, log it and add to the list
                 if not allowed:
-                    bad_lines[node]["version"] = version
-                    bad_lines[node]["lines"].append(line)
+                    vl["lines"].append(line)
                     self.logger.warning(
                         f"[{test_name}] Unexpected log line on {hostname}: {line}"
                     )
             self.logger.info(
-                sw.elapsedf(f"##### Time spent to scan bad logs on '{hostname}'")
+                node_sw.elapsedf(f"Time spent to scan bad logs on '{hostname}'")
             )
-        return dict(bad_lines)
+            return node, vl
+
+        bad_lines: NodeToLines = {}
+
+        # Run scans in parallel
+        with ThreadPoolExecutor() as executor:
+            futures = [executor.submit(scan_one, v, n) for v, n in versioned_nodes]
+            for fut in as_completed(futures):
+                node, vl = fut.result()
+                if vl["lines"]:
+                    bad_lines[node] = vl
+
+        self.logger.info(overall_sw.elapsedf("Time spent to scan bad logs overall"))
+        return bad_lines
 
     def search_logs(self, versioned_nodes: VersionedNodes) -> None:
         """
