@@ -13,7 +13,14 @@ import os
 import signal
 import threading
 import time
-from typing import Any, Dict, Optional, cast
+from typing import (
+    Any,
+    Dict,
+    Optional,
+    Sequence,
+    TypeAlias,
+    cast,
+)
 
 import requests
 from ducktape.cluster.cluster import ClusterNode
@@ -32,6 +39,8 @@ TESTS_DIR = os.path.join("/opt", "kgo-verifier")
 
 REMOTE_PORT_BASE = 8080
 
+Topic: TypeAlias = str | TopicSpec
+
 
 class KgoVerifierService(Service):
     """
@@ -47,7 +56,7 @@ class KgoVerifierService(Service):
         self,
         context: Any,
         redpanda: RedpandaServiceForClients,
-        topic: str | TopicSpec,
+        topic: Topic,
         msg_size: int,
         custom_node: list[ClusterNode] | None,
         debug_logs: bool,
@@ -625,7 +634,7 @@ class KgoVerifierProducer(KgoVerifierService):
         self,
         context: TestContext,
         redpanda: RedpandaServiceForClients,
-        topic: str | TopicSpec,
+        topic: Topic,
         msg_size: int,
         msg_count: int,
         custom_node: list[ClusterNode] | None = None,
@@ -888,7 +897,7 @@ class KgoVerifierSeqConsumer(AbstractConsumer):
         self,
         context: Any,
         redpanda: RedpandaServiceForClients,
-        topic: str | TopicSpec,
+        topic: Topic,
         msg_size: int | None = None,  # TODO: redundant, remove
         max_msgs: int | None = None,
         max_throughput_mb: int | None = None,
@@ -1004,7 +1013,7 @@ class KgoVerifierRandomConsumer(AbstractConsumer):
         self,
         context: Any,
         redpanda: RedpandaServiceForClients,
-        topic: str | TopicSpec,
+        topic: Topic,
         msg_size: int,
         rand_read_msgs: int,
         parallel: int,
@@ -1062,7 +1071,7 @@ class KgoVerifierConsumerGroupConsumer(AbstractConsumer):
         self,
         context: Any,
         redpanda: RedpandaServiceForClients,
-        topic: str | TopicSpec,
+        topic: Topic,
         msg_size: int,
         readers: int,
         loop: bool = False,
