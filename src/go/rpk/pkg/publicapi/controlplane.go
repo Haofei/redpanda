@@ -19,9 +19,11 @@ import (
 
 	"buf.build/gen/go/redpandadata/cloud/connectrpc/go/redpanda/api/byocplugin/v1alpha1/byocpluginv1alpha1connect"
 	"buf.build/gen/go/redpandadata/cloud/connectrpc/go/redpanda/api/controlplane/v1/controlplanev1connect"
+	"buf.build/gen/go/redpandadata/cloud/connectrpc/go/redpanda/api/controlplane/v1beta2/controlplanev1beta2connect"
 	"buf.build/gen/go/redpandadata/cloud/connectrpc/go/redpanda/api/iam/v1/iamv1connect"
 	byocpluginv1alpha1 "buf.build/gen/go/redpandadata/cloud/protocolbuffers/go/redpanda/api/byocplugin/v1alpha1"
 	controlplanev1 "buf.build/gen/go/redpandadata/cloud/protocolbuffers/go/redpanda/api/controlplane/v1"
+	controlplanev1beta2 "buf.build/gen/go/redpandadata/cloud/protocolbuffers/go/redpanda/api/controlplane/v1beta2"
 	iamv1 "buf.build/gen/go/redpandadata/cloud/protocolbuffers/go/redpanda/api/iam/v1"
 	"connectrpc.com/connect"
 	"github.com/redpanda-data/redpanda/src/go/rpk/pkg/oauth/authtoken"
@@ -40,6 +42,7 @@ type CloudClientSet struct {
 	Operations       controlplanev1connect.OperationServiceClient
 	ServerlessRegion controlplanev1connect.ServerlessRegionServiceClient
 	BYOCPlugin       byocpluginv1alpha1connect.BYOCPluginServiceClient
+	ShadowLink       controlplanev1beta2connect.ShadowLinkServiceClient // TODO: move this to v1 before release.
 
 	m         sync.RWMutex
 	authToken string
@@ -78,6 +81,7 @@ func NewCloudClientSet(host, authToken string, opts ...connect.ClientOption) *Cl
 	ccs.Operations = controlplanev1connect.NewOperationServiceClient(httpCl, host, opts...)
 	ccs.ServerlessRegion = controlplanev1connect.NewServerlessRegionServiceClient(httpCl, host, opts...)
 	ccs.BYOCPlugin = byocpluginv1alpha1connect.NewBYOCPluginServiceClient(httpCl, host, opts...)
+	ccs.ShadowLink = controlplanev1beta2connect.NewShadowLinkServiceClient(httpCl, host, opts...)
 	return ccs
 }
 
@@ -186,6 +190,25 @@ func (cpCl *CloudClientSet) ClusterForID(ctx context.Context, ID string) (*contr
 		return nil, fmt.Errorf("unable to find cluster %q; please report this bug to Redpanda Support", ID)
 	}
 	return c.Msg.Cluster, nil
+}
+
+// ShadowLinkListItems returns all the ShadowLinkListItems using the pagination
+// feature to traverse all pages of the list.
+func (cpCl *CloudClientSet) ShadowLinkListItems(ctx context.Context, filter *controlplanev1beta2.ListShadowLinksRequest_Filter) ([]*controlplanev1beta2.ShadowLinkListItem, error) {
+	maxPages := 500
+	fetchPage := func(ctx context.Context, pageToken string) ([]*controlplanev1beta2.ShadowLinkListItem, string, error) {
+		req := connect.NewRequest(&controlplanev1beta2.ListShadowLinksRequest{
+			Filter:    filter,
+			PageToken: pageToken,
+			PageSize:  100,
+		})
+		resp, err := cpCl.ShadowLink.ListShadowLinks(ctx, req)
+		if err != nil {
+			return nil, "", err
+		}
+		return resp.Msg.ShadowLinks, resp.Msg.NextPageToken, nil
+	}
+	return Paginate(ctx, maxPages, fetchPage)
 }
 
 // OrgResourceGroupsClusters is a helper function to concurrently query many

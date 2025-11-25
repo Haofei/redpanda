@@ -16,6 +16,8 @@ import (
 type ShadowLinkConfig struct {
 	// Name is the name of the shadow link
 	Name string `json:"name" yaml:"name"`
+	// Configurations for Shadow Link in Redpanda Cloud
+	CloudOptions *CloudShadowLinkOptions `json:"cloud_options,omitempty" yaml:"cloud_options,omitempty"`
 	// Configuration for the internal kafka client
 	ClientOptions *ShadowLinkClientOptions `json:"client_options,omitempty" yaml:"client_options,omitempty"`
 	// Topic metadata sync options
@@ -26,6 +28,12 @@ type ShadowLinkConfig struct {
 	SecuritySyncOptions *SecuritySettingsSyncOptions `json:"security_sync_options,omitempty" yaml:"security_sync_options,omitempty"`
 	// Schema Registry sync options
 	SchemaRegistrySyncOptions *SchemaRegistrySyncOptions `json:"schema_registry_sync_options,omitempty" yaml:"schema_registry_sync_options,omitempty"`
+}
+
+type CloudShadowLinkOptions struct {
+	SourceRedpandaID      string `json:"source_redpanda_id,omitempty" yaml:"source_redpanda_id,omitempty"`
+	ResourceGroupID       string `json:"resource_group_id,omitempty" yaml:"resource_group_id,omitempty"`
+	DestinationRedpandaID string `json:"destination_redpanda_id,omitempty" yaml:"destination_redpanda_id,omitempty"`
 }
 
 type ShadowLinkClientOptions struct {

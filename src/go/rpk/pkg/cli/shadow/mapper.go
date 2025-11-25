@@ -10,6 +10,7 @@
 package shadow
 
 import (
+	controlplanev1beta2 "buf.build/gen/go/redpandadata/cloud/protocolbuffers/go/redpanda/api/controlplane/v1beta2"
 	adminv2 "buf.build/gen/go/redpandadata/core/protocolbuffers/go/redpanda/core/admin/v2"
 	corecommonv1 "buf.build/gen/go/redpandadata/core/protocolbuffers/go/redpanda/core/common/v1"
 	"google.golang.org/protobuf/types/known/durationpb"
@@ -34,6 +35,27 @@ func shadowLinkConfigToProto(slCfg *ShadowLinkConfig) *adminv2.ShadowLink {
 		SchemaRegistrySyncOptions: mapSchemaRegistrySyncOptions(slCfg.SchemaRegistrySyncOptions),
 	}
 	return shadowLink
+}
+
+func shadowLinkConfigToCloudCreate(slCfg *ShadowLinkConfig) *controlplanev1beta2.ShadowLinkCreate {
+	if slCfg == nil {
+		return nil
+	}
+	cloudSl := &controlplanev1beta2.ShadowLinkCreate{
+		Name: slCfg.Name,
+	}
+	if slc := slCfg.CloudOptions; slc != nil {
+		cloudSl.DestinationRedpandaId = slc.DestinationRedpandaID
+		cloudSl.ResourceGroupId = slc.ResourceGroupID
+		cloudSl.SourceRedpandaId = slc.SourceRedpandaID
+	}
+
+	cloudSl.ClientOptions = mapCloudClientOptions(slCfg.ClientOptions)
+	cloudSl.TopicMetadataSyncOptions = mapTopicMetadataSyncOptions(slCfg.TopicMetadataSyncOptions)
+	cloudSl.ConsumerOffsetSyncOptions = mapConsumerOffsetSyncOptions(slCfg.ConsumerOffsetSyncOptions)
+	cloudSl.SecuritySyncOptions = mapSecuritySyncOptions(slCfg.SecuritySyncOptions)
+	cloudSl.SchemaRegistrySyncOptions = mapSchemaRegistrySyncOptions(slCfg.SchemaRegistrySyncOptions)
+	return cloudSl
 }
 
 func mapClientOptions(opts *ShadowLinkClientOptions) *adminv2.ShadowLinkClientOptions {
@@ -63,6 +85,57 @@ func mapClientOptions(opts *ShadowLinkClientOptions) *adminv2.ShadowLinkClientOp
 	}
 
 	return pbOpts
+}
+
+func mapCloudClientOptions(opts *ShadowLinkClientOptions) *controlplanev1beta2.ShadowLinkClientOptions {
+	if opts == nil {
+		return nil
+	}
+
+	pbOpts := &controlplanev1beta2.ShadowLinkClientOptions{
+		BootstrapServers:       opts.BootstrapServers,
+		SourceClusterId:        opts.SourceClusterID,
+		MetadataMaxAgeMs:       opts.MetadataMaxAgeMs,
+		ConnectionTimeoutMs:    opts.ConnectionTimeoutMs,
+		RetryBackoffMs:         opts.RetryBackoffMs,
+		FetchWaitMaxMs:         opts.FetchWaitMaxMs,
+		FetchMinBytes:          opts.FetchMinBytes,
+		FetchMaxBytes:          opts.FetchMaxBytes,
+		FetchPartitionMaxBytes: opts.FetchPartitionMaxBytes,
+		// ClientId is intentionally left empty; It's output only.
+	}
+
+	if opts.TLSSettings != nil {
+		pbOpts.TlsSettings = mapCloudTLSSettings(opts.TLSSettings)
+	}
+
+	if opts.AuthenticationConfiguration != nil {
+		pbOpts.AuthenticationConfiguration = mapAuthenticationConfiguration(opts.AuthenticationConfiguration)
+	}
+
+	return pbOpts
+}
+
+func mapCloudTLSSettings(tls *TLSSettings) *controlplanev1beta2.TLSSettings {
+	if tls == nil {
+		return nil
+	}
+
+	cloudTLS := &controlplanev1beta2.TLSSettings{
+		Enabled:             tls.Enabled,
+		DoNotSetSniHostname: tls.DoNotSetSniHostname,
+	}
+
+	// Cloud proto only supports inline PEM content, not file paths
+	if tls.TLSPEMSettings != nil {
+		cloudTLS.Ca = tls.TLSPEMSettings.CA
+		cloudTLS.Key = tls.TLSPEMSettings.Key
+		cloudTLS.Cert = tls.TLSPEMSettings.Cert
+	}
+	// Note: TLSFileSettings cannot be mapped directly to cloud proto
+	// since the cloud API requires inline PEM content, not file paths.
+
+	return cloudTLS
 }
 
 func mapTLSSettings(tls *TLSSettings) *corecommonv1.TLSSettings {
