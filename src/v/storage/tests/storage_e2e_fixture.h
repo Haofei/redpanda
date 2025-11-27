@@ -38,11 +38,11 @@ struct storage_e2e_fixture : public redpanda_thread_fixture {
         } catch (...) {
             eptr = std::current_exception();
         }
-        *incomplete -= 1;
         co_await producer.stop();
         if (eptr) {
             std::rethrow_exception(eptr);
         }
+        *incomplete -= 1;
     }
 
     ss::future<> remove_segment_permanently(
