@@ -109,7 +109,6 @@ class KgoVerifierService(Service):
         context: Any,
         redpanda: RedpandaServiceForClients,
         topic: Topic,
-        msg_size: int,
         custom_node: list[ClusterNode] | None,
         debug_logs: bool,
         trace_logs: bool,
@@ -136,7 +135,6 @@ class KgoVerifierService(Service):
 
         self._redpanda: RedpandaServiceForClients = redpanda
         self._topic = topic
-        self._msg_size = msg_size
         self._pid = None
         self._remote_port = None
         self._debug_logs = debug_logs
@@ -723,7 +721,6 @@ class KgoVerifierProducer(KgoVerifierService):
             context,
             redpanda,
             topic,
-            msg_size,
             custom_node,
             debug_logs,
             trace_logs,
@@ -731,6 +728,7 @@ class KgoVerifierProducer(KgoVerifierService):
             password,
             enable_tls,
         )
+        self._msg_size = msg_size
         self._msg_count = msg_count
         self._status = ProduceStatus(self._topic)
         self._batch_max_bytes = batch_max_bytes
@@ -978,7 +976,6 @@ class KgoVerifierSeqConsumer(AbstractConsumer):
             context,
             redpanda,
             topic,
-            msg_size,
             nodes,
             debug_logs,
             trace_logs,
@@ -1088,7 +1085,6 @@ class KgoVerifierRandomConsumer(AbstractConsumer):
             context,
             redpanda,
             topic,
-            msg_size,
             nodes,
             debug_logs,
             trace_logs,
@@ -1154,7 +1150,6 @@ class KgoVerifierConsumerGroupConsumer(AbstractConsumer):
             context,
             redpanda,
             topic,
-            msg_size,
             nodes,
             debug_logs,
             trace_logs,
