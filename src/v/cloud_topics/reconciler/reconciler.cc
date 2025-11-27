@@ -470,7 +470,8 @@ reconciler::build_object(
               max_object_size);
             break;
         }
-        // It shouldn't happen, but beware underflow.
+        // Beware underflow if the first partition sneaks a batch in over the
+        // size limit.
         ctx.size_budget = current_size >= max_object_size
                             ? 0
                             : max_object_size - current_size;
