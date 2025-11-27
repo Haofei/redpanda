@@ -3374,9 +3374,17 @@ class RedpandaService(Service, RedpandaServiceABC):
         self.wait_for_membership(first_start=first_start)
 
         self.logger.info("Verifying storage is in expected state")
+
+        expected = {
+            "redpanda": {"controller", "kvstore"},
+            "kafka": {"_redpanda.audit_log", "_redpanda.transform_logs"},
+            "kafka_internal": {"ct_l1_domain"},
+        }
+        expected["l1_staging"] = set()  # make type deduction happy
+
         storage = self.storage(nodes=to_start)
         for node in storage.nodes:
-            unexpected_ns = set(node.ns) - {"redpanda"}
+            unexpected_ns = set(node.ns) - set(expected.keys())
             if unexpected_ns:
                 for ns in unexpected_ns:
                     self.logger.error(
@@ -3385,16 +3393,14 @@ class RedpandaService(Service, RedpandaServiceABC):
                     )
                 raise RuntimeError("Unexpected files in data directory")
 
-            unexpected_rp_topics = set(node.ns["redpanda"].topics) - {
-                "controller",
-                "kvstore",
-            }
-            if unexpected_rp_topics:
-                self.logger.error(
-                    f"node {node.name}: unexpected topics in redpanda namespace: "
-                    f"{unexpected_rp_topics}"
-                )
-                raise RuntimeError("Unexpected files in data directory")
+            for ns in node.ns:
+                unexpected_topics = set(node.ns[ns].topics) - expected[ns]
+                if unexpected_topics:
+                    self.logger.error(
+                        f"node {node.name}: unexpected topics in {ns} namespace: "
+                        f"{unexpected_topics}"
+                    )
+                    raise RuntimeError("Unexpected files in data directory")
 
         if self.sasl_enabled():
             username, password, algorithm = self._superuser
