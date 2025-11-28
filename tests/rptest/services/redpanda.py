@@ -3266,6 +3266,7 @@ class RedpandaService(Service, RedpandaServiceABC):
         auto_assign_node_id: bool = False,
         omit_seeds_on_idx_one: bool = True,
         node_config_overrides: NodeConfigOverridesT = {},
+        skip_storage_init_check: bool = False,
         **kwargs: Any,
     ) -> None:
         """
@@ -3373,34 +3374,38 @@ class RedpandaService(Service, RedpandaServiceABC):
 
         self.wait_for_membership(first_start=first_start)
 
-        self.logger.info("Verifying storage is in expected state")
+        if not skip_storage_init_check:
+            self.logger.info("Verifying storage is in expected state")
 
-        expected = {
-            "redpanda": {"controller", "kvstore"},
-            "kafka": {"_redpanda.audit_log", "_redpanda.transform_logs"},
-            "kafka_internal": {"ct_l1_domain"},
-        }
-        expected["l1_staging"] = set()  # make type deduction happy
+            expected = {
+                "redpanda": {"controller", "kvstore"},
+                "kafka": {
+                    "_redpanda.audit_log",
+                    "_redpanda.transform_logs",
+                },
+                "kafka_internal": {"ct_l1_domain"},
+            }
+            expected["l1_staging"] = set()  # make type deduction happy
 
-        storage = self.storage(nodes=to_start)
-        for node in storage.nodes:
-            unexpected_ns = set(node.ns) - set(expected.keys())
-            if unexpected_ns:
-                for ns in unexpected_ns:
-                    self.logger.error(
-                        f"node {node.name}: unexpected namespace: {ns}, "
-                        f"topics: {set(node.ns[ns].topics)}"
-                    )
-                raise RuntimeError("Unexpected files in data directory")
-
-            for ns in node.ns:
-                unexpected_topics = set(node.ns[ns].topics) - expected[ns]
-                if unexpected_topics:
-                    self.logger.error(
-                        f"node {node.name}: unexpected topics in {ns} namespace: "
-                        f"{unexpected_topics}"
-                    )
+            storage = self.storage(nodes=to_start)
+            for node in storage.nodes:
+                unexpected_ns = set(node.ns) - set(expected.keys())
+                if unexpected_ns:
+                    for ns in unexpected_ns:
+                        self.logger.error(
+                            f"node {node.name}: unexpected namespace: {ns}, "
+                            f"topics: {set(node.ns[ns].topics)}"
+                        )
                     raise RuntimeError("Unexpected files in data directory")
+
+                for ns in node.ns:
+                    unexpected_topics = set(node.ns[ns].topics) - expected[ns]
+                    if unexpected_topics:
+                        self.logger.error(
+                            f"node {node.name}: unexpected topics in {ns} namespace: "
+                            f"{unexpected_topics}"
+                        )
+                        raise RuntimeError("Unexpected files in data directory")
 
         if self.sasl_enabled():
             username, password, algorithm = self._superuser
