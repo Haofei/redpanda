@@ -338,7 +338,9 @@ class CloudStorageScrubberTest(RedpandaTest):
         segment_metas = [
             meta
             for meta in self.cloud_storage_client.list_objects(self.bucket_name)
-            if "log" in meta.key
+            if ".log" in meta.key
+            and not meta.key.endswith(".index")
+            and not meta.key.endswith(".tx")
         ]
 
         view = BucketView(self.redpanda)
