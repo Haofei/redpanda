@@ -41,6 +41,7 @@ redpanda_cc_library(
     implementation_deps = [
         "//src/v/base",
         "//src/v/bytes:iobuf_parser",
+        "//src/v/hashing:crc32c",
         "//src/v/lsm/core:exceptions",
     ],
     deps = [

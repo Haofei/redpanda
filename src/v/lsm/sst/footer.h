@@ -30,9 +30,10 @@ struct footer {
     block::handle metaindex_handle;
     block::handle index_handle;
 
-    // Encoded length of the footer. It consists of two block handles and a
-    // magic number.
+    // Encoded length of the footer. It consists of two block handles, a crc and
+    // a magic number.
     constexpr static size_t encoded_length = 2 * sizeof(block::handle)
+                                             + sizeof(uint32_t)
                                              + sizeof(uint64_t);
 
     bool operator==(const footer&) const = default;
