@@ -249,3 +249,117 @@ FIXTURE_TEST(compact_transactions_and_replicate, compaction_multinode_test) {
     new_log->housekeeping(conf2).get();
     exec.validate(new_log).get();
 }
+
+FIXTURE_TEST(segment_tx_flags, compaction_multinode_test) {
+    const model::topic topic{"tapioca"};
+    model::node_id id{0};
+    create_node_application(id);
+    auto* rp = instance(id);
+    wait_for_controller_leadership(id).get();
+
+    cluster::topic_properties props;
+    props.cleanup_policy_bitflags = model::cleanup_policy_bitflags::compaction;
+    rp->add_topic({model::kafka_namespace, topic}, 1, props).get();
+    model::partition_id pid{0};
+    auto ntp = model::ntp(model::kafka_namespace, topic, pid);
+    RPTEST_REQUIRE_EVENTUALLY(5s, [&] {
+        auto [_, prt] = get_leader(ntp);
+        return prt != nullptr;
+    });
+    auto [_, partition] = get_leader(ntp);
+    auto log = partition->log();
+    using cluster::tx_executor;
+    tx_executor exec;
+    auto make_ctx = [&](int64_t id, model::term_id term) {
+        model::producer_identity pid{id, 0};
+        return tx_executor::tx_op_ctx{
+          exec.data_gen(), partition->rm_stm(), log, pid, term};
+    };
+    // Produce transactional records.
+    tx_executor::sorted_tx_ops_t ops;
+    auto term = partition->raft()->term();
+
+    int weight = 1;
+    ops.emplace(
+      ss::make_shared(tx_executor::begin_op(make_ctx(1, term), weight++)));
+    ops.emplace(
+      ss::make_shared(tx_executor::roll_op(make_ctx(1, term), weight++)));
+    ops.emplace(
+      ss::make_shared(tx_executor::data_op(make_ctx(1, term), weight++, 1)));
+    ops.emplace(
+      ss::make_shared(tx_executor::roll_op(make_ctx(1, term), weight++)));
+
+    ops.emplace(
+      ss::make_shared(tx_executor::abort_op(make_ctx(1, term), weight++)));
+    ops.emplace(
+      ss::make_shared(tx_executor::begin_op(make_ctx(2, term), weight++)));
+    ops.emplace(
+      ss::make_shared(tx_executor::data_op(make_ctx(2, term), weight++, 1)));
+    ops.emplace(
+      ss::make_shared(tx_executor::abort_op(make_ctx(2, term), weight++)));
+
+    exec.execute(std::move(ops)).get();
+    partition->log()->flush().get();
+    partition->log()->force_roll().get();
+
+    // Before compaction, segments should by default have these flags as `true`.
+    for (const auto& segment : log->segments()) {
+        BOOST_REQUIRE(segment->index().may_have_transaction_control_batches());
+        BOOST_REQUIRE(segment->index().may_have_transaction_data_batches());
+    }
+
+    ss::abort_source as;
+    auto collect_offset = log->stm_manager()->max_removable_local_log_offset();
+    {
+        auto conf = storage::housekeeping_config::make_config(
+          model::timestamp::min(),
+          std::nullopt,
+          collect_offset,
+          collect_offset,
+          collect_offset,
+          std::nullopt,
+          std::nullopt,
+          std::chrono::milliseconds{0},
+          as);
+        log->housekeeping(conf).get();
+    }
+
+    // After the first compaction, control batches are still present, but data
+    // batches have had their bit unset (due to being compacted twice over
+    // during self compaction -> sliding window compaction)
+    for (const auto& segment : log->segments()) {
+        if (segment->has_self_compact_timestamp()) {
+            BOOST_REQUIRE(
+              segment->index().may_have_transaction_control_batches());
+            BOOST_REQUIRE(
+              !segment->index().may_have_transaction_data_batches());
+        }
+    }
+
+    {
+        auto conf = storage::housekeeping_config::make_config(
+          model::timestamp::min(),
+          std::nullopt,
+          collect_offset,
+          collect_offset,
+          collect_offset,
+          std::nullopt,
+          std::chrono::milliseconds{0},
+          std::chrono::milliseconds{0},
+          as);
+        log->housekeeping(conf).get();
+    }
+
+    // `may_have_transaction_data_batches` will be false after the previous
+    // compaction, as transactional bits were unset.
+    // `may_have_transaction_control_batches` will also be false due to
+    // compacting with `tx_retention_ms` set.
+    for (const auto& segment : log->segments()) {
+        if (segment->has_self_compact_timestamp()) {
+            BOOST_REQUIRE(
+              !segment->index().may_have_transaction_control_batches());
+            BOOST_REQUIRE(
+              !segment->index().may_have_transaction_data_batches());
+        }
+    }
+}

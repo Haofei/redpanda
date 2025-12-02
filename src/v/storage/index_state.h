@@ -131,7 +131,7 @@ private:
    1 byte  - non_data_timestamps
  */
 struct index_state
-  : serde::envelope<index_state, serde::version<10>, serde::compat_version<4>> {
+  : serde::envelope<index_state, serde::version<11>, serde::compat_version<4>> {
     static constexpr auto monotonic_timestamps_version = 5;
     static constexpr auto broker_timestamp_version = 6;
     static constexpr auto num_compactible_records_version = 7;
@@ -140,6 +140,7 @@ struct index_state
     // Added in the same version.
     static constexpr auto self_compact_timestamp_version = 10;
     static constexpr auto may_have_transaction_control_batches_version = 10;
+    static constexpr auto may_have_transaction_data_batches_version = 11;
 
     static index_state
     make_empty_index(model::offset base_offset, offset_delta_time with_offset);
@@ -235,6 +236,12 @@ struct index_state
     // and it is proven that the segment does not contain any transactional
     // control batches (abort/commit batches, as well as tx_fence markers).
     bool may_have_transaction_control_batches{true};
+
+    // may_have_transaction_data_batches is `true` by default. It remains
+    // `true` until compaction deduplication/segment data copying is performed
+    // and it is proven that the segment does not contain any transactional
+    // data batches (i.e raft data batches with a transactional bit set).
+    bool may_have_transaction_data_batches{true};
 
     size_t size() const;
 
