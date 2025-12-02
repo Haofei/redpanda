@@ -636,8 +636,7 @@ ss::future<http::client::response_stream_ref> abs_client::do_get_object(
 
         const auto content_type = util::get_response_content_type(
           response_stream->get_headers());
-        auto buf = co_await util::drain_response_stream(
-          std::move(response_stream));
+        auto buf = co_await http::drain(std::move(response_stream));
         throw parse_rest_error_response(content_type, status, std::move(buf));
     }
 
@@ -694,8 +693,7 @@ ss::future<> abs_client::do_put_object(
         status != created && !is_no_content_and_accepted) {
         const auto content_type = util::get_response_content_type(
           response_stream->get_headers());
-        auto buf = co_await util::drain_response_stream(
-          std::move(response_stream));
+        auto buf = co_await http::drain(std::move(response_stream));
         throw parse_rest_error_response(content_type, status, std::move(buf));
     }
 }
@@ -811,8 +809,7 @@ ss::future<> abs_client::do_delete_object(
     if (status != boost::beast::http::status::accepted) {
         const auto content_type = util::get_response_content_type(
           response_stream->get_headers());
-        auto buf = co_await util::drain_response_stream(
-          std::move(response_stream));
+        auto buf = co_await http::drain(std::move(response_stream));
         throw parse_rest_error_response(content_type, status, std::move(buf));
     }
 }
@@ -892,7 +889,7 @@ ss::future<abs_client::list_bucket_result> abs_client::do_list_objects(
     if (status != boost::beast::http::status::ok) {
         const auto content_type = util::get_response_content_type(
           response_stream->get_headers());
-        iobuf buf = co_await util::drain_response_stream(response_stream);
+        iobuf buf = co_await http::drain(response_stream);
         throw parse_rest_error_response(content_type, status, std::move(buf));
     }
 
@@ -1037,8 +1034,7 @@ ss::future<> abs_client::do_delete_file(
       && status != boost::beast::http::status::ok) {
         const auto content_type = util::get_response_content_type(
           response_stream->get_headers());
-        auto buf = co_await util::drain_response_stream(
-          std::move(response_stream));
+        auto buf = co_await http::drain(std::move(response_stream));
         throw parse_rest_error_response(content_type, status, std::move(buf));
     }
 }

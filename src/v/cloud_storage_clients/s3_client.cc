@@ -800,7 +800,7 @@ ss::future<http::client::response_stream_ref> s3_client::do_get_object(
                   }
                   const auto content_type = util::get_response_content_type(
                     ref->get_headers());
-                  return util::drain_response_stream(std::move(ref))
+                  return http::drain(std::move(ref))
                     .then([content_type, result](iobuf&& res) {
                         return parse_rest_error_response<
                           http::client::response_stream_ref>(
@@ -918,27 +918,26 @@ ss::future<> s3_client::do_put_object(
           return ss::futurize_invoke(make_request)
             .then([id, accept_no_content](
                     const http::client::response_stream_ref& ref) {
-                return util::drain_response_stream(ref).then(
-                  [ref, id, accept_no_content](iobuf&& res) {
-                      auto status = ref->get_headers().result();
-                      using enum boost::beast::http::status;
-                      if (const auto is_no_content_and_accepted
-                          = status == no_content && accept_no_content;
-                          status != ok && !is_no_content_and_accepted) {
-                          vlog(
-                            s3_log.warn,
-                            "S3 PUT request failed for key {}: {} {:l}",
-                            id,
-                            status,
-                            ref->get_headers());
-                          const auto content_type
-                            = util::get_response_content_type(
-                              ref->get_headers());
-                          return parse_rest_error_response<>(
-                            content_type, status, std::move(res));
-                      }
-                      return ss::now();
-                  });
+                return http::drain(ref).then([ref, id, accept_no_content](
+                                               iobuf&& res) {
+                    auto status = ref->get_headers().result();
+                    using enum boost::beast::http::status;
+                    if (const auto is_no_content_and_accepted
+                        = status == no_content && accept_no_content;
+                        status != ok && !is_no_content_and_accepted) {
+                        vlog(
+                          s3_log.warn,
+                          "S3 PUT request failed for key {}: {} {:l}",
+                          id,
+                          status,
+                          ref->get_headers());
+                        const auto content_type
+                          = util::get_response_content_type(ref->get_headers());
+                        return parse_rest_error_response<>(
+                          content_type, status, std::move(res));
+                    }
+                    return ss::now();
+                });
             })
             .handle_exception_type(
               [](const ss::abort_requested_exception& err) {
@@ -1030,7 +1029,7 @@ ss::future<s3_client::list_bucket_result> s3_client::do_list_objects_v2(
                       header);
                     // In the error path we drain the response stream fully, the
                     // error response should not be very large.
-                    return util::drain_chunked_response_stream(resp).then(
+                    return http::drain(resp).then(
                       [result = header.result(), content_type](iobuf buf) {
                           return parse_rest_error_response<list_bucket_result>(
                             content_type, result, std::move(buf));
@@ -1089,7 +1088,7 @@ ss::future<> s3_client::do_delete_object(
     vlog(s3_log.trace, "send https request:\n{}", header.value());
     return _client.request(std::move(header.value()), timeout)
       .then([key](const http::client::response_stream_ref& ref) {
-          return util::drain_response_stream(ref).then([ref, key](iobuf&& res) {
+          return http::drain(ref).then([ref, key](iobuf&& res) {
               auto status = ref->get_headers().result();
               if (
                 status != boost::beast::http::status::ok
@@ -1190,25 +1189,24 @@ auto s3_client::do_delete_objects(
                    .finally([&] { return to_delete.close(); });
              })
       .then([](const http::client::response_stream_ref& response) {
-          return util::drain_response_stream(response).then(
-            [response](iobuf&& res) {
-                auto status = response->get_headers().result();
-                if (status != boost::beast::http::status::ok) {
-                    const auto content_type = util::get_response_content_type(
-                      response->get_headers());
-                    return parse_rest_error_response<delete_objects_result>(
-                      content_type, status, std::move(res));
-                }
-                auto parse_result = iobuf_to_delete_objects_result(
-                  std::move(res));
-                if (std::holds_alternative<client::delete_objects_result>(
-                      parse_result)) {
-                    return ss::make_ready_future<delete_objects_result>(
-                      std::get<client::delete_objects_result>(parse_result));
-                }
-                return ss::make_exception_future<delete_objects_result>(
-                  std::get<rest_error_response>(parse_result));
-            });
+          return http::drain(response).then([response](iobuf&& res) {
+              auto status = response->get_headers().result();
+              if (status != boost::beast::http::status::ok) {
+                  const auto content_type = util::get_response_content_type(
+                    response->get_headers());
+                  return parse_rest_error_response<delete_objects_result>(
+                    content_type, status, std::move(res));
+              }
+              auto parse_result = iobuf_to_delete_objects_result(
+                std::move(res));
+              if (std::holds_alternative<client::delete_objects_result>(
+                    parse_result)) {
+                  return ss::make_ready_future<delete_objects_result>(
+                    std::get<client::delete_objects_result>(parse_result));
+              }
+              return ss::make_exception_future<delete_objects_result>(
+                std::get<rest_error_response>(parse_result));
+          });
       });
 }
 

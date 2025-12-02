@@ -527,9 +527,7 @@ remote::download_object(download_request download_request) {
         if (resp) {
             vlog(ctxlog.debug, "Receive OK response from {}", path);
             try {
-                auto buffer
-                  = co_await cloud_storage_clients::util::drain_response_stream(
-                    resp.value());
+                auto buffer = co_await http::drain(resp.value());
                 download_request.payload.append_fragments(std::move(buffer));
                 transfer_details.on_success();
                 co_return download_result::success;
