@@ -327,6 +327,11 @@ bool client::response_stream::is_header_done() const {
 
 /// Access response headers (should only be called if is_header_done() == true)
 const client::response_header& client::response_stream::get_headers() const {
+    if (!is_header_done()) {
+        throw std::runtime_error(
+          "invariant violation: response headers are not available yet");
+    }
+
     return _parser.get();
 }
 
