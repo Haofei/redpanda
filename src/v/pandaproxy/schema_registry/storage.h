@@ -29,6 +29,7 @@
 #include "pandaproxy/schema_registry/seq_writer.h"
 #include "pandaproxy/schema_registry/sharded_store.h"
 #include "pandaproxy/schema_registry/types.h"
+#include "ssx/sformat.h"
 #include "storage/record_batch_builder.h"
 #include "strings/string_switch.h"
 
@@ -339,6 +340,7 @@ void rjson_serialize(::json::iobuf_writer<Buffer>& w, const schema_value& val) {
         w.Key("references");
         ::json::rjson_serialize(w, val.schema.def().refs());
     }
+    ::json::rjson_serialize(w, val.schema.def().meta());
     w.Key("schema");
     ::json::rjson_serialize(w, val.schema.def().raw());
     w.Key("deleted");
@@ -362,6 +364,9 @@ class schema_value_handler final : public json::base_handler<Encoding> {
         reference_name,
         reference_subject,
         reference_version,
+        metadata,
+        metadata_properties,
+        metadata_property,
     };
     state _state = state::empty;
 
@@ -372,6 +377,7 @@ class schema_value_handler final : public json::base_handler<Encoding> {
         typename schema_definition::references refs;
         std::optional<schema_metadata> metadata;
     };
+    ss::sstring metadata_property_key;
     mutable_schema _schema;
 
 public:
@@ -390,6 +396,7 @@ public:
                                      .match("subject", state::subject)
                                      .match("version", state::version)
                                      .match("schemaType", state::type)
+                                     .match("metadata", state::metadata)
                                      .match("schema", state::definition)
                                      .match("id", state::id)
                                      .match("deleted", state::deleted)
@@ -411,6 +418,20 @@ public:
             }
             return s.has_value();
         }
+        case state::metadata: {
+            std::optional<state> s{
+              string_switch<std::optional<state>>(sv)
+                .match("properties", state::metadata_properties)
+                .default_match(std::nullopt)};
+            if (s.has_value()) {
+                _state = *s;
+            }
+            return s.has_value();
+        }
+        case state::metadata_property: {
+            metadata_property_key = ss::sstring{sv};
+            return true;
+        }
         case state::empty:
         case state::subject:
         case state::version:
@@ -422,6 +443,7 @@ public:
         case state::reference_name:
         case state::reference_subject:
         case state::reference_version:
+        case state::metadata_properties:
             return false;
         }
         return false;
@@ -454,6 +476,9 @@ public:
         case state::reference:
         case state::reference_name:
         case state::reference_subject:
+        case state::metadata:
+        case state::metadata_properties:
+        case state::metadata_property:
             return false;
         }
         return false;
@@ -478,6 +503,9 @@ public:
         case state::reference_name:
         case state::reference_subject:
         case state::reference_version:
+        case state::metadata:
+        case state::metadata_properties:
+        case state::metadata_property:
             return false;
         }
         return false;
@@ -514,6 +542,11 @@ public:
             _state = state::reference;
             return true;
         }
+        case state::metadata_property: {
+            _schema.metadata->properties->insert_or_assign(
+              std::move(metadata_property_key), ss::sstring{sv});
+            return true;
+        }
         case state::empty:
         case state::object:
         case state::version:
@@ -522,6 +555,37 @@ public:
         case state::references:
         case state::reference:
         case state::reference_version:
+        case state::metadata:
+        case state::metadata_properties:
+            return false;
+        }
+        return false;
+    }
+
+    bool Null() {
+        switch (_state) {
+        case state::metadata: {
+            _state = state::object;
+            return true;
+        }
+        case state::metadata_properties: {
+            _state = state::metadata;
+            return true;
+        }
+        case state::empty:
+        case state::object:
+        case state::subject:
+        case state::version:
+        case state::type:
+        case state::id:
+        case state::definition:
+        case state::deleted:
+        case state::references:
+        case state::reference:
+        case state::reference_name:
+        case state::reference_subject:
+        case state::reference_version:
+        case state::metadata_property:
             return false;
         }
         return false;
@@ -538,6 +602,15 @@ public:
             _state = state::reference;
             return true;
         }
+        case state::metadata: {
+            _schema.metadata.emplace();
+            return true;
+        }
+        case state::metadata_properties: {
+            _schema.metadata->properties.emplace();
+            _state = state::metadata_property;
+            return true;
+        }
         case state::object:
         case state::subject:
         case state::version:
@@ -549,6 +622,7 @@ public:
         case state::reference_name:
         case state::reference_subject:
         case state::reference_version:
+        case state::metadata_property:
             return false;
         }
         return false;
@@ -571,6 +645,15 @@ public:
             const auto& ref{_schema.refs.back()};
             return !ref.name.empty() && ref.sub != invalid_subject
                    && ref.version != invalid_schema_version;
+        }
+        case state::metadata: {
+            _state = state::object;
+            return true;
+        }
+        case state::metadata_properties:
+        case state::metadata_property: {
+            _state = state::metadata;
+            return true;
         }
         case state::empty:
         case state::subject:

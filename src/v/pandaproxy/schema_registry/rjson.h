@@ -37,4 +37,24 @@ void rjson_serialize(
     w.EndObject();
 }
 
+template<typename Writer>
+void rjson_serialize(
+  Writer& w,
+  const std::optional<pandaproxy::schema_registry::schema_metadata>& meta) {
+    if (meta.has_value()) {
+        w.Key("metadata");
+        w.StartObject();
+        if (meta->properties.has_value()) {
+            w.Key("properties");
+            w.StartObject();
+            for (const auto& [k, v] : meta->properties.value()) {
+                w.Key(k);
+                ::json::rjson_serialize(w, v);
+            }
+            w.EndObject();
+        }
+        w.EndObject();
+    }
+}
+
 } // namespace json

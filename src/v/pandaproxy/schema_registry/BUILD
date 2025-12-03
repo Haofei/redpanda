@@ -225,6 +225,7 @@ redpanda_cc_library(
         "//src/v/security/audit",
         "//src/v/security/audit:types",
         "//src/v/ssx:semaphore",
+        "//src/v/ssx:sformat",
         "//src/v/strings:string_switch",
         "//src/v/strings:utf8",
         "//src/v/utils:adjustable_semaphore",
