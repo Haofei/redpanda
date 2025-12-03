@@ -30,6 +30,7 @@ redpanda_cc_library(
     deps = [
         ":filter",
         ":logger",
+        ":meta",
         "//src/v/cloud_topics:log_reader_config",
         "//src/v/cloud_topics/level_one/common:abstract_io",
         "//src/v/cloud_topics/level_one/frontend_reader:reader",
@@ -84,6 +85,7 @@ redpanda_cc_library(
         "//src/v/cloud_topics/level_one:__subpackages__",
     ],
     deps = [
+        "//src/v/cloud_topics/level_one/metastore:offset_interval_set",
         "//src/v/compaction:filter",
         "//src/v/compaction:key_offset_map",
         "//src/v/compaction:utils",
@@ -115,6 +117,7 @@ redpanda_cc_library(
         "//src/v/cloud_topics/level_one/common:file_io",
         "//src/v/cloud_topics/level_one/metastore",
         "//src/v/cloud_topics/level_one/metastore:replicated_metastore",
+        "//src/v/cluster",
         "//src/v/compaction:key_offset_map",
         "//src/v/compaction:reducer",
         "//src/v/config",
@@ -275,7 +278,6 @@ redpanda_cc_library(
         ":worker",
         "//src/v/cloud_topics/level_one/common:file_io",
         "//src/v/cloud_topics/level_one/metastore:replicated_metastore",
-        "//src/v/cluster",
         "//src/v/config",
         "//src/v/container:intrusive",
         "//src/v/model",

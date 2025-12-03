@@ -187,17 +187,24 @@ ss::future<ss::stop_iteration> compaction_source::deduplication_iteration(
         config, _ntp, _tp, _metastore, _io));
 
     auto stats = co_await rdr.consume(
-      compaction_filter{sink, *_map, _ntp}, model::no_timeout);
+      compaction_filter{sink, *_map, _ntp, _removable_tombstone_ranges},
+      model::no_timeout);
     if (stats.has_removed_data()) {
         vlog(
           compaction_log.info,
-          "L1 compaction removing data from CTP {}, stats: {}",
+          "L1 compaction removing data from CTP {}, offset range ({}~{}), "
+          "stats: {}",
+          start_offset,
+          max_offset,
           _ntp,
           stats);
     } else {
         vlog(
-          compaction_log.info,
-          "L1 compaction not removing data from CTP {}, stats: {}",
+          compaction_log.debug,
+          "L1 compaction not removing data from CTP {}, offset range ({}~{}), "
+          "stats: {}",
+          start_offset,
+          max_offset,
           _ntp,
           stats);
     }
