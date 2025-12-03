@@ -218,7 +218,7 @@ ss::future<index_state> deduplicate_segment(
     const bool past_tx_delete_horizon
       = internal::is_past_transaction_batch_delete_horizon(seg, cfg);
     bool may_have_transaction_control_batches = false;
-    bool may_have_transaction_data_batches = false;
+    bool may_have_transaction_data_or_fence_batches = false;
 
     auto is_latest_record = [&map](
                               const model::record_batch& b,
@@ -236,7 +236,7 @@ ss::future<index_state> deduplicate_segment(
                           &probe,
                           past_tx_delete_horizon,
                           &may_have_transaction_control_batches,
-                          &may_have_transaction_data_batches](
+                          &may_have_transaction_data_or_fence_batches](
                            const model::record_batch& b,
                            const model::record& r,
                            bool is_last_record_in_batch) {
@@ -253,7 +253,7 @@ ss::future<index_state> deduplicate_segment(
           may_have_tombstone_records,
           past_tx_delete_horizon,
           may_have_transaction_control_batches,
-          may_have_transaction_data_batches);
+          may_have_transaction_data_or_fence_batches);
     };
 
     auto copy_reducer = internal::copy_data_segment_reducer(
@@ -301,9 +301,9 @@ ss::future<index_state> deduplicate_segment(
     new_idx.may_have_transaction_control_batches
       = may_have_transaction_control_batches;
 
-    // Set may_have_transaction_data_batches
-    new_idx.may_have_transaction_data_batches
-      = may_have_transaction_data_batches;
+    // Set may_have_transaction_data_or_fence_batches
+    new_idx.may_have_transaction_data_or_fence_batches
+      = may_have_transaction_data_or_fence_batches;
 
     if (
       seg->index().may_have_tombstone_records()

@@ -350,8 +350,9 @@ std::ostream& operator<<(std::ostream& o, const index_state& s) {
              << ", self_compact_timestamp:" << s.self_compact_timestamp
              << ", may_have_transaction_control_batches:"
              << s.may_have_transaction_control_batches
-             << ", may_have_transaction_data_batches:"
-             << s.may_have_transaction_data_batches << ", " << s.index << "}";
+             << ", may_have_transaction_data_or_fence_batches:"
+             << s.may_have_transaction_data_or_fence_batches << ", " << s.index
+             << "}";
 }
 
 void index_state::serde_write(iobuf& out) const {
@@ -375,7 +376,7 @@ void index_state::serde_write(iobuf& out) const {
     write(tmp, may_have_tombstone_records);
     write(tmp, self_compact_timestamp);
     write(tmp, may_have_transaction_control_batches);
-    write(tmp, may_have_transaction_data_batches);
+    write(tmp, may_have_transaction_data_or_fence_batches);
 
     crc::crc32c crc;
     crc_extend_iobuf(crc, tmp);
@@ -501,10 +502,11 @@ void read_nested(
         st.may_have_transaction_control_batches = true;
     }
     if (
-      hdr._version >= index_state::may_have_transaction_data_batches_version) {
-        read_nested(p, st.may_have_transaction_data_batches, 0U);
+      hdr._version
+      >= index_state::may_have_transaction_data_or_fence_batches_version) {
+        read_nested(p, st.may_have_transaction_data_or_fence_batches, 0U);
     } else {
-        st.may_have_transaction_data_batches = true;
+        st.may_have_transaction_data_or_fence_batches = true;
     }
 }
 
@@ -574,7 +576,8 @@ index_state::index_state(const index_state& o) noexcept
   , may_have_tombstone_records(o.may_have_tombstone_records)
   , self_compact_timestamp(o.self_compact_timestamp)
   , may_have_transaction_control_batches(o.may_have_transaction_control_batches)
-  , may_have_transaction_data_batches(o.may_have_transaction_data_batches) {}
+  , may_have_transaction_data_or_fence_batches(
+      o.may_have_transaction_data_or_fence_batches) {}
 
 namespace serde_compat {
 uint64_t index_state_serde::checksum(const index_state& r) {

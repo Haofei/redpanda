@@ -160,7 +160,7 @@ public:
       bool may_have_tombstone_records = true,
       std::optional<model::timestamp> self_compact_timestamp = std::nullopt,
       bool may_have_transaction_control_batches = true,
-      bool may_have_transaction_data_batches = true);
+      bool may_have_transaction_data_or_fence_batches = true);
 
     ~segment_index() noexcept = default;
     segment_index(segment_index&&) noexcept = default;
@@ -292,8 +292,8 @@ public:
         return _state.may_have_transaction_control_batches;
     }
 
-    bool may_have_transaction_data_batches() const {
-        return _state.may_have_transaction_data_batches;
+    bool may_have_transaction_data_or_fence_batches() const {
+        return _state.may_have_transaction_data_or_fence_batches;
     }
 
     ss::future<bool> materialize_index();

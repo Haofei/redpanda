@@ -140,7 +140,8 @@ struct index_state
     // Added in the same version.
     static constexpr auto self_compact_timestamp_version = 10;
     static constexpr auto may_have_transaction_control_batches_version = 10;
-    static constexpr auto may_have_transaction_data_batches_version = 11;
+    static constexpr auto may_have_transaction_data_or_fence_batches_version
+      = 11;
 
     static index_state
     make_empty_index(model::offset base_offset, offset_delta_time with_offset);
@@ -237,11 +238,12 @@ struct index_state
     // control batches (abort/commit batches, as well as tx_fence markers).
     bool may_have_transaction_control_batches{true};
 
-    // may_have_transaction_data_batches is `true` by default. It remains
-    // `true` until compaction deduplication/segment data copying is performed
-    // and it is proven that the segment does not contain any transactional
-    // data batches (i.e raft data batches with a transactional bit set).
-    bool may_have_transaction_data_batches{true};
+    // `may_have_transaction_data_or_fence_batches` is `true` by default. It
+    // remains `true` until compaction deduplication/segment data copying is
+    // performed and it is proven that the segment does not contain any
+    // transactional data batches (i.e raft data batches with a transactional
+    // bit set) or tx_fence markers.
+    bool may_have_transaction_data_or_fence_batches{true};
 
     size_t size() const;
 

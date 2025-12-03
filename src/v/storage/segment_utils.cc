@@ -400,7 +400,7 @@ ss::future<storage::index_state> do_copy_segment_data(
     const bool past_tx_delete_horizon
       = internal::is_past_transaction_batch_delete_horizon(seg, cfg);
     bool may_have_transaction_control_batches = false;
-    bool may_have_transaction_data_batches = false;
+    bool may_have_transaction_data_or_fence_batches = false;
 
     auto offset_in_compacted_list =
       [compacted_offsets = std::move(compacted_offsets)](
@@ -421,7 +421,7 @@ ss::future<storage::index_state> do_copy_segment_data(
                           &pb,
                           past_tx_delete_horizon,
                           &may_have_transaction_control_batches,
-                          &may_have_transaction_data_batches](
+                          &may_have_transaction_data_or_fence_batches](
                            const model::record_batch& b,
                            const model::record& r,
                            bool is_last_record_in_batch) {
@@ -438,7 +438,7 @@ ss::future<storage::index_state> do_copy_segment_data(
           may_have_tombstone_records,
           past_tx_delete_horizon,
           may_have_transaction_control_batches,
-          may_have_transaction_data_batches);
+          may_have_transaction_data_or_fence_batches);
     };
 
     auto copy_reducer = copy_data_segment_reducer(
@@ -496,9 +496,9 @@ ss::future<storage::index_state> do_copy_segment_data(
     new_index.may_have_transaction_control_batches
       = may_have_transaction_control_batches;
 
-    // Set may_have_transaction_data_batches
-    new_index.may_have_transaction_data_batches
-      = may_have_transaction_data_batches;
+    // Set may_have_transaction_data_or_fence_batches
+    new_index.may_have_transaction_data_or_fence_batches
+      = may_have_transaction_data_or_fence_batches;
 
     if (
       seg->index().may_have_tombstone_records()
@@ -986,9 +986,9 @@ make_concatenated_segment(
 
     // If any of the segments contain a transactional data batch, then the new
     // index should reflect that.
-    auto new_may_have_transaction_data_batches = std::ranges::any_of(
+    auto new_may_have_transaction_data_or_fence_batches = std::ranges::any_of(
       segments, [](const auto& s) {
-          return s->index().may_have_transaction_data_batches();
+          return s->index().may_have_transaction_data_or_fence_batches();
       });
 
     segment_index index(
@@ -1002,7 +1002,7 @@ make_concatenated_segment(
       new_may_have_tombstone_records,
       new_self_compact_timestamp,
       new_may_have_transaction_control_batches,
-      new_may_have_transaction_data_batches);
+      new_may_have_transaction_data_or_fence_batches);
 
     co_return std::make_tuple(
       ss::make_lw_shared<segment>(
@@ -1415,7 +1415,8 @@ bool has_removable_transaction_batches(
   ss::lw_shared_ptr<segment> seg, const compaction::compaction_config& cfg) {
     // If there are transactional data batches, we will unset the transactional
     // bit during compaction.
-    auto has_data_batches = seg->index().may_have_transaction_data_batches();
+    auto has_data_batches
+      = seg->index().may_have_transaction_data_or_fence_batches();
     // If there are removable control batches, they will be removed during
     // compaction.
     auto has_removable_control_batches

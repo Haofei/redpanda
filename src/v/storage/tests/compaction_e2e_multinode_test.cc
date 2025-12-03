@@ -305,7 +305,8 @@ FIXTURE_TEST(segment_tx_flags, compaction_multinode_test) {
     // Before compaction, segments should by default have these flags as `true`.
     for (const auto& segment : log->segments()) {
         BOOST_REQUIRE(segment->index().may_have_transaction_control_batches());
-        BOOST_REQUIRE(segment->index().may_have_transaction_data_batches());
+        BOOST_REQUIRE(
+          segment->index().may_have_transaction_data_or_fence_batches());
     }
 
     ss::abort_source as;
@@ -332,7 +333,7 @@ FIXTURE_TEST(segment_tx_flags, compaction_multinode_test) {
             BOOST_REQUIRE(
               segment->index().may_have_transaction_control_batches());
             BOOST_REQUIRE(
-              !segment->index().may_have_transaction_data_batches());
+              !segment->index().may_have_transaction_data_or_fence_batches());
         }
     }
 
