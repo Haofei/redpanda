@@ -119,6 +119,8 @@ private:
     };
     using migration_reconciliation_states_t
       = absl::flat_hash_map<id, migration_reconciliation_state>;
+    using mrstate_it_t = migration_reconciliation_states_t::iterator;
+    using mrstate_cit_t = migration_reconciliation_states_t::const_iterator;
 
     struct replica_work_state {
         state sought_state;
@@ -204,15 +206,13 @@ private:
     ss::future<> send_rpc(model::node_id node_id);
     ss::future<check_ntp_states_reply>
     check_ntp_states_locally(check_ntp_states_request&& req);
-    void
-    to_advance_if_done(migration_reconciliation_states_t::const_iterator it);
+    void to_advance_if_done(mrstate_cit_t it);
     ss::future<> advance(id migration_id, state sought_state);
     void spawn_advances();
 
     /* topic work */
     void schedule_topic_work_if_partitions_ready(
-      const model::topic_namespace& nt,
-      migration_reconciliation_states_t::const_iterator rs_it);
+      const model::topic_namespace& nt, mrstate_cit_t rs_it);
     void schedule_topic_work(topic_namespace_migration tnm);
     ss::future<topic_work_result>
     // also resulting future cannot throw when co_awaited
@@ -283,20 +283,18 @@ private:
     ss::future<> process_delta(cluster::topic_table_ntp_delta&& delta);
 
     /* helpers */
-    std::optional<backend::migration_reconciliation_states_t::iterator>
+    std::optional<mrstate_it_t>
     get_rstate(id migration, state expected_sought_state);
 
     void update_partition_shard(
       const model::ntp& ntp,
       rwstate_entry& rwstate,
       std::optional<ss::shard_id> new_shard);
-    void mark_migration_step_done_for_ntp(
-      migration_reconciliation_states_t::iterator rs_it, const model::ntp& ntp);
+    void
+    mark_migration_step_done_for_ntp(mrstate_it_t rs_it, const model::ntp& ntp);
     void mark_migration_step_done_for_nt(
-      migration_reconciliation_states_t::iterator rs_it,
-      const model::topic_namespace& nt);
-    ss::future<> drop_migration_reconciliation_rstate(
-      migration_reconciliation_states_t::const_iterator rs_it);
+      mrstate_it_t rs_it, const model::topic_namespace& nt);
+    ss::future<> drop_migration_reconciliation_rstate(mrstate_cit_t rs_it);
     ss::future<> clear_tstate(
       id migration_id, const topic_map_t::value_type& topic_map_entry);
     void clear_tstate_belongings(
@@ -304,9 +302,7 @@ private:
       const topic_reconciliation_state& tstate);
     void remove_from_topic_migration_map(
       const model::topic_namespace& nt, id migration);
-    void erase_tstate_if_done(
-      migration_reconciliation_states_t::iterator rs_it,
-      topic_map_t::iterator it);
+    void erase_tstate_if_done(mrstate_it_t rs_it, topic_map_t::iterator it);
     result<partition_consumer_group_map_t, errc>
     build_migration_group_map(const migration_metadata& metadata) const;
 

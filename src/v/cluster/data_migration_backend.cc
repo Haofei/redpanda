@@ -500,8 +500,7 @@ ss::future<> backend::loop_once() {
 }
 
 void backend::schedule_topic_work_if_partitions_ready(
-  const model::topic_namespace& tp_ns,
-  migration_reconciliation_states_t::const_iterator rs_it) {
+  const model::topic_namespace& tp_ns, mrstate_cit_t rs_it) {
     const auto& outstanding_topics = rs_it->second.outstanding_topics;
     auto it = outstanding_topics.find(tp_ns);
     if (it == outstanding_topics.end()) {
@@ -638,7 +637,7 @@ ss::future<> backend::work_once() {
 
 void backend::wakeup() { _sem.signal(1 - _sem.available_units()); }
 
-std::optional<backend::migration_reconciliation_states_t::iterator>
+std::optional<backend::mrstate_it_t>
 backend::get_rstate(id migration, state expected_sought_state) {
     auto rs_it = _migration_states.find(migration);
     if (rs_it == _migration_states.end()) {
@@ -654,7 +653,7 @@ backend::get_rstate(id migration, state expected_sought_state) {
 }
 
 void backend::mark_migration_step_done_for_ntp(
-  migration_reconciliation_states_t::iterator rs_it, const model::ntp& ntp) {
+  mrstate_it_t rs_it, const model::ntp& ntp) {
     auto& rs_topics = rs_it->second.outstanding_topics;
     auto rs_topic_it = rs_topics.find({ntp.ns, ntp.tp.topic});
     if (rs_topic_it != rs_topics.end()) {
@@ -681,8 +680,7 @@ void backend::mark_migration_step_done_for_ntp(
 }
 
 void backend::mark_migration_step_done_for_nt(
-  migration_reconciliation_states_t::iterator rs_it,
-  const model::topic_namespace& nt) {
+  mrstate_it_t rs_it, const model::topic_namespace& nt) {
     auto& rs_topics = rs_it->second.outstanding_topics;
     auto rs_topic_it = rs_topics.find(nt);
     if (rs_topic_it != rs_topics.end()) {
@@ -706,7 +704,7 @@ void backend::remove_from_topic_migration_map(
 }
 
 void backend::erase_tstate_if_done(
-  migration_reconciliation_states_t::iterator rs_it, topic_map_t::iterator it) {
+  mrstate_it_t rs_it, topic_map_t::iterator it) {
     auto& tstate = it->second;
     bool done
       = tstate.outstanding_partitions.empty()
@@ -1266,8 +1264,7 @@ ss::future<errc> backend::do_unmount_topic(
     co_return errc::topic_operation_error;
 }
 
-void backend::to_advance_if_done(
-  migration_reconciliation_states_t::const_iterator it) {
+void backend::to_advance_if_done(mrstate_cit_t it) {
     auto& rs = it->second;
     if (rs.outstanding_topics.empty()) {
         auto sought_state = *rs.scope.sought_state;
@@ -1682,8 +1679,8 @@ void backend::clear_tstate_belongings(
     _topic_work_to_retry.erase(tnm);
 }
 
-ss::future<> backend::drop_migration_reconciliation_rstate(
-  migration_reconciliation_states_t::const_iterator rs_it) {
+ss::future<>
+backend::drop_migration_reconciliation_rstate(mrstate_cit_t rs_it) {
     const auto& topics = rs_it->second.outstanding_topics;
 
     co_await ss::parallel_for_each(
