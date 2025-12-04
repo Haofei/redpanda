@@ -106,6 +106,7 @@ ss::future<> app::construct(
       ss::sharded_parameter([&] { return &remote->local(); }),
       bucket,
       &controller->get_health_monitor(),
+      &controller->get_controller_stm(),
       &controller->get_topics_state());
 
     co_await construct_service(housekeeper_manager, ss::sharded_parameter([&] {

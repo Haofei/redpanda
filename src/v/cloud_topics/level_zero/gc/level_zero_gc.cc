@@ -150,8 +150,10 @@ class cluster_support_impl : public level_zero_gc::cluster_support {
 public:
     explicit cluster_support_impl(
       seastar::sharded<cluster::health_monitor_frontend>* health_monitor,
+      seastar::sharded<cluster::controller_stm>* controller_stm,
       seastar::sharded<cluster::topic_table>* topic_table)
       : health_monitor_(health_monitor)
+      , controller_stm_(controller_stm)
       , topic_table_(topic_table) {}
 
     seastar::future<std::expected<partitions_snapshot, std::string>>
@@ -161,8 +163,17 @@ public:
         // this revision is for detecting concurrent modifications
         const auto iter_start_rev = topic_table.topics_map_revision();
 
+        /*
+         * The controller stm last applied offset is used, as opposed to using
+         * the topic table last applied offset, because we need the version to
+         * move forward. the controller stm offset is a at the top of the stm
+         * hierarchy and is consistent with the topic table last applied offset.
+         */
         partitions_snapshot snap;
-        snap.last_applied = topic_table.last_applied_revision();
+        snap.last_applied = co_await controller_stm_->invoke_on(
+          cluster::controller_stm_shard, [](auto& stm) {
+              return model::revision_id(stm.get_last_applied_offset());
+          });
 
         for (const auto& topic : topic_table.topics_map()) {
             // we only care about cloud topics
@@ -268,6 +279,7 @@ public:
 
 private:
     seastar::sharded<cluster::health_monitor_frontend>* health_monitor_;
+    seastar::sharded<cluster::controller_stm>* controller_stm_;
     seastar::sharded<cluster::topic_table>* topic_table_;
 };
 
@@ -287,12 +299,14 @@ level_zero_gc::level_zero_gc(
   cloud_io::remote* remote,
   cloud_storage_clients::bucket_name bucket,
   seastar::sharded<cluster::health_monitor_frontend>* health_monitor,
+  seastar::sharded<cluster::controller_stm>* controller_stm,
   seastar::sharded<cluster::topic_table>* topic_table,
   level_zero_gc_config config)
   : level_zero_gc(
       config,
       std::make_unique<object_storage_remote_impl>(remote, std::move(bucket)),
-      std::make_unique<cluster_support_impl>(health_monitor, topic_table)) {}
+      std::make_unique<cluster_support_impl>(
+        health_monitor, controller_stm, topic_table)) {}
 
 void level_zero_gc::start() {
     vlog(cd_log.info, "Starting cloud topics L0 GC worker");
