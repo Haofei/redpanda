@@ -1920,11 +1920,8 @@ tx_gateway_frontend::handle_abort_tx(
                 outcome->set_value(tx::errc::none);
                 co_return r.value();
             }
-            vlogl(
-              txlog,
-              ssx::is_shutdown_exception(std::current_exception())
-                ? ss::log_level::debug
-                : ss::log_level::error,
+            vlog(
+              txlog.warn,
               "[tx_id={}] error aborting transaction: {} - {}",
               tx.id,
               tx,
