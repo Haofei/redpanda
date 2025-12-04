@@ -438,7 +438,8 @@ message PlainConfig {
     // PLAIN username
     string username = 1;
     // Password
-    string password = 2 [(google.api.field_behavior) = INPUT_ONLY];
+    string password = 2
+        [(google.api.field_behavior) = INPUT_ONLY, debug_redact = true];
     // Indicates that the password has been set
     bool password_set = 3 [(google.api.field_behavior) = OUTPUT_ONLY];
     // Timestamp of when the password was last set - only valid if password_set
@@ -451,7 +452,8 @@ message ScramConfig {
     // SCRAM username
     string username = 1;
     // Password
-    string password = 2 [(google.api.field_behavior) = INPUT_ONLY];
+    string password = 2
+        [(google.api.field_behavior) = INPUT_ONLY, debug_redact = true];
     // Indicates that the password has been set
     bool password_set = 3 [(google.api.field_behavior) = OUTPUT_ONLY];
     // Timestamp of when the password was last set - only valid if password_set

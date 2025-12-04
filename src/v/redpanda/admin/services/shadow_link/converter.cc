@@ -1017,6 +1017,13 @@ chunked_vector<shadow_topic> create_shadow_topics(
           return model_to_shadow_topic(p.first, p.second, status_report);
       });
 
+    std::ranges::sort(
+      shadow_topics.begin(),
+      shadow_topics.end(),
+      [](const shadow_topic& a, const shadow_topic& b) {
+          return a.get_name() < b.get_name();
+      });
+
     return shadow_topics;
 }
 
@@ -1215,7 +1222,10 @@ chunked_vector<topic_partition_information> status_to_partition_information(
         info.set_high_watermark(report.shadow_partition_high_watermark);
         resp.emplace_back(std::move(info));
     }
-
+    std::ranges::sort(
+      resp,
+      std::ranges::less{},
+      &topic_partition_information::get_partition_id);
     return resp;
 }
 } // namespace
