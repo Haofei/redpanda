@@ -105,12 +105,15 @@ ss::future<std::optional<iobuf>> database::get(std::string_view target) {
 }
 
 ss::future<iterator> database::create_iterator() {
-    auto iter = co_await _impl->create_iterator();
+    auto iter = co_await _impl->create_iterator(std::nullopt);
     co_return iterator(std::move(iter));
 }
 
-write_batch::write_batch()
-  : _batch(ss::make_lw_shared<db::memtable>()) {}
+write_batch database::create_write_batch() { return write_batch{_impl.get()}; }
+
+write_batch::write_batch(db::impl* db)
+  : _batch(ss::make_lw_shared<db::memtable>())
+  , _db(db) {}
 write_batch::write_batch(write_batch&&) noexcept = default;
 write_batch& write_batch::operator=(write_batch&&) noexcept = default;
 write_batch::~write_batch() noexcept = default;
@@ -131,6 +134,24 @@ void write_batch::remove(std::string_view key, model::offset offset) {
       .type = internal::value_type::tombstone,
     });
     _batch->remove(std::move(k));
+}
+
+ss::future<std::optional<iobuf>> write_batch::get(std::string_view target) {
+    auto key = internal::key::encode({
+      .key = target,
+      .seqno = internal::sequence_number::max(),
+      .type = internal::value_type::value,
+    });
+    auto result = _batch->get(key);
+    if (result.is_missing()) {
+        result = co_await _db->get(key);
+    }
+    co_return std::move(result).take_value();
+}
+
+ss::future<iterator> write_batch::create_iterator() {
+    auto iter = co_await _db->create_iterator(_batch);
+    co_return iterator(std::move(iter));
 }
 
 } // namespace lsm

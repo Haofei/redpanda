@@ -59,18 +59,31 @@ public:
 
     // The maximum offset that has been persisted to durable storage.
     model::offset max_persisted_offset() const;
+
     // The maximum offset that has been applied to the database (persisted or
     // not).
     model::offset max_applied_offset() const;
 
     // Apply a batch of data atomically to the database.
+    //
+    // Any gets/iteration on the write batch must be finished before calling
+    // this method.
     ss::future<> apply(write_batch);
 
     // Lookup a value in the database
     ss::future<std::optional<iobuf>> get(std::string_view key);
 
     // Create an iterator over the database.
+    //
+    // This iterator gives snapshot isolation, so writes applied after
+    // this future completes will not be seen by the iterator.
     ss::future<iterator> create_iterator();
+
+    // Create a write batch that can be applied to the the database.
+    //
+    // This write batch can only be used with this database and it's lifetime is
+    // tied to this database as well.
+    write_batch create_write_batch();
 
 private:
     std::unique_ptr<db::impl> _impl;
@@ -85,9 +98,11 @@ public:
     iterator& operator=(const iterator&) = delete;
     iterator& operator=(iterator&&) noexcept;
     ~iterator() noexcept;
+
     // An iterator is either positioned at a key/value pair, or
     // not valid. This method returns true iff the iterator is valid.
     bool valid() const;
+
     // Position at the first key in the source. The iterator is valid()
     // after this call iff the source is not empty.
     ss::future<> seek_to_first();
@@ -124,10 +139,14 @@ private:
     std::unique_ptr<internal::iterator> _impl;
 };
 
-// A batch of data that can be applied to the database.
+// A batch of data that can be applied atomically to the database.
+//
+// In addition to being a staging ground for write operations,
+// the write batch also supports reading the staged data as a view over the
+// existing database so that you can Read-Your-Own-Writes before data is
+// committed to the LSM tree.
 class write_batch {
 public:
-    write_batch();
     write_batch(const write_batch&) = delete;
     write_batch(write_batch&&) noexcept;
     write_batch& operator=(const write_batch&) = delete;
@@ -144,9 +163,32 @@ public:
     // REQUIRES: offsets must be monotonically increasing as added to the batch.
     void remove(std::string_view key, model::offset);
 
+    // Lookup a value in the database as if the current write batch was applied.
+    //
+    // The returned future must finish resolving before the write_batch is
+    // applied to the database.
+    ss::future<std::optional<iobuf>> get(std::string_view key);
+
+    // Create an iterator over the database as if the current write batch was
+    // applied.
+    //
+    // This iterator gives snapshot isolation, so  writes applied after
+    // this future completes will not be seen by the iterator as long as
+    // these writes do not have the same offset.
+    //
+    // The resulting iterator is safe to use concurrently with additional writes
+    // being applied to the batch.
+    //
+    // The returned iterator must not be used after the write_batch is applied
+    // to the database.
+    ss::future<iterator> create_iterator();
+
 private:
+    explicit write_batch(db::impl*);
+
     friend class database;
     ss::lw_shared_ptr<db::memtable> _batch;
+    db::impl* _db;
 };
 
 } // namespace lsm

@@ -475,7 +475,7 @@ private:
         stats.bytes_read = 0;
 
         // Perform sequential iteration
-        auto iter = co_await _db->create_iterator();
+        auto iter = co_await _db->create_iterator(std::nullopt);
         co_await iter->seek_to_first();
 
         size_t count = 0;
@@ -667,7 +667,7 @@ private:
 
         // Build a set of all keys from iterator
         std::map<ss::sstring, iobuf> db_keys;
-        auto iter = co_await _db->create_iterator();
+        auto iter = co_await _db->create_iterator(std::nullopt);
         co_await iter->seek_to_first();
 
         while (iter->valid()) {

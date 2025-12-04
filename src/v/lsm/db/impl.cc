@@ -186,13 +186,22 @@ ss::future<lookup_result> impl::get(internal::key_view key) {
     co_return result;
 }
 
-ss::future<std::unique_ptr<internal::iterator>> impl::create_iterator() {
-    auto iter = co_await create_internal_iterator();
+ss::future<std::unique_ptr<internal::iterator>>
+impl::create_iterator(ss::optimized_optional<ss::lw_shared_ptr<memtable>> wb) {
+    auto iter = co_await create_internal_iterator(wb->get());
+    internal::sequence_number iter_seqno = max_applied_seqno();
+    if (wb) {
+        auto wb_seqno = (*wb)->last_seqno().value_or(iter_seqno);
+        vassert(
+          wb_seqno > iter_seqno,
+          "write memtable seqno must be greater than the current "
+          "max_applied_seqno: {} > {}",
+          wb_seqno,
+          iter_seqno);
+        iter_seqno = wb_seqno;
+    }
     co_return create_db_iterator(
-      std::move(iter),
-      max_applied_seqno(),
-      _opts,
-      [this](internal::key_view key) {
+      std::move(iter), iter_seqno, _opts, [this](internal::key_view key) {
           return _versions->current()->record_read_sample(key).then(
             [this](bool compaction_needed) {
                 if (compaction_needed) {
@@ -203,8 +212,11 @@ ss::future<std::unique_ptr<internal::iterator>> impl::create_iterator() {
 }
 
 ss::future<std::unique_ptr<internal::iterator>>
-impl::create_internal_iterator() {
+impl::create_internal_iterator(ss::optimized_optional<memtable*> wb) {
     chunked_vector<std::unique_ptr<internal::iterator>> list;
+    if (wb) {
+        list.push_back((*wb)->create_iterator());
+    }
     list.push_back(_mem->create_iterator());
     if (_imm) {
         list.push_back((*_imm)->create_iterator());

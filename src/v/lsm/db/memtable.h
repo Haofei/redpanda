@@ -68,7 +68,8 @@ public:
 
     // Create an iterator for this memtable.
     //
-    // This iterator is safe to use in face of concurrent updates
+    // This iterator is safe to use in face of concurrent updates, but users can
+    // see newer values that are added since the iterator is created.
     std::unique_ptr<internal::iterator> create_iterator();
 
     // The approximate amount of memory used for this memtable.

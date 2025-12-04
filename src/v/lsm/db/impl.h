@@ -57,10 +57,12 @@ public:
     // Get a key from the database
     ss::future<lookup_result> get(internal::key_view);
 
-    // Create an iterator over the database. Note that this iterator
-    // results in ALL entries from the database, a deduplicating iterator
-    // needs to be added on top to give a traditional iterator view.
-    ss::future<std::unique_ptr<internal::iterator>> create_iterator();
+    // Create an interator over the database.
+    //
+    // If a non-null memtable is passed in, then a frozen state of the memtable
+    // is applied ontop of the existing database.
+    ss::future<std::unique_ptr<internal::iterator>>
+      create_iterator(ss::optimized_optional<ss::lw_shared_ptr<memtable>>);
 
     // Flush any pending state in memtables to disk.
     ss::future<> flush();
@@ -72,7 +74,14 @@ public:
     ss::future<> close();
 
 private:
-    ss::future<std::unique_ptr<internal::iterator>> create_internal_iterator();
+    // Create an iterator over the database. Note that this iterator
+    // results in ALL entries from the database, a deduplicating iterator
+    // needs to be added on top to give a traditional iterator view.
+    //
+    // If a non-null memtable is passed in, then a frozen state of the memtable
+    // is applied ontop of the existing database.
+    ss::future<std::unique_ptr<internal::iterator>>
+      create_internal_iterator(ss::optimized_optional<memtable*>);
 
     ss::future<> recover();
 
