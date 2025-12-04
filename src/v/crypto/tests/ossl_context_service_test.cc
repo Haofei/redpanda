@@ -20,11 +20,6 @@
 #include "ssx/thread_worker.h"
 #include "test_utils/test.h"
 #include "test_values.h"
-#include "thirdparty/openssl/crypto.h"
-#include "thirdparty/openssl/evp.h"
-#include "thirdparty/openssl/provider.h"
-#include "thirdparty/openssl/ssl.h"
-#include "thirdparty/openssl/types.h"
 
 #include <seastar/core/file-types.hh>
 #include <seastar/core/future.hh>
@@ -33,6 +28,11 @@
 #include <seastar/util/log.hh>
 
 #include <gtest/gtest.h>
+#include <openssl/crypto.h>
+#include <openssl/evp.h>
+#include <openssl/provider.h>
+#include <openssl/ssl.h>
+#include <openssl/types.h>
 
 #include <cstdlib>
 
