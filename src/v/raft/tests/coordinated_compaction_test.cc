@@ -200,8 +200,10 @@ struct coco_fixture : raft_fixture {
         auto& node0coco
           = node(model::node_id{0}).raft()->get_compaction_coordinator();
         co_await ss::sleep(
-          compaction_coordinator::test_accessor::mcco_getting_delay(node0coco)
-          + compaction_coordinator::test_accessor::mtro_distribution_delay()
+          compaction_coordinator::test_accessor::local_offsets_getting_delay(
+            node0coco)
+          + compaction_coordinator::test_accessor::
+            group_offsets_distribution_delay()
           + 1s);
     }
 };
