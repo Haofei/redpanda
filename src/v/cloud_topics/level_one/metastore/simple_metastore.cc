@@ -606,6 +606,10 @@ std::expected<double, metastore::errc> simple_metastore::get_dirty_ratio(
     for (const auto& extent : prt.extents) {
         total_size += extent.len;
         auto b = extent.base_offset;
+        if (unlikely(b < prt.start_offset)) {
+            // The extent is partially truncated
+            b = prt.start_offset;
+        }
         auto e = extent.last_offset;
         if (!cleaned_ranges.covers(b, e)) {
             dirty_size += extent.len;
