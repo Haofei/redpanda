@@ -1,4 +1,5 @@
 load("@rules_go//go:def.bzl", "go_binary", "go_library")
+load("@rules_shell//shell:sh_binary.bzl", "sh_binary")
 
 go_library(
     name = "rpk_lib",
@@ -22,4 +23,18 @@ go_binary(
         "github.com/redpanda-data/redpanda/src/go/rpk/pkg/cli/version.buildTime": "{FORMATTED_DATE}",
         "github.com/redpanda-data/redpanda/src/go/rpk/pkg/cli/container/common.tag": "{STABLE_GIT_LATEST_TAG}",
     },
+)
+
+sh_binary(
+    name = "rpk_wrapper",
+    srcs = ["rpk_wrapper.sh"],
+    args = [
+        "$(rootpath :rpk)",
+        "$(rootpath @seastar//:iotune)",
+    ],
+    data = [
+        ":rpk",
+        "@seastar//:iotune",
+    ],
+    visibility = ["//visibility:public"],
 )
