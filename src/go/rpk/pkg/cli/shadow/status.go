@@ -321,7 +321,7 @@ func fromDataplaneShadowLink(
 	for _, topicResp := range topicDetails {
 		ts := topicStatus{
 			Name:  topicResp.GetTopicName(),
-			ID:    "", // Dataplane API doesn't provide TopicId
+			ID:    "", // TODO: Dataplane API doesn't provide TopicId
 			State: strings.TrimPrefix(topicResp.GetState().String(), "SHADOW_TOPIC_STATE_"),
 		}
 		for _, p := range topicResp.GetPartitions() {

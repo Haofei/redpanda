@@ -155,7 +155,7 @@ func printCloudShadowLinkInfo(link *controlplanev1.ShadowLink) {
 	tw.Print("RESOURCE GROUP ID", link.GetResourceGroupId())
 	tw.Print("SHADOW REDPANDA ID", link.GetShadowRedpandaId())
 	if bss := link.GetClientOptions().GetBootstrapServers(); len(bss) > 0 {
-		tw.Print("BOOTSTRAP SERVERS:", "")
+		tw.Print("BOOTSTRAP SERVERS", "")
 		for _, bs := range bss {
 			tw.Print("", fmt.Sprintf("- %s", bs))
 		}

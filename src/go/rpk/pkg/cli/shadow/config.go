@@ -207,6 +207,7 @@ func generateSampleConfig(cloud bool) *ShadowLinkConfig {
 			ResourceGroupID:  "3f72b1a9-5c4e-4d82-9ab7-1c5f8e9d3a6b",
 		}
 
+		slCfg.ClientOptions.BootstrapServers = nil
 		// This is confusing on Cloud, user is already providing the Redpanda ID.
 		slCfg.ClientOptions.SourceClusterID = ""
 		// Cloud only accepts passwords from the secret store.

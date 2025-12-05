@@ -28,6 +28,15 @@ import (
 	"github.com/spf13/cobra"
 )
 
+// Section header constants for describe output.
+const (
+	secOverview       = "Overview"
+	secClient         = "Client"
+	secTopicSync      = "Topic Sync"
+	secConsumerOffset = "Consumer Offset Sync"
+	secSecurity       = "Security Sync"
+)
+
 func newDescribeCommand(fs afero.Fs, p *config.Params) *cobra.Command {
 	var opts slDescribeOptions
 	cmd := &cobra.Command{
@@ -126,14 +135,6 @@ func (o *slDescribeOptions) defaultOrAll() {
 }
 
 func printShadowLinkDescription(link *adminv2.ShadowLink, opts slDescribeOptions) {
-	const (
-		secOverview       = "Overview"
-		secClient         = "Client"
-		secTopicSync      = "Topic Sync"
-		secConsumerOffset = "Consumer Offset Sync"
-		secSecurity       = "Security Sync"
-	)
-
 	sections := out.NewSections(
 		out.ConditionalSectionHeaders(map[string]bool{
 			secOverview:       opts.overview,
@@ -168,14 +169,6 @@ func printShadowLinkDescription(link *adminv2.ShadowLink, opts slDescribeOptions
 }
 
 func printCloudShadowLinkDescription(link *controlplanev1.ShadowLink, opts slDescribeOptions) {
-	const (
-		secOverview       = "Overview"
-		secClient         = "Client"
-		secTopicSync      = "Topic Sync"
-		secConsumerOffset = "Consumer Offset Sync"
-		secSecurity       = "Security Sync"
-	)
-
 	sections := out.NewSections(
 		out.ConditionalSectionHeaders(map[string]bool{
 			secOverview:       opts.overview,
