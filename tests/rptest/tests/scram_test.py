@@ -27,6 +27,7 @@ from ducktape.services.service import Service
 from ducktape.utils.util import wait_until
 from requests.exceptions import HTTPError
 
+from rptest.utils.mode_checks import in_fips_environment
 from rptest.clients.kafka_cli_tools import KafkaCliTools, KafkaCliToolsError
 from rptest.clients.kcl import RawKCL
 from rptest.clients.python_librdkafka import PythonLibrdkafka
@@ -57,13 +58,21 @@ class BaseScramTest(RedpandaTest):
     def __init__(self, test_context, **kwargs):
         super(BaseScramTest, self).__init__(test_context, **kwargs)
 
-    def update_user(self, username, quote: bool = True):
+    def update_user(
+        self,
+        username,
+        quote: bool = True,
+        password=None,
+        expected_status_code=200,
+        err_msg=None,
+    ):
         def gen(length):
             return "".join(random.choice(string.ascii_letters) for _ in range(length))
 
         if quote:
             username = urllib.parse.quote(username, safe="")
-        password = gen(20)
+        if password is None:
+            password = gen(20)
 
         controller = self.redpanda.nodes[0]
         url = f"http://{controller.account.hostname}:9644/v1/security/users/{username}"
@@ -74,7 +83,15 @@ class BaseScramTest(RedpandaTest):
         )
         res = requests.put(url, json=data)
 
-        assert res.status_code == 200
+        assert res.status_code == expected_status_code, (
+            f"Expected {expected_status_code}, got {res.status_code}: {res.content}"
+        )
+
+        if err_msg is not None:
+            assert res.json()["message"] == err_msg, (
+                f"{res.json()['message']} != {err_msg}"
+            )
+
         return password
 
     def delete_user(self, username, quote: bool = True):
@@ -953,6 +970,50 @@ class InvalidNewUserStrings(BaseScramTest):
             password=password,
             expected_status_code=400,
             err_msg="Parameter 'password' contained invalid control characters",
+        )
+
+    @cluster(num_nodes=3)
+    def test_short_password(self):
+        """
+        Validate that in fips mode, short scram passwords (<14 chars) are rejected with a clean error.
+        In non-fips mode, they should be accepted.
+        """
+        password = "short_pwd"
+        if in_fips_environment():
+            expected_status_code = 400
+            err_msg = "Password length less than 14 characters"
+        else:
+            expected_status_code = 200
+            err_msg = None
+
+        # Validate failure in fips mode and success in non-fips
+        self.create_user(
+            username="test-user",
+            algorithm="SCRAM-SHA-256",
+            password=password,
+            expected_status_code=expected_status_code,
+            err_msg=err_msg,
+        )
+
+        # Validate success in both - password is long enough
+        self.create_user(
+            username="test-user-2",
+            algorithm="SCRAM-SHA-256",
+            password="sufficiently_long_password",
+        )
+
+        # Validate failure in fips mode and success in non-fips
+        self.update_user(
+            username="test-user-2",
+            password=password,
+            expected_status_code=expected_status_code,
+            err_msg=err_msg,
+        )
+
+        # Validate success in both - password is long enough
+        self.update_user(
+            username="test-user-2",
+            password="other_sufficiently_long_password",
         )
 
 

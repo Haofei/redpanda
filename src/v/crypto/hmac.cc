@@ -189,4 +189,13 @@ bytes hmac(digest_type type, std::string_view key, std::string_view msg) {
     ctx.update(msg);
     return std::move(ctx).final();
 }
+
+bool is_hmac_key_too_short(const bytes_view key) {
+    return internal::fips_enabled() && key.size() < hmac_key_fips_min_bytes;
+}
+
+bool is_scram_password_too_short(const std::string_view password) {
+    return internal::fips_enabled()
+           && password.size() < hmac_key_fips_min_bytes;
+}
 } // namespace crypto
