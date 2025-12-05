@@ -15,7 +15,6 @@ import (
 	"strings"
 
 	controlplanev1 "buf.build/gen/go/redpandadata/cloud/protocolbuffers/go/redpanda/api/controlplane/v1"
-
 	adminv2 "buf.build/gen/go/redpandadata/core/protocolbuffers/go/redpanda/core/admin/v2"
 	"connectrpc.com/connect"
 	"github.com/redpanda-data/redpanda/src/go/rpk/pkg/adminapi"
@@ -174,6 +173,9 @@ func validateParsedShadowLinkConfig(slCfg *ShadowLinkConfig) error {
 	if tls := slCfg.ClientOptions.TLSSettings; tls != nil && tls.TLSFileSettings != nil && tls.TLSPEMSettings != nil {
 		return errors.New("only one of TLS file settings or PEM settings can be provided")
 	}
+	if auth := slCfg.ClientOptions.AuthenticationConfiguration; auth != nil && auth.ScramConfiguration != nil && auth.PlainConfiguration != nil {
+		return errors.New("only one of scram_configuration or plain_configuration can be provided")
+	}
 	if ts := slCfg.TopicMetadataSyncOptions; ts != nil {
 		var count int
 		if ts.StartAtLatest != nil {
@@ -189,29 +191,42 @@ func validateParsedShadowLinkConfig(slCfg *ShadowLinkConfig) error {
 			return errors.New("only one of start_at_latest, start_at_earliest, or start_at_timestamp can be provided")
 		}
 	}
-	if slc := slCfg.CloudOptions; slc != nil {
-		if slc.ShadowRedpandaID == "" {
-			return errors.New("shadow_redpanda_id is required in cloud options")
-		}
-		if slc.ShadowRedpandaID == slc.SourceRedpandaID {
-			return errors.New("shadow_redpanda_id and source_redpanda_id cannot be the same")
-		}
-		if co := slCfg.ClientOptions; co != nil {
-			if co.TLSSettings != nil && co.TLSSettings.TLSFileSettings != nil {
-				return errors.New("TLS file settings are not supported when using cloud options; use tls_pem_settings instead")
-			}
-			if pw := scramPassword(co); pw != "" && !strings.HasPrefix(pw, "${secrets.") {
-				return errors.New("cloud shadow links don't support plain passwords, you must use secrets from the secrets store. See 'rpk security secret --help' for more details")
-			}
-		}
+
+	slc := slCfg.CloudOptions
+	if slc == nil {
+		return nil
+	}
+	// Cloud only validations.
+	if slc.ShadowRedpandaID == "" {
+		return errors.New("shadow_redpanda_id is required in cloud options")
+	}
+	if slc.ShadowRedpandaID == slc.SourceRedpandaID {
+		return errors.New("shadow_redpanda_id and source_redpanda_id cannot be the same")
+	}
+	co := slCfg.ClientOptions
+	if co == nil {
+		return nil
+	}
+	if co.TLSSettings != nil && co.TLSSettings.TLSFileSettings != nil {
+		return errors.New("TLS file settings are not supported when using cloud options; use tls_pem_settings instead")
+	}
+	if pw := authPassword(co); pw != "" && !strings.HasPrefix(pw, "${secrets.") {
+		return errors.New("cloud shadow links don't support plain passwords, you must use secrets from the secrets store. See 'rpk security secret --help' for more details")
 	}
 	return nil
 }
 
-// scramPassword extracts the SCRAM password from the client options, if set.
-func scramPassword(co *ShadowLinkClientOptions) string {
-	if co == nil || co.AuthenticationConfiguration == nil || co.AuthenticationConfiguration.ScramConfiguration == nil {
+// authPassword extracts the authentication password from the client options, if set.
+func authPassword(co *ShadowLinkClientOptions) string {
+	if co == nil || co.AuthenticationConfiguration == nil {
 		return ""
 	}
-	return co.AuthenticationConfiguration.ScramConfiguration.Password
+	auth := co.AuthenticationConfiguration
+	if auth.ScramConfiguration != nil {
+		return auth.ScramConfiguration.Password
+	}
+	if auth.PlainConfiguration != nil {
+		return auth.PlainConfiguration.Password
+	}
+	return ""
 }

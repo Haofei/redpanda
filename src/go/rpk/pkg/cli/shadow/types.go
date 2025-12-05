@@ -106,6 +106,15 @@ type TLSPEMSettings struct {
 // AuthenticationConfiguration is the union for authentication configurations.
 type AuthenticationConfiguration struct {
 	ScramConfiguration *ScramConfiguration `json:"scram_configuration,omitempty" yaml:"scram_configuration,omitempty"`
+	PlainConfiguration *PlainConfiguration `json:"plain_configuration,omitempty" yaml:"plain_configuration,omitempty"`
+}
+
+// PlainConfiguration is an authentication configuration using SASL/PLAIN.
+type PlainConfiguration struct {
+	// PLAIN username
+	Username string `json:"username,omitempty" yaml:"username,omitempty"`
+	// Password
+	Password string `json:"password,omitempty" yaml:"password,omitempty"`
 }
 
 // ScramConfiguration is an authentication configuration using SCRAM.

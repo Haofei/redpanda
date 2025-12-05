@@ -14,15 +14,14 @@ import (
 	"strings"
 
 	adminv2 "buf.build/gen/go/redpandadata/core/protocolbuffers/go/redpanda/core/admin/v2"
-	dataplanev1alpha3 "buf.build/gen/go/redpandadata/dataplane/protocolbuffers/go/redpanda/api/dataplane/v1alpha3"
+	dataplanev1 "buf.build/gen/go/redpandadata/dataplane/protocolbuffers/go/redpanda/api/dataplane/v1"
 	"connectrpc.com/connect"
-	"github.com/spf13/afero"
-	"github.com/spf13/cobra"
-
 	"github.com/redpanda-data/redpanda/src/go/rpk/pkg/adminapi"
 	"github.com/redpanda-data/redpanda/src/go/rpk/pkg/config"
 	"github.com/redpanda-data/redpanda/src/go/rpk/pkg/out"
 	"github.com/redpanda-data/redpanda/src/go/rpk/pkg/publicapi"
+	"github.com/spf13/afero"
+	"github.com/spf13/cobra"
 )
 
 func newFailoverCommand(fs afero.Fs, p *config.Params) *cobra.Command {
@@ -79,7 +78,7 @@ Failover without confirmation:
 				out.MaybeDie(err, "unable to initialize dataplane client: %v", err)
 
 				if !noConfirm {
-					sl, err := dpClient.ShadowLink.GetShadowLink(cmd.Context(), connect.NewRequest(&dataplanev1alpha3.GetShadowLinkRequest{
+					sl, err := dpClient.ShadowLink.GetShadowLink(cmd.Context(), connect.NewRequest(&dataplanev1.GetShadowLinkRequest{
 						Name: linkName,
 					}))
 					out.MaybeDie(err, "unable to get Shadow Link %q: %v", linkName, handleConnectError(err, "get", linkName))
@@ -150,7 +149,7 @@ Failover without confirmation:
 	return cmd
 }
 
-func printDataplaneCloudOverview(link *dataplanev1alpha3.ShadowLink) {
+func printDataplaneCloudOverview(link *dataplanev1.ShadowLink) {
 	tw := out.NewTabWriter()
 	defer tw.Flush()
 	tw.Print("NAME", link.GetName())

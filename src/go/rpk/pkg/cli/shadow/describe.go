@@ -350,14 +350,13 @@ func printCloudClient(opts *controlplanev1.ShadowLinkClientOptions) {
 	tw.Print("CLIENT CONFIGURATION:", "")
 	tw.Print(strings.Repeat("-", 21), "")
 
-	// Print client config table - Cloud doesn't have "Effective" prefix
-	tw.Print("metadata_max_age_ms", opts.GetMetadataMaxAgeMs())
-	tw.Print("connection_timeout_ms", opts.GetConnectionTimeoutMs())
-	tw.Print("retry_backoff_ms", opts.GetRetryBackoffMs())
-	tw.Print("fetch_wait_max_ms", opts.GetFetchWaitMaxMs())
-	tw.Print("fetch_min_bytes", opts.GetFetchMinBytes())
-	tw.Print("fetch_max_bytes", opts.GetFetchMaxBytes())
-	tw.Print("fetch_partition_max_bytes", opts.GetFetchPartitionMaxBytes())
+	tw.Print("metadata_max_age_ms", opts.GetEffectiveMetadataMaxAgeMs())
+	tw.Print("connection_timeout_ms", opts.GetEffectiveConnectionTimeoutMs())
+	tw.Print("retry_backoff_ms", opts.GetEffectiveRetryBackoffMs())
+	tw.Print("fetch_wait_max_ms", opts.GetEffectiveFetchWaitMaxMs())
+	tw.Print("fetch_min_bytes", opts.GetEffectiveFetchMinBytes())
+	tw.Print("fetch_max_bytes", opts.GetEffectiveFetchMaxBytes())
+	tw.Print("fetch_partition_max_bytes", opts.GetEffectiveFetchPartitionMaxBytes())
 }
 
 func printTopicSync(opts *adminv2.TopicMetadataSyncOptions) {

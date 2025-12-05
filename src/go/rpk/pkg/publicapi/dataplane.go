@@ -19,7 +19,7 @@ import (
 
 	"buf.build/gen/go/redpandadata/dataplane/connectrpc/go/redpanda/api/dataplane/v1/dataplanev1connect"
 	"buf.build/gen/go/redpandadata/dataplane/connectrpc/go/redpanda/api/dataplane/v1alpha3/dataplanev1alpha3connect"
-	dataplanev1alpha3 "buf.build/gen/go/redpandadata/dataplane/protocolbuffers/go/redpanda/api/dataplane/v1alpha3"
+	dataplanev1 "buf.build/gen/go/redpandadata/dataplane/protocolbuffers/go/redpanda/api/dataplane/v1"
 	"connectrpc.com/connect"
 	"github.com/redpanda-data/redpanda/src/go/rpk/pkg/config"
 )
@@ -41,7 +41,7 @@ type DataPlaneClientSet struct {
 	Security      dataplanev1connect.SecurityServiceClient
 	Monitoring    dataplanev1connect.MonitoringServiceClient
 	KnowledgeBase dataplanev1alpha3connect.KnowledgeBaseServiceClient
-	ShadowLink    dataplanev1alpha3connect.ShadowLinkServiceClient
+	ShadowLink    dataplanev1connect.ShadowLinkServiceClient
 
 	m         sync.RWMutex
 	authToken string
@@ -123,7 +123,7 @@ func NewDataPlaneClientSet(host, authToken string, opts ...connect.ClientOption)
 	dpCl.Security = dataplanev1connect.NewSecurityServiceClient(httpCl, host, opts...)
 	dpCl.Monitoring = dataplanev1connect.NewMonitoringServiceClient(httpCl, host, opts...)
 	dpCl.KnowledgeBase = dataplanev1alpha3connect.NewKnowledgeBaseServiceClient(httpCl, host, opts...)
-	dpCl.ShadowLink = dataplanev1alpha3connect.NewShadowLinkServiceClient(httpCl, host, opts...)
+	dpCl.ShadowLink = dataplanev1connect.NewShadowLinkServiceClient(httpCl, host, opts...)
 
 	return dpCl, nil
 }
@@ -141,10 +141,10 @@ func DataplaneClientFromRpkProfile(p *config.RpkProfile, opts ...connect.ClientO
 
 // ListAllShadowLinkTopics returns all the ShadowTopics for a given shadow link
 // using the pagination feature to traverse all pages of the list.
-func (dpCl *DataPlaneClientSet) ListAllShadowLinkTopics(ctx context.Context, shadowLinkName string) ([]*dataplanev1alpha3.ShadowTopic, error) {
+func (dpCl *DataPlaneClientSet) ListAllShadowLinkTopics(ctx context.Context, shadowLinkName string) ([]*dataplanev1.ShadowTopic, error) {
 	maxPages := 500
-	fetchPage := func(ctx context.Context, pageToken string) ([]*dataplanev1alpha3.ShadowTopic, string, error) {
-		req := connect.NewRequest(&dataplanev1alpha3.ListShadowLinkTopicsRequest{
+	fetchPage := func(ctx context.Context, pageToken string) ([]*dataplanev1.ShadowTopic, string, error) {
+		req := connect.NewRequest(&dataplanev1.ListShadowLinkTopicsRequest{
 			ShadowLinkName: shadowLinkName,
 			PageToken:      pageToken,
 			PageSize:       100,

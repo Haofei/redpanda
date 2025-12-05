@@ -179,12 +179,23 @@ func mapAuthenticationConfiguration(auth *AuthenticationConfiguration) *adminv2.
 
 	pbAuth := &adminv2.AuthenticationConfiguration{}
 
-	if a := auth.ScramConfiguration; a != nil {
+	switch {
+	case auth.ScramConfiguration != nil:
+		a := auth.ScramConfiguration
 		pbAuth.Authentication = &adminv2.AuthenticationConfiguration_ScramConfiguration{
 			ScramConfiguration: &adminv2.ScramConfig{
 				Username:       a.Username,
 				Password:       a.Password,
 				ScramMechanism: mapScramMechanism(a.ScramMechanism),
+				// password_set and password_set_at are output-only
+			},
+		}
+	case auth.PlainConfiguration != nil:
+		a := auth.PlainConfiguration
+		pbAuth.Authentication = &adminv2.AuthenticationConfiguration_PlainConfiguration{
+			PlainConfiguration: &adminv2.PlainConfig{
+				Username: a.Username,
+				Password: a.Password,
 				// password_set and password_set_at are output-only
 			},
 		}
@@ -537,7 +548,8 @@ func adminAuthToCfg(auth *adminv2.AuthenticationConfiguration) *AuthenticationCo
 		return nil
 	}
 
-	if a, ok := auth.GetAuthentication().(*adminv2.AuthenticationConfiguration_ScramConfiguration); ok {
+	switch a := auth.GetAuthentication().(type) {
+	case *adminv2.AuthenticationConfiguration_ScramConfiguration:
 		if a.ScramConfiguration == nil {
 			return nil
 		}
@@ -546,6 +558,16 @@ func adminAuthToCfg(auth *adminv2.AuthenticationConfiguration) *AuthenticationCo
 				Username:       a.ScramConfiguration.GetUsername(),
 				Password:       a.ScramConfiguration.GetPassword(),
 				ScramMechanism: adminScramMechanismToCfg(a.ScramConfiguration.GetScramMechanism()),
+			},
+		}
+	case *adminv2.AuthenticationConfiguration_PlainConfiguration:
+		if a.PlainConfiguration == nil {
+			return nil
+		}
+		return &AuthenticationConfiguration{
+			PlainConfiguration: &PlainConfiguration{
+				Username: a.PlainConfiguration.GetUsername(),
+				Password: a.PlainConfiguration.GetPassword(),
 			},
 		}
 	}

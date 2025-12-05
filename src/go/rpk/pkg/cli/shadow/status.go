@@ -14,7 +14,7 @@ import (
 	"strings"
 
 	adminv2 "buf.build/gen/go/redpandadata/core/protocolbuffers/go/redpanda/core/admin/v2"
-	dataplanev1alpha3 "buf.build/gen/go/redpandadata/dataplane/protocolbuffers/go/redpanda/api/dataplane/v1alpha3"
+	dataplanev1 "buf.build/gen/go/redpandadata/dataplane/protocolbuffers/go/redpanda/api/dataplane/v1"
 	"connectrpc.com/connect"
 	"github.com/redpanda-data/redpanda/src/go/rpk/pkg/adminapi"
 	"github.com/redpanda-data/redpanda/src/go/rpk/pkg/config"
@@ -109,7 +109,7 @@ Display specific sections:
 				cl, err := publicapi.DataplaneClientFromRpkProfile(prof)
 				out.MaybeDie(err, "unable to initialize cloud API client: %v", err)
 
-				link, err := cl.ShadowLink.GetShadowLink(cmd.Context(), connect.NewRequest(&dataplanev1alpha3.GetShadowLinkRequest{
+				link, err := cl.ShadowLink.GetShadowLink(cmd.Context(), connect.NewRequest(&dataplanev1.GetShadowLinkRequest{
 					Name: linkName,
 				}))
 				out.MaybeDie(err, "unable to get shadow link: %v", err)
@@ -119,9 +119,9 @@ Display specific sections:
 
 				// Fetch details for each topic as the partition information is
 				// not included in the list response.
-				topicDetails := make(map[string]*dataplanev1alpha3.GetShadowTopicResponse)
+				topicDetails := make(map[string]*dataplanev1.GetShadowTopicResponse)
 				for _, listedTopic := range topicList {
-					topicResp, err := cl.ShadowLink.GetShadowTopic(cmd.Context(), connect.NewRequest(&dataplanev1alpha3.GetShadowTopicRequest{
+					topicResp, err := cl.ShadowLink.GetShadowTopic(cmd.Context(), connect.NewRequest(&dataplanev1.GetShadowTopicRequest{
 						ShadowLinkName: linkName,
 						TopicName:      listedTopic.GetTopicName(),
 					}))
@@ -294,8 +294,8 @@ func fromAdminV2ShadowLink(link *adminv2.ShadowLink) shadowLinkStatus {
 
 // fromDataplaneShadowLink converts dataplane API responses to the unified shadowLinkStatus.
 func fromDataplaneShadowLink(
-	link *dataplanev1alpha3.ShadowLink,
-	topicDetails map[string]*dataplanev1alpha3.GetShadowTopicResponse,
+	link *dataplanev1.ShadowLink,
+	topicDetails map[string]*dataplanev1.GetShadowTopicResponse,
 ) shadowLinkStatus {
 	result := shadowLinkStatus{
 		Overview: linkOverview{
@@ -311,7 +311,7 @@ func fromDataplaneShadowLink(
 		result.Tasks = append(result.Tasks, taskStatus{
 			Name:     task.GetName(),
 			BrokerID: task.GetBrokerId(),
-			Shard:    task.GetShardId(),
+			Shard:    task.GetShard(),
 			State:    strings.TrimPrefix(task.GetState().String(), "TASK_STATE_"),
 			Reason:   task.GetReason(),
 		})

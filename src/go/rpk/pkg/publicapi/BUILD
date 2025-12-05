@@ -26,7 +26,6 @@ go_library(
         "@build_buf_gen_go_redpandadata_dataplane_connectrpc_go//redpanda/api/dataplane/v1/dataplanev1connect",
         "@build_buf_gen_go_redpandadata_dataplane_connectrpc_go//redpanda/api/dataplane/v1alpha3/dataplanev1alpha3connect",
         "@build_buf_gen_go_redpandadata_dataplane_protocolbuffers_go//redpanda/api/dataplane/v1:dataplane",
-        "@build_buf_gen_go_redpandadata_dataplane_protocolbuffers_go//redpanda/api/dataplane/v1alpha3",
         "@build_buf_gen_go_redpandadata_gatekeeper_connectrpc_go//redpanda/api/gatekeeper/v1alpha1/gatekeeperv1alpha1connect",
         "@com_connectrpc_connect//:connect",
         "@org_uber_go_zap//:zap",

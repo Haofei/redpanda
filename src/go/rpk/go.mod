@@ -6,12 +6,12 @@ go 1.24.3
 replace github.com/hamba/avro/v2 => github.com/redpanda-data/go-avro/v2 v2.0.0-20240405204525-77b1144dc525
 
 require (
-	buf.build/gen/go/redpandadata/cloud/connectrpc/go v1.19.1-20251128173054-b9f9fc6e5a70.2
-	buf.build/gen/go/redpandadata/cloud/protocolbuffers/go v1.36.10-20251128173054-b9f9fc6e5a70.1
+	buf.build/gen/go/redpandadata/cloud/connectrpc/go v1.19.1-20251203172951-07dd0ee1891a.2
+	buf.build/gen/go/redpandadata/cloud/protocolbuffers/go v1.36.10-20251203172951-07dd0ee1891a.1
 	buf.build/gen/go/redpandadata/common/protocolbuffers/go v1.36.10-20251106193941-bb850a944663.1
-	buf.build/gen/go/redpandadata/core/protocolbuffers/go v1.36.10-20251111205446-9c61b5cb371f.1
-	buf.build/gen/go/redpandadata/dataplane/connectrpc/go v1.19.1-20251128071731-da802bad50d5.2
-	buf.build/gen/go/redpandadata/dataplane/protocolbuffers/go v1.36.10-20251128071731-da802bad50d5.1
+	buf.build/gen/go/redpandadata/core/protocolbuffers/go v1.36.10-20251204205609-c0c7c0a68f89.1
+	buf.build/gen/go/redpandadata/dataplane/connectrpc/go v1.19.1-20251204093222-b597a9e6d691.2
+	buf.build/gen/go/redpandadata/dataplane/protocolbuffers/go v1.36.10-20251204093222-b597a9e6d691.1
 	buf.build/gen/go/redpandadata/gatekeeper/connectrpc/go v1.19.1-20251022210437-a5dd600d04b6.2
 	buf.build/gen/go/redpandadata/gatekeeper/protocolbuffers/go v1.36.10-20251022210437-a5dd600d04b6.1
 	cloud.google.com/go/compute/metadata v0.9.0
@@ -86,7 +86,7 @@ require (
 require (
 	buf.build/gen/go/bufbuild/protovalidate/protocolbuffers/go v1.36.10-20250912141014-52f32327d4b0.1 // indirect
 	buf.build/gen/go/grpc-ecosystem/grpc-gateway/protocolbuffers/go v1.36.10-20240617172850-a48fcebcf8f1.1 // indirect
-	buf.build/gen/go/redpandadata/core/connectrpc/go v1.19.1-20251107181116-874373458fcf.2 // indirect
+	buf.build/gen/go/redpandadata/core/connectrpc/go v1.19.1-20251125205739-05aa34b3829a.2 // indirect
 	github.com/Azure/go-ansiterm v0.0.0-20250102033503-faa5f7b0171c // indirect
 	github.com/BurntSushi/toml v1.1.0 // indirect
 	github.com/Microsoft/go-winio v0.4.14 // indirect
