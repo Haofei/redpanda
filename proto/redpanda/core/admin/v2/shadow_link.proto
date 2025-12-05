@@ -570,11 +570,14 @@ enum ScramMechanism {
 }
 // The matching pattern type
 enum PatternType {
+    option allow_alias = true;
     PATTERN_TYPE_UNSPECIFIED = 0;
     // Must match the filter exactly
     PATTERN_TYPE_LITERAL = 1;
     // Will match anything that starts with filter
     PATTERN_TYPE_PREFIX = 2;
+    // Will match anything that starts with filter
+    PATTERN_TYPE_PREFIXED = 2;
 }
 // What type of filter this is, include or exclude
 enum FilterType {
