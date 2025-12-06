@@ -10,7 +10,6 @@
  */
 
 #include "gtest/gtest.h"
-#include "lsm/core/internal/batch.h"
 #include "lsm/core/internal/keys.h"
 #include "lsm/core/internal/options.h"
 #include "lsm/db/impl.h"
@@ -102,9 +101,9 @@ public:
     }
 
     void write_at_least(size_t size) {
-        lsm::internal::write_batch batch;
+        auto batch = ss::make_lw_shared<lsm::db::memtable>();
         auto seqno = _db->max_applied_seqno();
-        while (batch.memory_usage() < size) {
+        while (batch->approximate_memory_usage() < size) {
             auto key = lsm::internal::key::encode({
               .key = random_generators::gen_alphanum_max_distinct(100'000),
               .seqno = ++seqno,
@@ -113,13 +112,13 @@ public:
               random_generators::gen_alphanum_string(1_KiB));
             _shadow.insert_or_assign(
               ss::sstring(key.user_key()), value.share());
-            batch.put(key, value.share());
+            batch->put(key, value.share());
         }
         _db->apply(std::move(batch)).get();
     }
 
     testing::AssertionResult matches_shadow() {
-        auto iter = _db->create_iterator().get();
+        auto iter = _db->create_iterator(std::nullopt).get();
         auto it = _shadow.begin();
         std::vector<std::string> errors;
         for (iter->seek_to_first().get(); iter->valid(); iter->next().get()) {
@@ -219,6 +218,85 @@ TEST_F(ImplTest, Randomized) {
         write_at_least(512_KiB);
         EXPECT_TRUE(matches_shadow());
     }
+}
+
+TEST_F(ImplTest, ReadYourOwnWrites) {
+    // Write some initial data to the database
+    auto batch1 = ss::make_lw_shared<lsm::db::memtable>();
+    auto seqno = _db->max_applied_seqno();
+    auto key1 = lsm::internal::key::encode({
+      .key = "key1",
+      .seqno = ++seqno,
+    });
+    auto value1 = iobuf::from("value1");
+    batch1->put(key1, value1.share());
+
+    auto key2 = lsm::internal::key::encode({
+      .key = "key2",
+      .seqno = ++seqno,
+    });
+    auto value2 = iobuf::from("value2");
+    batch1->put(key2, value2.share());
+
+    _db->apply(batch1).get();
+
+    // Create a pending write batch with new keys (not yet applied)
+    auto pending_batch = ss::make_lw_shared<lsm::db::memtable>();
+    seqno = _db->max_applied_seqno();
+
+    auto key3 = lsm::internal::key::encode({
+      .key = "key3",
+      .seqno = ++seqno,
+    });
+    auto value3 = iobuf::from("value3");
+    pending_batch->put(key3, value3.share());
+
+    // Verify new key is visible through iterator with write batch
+    auto iter = _db->create_iterator(pending_batch).get();
+    std::map<ss::sstring, iobuf> seen;
+    for (iter->seek_to_first().get(); iter->valid(); iter->next().get()) {
+        seen.insert_or_assign(
+          ss::sstring(iter->key().user_key()), iter->value());
+    }
+    EXPECT_EQ(seen.size(), 3);
+    EXPECT_EQ(seen["key1"], value1);
+    EXPECT_EQ(seen["key2"], value2);
+    EXPECT_EQ(seen["key3"], value3);
+
+    // Create another pending write batch that updates an existing key
+    auto update_batch = ss::make_lw_shared<lsm::db::memtable>();
+    seqno = _db->max_applied_seqno();
+
+    auto key2_updated = lsm::internal::key::encode({
+      .key = "key2",
+      .seqno = ++seqno,
+    });
+    auto value2_updated = iobuf::from("value2_updated");
+    update_batch->put(key2_updated, value2_updated.share());
+
+    // Verify updated value is visible through iterator with write batch
+    auto iter2 = _db->create_iterator(update_batch).get();
+    seen.clear();
+    for (iter2->seek_to_first().get(); iter2->valid(); iter2->next().get()) {
+        seen.insert_or_assign(
+          ss::sstring(iter2->key().user_key()), iter2->value());
+    }
+    EXPECT_EQ(seen.size(), 2);
+    EXPECT_EQ(seen["key1"], value1);
+    EXPECT_EQ(seen["key2"], value2_updated);
+
+    // Apply the update batch and verify all data is now committed
+    _db->apply(update_batch).get();
+
+    auto iter3 = _db->create_iterator(std::nullopt).get();
+    seen.clear();
+    for (iter3->seek_to_first().get(); iter3->valid(); iter3->next().get()) {
+        seen.insert_or_assign(
+          ss::sstring(iter3->key().user_key()), iter3->value());
+    }
+    EXPECT_EQ(seen.size(), 2);
+    EXPECT_EQ(seen["key1"], value1);
+    EXPECT_EQ(seen["key2"], value2_updated);
 }
 
 } // namespace

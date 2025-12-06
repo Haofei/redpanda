@@ -9,7 +9,6 @@
  * by the Apache License, Version 2.0
  */
 
-#include "lsm/core/internal/batch.h"
 #include "lsm/core/internal/keys.h"
 #include "lsm/core/internal/tests/iterator_test_harness.h"
 #include "lsm/db/memtable.h"
@@ -27,12 +26,10 @@ class memtable_iterator_factory {
 public:
     std::unique_ptr<lsm::internal::iterator>
     make_iterator(std::map<lsm::internal::key, iobuf> map) {
-        lsm::internal::write_batch batch;
-        for (auto& [k, v] : map) {
-            batch.put(k, v.share());
-        }
         auto memtable = ss::make_lw_shared<lsm::db::memtable>();
-        memtable->apply(std::move(batch));
+        for (auto& [k, v] : map) {
+            memtable->put(k, v.share());
+        }
         return memtable->create_iterator();
     }
 };
@@ -47,16 +44,10 @@ INSTANTIATE_TYPED_TEST_SUITE_P(
 class MemtableTest : public testing::Test {
 public:
     void add(lsm::internal::key key, iobuf value) {
-        lsm::internal::write_batch batch;
-        batch.put(std::move(key), std::move(value));
-        _table->apply(std::move(batch));
+        _table->put(std::move(key), std::move(value));
     }
 
-    void remove(lsm::internal::key key) {
-        lsm::internal::write_batch batch;
-        batch.remove(std::move(key));
-        _table->apply(std::move(batch));
-    }
+    void remove(lsm::internal::key key) { _table->remove(std::move(key)); }
 
     auto get(lsm::internal::key_view key) { return _table->get(key); }
 

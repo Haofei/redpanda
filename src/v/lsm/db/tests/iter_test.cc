@@ -9,7 +9,6 @@
  * by the Apache License, Version 2.0
  */
 
-#include "lsm/core/internal/batch.h"
 #include "lsm/core/internal/iterator.h"
 #include "lsm/core/internal/keys.h"
 #include "lsm/core/internal/options.h"
@@ -57,15 +56,13 @@ public:
       std::string_view value,
       lsm::internal::sequence_number seqno,
       lsm::internal::value_type type = lsm::internal::value_type::value) {
-        lsm::internal::write_batch batch;
         auto ikey = lsm::internal::key::encode(
           {.key = ss::sstring{key}, .seqno = seqno, .type = type});
         if (type == lsm::internal::value_type::value) {
-            batch.put(ikey, iobuf::from(value));
+            _memtable->put(ikey, iobuf::from(value));
         } else {
-            batch.remove(ikey);
+            _memtable->remove(ikey);
         }
-        _memtable->apply(std::move(batch));
     }
 
     void add_value(

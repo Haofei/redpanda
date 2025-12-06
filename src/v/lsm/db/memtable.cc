@@ -23,6 +23,8 @@
 
 namespace lsm::db {
 
+using internal::operator""_seqno;
+
 class memtable::iterator : public internal::iterator {
 public:
     // The dummy iterator is only a place holder for the linked list in the
@@ -140,19 +142,50 @@ private:
         _it;
 };
 
-void memtable::apply(internal::write_batch batch) {
-    if (_last_seqno) {
-        dassert(
-          _last_seqno < batch.last_seqno(),
-          "expected new batch seqno to be greater than what is applied: {} < "
-          "{}",
-          _last_seqno.value(),
-          batch.last_seqno());
-    }
+void memtable::put(internal::key key, iobuf value) {
+    internal::key_view::parts parts = internal::key_view{key}.decode();
+    vassert(
+      parts.type == internal::value_type::value,
+      "when add a put to a memtable, keys much be of value type",
+      key);
+    vassert(
+      parts.seqno >= _last_seqno,
+      "seqno should only go up: {} >= {}",
+      parts.seqno);
     invalidate_iterators();
-    _memory_usage += batch.memory_usage();
-    _last_seqno = batch.last_seqno();
-    _table.merge(std::move(batch.entries()));
+    _memory_usage += key.memory_usage() + value.memory_usage();
+    _last_seqno = parts.seqno;
+    _table.emplace(std::move(key), std::move(value));
+}
+
+void memtable::remove(internal::key key) {
+    internal::key_view::parts parts = internal::key_view{key}.decode();
+    vassert(
+      parts.type == internal::value_type::tombstone,
+      "when add a tombstone to a memtable, keys much be of tombstone type",
+      key);
+    vassert(
+      parts.seqno >= _last_seqno,
+      "seqno should only go up: {} >= {}",
+      parts.seqno);
+    invalidate_iterators();
+    iobuf value;
+    _memory_usage += key.memory_usage() + value.memory_usage();
+    _last_seqno = parts.seqno;
+    _table.emplace(std::move(key), std::move(value));
+}
+
+void memtable::merge(ss::lw_shared_ptr<memtable> other) {
+    vassert(
+      _last_seqno < other->last_seqno(),
+      "expected new batch seqno to be greater than what is applied: {} < "
+      "{}",
+      _last_seqno.value_or(0_seqno),
+      other->last_seqno().value_or(0_seqno));
+    invalidate_iterators();
+    _memory_usage += other->approximate_memory_usage();
+    _last_seqno = other->last_seqno();
+    _table.merge(std::move(other->_table));
 }
 
 lookup_result memtable::get(internal::key_view key) {

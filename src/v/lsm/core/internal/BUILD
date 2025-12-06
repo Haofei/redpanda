@@ -94,15 +94,3 @@ redpanda_cc_library(
         "@seastar",
     ],
 )
-
-redpanda_cc_library(
-    name = "batch",
-    hdrs = ["batch.h"],
-    deps = [
-        ":keys",
-        "//src/v/base",
-        "//src/v/bytes:iobuf",
-        "@abseil-cpp//absl/container:btree",
-        "@seastar",
-    ],
-)

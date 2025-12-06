@@ -14,7 +14,6 @@
 #include "absl/container/btree_map.h"
 #include "base/seastarx.h"
 #include "bytes/iobuf.h"
-#include "lsm/core/internal/batch.h"
 #include "lsm/core/internal/iterator.h"
 #include "lsm/core/internal/keys.h"
 #include "lsm/core/lookup_result.h"
@@ -43,11 +42,24 @@ public:
     memtable& operator=(memtable&&) = delete;
     ~memtable();
 
-    // Add batch of key-value pairs to the memtable.
+    // Add a key-value pair to the database. Overwrites any previous value.
     //
-    // REQUIRES: the sequence numbers in the write batch are >= to the last
-    // applied sequence number in this memtable.
-    void apply(internal::write_batch);
+    // REQUIRES: key.value_type is value
+    void put(internal::key key, iobuf value);
+
+    // Remove the value for a given key.
+    //
+    // REQUIRES: key.value_type is tombstone
+    void remove(internal::key key);
+
+    // Merge the supplied memtable into this memtable.
+    // The resulting memtable should not be used anymore after passed into
+    // this function as the data is *taken* from the memtable and applied to
+    // this memtable.
+    //
+    // REQUIRES: the sequence numbers in the supplied memtable are >= to the
+    // last applied sequence number in this memtable.
+    void merge(ss::lw_shared_ptr<memtable>);
 
     // Get the value for a given key.
     //
@@ -56,7 +68,8 @@ public:
 
     // Create an iterator for this memtable.
     //
-    // This iterator is safe to use in face of concurrent updates
+    // This iterator is safe to use in face of concurrent updates, but users can
+    // see newer values that are added since the iterator is created.
     std::unique_ptr<internal::iterator> create_iterator();
 
     // The approximate amount of memory used for this memtable.

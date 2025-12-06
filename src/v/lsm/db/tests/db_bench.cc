@@ -13,7 +13,6 @@
 #include "base/seastarx.h"
 #include "bytes/iobuf.h"
 #include "lsm/core/compression.h"
-#include "lsm/core/internal/batch.h"
 #include "lsm/core/internal/iterator.h"
 #include "lsm/core/internal/keys.h"
 #include "lsm/core/internal/options.h"
@@ -476,7 +475,7 @@ private:
         stats.bytes_read = 0;
 
         // Perform sequential iteration
-        auto iter = co_await _db->create_iterator();
+        auto iter = co_await _db->create_iterator(std::nullopt);
         co_await iter->seek_to_first();
 
         size_t count = 0;
@@ -578,14 +577,14 @@ private:
 
     ss::future<>
     write_key(ss::sstring key, iobuf value, benchmark_stats& stats) {
-        lsm::internal::write_batch batch;
+        auto batch = ss::make_lw_shared<lsm::db::memtable>();
         auto key_encoded = lsm::internal::key::encode(
           {.key = key,
            .seqno = ++_seqno,
            .type = lsm::internal::value_type::value});
 
         stats.bytes_written += key.size() + value.size_bytes();
-        batch.put(std::move(key_encoded), value.copy());
+        batch->put(std::move(key_encoded), value.copy());
 
         if (_cfg.verify) {
             _shadow.put(key, value.copy());
@@ -596,13 +595,13 @@ private:
     }
 
     ss::future<> delete_key(const ss::sstring& key, benchmark_stats& stats) {
-        lsm::internal::write_batch batch;
+        auto batch = ss::make_lw_shared<lsm::db::memtable>();
         auto key_encoded = lsm::internal::key::encode(
           {.key = key,
            .seqno = ++_seqno,
            .type = lsm::internal::value_type::tombstone});
 
-        batch.remove(std::move(key_encoded));
+        batch->remove(std::move(key_encoded));
 
         if (_cfg.verify) {
             _shadow.remove(key);
@@ -668,7 +667,7 @@ private:
 
         // Build a set of all keys from iterator
         std::map<ss::sstring, iobuf> db_keys;
-        auto iter = co_await _db->create_iterator();
+        auto iter = co_await _db->create_iterator(std::nullopt);
         co_await iter->seek_to_first();
 
         while (iter->valid()) {
