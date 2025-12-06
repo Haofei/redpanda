@@ -26,6 +26,8 @@ const object_id oid1 = l1::create_object_id();
 const object_id oid2 = l1::create_object_id();
 const object_id oid3 = l1::create_object_id();
 const object_id oid4 = l1::create_object_id();
+const object_id oid5 = l1::create_object_id();
+const object_id oid6 = l1::create_object_id();
 const std::string_view tidp_a = "deadbeef-aaaa-0000-0000-000000000000/0";
 const std::string_view tidp_b = "deadbeef-bbbb-0000-0000-000000000000/0";
 const std::string_view tidp_c = "deadbeef-cccc-0000-0000-000000000000/0";
@@ -496,6 +498,168 @@ TEST(StateUpdateTest, TestEmptyReplace) {
     EXPECT_THAT(
       std::string(replace_res.error()()),
       testing::StrEq("No objects requested"));
+}
+
+TEST(StateUpdateTest, TestReplaceValidNonContiguous) {
+    auto add = add_objects_builder()
+                 .add(new_obj_builder(oid1, 100, 1100)
+                        .add(tidp_a, 0_o, 99_o, 1999_t, 0, 99)
+                        .build())
+                 .add(new_obj_builder(oid2, 100, 1100)
+                        .add(tidp_a, 100_o, 199_o, 1999_t, 0, 99)
+                        .build())
+                 .add(new_obj_builder(oid3, 100, 1100)
+                        .add(tidp_a, 200_o, 299_o, 1999_t, 0, 99)
+                        .build())
+                 .add_term_start(tidp_a, 0_tm, 0_o)
+                 .build();
+    state s;
+    auto add_res = add.apply(s);
+    ASSERT_TRUE(add_res.has_value());
+
+    // Attempt to replace oid1 and oid3 while leaving oid2 in place with a
+    // non-contiguous update. While the update itself is non-contiguous, the
+    // individual objects still align with existing extents, and is therefore
+    // valid.
+    auto replace = replace_objects_builder()
+                     .add(new_obj_builder(oid4, 100, 1100)
+                            .add(tidp_a, 0_o, 99_o, 1999_t, 0, 99)
+                            .build())
+                     .add(new_obj_builder(oid5, 100, 1100)
+                            .add(tidp_a, 200_o, 299_o, 1999_t, 0, 99)
+                            .build())
+                     .build();
+
+    auto replace_res = replace.apply(s);
+    ASSERT_TRUE(replace_res.has_value());
+
+    auto& p = s.partition_state(model::topic_id_partition::from(tidp_a))->get();
+    ASSERT_EQ(p.extents.size(), 3);
+}
+
+TEST(StateUpdateTest, TestReplaceValidNonContiguousSplitExtent) {
+    auto add = add_objects_builder()
+                 .add(new_obj_builder(oid1, 100, 1100)
+                        .add(tidp_a, 0_o, 99_o, 1999_t, 0, 99)
+                        .build())
+                 .add(new_obj_builder(oid2, 100, 1100)
+                        .add(tidp_a, 100_o, 199_o, 1999_t, 0, 99)
+                        .build())
+                 .add(new_obj_builder(oid3, 100, 1100)
+                        .add(tidp_a, 200_o, 299_o, 1999_t, 0, 99)
+                        .build())
+                 .add_term_start(tidp_a, 0_tm, 0_o)
+                 .build();
+    state s;
+    auto add_res = add.apply(s);
+    ASSERT_TRUE(add_res.has_value());
+
+    // Attempt to replace oid1 and oid3 while leaving oid2 in place with a
+    // non-contiguous update whose objects align with existing extents.
+    // The update should see oid3 split into two new extents (for a total of 4
+    // extents).
+    auto replace = replace_objects_builder()
+                     .add(new_obj_builder(oid4, 100, 1100)
+                            .add(tidp_a, 0_o, 99_o, 1999_t, 0, 99)
+                            .build())
+                     .add(new_obj_builder(oid5, 100, 1100)
+                            .add(tidp_a, 200_o, 249_o, 1999_t, 0, 99)
+                            .build())
+                     .add(new_obj_builder(oid6, 100, 1100)
+                            .add(tidp_a, 250_o, 299_o, 1999_t, 0, 99)
+                            .build())
+                     .build();
+
+    auto replace_res = replace.apply(s);
+    ASSERT_TRUE(replace_res.has_value());
+
+    auto& p = s.partition_state(model::topic_id_partition::from(tidp_a))->get();
+    ASSERT_EQ(p.extents.size(), 4);
+}
+
+TEST(StateUpdateTest, TestReplaceInvalidNonContiguousBadOffsets) {
+    using testing::ElementsAre;
+    auto add = add_objects_builder()
+                 .add(new_obj_builder(oid1, 100, 1100)
+                        .add(tidp_a, 0_o, 99_o, 1999_t, 0, 99)
+                        .build())
+                 .add(new_obj_builder(oid2, 100, 1100)
+                        .add(tidp_a, 100_o, 199_o, 1999_t, 0, 99)
+                        .build())
+                 .add(new_obj_builder(oid3, 100, 1100)
+                        .add(tidp_a, 200_o, 299_o, 1999_t, 0, 99)
+                        .build())
+                 .add_term_start(tidp_a, 0_tm, 0_o)
+                 .build();
+    state s;
+    auto add_res = add.apply(s);
+    ASSERT_TRUE(add_res.has_value());
+
+    // Attempt to replace oid1 and oid3 while leaving oid2 in place with a
+    // invalid non-contiguous update with bad offsets.
+    auto replace = replace_objects_builder()
+                     .add(new_obj_builder(oid4, 100, 1100)
+                            .add(tidp_a, 0_o, 99_o, 1999_t, 0, 99)
+                            .build())
+                     .add(new_obj_builder(oid5, 100, 1100)
+                            .add(tidp_a, 200_o, 249_o, 1999_t, 0, 99)
+                            .build())
+                     .add(new_obj_builder(oid6, 100, 1100)
+                            .add(tidp_a, 239_o, 299_o, 1999_t, 0, 99)
+                            .build())
+                     .build();
+
+    auto replace_res = replace.apply(s);
+    ASSERT_FALSE(replace_res.has_value());
+    EXPECT_THAT(
+      std::string(replace_res.error()()),
+      testing::ContainsRegex("breaks partition .+ offset ordering"));
+
+    auto& p = s.partition_state(model::topic_id_partition::from(tidp_a))->get();
+    ASSERT_EQ(p.extents.size(), 3);
+}
+
+TEST(StateUpdateTest, TestReplaceInvalidNonContiguousDoesNotSpan) {
+    using testing::ElementsAre;
+    auto add = add_objects_builder()
+                 .add(new_obj_builder(oid1, 100, 1100)
+                        .add(tidp_a, 0_o, 99_o, 1999_t, 0, 99)
+                        .build())
+                 .add(new_obj_builder(oid2, 100, 1100)
+                        .add(tidp_a, 100_o, 199_o, 1999_t, 0, 99)
+                        .build())
+                 .add(new_obj_builder(oid3, 100, 1100)
+                        .add(tidp_a, 200_o, 299_o, 1999_t, 0, 99)
+                        .build())
+                 .add_term_start(tidp_a, 0_tm, 0_o)
+                 .build();
+    state s;
+    auto add_res = add.apply(s);
+    ASSERT_TRUE(add_res.has_value());
+
+    // Attempt to replace oid1 and oid3 while leaving oid2 in place with a
+    // invalid non-contiguous update that doesn't exactly span existing extents.
+    auto replace = replace_objects_builder()
+                     .add(new_obj_builder(oid4, 100, 1100)
+                            .add(tidp_a, 0_o, 99_o, 1999_t, 0, 99)
+                            .build())
+                     .add(new_obj_builder(oid5, 100, 1100)
+                            .add(tidp_a, 200_o, 249_o, 1999_t, 0, 99)
+                            .build())
+                     .add(new_obj_builder(oid6, 100, 1100)
+                            .add(tidp_a, 250_o, 298_o, 1999_t, 0, 99)
+                            .build())
+                     .build();
+
+    auto replace_res = replace.apply(s);
+    ASSERT_FALSE(replace_res.has_value());
+    EXPECT_THAT(
+      std::string(replace_res.error()()),
+      testing::ContainsRegex(
+        "Partition .+ doesn't contain extents that span exactly"));
+
+    auto& p = s.partition_state(model::topic_id_partition::from(tidp_a))->get();
+    ASSERT_EQ(p.extents.size(), 3);
 }
 
 TEST(StateUpdateTest, TestReplaceWithCompaction) {
