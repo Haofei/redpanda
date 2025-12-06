@@ -4579,7 +4579,7 @@ TEST_F(storage_test_fixture, test_offset_range_size2) {
     // timed uploads.
     size_t tail_length = 5;
 
-    for (size_t i = 0; i < tail_length; i++) {
+    for (size_t i = 0; i < std::min(tail_length, summaries.size()); i++) {
         auto ix_batch = summaries.size() - 1 - i;
         res = log
                 ->offset_range_size(
@@ -5041,7 +5041,7 @@ TEST_F(storage_test_fixture, test_offset_range_size2_compacted) {
     // timed uploads.
     size_t tail_length = 5;
 
-    for (size_t i = 0; i < tail_length; i++) {
+    for (size_t i = 0; i < std::min(tail_length, c_summaries.size()); i++) {
         SUCCEED() << fmt::format("Checking i = {}", i);
         auto ix_batch = c_summaries.size() - 1 - i;
         res = log
