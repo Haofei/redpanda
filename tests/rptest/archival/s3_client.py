@@ -132,11 +132,25 @@ class S3Client:
                     populate_handler(h.baseFilename, h.level)
 
     def make_client(self):
+        # Disable automatic checksum calculation for GCS to avoid aws-chunked
+        # Content-Encoding. GCS stores and returns content with this encoding
+        # as-is, which breaks consumers expecting decoded content.
+        if self._is_gcs:
+            checksum_config = {
+                "request_checksum_calculation": "when_required",
+                "response_checksum_validation": "when_required",
+            }
+        else:
+            checksum_config = {}
+
         cfg = Config(
             region_name=self._region,
             signature_version=self._signature_version,
             retries={"max_attempts": 10, "mode": "adaptive"},
-            s3={"addressing_style": f"{self._addressing_style}"},
+            s3={
+                "addressing_style": f"{self._addressing_style}",
+            },
+            **checksum_config,
             use_fips_endpoint=True if self._use_fips_endpoint else None,
         )
         cl = boto3.client(
