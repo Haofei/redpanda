@@ -13,6 +13,7 @@
 
 #include "lsm/core/internal/iterator.h"
 #include "lsm/core/internal/keys.h"
+#include "lsm/core/internal/options.h"
 #include "lsm/db/impl.h"
 #include "lsm/db/memtable.h"
 
@@ -24,9 +25,81 @@ namespace lsm {
 
 namespace {
 
-ss::lw_shared_ptr<internal::options> translate_options(options) {
-    // TODO: implement me
-    return ss::make_lw_shared<internal::options>();
+ss::lw_shared_ptr<internal::options> translate_options(options opts) {
+    if (opts.num_levels < 2) {
+        throw std::invalid_argument(
+          fmt::format(
+            "num_levels must be at least 2, got {}", opts.num_levels));
+    }
+
+    if (
+      opts.level_zero_stop_writes_trigger
+      <= opts.level_zero_slowdown_writes_trigger) {
+        throw std::invalid_argument(
+          fmt::format(
+            "level_zero_stop_writes_trigger ({}) must be greater than "
+            "level_zero_slowdown_writes_trigger ({})",
+            opts.level_zero_stop_writes_trigger,
+            opts.level_zero_slowdown_writes_trigger));
+    }
+
+    if (
+      opts.sst_filter_period != 0
+      && (opts.sst_filter_period & (opts.sst_filter_period - 1)) != 0) {
+        throw std::invalid_argument(
+          fmt::format(
+            "sst_filter_period must be a power of two, got {}",
+            opts.sst_filter_period));
+    }
+
+    if (
+      opts.level_one_compaction_trigger
+      >= opts.level_zero_slowdown_writes_trigger) {
+        throw std::invalid_argument(
+          fmt::format(
+            "level_one_compaction_trigger ({}) must be less than "
+            "level_zero_slowdown_writes_trigger ({})",
+            opts.level_one_compaction_trigger,
+            opts.level_zero_slowdown_writes_trigger));
+    }
+
+    // Create the internal options
+    auto internal_opts = ss::make_lw_shared<internal::options>();
+
+    // Set database epoch
+    internal_opts->database_epoch = internal::database_epoch{
+      opts.database_epoch};
+
+    // Create level configs based on num_levels
+    internal_opts->levels.clear();
+    internal_opts->levels.reserve(opts.num_levels);
+    for (uint8_t i = 0; i < opts.num_levels; ++i) {
+        internal_opts->levels.emplace_back(internal::level{i});
+    }
+
+    internal_opts->level_zero_slowdown_writes_trigger
+      = opts.level_zero_slowdown_writes_trigger;
+    internal_opts->level_zero_stop_writes_trigger
+      = opts.level_zero_stop_writes_trigger;
+    internal_opts->write_buffer_size = opts.write_buffer_size;
+    internal_opts->level_one_compaction_trigger
+      = opts.level_one_compaction_trigger;
+    internal_opts->max_file_size = opts.max_file_size;
+    internal_opts->max_open_files = opts.max_open_files;
+    internal_opts->block_cache_size = opts.block_cache_size;
+    internal_opts->sst_block_size = opts.sst_block_size;
+    internal_opts->sst_filter_period = opts.sst_filter_period;
+
+    switch (opts.compression) {
+    case options::compression_type::none:
+        internal_opts->compression = compression_type::none;
+        break;
+    case options::compression_type::zstd:
+        internal_opts->compression = compression_type::zstd;
+        break;
+    }
+
+    return internal_opts;
 }
 
 model::offset seqno_cast(internal::sequence_number seqno) {

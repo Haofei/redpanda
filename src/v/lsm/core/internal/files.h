@@ -44,25 +44,10 @@ consteval file_id operator""_file_id(unsigned long long val) {
 // For example, if replicating a WAL using raft, then writing the WAL to object
 // storage, each raft term could become it's own database_epoch, which would
 // mean that old leaders cannot clobber a new leader's files while shutting
-// down. On top of this there are an additional 64 bits that can be used for
-// restarts of a raft group within a single term (think cross shard movement)
-// to ensure old leaders on the same node never clobber a new node's files.
-// This second additional 64 bits could be implemented as either a global
-// counter or something like a timestamp from a monotonic clock.
-struct database_epoch {
-    uint64_t inter;
-    uint64_t intra;
-    bool operator==(const database_epoch&) const = default;
-    auto operator<=>(const database_epoch&) const = default;
-    fmt::iterator format_to(fmt::iterator) const;
-    template<typename H>
-    friend H AbslHashValue(H h, const database_epoch& c) {
-        return H::combine(std::move(h), c.inter, c.intra);
-    }
-};
-
+// down.
+using database_epoch = named_type<uint64_t, struct database_epoch_tag>;
 consteval database_epoch operator""_db_epoch(unsigned long long val) {
-    return database_epoch{.inter = val};
+    return database_epoch{val};
 }
 
 // File handle is a combination of a file's ID and the database epoch at which

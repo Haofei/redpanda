@@ -495,8 +495,7 @@ private:
     cloud_storage_clients::object_key
     manifest_key(internal::database_epoch epoch) const {
         return cloud_storage_clients::object_key{
-          _prefix()
-          / fmt::format("MANIFEST.{:020}-{:020}", epoch.inter, epoch.intra)};
+          _prefix() / fmt::format("MANIFEST.{:020}", epoch)};
     }
 
     cloud_io::remote* _remote;

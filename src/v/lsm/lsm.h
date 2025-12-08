@@ -33,7 +33,91 @@ class iterator;
 class iterator;
 
 // Options for the database.
-struct options {};
+struct options {
+    // Database epoch are assigned to a file such that on shared storage mediums
+    // databases that share persistence locations that write with different
+    // epochs will not collide with each other.
+    //
+    // For example, if replicating a WAL using raft, then writing the WAL to
+    // object storage, each raft term could become it's own database_epoch,
+    // which would mean that old leaders cannot clobber a new leader's files
+    // while shutting down.
+    //
+    // This value should never decrease.
+    uint64_t database_epoch = 0;
+
+    // The number of levels in the LSM tree. More levels allow more smaller and
+    // faster compactions, but causes more read amplication.
+    //
+    // There must be at least 2 levels in the database:
+    // * one for unsorted data (where memtables get flushed to)
+    // * one for sorted data
+    //
+    // Currently, it is only valid for this value to be increased each time the
+    // database is opened.
+    constexpr static uint8_t default_num_levels = 7;
+    uint8_t num_levels = default_num_levels;
+
+    // At what point do we start throttling writes in terms of the number of L0
+    // files
+    constexpr static size_t default_level_zero_slowdown_writes_trigger = 8;
+    size_t level_zero_slowdown_writes_trigger
+      = default_level_zero_slowdown_writes_trigger;
+
+    // At what point do we halt writes in terms of number of L0 files
+    constexpr static size_t default_level_zero_stop_writes_trigger = 12;
+    size_t level_zero_stop_writes_trigger
+      = default_level_zero_stop_writes_trigger;
+
+    // How big to let memtable accumulate in bytes before flushing.
+    constexpr static size_t default_write_buffer_size = 16_MiB;
+    size_t write_buffer_size = default_write_buffer_size;
+
+    // When do we trigger compaction into L1 in terms of number of L0 files
+    constexpr static size_t default_level_one_compaction_trigger = 4;
+    size_t level_one_compaction_trigger = default_level_one_compaction_trigger;
+
+    // Write up to this amount of bytes to a file before switching to a new one.
+    // Increasing this provides better file system efficiency with larger files,
+    // but the downside of increasing this is longer compactions and longer
+    // latency/performance hiccups.
+    size_t max_file_size = 2_GiB;
+
+    // The approximate max number of SST files that should be opened at one
+    // time.
+    constexpr static uint32_t default_max_open_files = 1000;
+    uint32_t max_open_files = default_max_open_files;
+
+    // The size of the cache that stores uncompressed blocks.
+    constexpr static size_t default_block_cache_size = 10_MiB;
+    size_t block_cache_size = default_block_cache_size;
+
+    // The size of a single block within an SST file.
+    constexpr static size_t default_sst_block_size = 4_KiB;
+    size_t sst_block_size = default_sst_block_size;
+
+    // The frequency at which to generate a new bloom filter.
+    //
+    // If set to 0 then no bloom filters will be generated.
+    //
+    // This value may be changed between different opens of the database.
+    //
+    // REQUIRED: this value must be a power of two
+    constexpr static size_t default_sst_filter_period = 2_KiB;
+    size_t sst_filter_period = default_sst_filter_period;
+
+    // The supported compression algorithms
+    enum class compression_type : uint8_t {
+        none = 0,
+        zstd = 1,
+    };
+    // The compression to use for SST blocks.
+    //
+    // This value may be changed between different opens of the database.
+    //
+    // TODO: support different compression types per level
+    compression_type compression = compression_type::none;
+};
 
 class write_batch;
 

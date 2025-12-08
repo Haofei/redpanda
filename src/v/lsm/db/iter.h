@@ -19,7 +19,7 @@ namespace lsm::db {
 
 // A function that records a sample of bytes read at the specified internal key.
 // Samples are taken approximately every
-// `internal::config::compact_after_seek_bytes`.
+// `internal::config::read_bytes_period`.
 using key_sample_fn
   = ss::noncopyable_function<ss::future<>(internal::key_view)>;
 

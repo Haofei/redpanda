@@ -12,6 +12,7 @@ redpanda_cc_library(
         "//src/v/lsm/core/internal:files",
         "//src/v/lsm/core/internal:iterator",
         "//src/v/lsm/core/internal:keys",
+        "//src/v/lsm/core/internal:options",
         "//src/v/lsm/db:impl",
         "//src/v/lsm/db:memtable",
     ],

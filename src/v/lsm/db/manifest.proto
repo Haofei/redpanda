@@ -41,20 +41,12 @@ message Version {
     repeated Level levels = 1;
 }
 
-// The version of the database being opened.
-message DatabaseEpoch {
-    // The inter-process epoch
-    uint64 inter = 1;
-    // The intra-process epoch
-    uint64 intra = 2;
-}
-
 // Metadata for an SST file in the database.
 message FileMetaData {
     // The file's ID.
     uint64 id = 1;
     // The database epoch when the file as created.
-    DatabaseEpoch epoch = 2;
+    uint64 database_epoch = 2;
     // The size of the file in bytes.
     uint64 file_size = 3;
     // The smallest key in the table.

@@ -89,8 +89,7 @@ public:
 
     ss::future<std::optional<iobuf>>
     read_manifest(internal::database_epoch epoch) override {
-        auto latest_filename = fmt::format(
-          "{:020}-{:020}.MANIFEST", epoch.inter, epoch.intra);
+        auto latest_filename = fmt::format("{:020}.MANIFEST", epoch);
         std::string filename;
         auto generator = list_all_files();
         while (auto entry = co_await generator()) {
@@ -124,8 +123,7 @@ public:
 
     ss::future<>
     write_manifest(internal::database_epoch epoch, iobuf b) override {
-        auto filename = fmt::format(
-          "{:020}-{:020}.MANIFEST", epoch.inter, epoch.intra);
+        auto filename = fmt::format("{:020}.MANIFEST", epoch);
         auto staging_name = fmt::format(
           "{}.lsm-staging", filename, uuid_t::create());
         try {

@@ -26,12 +26,6 @@ compression::type convert_type(compression_type type) {
     switch (type) {
     case compression_type::zstd:
         return compression::type::zstd;
-    case compression_type::java_snappy:
-        return compression::type::java_snappy;
-    case compression_type::lz4:
-        return compression::type::lz4;
-    case compression_type::gzip:
-        return compression::type::gzip;
     case compression_type::none:
         throw invalid_argument_exception(
           "attempted to compress with type none");
@@ -57,9 +51,6 @@ compression_type compression_type_from_raw(uint8_t v) {
     switch (ct) {
     case compression_type::none:
     case compression_type::zstd:
-    case compression_type::java_snappy:
-    case compression_type::lz4:
-    case compression_type::gzip:
         return ct;
     }
     throw corruption_exception("unknown compression type: {}", v);

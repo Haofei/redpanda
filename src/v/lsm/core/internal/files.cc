@@ -19,11 +19,7 @@
 namespace lsm::internal {
 
 ss::sstring sst_file_name(file_handle handle) noexcept {
-    return ss::format(
-      "{:020}-{:020}-{:020}.sst",
-      handle.id(),
-      handle.epoch.inter,
-      handle.epoch.intra);
+    return ss::format("{:020}-{:020}.sst", handle.id(), handle.epoch);
 }
 
 std::optional<file_handle>
@@ -37,32 +33,21 @@ parse_sst_file_name(std::string_view filename) noexcept {
     if (ext != ".sst") {
         return std::nullopt;
     }
-    std::array<std::string_view, 3> split = absl::StrSplit(
-      stem, absl::MaxSplits('-', 2));
-    auto [str_id, str_epoch_hi, str_epoch_lo] = split;
+    std::array<std::string_view, 2> split = absl::StrSplit(
+      stem, absl::MaxSplits('-', 1));
+    auto [str_id, str_epoch] = split;
     uint64_t raw_id = 0;
     if (!absl::SimpleAtoi(str_id, &raw_id)) {
         return std::nullopt;
     }
-    uint64_t raw_epoch_hi = 0;
-    if (!absl::SimpleAtoi(str_epoch_hi, &raw_epoch_hi)) {
-        return std::nullopt;
-    }
-    uint64_t raw_epoch_lo = 0;
-    if (!absl::SimpleAtoi(str_epoch_lo, &raw_epoch_lo)) {
+    uint64_t raw_epoch = 0;
+    if (!absl::SimpleAtoi(str_epoch, &raw_epoch)) {
         return std::nullopt;
     }
     return file_handle{
       .id = file_id{raw_id},
-      .epoch = database_epoch{
-        .inter = raw_epoch_hi,
-        .intra = raw_epoch_lo,
-      },
+      .epoch = database_epoch{raw_epoch},
     };
-}
-
-fmt::iterator database_epoch::format_to(fmt::iterator it) const {
-    return fmt::format_to(it, "{{inter={},intra={}}}", inter, intra);
 }
 
 fmt::iterator file_handle::format_to(fmt::iterator it) const {

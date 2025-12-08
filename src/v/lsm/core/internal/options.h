@@ -83,7 +83,8 @@ struct options {
         return multiplier * target_file_size();
     }
 
-    // The max number of SST files that should be opened at one time.
+    // The approximate max number of SST files that should be opened at one
+    // time.
     constexpr static uint32_t default_max_open_files = 1000;
     uint32_t max_open_files = default_max_open_files;
 
@@ -118,8 +119,9 @@ struct options {
     // This imples that 125 seeks cost the same as the compaction of
     // 1MB of data. I.e., one seek costs approximately the same as
     // the compaction of 8KiB of data.
-    constexpr static size_t default_compact_after_seek_bytes = 8_KiB;
-    size_t compact_after_seek_bytes = default_compact_after_seek_bytes;
+    constexpr static size_t default_seek_compaction_bytes_cost_ratio = 8_KiB;
+    size_t seek_compaction_bytes_cost_ratio
+      = default_seek_compaction_bytes_cost_ratio;
 
     // Approximate gap in bytes between samples of data read during iteration.
     constexpr static size_t default_read_bytes_period = 10_MiB;

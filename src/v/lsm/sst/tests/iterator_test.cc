@@ -72,8 +72,7 @@ private:
 
 using SSTIteratorType = ::testing::Types<
   sst_iterator_factory<lsm::compression_type::none>,
-  sst_iterator_factory<lsm::compression_type::zstd>,
-  sst_iterator_factory<lsm::compression_type::gzip>>;
+  sst_iterator_factory<lsm::compression_type::zstd>>;
 
 INSTANTIATE_TYPED_TEST_SUITE_P(
   SSTIteratorSuite, CoreIteratorTest, SSTIteratorType);
