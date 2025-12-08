@@ -204,7 +204,7 @@ struct extent_metadata
 struct get_compaction_info_reply
   : serde::envelope<
       get_compaction_info_reply,
-      serde::version<0>,
+      serde::version<1>,
       serde::compat_version<0>> {
     auto serde_fields() {
         return std::tie(
@@ -213,7 +213,8 @@ struct get_compaction_info_reply
           removable_tombstone_ranges,
           dirty_ratio,
           earliest_dirty_ts,
-          extents);
+          extents,
+          compaction_epoch);
     }
 
     errc ec;
@@ -222,6 +223,7 @@ struct get_compaction_info_reply
     double dirty_ratio;
     std::optional<model::timestamp> earliest_dirty_ts;
     chunked_vector<extent_metadata> extents;
+    partition_state::compaction_epoch_t compaction_epoch;
 };
 struct get_compaction_info_request
   : serde::envelope<

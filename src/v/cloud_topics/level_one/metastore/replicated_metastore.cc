@@ -79,6 +79,8 @@ meta_to_rpc_compact_update(const metastore::compaction_update& update) {
 
     rpc_update.removed_tombstones_ranges = update.removed_tombstones_ranges;
     rpc_update.cleaned_at = update.cleaned_at;
+    rpc_update.expected_compaction_epoch = partition_state::compaction_epoch_t{
+      update.expected_compaction_epoch()};
 
     return rpc_update;
 }
@@ -685,6 +687,8 @@ replicated_metastore::get_compaction_info(const compaction_info_spec& log) {
       .dirty_ranges = std::move(reply.dirty_ranges),
       .removable_tombstone_ranges = std::move(reply.removable_tombstone_ranges),
       .extents = rpc_to_meta_extent_metadata(std::move(reply.extents))};
+    resp.compaction_epoch = metastore::compaction_epoch{
+      reply.compaction_epoch()};
 
     co_return resp;
 }
