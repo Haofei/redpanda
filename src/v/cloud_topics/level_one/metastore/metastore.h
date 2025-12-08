@@ -233,6 +233,9 @@ public:
     virtual ss::future<std::expected<model::term_id, errc>>
     get_term_for_offset(const model::topic_id_partition&, kafka::offset) = 0;
 
+    using compaction_epoch
+      = named_type<int64_t, struct metastore_compaction_epoch>;
+
     // Compaction metadata updates per partition
     //
     // Kafka compaction works by taking "dirty" ranges of data, collecting the
@@ -281,14 +284,19 @@ public:
         // Timestamp at which the compaction operation happened.
         model::timestamp cleaned_at;
 
+        // The expected compaction epoch of the log at time of update
+        // application.
+        compaction_epoch expected_compaction_epoch;
+
         fmt::iterator format_to(fmt::iterator it) const {
             return fmt::format_to(
               it,
               "{{new_cleaned_ranges:{}, removed_tombstone_ranges:{}, "
-              "cleaned_at:{}}}",
+              "cleaned_at:{}, expected_compaction_epoch: {}}}",
               new_cleaned_ranges,
               removed_tombstones_ranges,
-              cleaned_at);
+              cleaned_at,
+              expected_compaction_epoch);
         }
     };
     using compaction_map_t
@@ -355,14 +363,18 @@ public:
         std::optional<model::timestamp> earliest_dirty_ts;
         // Dirty ranges & removable tombstone ranges.
         compaction_offsets_response offsets_response;
+        // The log's current compaction epoch.
+        compaction_epoch compaction_epoch;
 
         fmt::iterator format_to(fmt::iterator it) const {
             return fmt::format_to(
               it,
-              "{{dirty_ratio:{}, earliest_dirty_ts:{}, offsets_response:{}}}",
+              "{{dirty_ratio:{}, earliest_dirty_ts:{}, offsets_response:{}, "
+              "compaction_epoch:{}}}",
               dirty_ratio,
               earliest_dirty_ts,
-              offsets_response);
+              offsets_response,
+              compaction_epoch);
         }
     };
 
