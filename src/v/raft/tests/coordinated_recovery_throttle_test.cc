@@ -238,10 +238,10 @@ FIXTURE_TEST(throttler_test_rebalancing, test_fixture) {
         // bandwidth after rebalancing.
         ssize_t total_available = 0;
         for (auto current : all_available().get()) {
-            BOOST_REQUIRE(abs(current) < ss::smp::count);
+            BOOST_REQUIRE(std::abs(current) < ss::smp::count);
             total_available += current;
         }
-        BOOST_REQUIRE(abs(total_available) < ss::smp::count);
+        BOOST_REQUIRE(std::abs(total_available) < ss::smp::count);
 
         // Nothing waiting
         BOOST_REQUIRE_EQUAL(
@@ -270,7 +270,7 @@ FIXTURE_TEST(throttler_test_rebalancing, test_fixture) {
             }
             ++shard_id;
         }
-        BOOST_REQUIRE(abs(total_available) < ss::smp::count);
+        BOOST_REQUIRE(std::abs(total_available) < ss::smp::count);
 
         // Step 5: In a few ticks, all shards should be back to fair rate.
         wait_until([this] {
@@ -355,7 +355,7 @@ FIXTURE_TEST(overusing, test_fixture) {
         return current >= 0;
     }));
     auto sum = std::ranges::fold_left(available, ssize_t{0}, std::plus{});
-    auto deviation_from_full = abs(
+    auto deviation_from_full = std::abs(
       sum - ss::smp::count * initial_rate_per_shard);
     // allow for rounding errors
     BOOST_REQUIRE(deviation_from_full <= ss::smp::count);
@@ -432,7 +432,7 @@ FIXTURE_TEST(allowance_staying_negative, test_fixture) {
     auto sum = std::ranges::fold_left(available, ssize_t{0}, std::plus{});
     auto expected_sum = original_rate + reduced_rate - oversized_request;
 
-    auto deviation = abs(sum - expected_sum);
+    auto deviation = std::abs(sum - expected_sum);
     // allow for rounding errors
     BOOST_REQUIRE(deviation <= ss::smp::count);
 }
