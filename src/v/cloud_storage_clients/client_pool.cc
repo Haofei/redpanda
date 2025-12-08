@@ -39,7 +39,7 @@ client_pool::client_pool(
   size_t size, client_configuration conf, client_pool_overdraft_policy policy)
   : _capacity(size)
   , _config(std::move(conf))
-  , _probe(std::visit([](auto&& p) { return p._probe; }, _config))
+  , _probe(std::visit([](auto&& p) { return p.make_probe(); }, _config))
   , _policy(policy)
   , _credential_manager(
       *this, _config, ss::visit(_config, [](const common_configuration& c) {
@@ -574,11 +574,21 @@ client_pool::http_client_ptr client_pool::make_client() noexcept {
       _config,
       [this](const s3_configuration& cfg) -> http_client_ptr {
           return ss::make_shared<s3_client>(
-            weak_from_this(), cfg, _transport_config, _as, _apply_credentials);
+            weak_from_this(),
+            cfg,
+            _transport_config,
+            _probe,
+            _as,
+            _apply_credentials);
       },
       [this](const abs_configuration& cfg) -> http_client_ptr {
           return ss::make_shared<abs_client>(
-            weak_from_this(), cfg, _transport_config, _as, _apply_credentials);
+            weak_from_this(),
+            cfg,
+            _transport_config,
+            _probe,
+            _as,
+            _apply_credentials);
       });
 }
 

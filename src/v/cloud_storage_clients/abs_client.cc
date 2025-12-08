@@ -446,6 +446,7 @@ abs_client::abs_client(
   ss::weak_ptr<client_pool> pool_ptr,
   const abs_configuration& conf,
   const net::base_transport::configuration& transport_conf,
+  ss::shared_ptr<client_probe> probe,
   ss::lw_shared_ptr<const cloud_roles::apply_credentials> apply_credentials)
   : client(std::move(pool_ptr))
   , _data_lake_v2_client_config(
@@ -455,11 +456,11 @@ abs_client::abs_client(
         : std::nullopt)
   , _is_oauth(apply_credentials->is_oauth())
   , _requestor(conf, std::move(apply_credentials))
-  , _client(transport_conf)
+  , _client(transport_conf, nullptr, probe)
   , _adls_client(
       conf.is_hns_enabled ? std::make_optional(*_data_lake_v2_client_config)
                           : std::nullopt)
-  , _probe(conf._probe) {
+  , _probe(std::move(probe)) {
     vlog(abs_log.trace, "Created client with config:{}", conf);
 }
 
@@ -467,6 +468,7 @@ abs_client::abs_client(
   ss::weak_ptr<client_pool> pool_ptr,
   const abs_configuration& conf,
   const net::base_transport::configuration& transport_conf,
+  ss::shared_ptr<client_probe> probe,
   const ss::abort_source& as,
   ss::lw_shared_ptr<const cloud_roles::apply_credentials> apply_credentials)
   : client(std::move(pool_ptr))
@@ -477,11 +479,11 @@ abs_client::abs_client(
         : std::nullopt)
   , _is_oauth(apply_credentials->is_oauth())
   , _requestor(conf, std::move(apply_credentials))
-  , _client(transport_conf, &as, conf._probe, conf.max_idle_time)
+  , _client(transport_conf, &as, probe, conf.max_idle_time)
   , _adls_client(
       conf.is_hns_enabled ? std::make_optional(*_data_lake_v2_client_config)
                           : std::nullopt)
-  , _probe(conf._probe) {
+  , _probe(std::move(probe)) {
     vlog(abs_log.trace, "Created client with config:{}", conf);
 }
 

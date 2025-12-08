@@ -125,12 +125,14 @@ public:
       ss::weak_ptr<client_pool> pool_ptr,
       const s3_configuration& conf,
       const net::base_transport::configuration& transport_conf,
+      ss::shared_ptr<client_probe> probe,
       ss::lw_shared_ptr<const cloud_roles::apply_credentials>
         apply_credentials);
     s3_client(
       ss::weak_ptr<client_pool> pool_ptr,
       const s3_configuration& conf,
       const net::base_transport::configuration& transport_conf,
+      ss::shared_ptr<client_probe> probe,
       const ss::abort_source& as,
       ss::lw_shared_ptr<const cloud_roles::apply_credentials>
         apply_credentials);

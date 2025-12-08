@@ -31,14 +31,12 @@ struct default_overrides {
 };
 
 /// Configuration options common across cloud storage clients
-/// Primitive, copyable across shards (not yet because of _probe member).
+/// Primitive, copyable across shards.
 struct common_configuration {
     /// URI of the access point
     access_point_uri uri;
     /// Max time that connection can spend idle
     ss::lowres_clock::duration max_idle_time;
-    /// Metrics probe (should be created for every aws account on every shard)
-    ss::shared_ptr<client_probe> _probe;
 
     bool requires_self_configuration{false};
 
@@ -101,6 +99,8 @@ struct s3_configuration : common_configuration {
       net::public_metrics_disabled disable_public_metrics
       = net::public_metrics_disabled::yes);
 
+    ss::shared_ptr<client_probe> make_probe() const;
+
     friend std::ostream& operator<<(std::ostream& o, const s3_configuration& c);
 };
 
@@ -117,6 +117,8 @@ struct abs_configuration : common_configuration {
       net::metrics_disabled disable_metrics = net::metrics_disabled::yes,
       net::public_metrics_disabled disable_public_metrics
       = net::public_metrics_disabled::yes);
+
+    ss::shared_ptr<client_probe> make_probe() const;
 
     friend std::ostream&
     operator<<(std::ostream& o, const abs_configuration& c);
