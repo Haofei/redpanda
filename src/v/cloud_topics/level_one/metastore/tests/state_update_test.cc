@@ -662,6 +662,232 @@ TEST(StateUpdateTest, TestReplaceInvalidNonContiguousDoesNotSpan) {
     ASSERT_EQ(p.extents.size(), 3);
 }
 
+TEST(StateUpdateTest, TestReplaceSingleExtentBeforeNewStartOffset) {
+    auto add = add_objects_builder()
+                 .add(new_obj_builder(oid1, 100, 1100)
+                        .add(tidp_a, 0_o, 99_o, 1999_t, 0, 99)
+                        .build())
+                 .add(new_obj_builder(oid2, 100, 1100)
+                        .add(tidp_a, 100_o, 199_o, 1999_t, 0, 99)
+                        .build())
+                 .add(new_obj_builder(oid3, 100, 1100)
+                        .add(tidp_a, 200_o, 299_o, 1999_t, 0, 99)
+                        .build())
+                 .add_term_start(tidp_a, 0_tm, 0_o)
+                 .build();
+    state s;
+    auto add_res = add.apply(s);
+    ASSERT_TRUE(add_res.has_value());
+
+    auto tp = model::topic_id_partition::from(tidp_a);
+    auto set_start_update = set_start_offset_update::build(s, tp, 150_o);
+    ASSERT_TRUE(set_start_update.has_value());
+
+    auto apply_res = set_start_update->apply(s);
+    ASSERT_TRUE(apply_res.has_value());
+
+    // Attempt to replace with a list of valid objects, with one extent
+    // containing offsets before the truncation point (the new start offset).
+    // The metastore should be able to apply the update by ignoring the first
+    // extent.
+    auto replace = replace_objects_builder()
+                     .add(new_obj_builder(oid4, 100, 1100)
+                            .add(tidp_a, 0_o, 99_o, 1999_t, 0, 99)
+                            .build())
+                     .add(new_obj_builder(oid5, 100, 1100)
+                            .add(tidp_a, 100_o, 199_o, 1999_t, 0, 99)
+                            .build())
+                     .add(new_obj_builder(oid6, 100, 1100)
+                            .add(tidp_a, 200_o, 299_o, 1999_t, 0, 99)
+                            .build())
+                     .build();
+
+    auto replace_res = replace.apply(s);
+    ASSERT_TRUE(replace_res.has_value());
+}
+
+TEST(StateUpdateTest, TestReplaceWithAlignedExtentsBeforeNewStartOffset) {
+    auto add = add_objects_builder()
+                 .add(new_obj_builder(oid1, 100, 1100)
+                        .add(tidp_a, 0_o, 30_o, 1999_t, 0, 99)
+                        .build())
+                 .add(new_obj_builder(oid2, 100, 1100)
+                        .add(tidp_a, 31_o, 60_o, 1999_t, 0, 99)
+                        .build())
+                 .add(new_obj_builder(oid3, 100, 1100)
+                        .add(tidp_a, 61_o, 100_o, 1999_t, 0, 99)
+                        .build())
+                 .add_term_start(tidp_a, 0_tm, 0_o)
+                 .build();
+    state s;
+    auto add_res = add.apply(s);
+    ASSERT_TRUE(add_res.has_value());
+
+    auto tp = model::topic_id_partition::from(tidp_a);
+    auto set_start_update = set_start_offset_update::build(s, tp, 61_o);
+    ASSERT_TRUE(set_start_update.has_value());
+
+    auto apply_res = set_start_update->apply(s);
+    ASSERT_TRUE(apply_res.has_value());
+
+    // Attempt to replace with a list of valid objects built before the
+    // truncation occurred. The metastore should be able to accept and prune the
+    // extents below the start offset.
+    auto replace = replace_objects_builder()
+                     .add(new_obj_builder(oid4, 100, 1100)
+                            .add(tidp_a, 0_o, 30_o, 1999_t, 0, 99)
+                            .build())
+                     .add(new_obj_builder(oid5, 100, 1100)
+                            .add(tidp_a, 31_o, 60_o, 1999_t, 0, 99)
+                            .build())
+                     .add(new_obj_builder(oid6, 100, 1100)
+                            .add(tidp_a, 61_o, 100_o, 1999_t, 0, 99)
+                            .build())
+                     .build();
+
+    auto replace_res = replace.apply(s);
+    ASSERT_TRUE(replace_res.has_value());
+
+    auto p_state = s.partition_state(tp);
+    ASSERT_TRUE(p_state.has_value());
+    EXPECT_EQ(p_state->get().extents.size(), 1);
+}
+
+TEST(StateUpdateTest, TestReplaceAllExtentsBeforeNewStartOffset) {
+    auto add = add_objects_builder()
+                 .add(new_obj_builder(oid1, 100, 1100)
+                        .add(tidp_a, 0_o, 99_o, 1999_t, 0, 99)
+                        .build())
+                 .add(new_obj_builder(oid2, 100, 1100)
+                        .add(tidp_a, 100_o, 199_o, 1999_t, 0, 99)
+                        .build())
+                 .add(new_obj_builder(oid3, 100, 1100)
+                        .add(tidp_a, 200_o, 299_o, 1999_t, 0, 99)
+                        .build())
+                 .add_term_start(tidp_a, 0_tm, 0_o)
+                 .build();
+    state s;
+    auto add_res = add.apply(s);
+    ASSERT_TRUE(add_res.has_value());
+
+    auto tp = model::topic_id_partition::from(tidp_a);
+    auto set_start_update = set_start_offset_update::build(s, tp, 300_o);
+    ASSERT_TRUE(set_start_update.has_value());
+
+    auto apply_res = set_start_update->apply(s);
+    ASSERT_TRUE(apply_res.has_value());
+
+    // Attempt to replace with a list of valid objects, with all extents
+    // containing offsets before the truncation point (the new start offset).
+    // The metastore should be able to recognize this is a no-op.
+    auto replace = replace_objects_builder()
+                     .add(new_obj_builder(oid4, 100, 1100)
+                            .add(tidp_a, 0_o, 99_o, 1999_t, 0, 99)
+                            .build())
+                     .add(new_obj_builder(oid5, 100, 1100)
+                            .add(tidp_a, 100_o, 199_o, 1999_t, 0, 99)
+                            .build())
+                     .add(new_obj_builder(oid6, 100, 1100)
+                            .add(tidp_a, 200_o, 299_o, 1999_t, 0, 99)
+                            .build())
+                     .build();
+
+    auto replace_res = replace.apply(s);
+    ASSERT_FALSE(replace_res.has_value());
+    EXPECT_THAT(
+      std::string(replace_res.error()()),
+      testing::ContainsRegex(
+        "Partition .+ doesn't contain extents that span exactly"));
+}
+
+TEST(StateUpdateTest, TestReplaceMultipleExtentsBeforeNewStartOffset) {
+    auto add = add_objects_builder()
+                 .add(new_obj_builder(oid1, 100, 1100)
+                        .add(tidp_a, 0_o, 100_o, 1999_t, 0, 99)
+                        .build())
+                 .add_term_start(tidp_a, 0_tm, 0_o)
+                 .build();
+    state s;
+    auto add_res = add.apply(s);
+    ASSERT_TRUE(add_res.has_value());
+
+    auto tp = model::topic_id_partition::from(tidp_a);
+    auto set_start_update = set_start_offset_update::build(s, tp, 75_o);
+    ASSERT_TRUE(set_start_update.has_value());
+
+    auto apply_res = set_start_update->apply(s);
+    ASSERT_TRUE(apply_res.has_value());
+
+    // Attempt to replace with a list of valid objects, with some extents
+    // containing offsets before the truncation point (the new start offset).
+    // If we fail to consider the fact that the extent {0,100} is still
+    // present in the existing state, removing the first two extents would
+    // result in a misaligned update and a failure to replace.
+    auto replace = replace_objects_builder()
+                     .add(new_obj_builder(oid2, 100, 1100)
+                            .add(tidp_a, 0_o, 30_o, 1999_t, 0, 99)
+                            .build())
+                     .add(new_obj_builder(oid3, 100, 1100)
+                            .add(tidp_a, 31_o, 60_o, 1999_t, 0, 99)
+                            .build())
+                     .add(new_obj_builder(oid4, 100, 1100)
+                            .add(tidp_a, 61_o, 100_o, 1999_t, 0, 99)
+                            .build())
+                     .build();
+
+    auto replace_res = replace.apply(s);
+    ASSERT_TRUE(replace_res.has_value());
+
+    auto p_state = s.partition_state(tp);
+    ASSERT_TRUE(p_state.has_value());
+    EXPECT_EQ(p_state->get().extents.size(), 1);
+}
+
+TEST(StateUpdateTest, TestReplaceMisalignedButContiguousWithNewStartOffset) {
+    auto add = add_objects_builder()
+                 .add(new_obj_builder(oid1, 100, 1100)
+                        .add(tidp_a, 0_o, 10_o, 1999_t, 0, 99)
+                        .build())
+                 .add(new_obj_builder(oid2, 100, 1100)
+                        .add(tidp_a, 11_o, 20_o, 1999_t, 0, 99)
+                        .build())
+                 .add(new_obj_builder(oid3, 100, 1100)
+                        .add(tidp_a, 21_o, 30_o, 1999_t, 0, 99)
+                        .build())
+                 .add_term_start(tidp_a, 0_tm, 0_o)
+                 .build();
+
+    state s;
+    auto add_res = add.apply(s);
+    ASSERT_TRUE(add_res.has_value());
+
+    auto tp = model::topic_id_partition::from(tidp_a);
+    auto set_start_update = set_start_offset_update::build(s, tp, 15_o);
+    ASSERT_TRUE(set_start_update.has_value());
+
+    auto apply_res = set_start_update->apply(s);
+    ASSERT_TRUE(apply_res.has_value());
+
+    // Attempt to replace with a list of extents that are misaligned to the
+    // existing extents ([11,20],[21,30]), but form a valid, contiguous update
+    // when considering the new start offset.
+    auto replace = replace_objects_builder()
+                     .add(new_obj_builder(oid4, 100, 1100)
+                            .add(tidp_a, 0_o, 15_o, 1999_t, 0, 99)
+                            .build())
+                     .add(new_obj_builder(oid5, 100, 1100)
+                            .add(tidp_a, 16_o, 30_o, 1999_t, 0, 99)
+                            .build())
+                     .build();
+
+    auto replace_res = replace.apply(s);
+    ASSERT_TRUE(replace_res.has_value());
+
+    auto p_state = s.partition_state(tp);
+    ASSERT_TRUE(p_state.has_value());
+    EXPECT_EQ(p_state->get().extents.size(), 2);
+}
+
 TEST(StateUpdateTest, TestReplaceWithCompaction) {
     using testing::ElementsAre;
     using range = struct compaction_state_update::cleaned_range;

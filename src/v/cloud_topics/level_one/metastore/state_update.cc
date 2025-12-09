@@ -25,11 +25,22 @@ struct extent_range {
 std::optional<extent_range> get_range(
   const partition_state::extent_set_t& extents,
   kafka::offset base,
-  kafka::offset last) {
-    auto base_it = std::ranges::lower_bound(
-      extents, base, std::less<>{}, &extent::base_offset);
-    if (base_it == extents.end() || base_it->base_offset != base) {
-        return std::nullopt;
+  kafka::offset last,
+  kafka::offset log_start_offset) {
+    auto base_it = extents.begin();
+    // If base < log_start_offset, we are considering replacing an extent below
+    // the log start offset. We allow for misalignment between the start offset
+    // and the first extent in the partition, since we need to support partial
+    // truncations- this also means we don't need replacement extents to be
+    // aligned to existing extents below the start offset. Fallthrough here
+    // instead of returning `std::nullopt`- we will still need to validate the
+    // alignment of the range's last offset.
+    if (base >= log_start_offset) {
+        base_it = std::ranges::lower_bound(
+          extents, base, std::less<>{}, &extent::base_offset);
+        if (base_it == extents.end() || base_it->base_offset != base) {
+            return std::nullopt;
+        }
     }
     // Check that the range's last offset aligns with an existing extent.
     auto last_it = std::ranges::lower_bound(
@@ -92,6 +103,38 @@ contiguous_intervals_for_extents(
     }
 
     return ret;
+}
+
+void remove_extents_below_start_offset_for_tp(
+  state& state, model::topic_id_partition tp, std::string_view ctx) {
+    auto& p_state
+      = state.topic_to_state[tp.topic_id].pid_to_state[tp.partition];
+    auto start_offset = p_state.start_offset;
+    while (!p_state.extents.empty()) {
+        if (p_state.extents.begin()->last_offset >= start_offset) {
+            break;
+        }
+        // The front extent falls entirely below the new start offset, meaning
+        // it's can be removed.
+        auto begin_it = p_state.extents.begin();
+        auto oid = begin_it->oid;
+        auto obj_it = state.objects.find(oid);
+        if (obj_it == state.objects.end()) {
+            // Unexpected, but benign.
+            continue;
+        }
+        obj_it->second.removed_data_size += begin_it->len;
+        vlog(
+          cd_log.debug,
+          "{} for {}: {}, removing extent {} [{}, {}]",
+          ctx,
+          tp,
+          start_offset,
+          begin_it->oid,
+          begin_it->base_offset,
+          begin_it->last_offset);
+        p_state.extents.erase(begin_it);
+    }
 }
 
 } // namespace
@@ -391,9 +434,11 @@ replace_objects_update::can_apply(const state& state) {
                   fmt::format("Partition {} not tracked by state", tidp)));
             }
 
-            // Check that the new range's offset aligns with existing extents.
+            // Check that the new range's offset aligns with existing extents
+            // above the log's start offset.
             const auto& prt = p_state->get();
-            auto iters = get_range(prt.extents, req_base, req_last);
+            auto iters = get_range(
+              prt.extents, req_base, req_last, prt.start_offset);
             if (!iters.has_value()) {
                 return std::unexpected(stm_update_error(
                   fmt::format(
@@ -547,7 +592,10 @@ replace_objects_update::apply(state& state) {
             auto requested_base = interval.base_offset;
             auto requested_last = interval.last_offset;
             auto iters = get_range(
-              p_state.extents, requested_base, requested_last);
+              p_state.extents,
+              requested_base,
+              requested_last,
+              p_state.start_offset);
             auto [base_it, last_it] = *iters;
             auto end_it = std::next(last_it);
             for (auto iter = base_it; iter != end_it; ++iter) {
@@ -588,6 +636,12 @@ replace_objects_update::apply(state& state) {
             state.objects[extent.oid].total_data_size += extent.len;
         }
     }
+
+    for (const auto& [tidp, _] : new_extents_by_tp) {
+        remove_extents_below_start_offset_for_tp(
+          state, tidp, "Added replacement below start offset");
+    }
+
     for (const auto& [t, t_req] : compaction_updates) {
         for (const auto& [p, compaction_update] : t_req) {
             model::topic_id_partition tidp{t, p};
@@ -725,30 +779,8 @@ set_start_offset_update::apply(state& state) {
         return std::monostate{};
     }
     p_state.start_offset = new_start_offset;
-    while (!p_state.extents.empty()) {
-        if (p_state.extents.begin()->last_offset >= new_start_offset) {
-            break;
-        }
-        // The front extent falls entirely below the new start offset, meaning
-        // it's can be removed.
-        auto begin_it = p_state.extents.begin();
-        auto oid = begin_it->oid;
-        auto obj_it = state.objects.find(oid);
-        if (obj_it == state.objects.end()) {
-            // Unexpected, but benign.
-            continue;
-        }
-        obj_it->second.removed_data_size += begin_it->len;
-        vlog(
-          cd_log.debug,
-          "New offset for {}: {}, removing extent {} [{}, {}]",
-          tp,
-          new_start_offset,
-          begin_it->oid,
-          begin_it->base_offset,
-          begin_it->last_offset);
-        p_state.extents.erase(begin_it);
-    }
+    remove_extents_below_start_offset_for_tp(state, tp, "New start offset");
+
     // Now remove terms. Note that the removal should always leave at least one
     // term start, enough to cover `next_offset`, even if the log is empty.
     while (p_state.term_starts.size() > 1) {
