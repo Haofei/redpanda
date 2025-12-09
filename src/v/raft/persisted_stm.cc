@@ -357,25 +357,22 @@ ss::future<> persisted_stm_base<BaseT, T>::ensure_local_snapshot_exists(
       _log.debug,
       "ensure snapshot_exists with target offset: {}",
       target_offset);
-    return _op_lock.with([this, target_offset]() {
-        return wait_for_snapshot_hydrated().then([this, target_offset] {
-            if (target_offset <= _last_snapshot_offset) {
-                return ss::now();
-            }
-            return BaseT::wait(target_offset, model::no_timeout)
-              .then([this, target_offset]() {
-                  vassert(
-                    target_offset < BaseT::next(),
-                    "[{} ({})]  after we waited for target_offset ({}) "
-                    "next ({}) must be greater",
-                    _raft->ntp(),
-                    name(),
-                    target_offset,
-                    BaseT::next());
-                  return do_write_local_snapshot();
-              });
-        });
-    });
+    auto gate_holder = _gate.hold();
+    auto lock_holder = co_await _op_lock.get_units();
+    co_await wait_for_snapshot_hydrated();
+    if (target_offset <= _last_snapshot_offset) {
+        co_return;
+    }
+    co_await BaseT::wait(target_offset, model::no_timeout);
+    vassert(
+      target_offset < BaseT::next(),
+      "[{} ({})]  after we waited for target_offset ({}) "
+      "next ({}) must be greater",
+      _raft->ntp(),
+      name(),
+      target_offset,
+      BaseT::next());
+    co_await do_write_local_snapshot();
 }
 
 template<typename BaseT, supported_stm_snapshot T>
@@ -564,6 +561,7 @@ ss::future<bool> persisted_stm_base<BaseT, T>::wait_no_throw(
 
 template<typename BaseT, supported_stm_snapshot T>
 ss::future<> persisted_stm_base<BaseT, T>::start() {
+    auto holder = _gate.hold();
     if (_raft->dirty_offset() == model::offset{}) {
         co_await _snapshot_backend.perform_initial_cleanup();
     }

@@ -199,11 +199,8 @@ public:
       model::record_batch batch,
       raft::replicate_options);
 
+    // Caller must keep the STM alive until it destructs the returned holder.
     ss::future<ss::basic_rwlock<>::holder> prepare_transfer_leadership();
-
-    ss::future<> stop() override;
-
-    ss::future<> start() override;
 
     void testing_only_disable_auto_abort() { _is_autoabort_enabled = false; }
 
@@ -229,6 +226,7 @@ public:
     }
 
 protected:
+    ss::future<> stop() override;
     ss::future<> apply_raft_snapshot(const iobuf&) final;
 
 private:

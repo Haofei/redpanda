@@ -177,16 +177,9 @@ FIXTURE_TEST(test_tx_happy_tx, rm_stm_test_fixture) {
 //   - a simple tx aborting before prepare succeeds
 //   - an aborted tx is reflected in aborted_transactions
 FIXTURE_TEST(test_tx_aborted_tx_1, rm_stm_test_fixture) {
-    create_stm_and_start_raft();
-    auto& stm = *_stm;
-    stm.testing_only_disable_auto_abort();
+    auto& stm = start_and_disable_auto_abort();
 
-    stm.start().get();
     auto tx_seq = model::tx_seq(0);
-
-    wait_for_confirmed_leader();
-    wait_for_meta_initialized();
-
     auto min_offset = model::offset(0);
     auto max_offset = model::offset(std::numeric_limits<int64_t>::max());
 
@@ -246,16 +239,8 @@ FIXTURE_TEST(test_tx_aborted_tx_1, rm_stm_test_fixture) {
 //   - a simple tx aborting after prepare succeeds
 //   - an aborted tx is reflected in aborted_transactions
 FIXTURE_TEST(test_tx_aborted_tx_2, rm_stm_test_fixture) {
-    create_stm_and_start_raft();
-    auto& stm = *_stm;
-    stm.testing_only_disable_auto_abort();
-
-    stm.start().get();
-
+    auto& stm = start_and_disable_auto_abort();
     auto tx_seq = model::tx_seq(0);
-
-    wait_for_confirmed_leader();
-    wait_for_meta_initialized();
 
     auto min_offset = model::offset(0);
     auto max_offset = model::offset(std::numeric_limits<int64_t>::max());
@@ -316,14 +301,7 @@ FIXTURE_TEST(test_tx_aborted_tx_2, rm_stm_test_fixture) {
 
 // transactional writes of an unknown tx are rejected
 FIXTURE_TEST(test_tx_unknown_produce, rm_stm_test_fixture) {
-    create_stm_and_start_raft();
-    auto& stm = *_stm;
-    stm.testing_only_disable_auto_abort();
-
-    stm.start().get();
-
-    wait_for_confirmed_leader();
-    wait_for_meta_initialized();
+    auto& stm = start_and_disable_auto_abort();
 
     auto pid1 = model::producer_identity{1, 0};
     auto rreader = make_batches(pid1, 0, 5, false);
@@ -341,14 +319,7 @@ FIXTURE_TEST(test_tx_unknown_produce, rm_stm_test_fixture) {
 }
 
 FIXTURE_TEST(test_stale_begin_tx_fenced, rm_stm_test_fixture) {
-    create_stm_and_start_raft();
-    auto& stm = *_stm;
-    stm.testing_only_disable_auto_abort();
-
-    stm.start().get();
-
-    wait_for_confirmed_leader();
-    wait_for_meta_initialized();
+    auto& stm = start_and_disable_auto_abort();
 
     auto tx_seq = model::tx_seq(10);
     auto tx_seq_old = model::tx_seq(9);
@@ -386,17 +357,9 @@ FIXTURE_TEST(test_stale_begin_tx_fenced, rm_stm_test_fixture) {
 
 // begin fences off old transactions
 FIXTURE_TEST(test_tx_begin_fences_produce, rm_stm_test_fixture) {
-    create_stm_and_start_raft();
-    auto& stm = *_stm;
-    stm.testing_only_disable_auto_abort();
-
-    stm.start().get();
+    auto& stm = start_and_disable_auto_abort();
 
     auto tx_seq = model::tx_seq(0);
-
-    wait_for_confirmed_leader();
-    wait_for_meta_initialized();
-
     auto pid1 = model::producer_identity{1, 0};
     auto rreader = make_batches(pid1, 0, 5, false);
     auto offset_r = replicate_all(stm, std::move(rreader)).get();
@@ -421,17 +384,9 @@ FIXTURE_TEST(test_tx_begin_fences_produce, rm_stm_test_fixture) {
 
 // transactional writes of an aborted tx are rejected
 FIXTURE_TEST(test_tx_post_aborted_produce, rm_stm_test_fixture) {
-    create_stm_and_start_raft();
-    auto& stm = *_stm;
-    stm.testing_only_disable_auto_abort();
-
-    stm.start().get();
+    auto& stm = start_and_disable_auto_abort();
 
     auto tx_seq = model::tx_seq(0);
-
-    wait_for_confirmed_leader();
-    wait_for_meta_initialized();
-
     auto pid1 = model::producer_identity{1, 0};
     auto rreader = make_batches(pid1, 0, 5, false);
     auto offset_r = replicate_all(stm, std::move(rreader)).get();
@@ -461,14 +416,7 @@ FIXTURE_TEST(test_tx_post_aborted_produce, rm_stm_test_fixture) {
 // aborted transactions for correctness. These serve as regression tests so that
 // we do not break the semantics.
 FIXTURE_TEST(test_aborted_transactions, rm_stm_test_fixture) {
-    create_stm_and_start_raft();
-    auto& stm = *_stm;
-    stm.testing_only_disable_auto_abort();
-
-    stm.start().get();
-
-    wait_for_confirmed_leader();
-    wait_for_meta_initialized();
+    auto& stm = start_and_disable_auto_abort();
 
     auto log = _storage.local().log_mgr().get(_raft->ntp());
     BOOST_REQUIRE(log);
@@ -764,12 +712,7 @@ SEASTAR_THREAD_TEST_CASE(async_adl_snapshot_validation) {
 }
 
 FIXTURE_TEST(test_snapshot_v4_v5_equivalence, rm_stm_test_fixture) {
-    create_stm_and_start_raft();
-    auto& stm = *_stm;
-    stm.testing_only_disable_auto_abort();
-
-    stm.start().get();
-    wait_for_confirmed_leader();
+    auto& stm = start_and_disable_auto_abort();
 
     // Check the stm can apply v4/v5 snapshots
     {
@@ -816,13 +759,8 @@ FIXTURE_TEST(test_snapshot_v4_v5_equivalence, rm_stm_test_fixture) {
 }
 
 FIXTURE_TEST(test_tx_expiration_without_data_batches, rm_stm_test_fixture) {
-    create_stm_and_start_raft();
-    auto& stm = *_stm;
-    stm.start().get();
-    stm.testing_only_disable_auto_abort();
+    auto& stm = start_and_disable_auto_abort();
 
-    wait_for_confirmed_leader();
-    wait_for_meta_initialized();
     // Add a fence batch
     auto pid = model::producer_identity{0, 0};
     auto term_op = stm
@@ -850,13 +788,7 @@ FIXTURE_TEST(test_tx_expiration_without_data_batches, rm_stm_test_fixture) {
  * partition stop).
  */
 FIXTURE_TEST(test_concurrent_producer_evictions, rm_stm_test_fixture) {
-    create_stm_and_start_raft();
-    auto& stm = *_stm;
-    stm.start().get();
-    stm.testing_only_disable_auto_abort();
-
-    wait_for_confirmed_leader();
-    wait_for_meta_initialized();
+    start_and_disable_auto_abort();
 
     // Ensure eviction runs with higher frequency
     // and evicts everything possible.
@@ -945,14 +877,8 @@ FIXTURE_TEST(test_concurrent_producer_evictions, rm_stm_test_fixture) {
 }
 
 FIXTURE_TEST(test_lso_bound_by_open_tx, rm_stm_test_fixture) {
-    create_stm_and_start_raft();
-    auto& stm = *_stm;
+    auto& stm = start_and_disable_auto_abort();
     auto raft = _raft;
-    stm.start().get();
-    stm.testing_only_disable_auto_abort();
-
-    wait_for_confirmed_leader();
-    wait_for_meta_initialized();
 
     auto pid = model::producer_identity{0, 0};
 

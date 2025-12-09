@@ -257,6 +257,7 @@ ss::future<checked<model::term_id, tx::errc>> rm_stm::begin_tx(
   model::tx_seq tx_seq,
   std::chrono::milliseconds transaction_timeout_ms,
   model::partition_id tm) {
+    auto holder = _gate.hold();
     auto state_lock = co_await _state_lock.hold_read_lock();
     auto lso_lock_holder = co_await _lso_lock.hold_write_lock();
     if (!co_await sync(_sync_timeout())) {
@@ -507,6 +508,7 @@ ss::future<tx::errc> rm_stm::commit_tx(
   model::producer_identity pid,
   model::tx_seq tx_seq,
   model::timeout_clock::duration timeout) {
+    auto holder = _gate.hold();
     auto state_lock_holder = co_await _state_lock.hold_read_lock();
     if (!co_await sync(timeout)) {
         co_return tx::errc::stale;
@@ -661,6 +663,7 @@ ss::future<tx::errc> rm_stm::abort_tx(
   model::producer_identity pid,
   model::tx_seq tx_seq,
   model::timeout_clock::duration timeout) {
+    auto holder = _gate.hold();
     auto state_lock_holder = co_await _state_lock.hold_read_lock();
     if (!co_await sync(timeout)) {
         vlog(
@@ -880,8 +883,6 @@ ss::future<> rm_stm::stop() {
     co_await raft::persisted_stm<>::stop();
 }
 
-ss::future<> rm_stm::start() { return raft::persisted_stm<>::start(); }
-
 std::optional<int32_t>
 rm_stm::get_seq_number(model::producer_identity pid) const {
     auto it = _producers.find(pid.get_id());
@@ -892,6 +893,7 @@ rm_stm::get_seq_number(model::producer_identity pid) const {
 }
 
 ss::future<result<partition_transactions>> rm_stm::get_transactions() {
+    auto holder = _gate.hold();
     if (!co_await sync(_sync_timeout())) {
         co_return cluster::errc::not_leader;
     }
@@ -916,6 +918,7 @@ ss::future<result<partition_transactions>> rm_stm::get_transactions() {
 }
 
 ss::future<tx::errc> rm_stm::mark_expired(model::producer_identity pid) {
+    auto gh = _gate.hold();
     if (!co_await sync(_sync_timeout())) {
         co_return tx::errc::leader_not_found;
     }
@@ -940,6 +943,7 @@ ss::future<result<kafka_result>> rm_stm::transactional_replicate(
   producer_ptr producer,
   model::batch_identity bid,
   model::record_batch batch) {
+    auto holder = _gate.hold();
     auto result = co_await do_transactional_replicate(
       expected_term, producer, bid, std::move(batch));
     if (!result) {
@@ -1051,6 +1055,7 @@ ss::future<result<kafka_result>> rm_stm::transactional_replicate(
     if (!check_tx_permitted()) {
         co_return cluster::errc::generic_tx_error;
     }
+    auto holder = _gate.hold();
     if (!co_await sync(_sync_timeout())) {
         vlog(
           _ctx_log.trace,
@@ -1406,11 +1411,9 @@ static void filter_intersecting(
 
 ss::future<chunked_vector<tx_range>>
 rm_stm::aborted_transactions(model::offset from, model::offset to) {
-    return _state_lock.hold_read_lock().then(
-      [from, to, this](ss::basic_rwlock<>::holder unit) mutable {
-          return do_aborted_transactions(from, to).finally(
-            [u = std::move(unit)] {});
-      });
+    auto gate_holder = _gate.hold();
+    auto lock_holder = co_await _state_lock.hold_read_lock();
+    co_return co_await do_aborted_transactions(from, to);
 }
 
 model::producer_id rm_stm::highest_producer_id() const {
@@ -1711,6 +1714,7 @@ void rm_stm::maybe_rearm_autoabort_timer(time_point_type deadline) {
 }
 
 ss::future<tx::errc> rm_stm::abort_all_txes() {
+    auto holder = _gate.hold();
     static constexpr uint max_concurrency = 5u;
     if (!co_await sync(_sync_timeout())) {
         co_return tx::errc::stale;
