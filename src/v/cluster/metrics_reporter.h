@@ -11,6 +11,7 @@
 
 #pragma once
 
+#include "cluster/cluster_link/fwd.h"
 #include "cluster/fwd.h"
 #include "cluster/plugin_table.h"
 #include "cluster/types.h"
@@ -137,6 +138,7 @@ public:
       ss::sharded<plugin_table>*,
       ss::sharded<feature_manager>*,
       ss::sharded<storage::api>*,
+      ss::sharded<cluster_link::frontend>*,
       ss::sharded<ss::abort_source>&);
 
     ss::future<> start();
@@ -165,6 +167,7 @@ private:
     ss::sharded<plugin_table>* _plugin_table;
     ss::sharded<feature_manager>* _feature_manager;
     ss::sharded<storage::api>* _storage;
+    ss::sharded<cluster_link::frontend>* _clfe;
     ss::sharded<ss::abort_source>& _as;
     prefix_logger _logger;
     ss::timer<> _tick_timer;

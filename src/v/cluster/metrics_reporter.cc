@@ -149,6 +149,7 @@ metrics_reporter::metrics_reporter(
   ss::sharded<plugin_table>* pt,
   ss::sharded<feature_manager>* fm,
   ss::sharded<storage::api>* storage,
+  ss::sharded<cluster_link::frontend>* clfe,
   ss::sharded<ss::abort_source>& as)
   : _raft0(std::move(raft0))
   , _cluster_info(controller_stm.local().get_metrics_reporter_cluster_info())
@@ -162,6 +163,7 @@ metrics_reporter::metrics_reporter(
   , _plugin_table(pt)
   , _feature_manager(fm)
   , _storage(storage)
+  , _clfe(clfe)
   , _as(as)
   , _logger(logger, "metrics-reporter") {}
 
