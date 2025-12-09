@@ -52,6 +52,7 @@ from rptest.services.tls import CertificateAuthority, Certificate, TLSCertManage
 from rptest.tests.prealloc_nodes import PreallocNodesTest
 from rptest.util import bg_thread_cm, wait_until_result
 from rptest.utils.node_operations import FailureInjectorBackgroundThread
+from threading import Lock
 from urllib3.exceptions import ProtocolError
 
 
@@ -111,6 +112,9 @@ class ClusterLinkingTLSProvider(TLSProvider):
 
 
 class ClusterLinkingProgressVerifier:
+    instance_lock = Lock()
+    instance_count = 0
+
     def __init__(
         self,
         test_context,
@@ -152,6 +156,14 @@ class ClusterLinkingProgressVerifier:
         self.validate_number_of_messages_on_target = (
             validate_number_of_messages_on_target
         )
+        self._instance_id = ClusterLinkingProgressVerifier.instance_id()
+
+    @staticmethod
+    def instance_id() -> int:
+        with ClusterLinkingProgressVerifier.instance_lock:
+            id = ClusterLinkingProgressVerifier.instance_count
+            ClusterLinkingProgressVerifier.instance_count += 1
+            return id
 
     def start(self):
         self.producer = KgoVerifierProducer(
@@ -176,7 +188,7 @@ class ClusterLinkingProgressVerifier:
             msg_size=self.msg_size,
             readers=readers,
             use_transactions=self.use_transactions,
-            group_name=f"source-cg-{self.topic}",
+            group_name=f"source-cg-{self._instance_id}",
             nodes=self.preallocated_nodes,
             continuous=True,
             **self.consumer_properties,
@@ -191,7 +203,7 @@ class ClusterLinkingProgressVerifier:
             max_msgs=self.msg_count,
             readers=readers,
             use_transactions=self.use_transactions,
-            group_name=f"test-kgo-consumer-group-{self.topic}",
+            group_name=f"target-cg-{self._instance_id}",
             nodes=self.preallocated_nodes,
             continuous=True,
             **self.consumer_properties,
