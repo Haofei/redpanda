@@ -238,11 +238,21 @@ public:
                 const auto& tp_ns = topic_status.first;
                 for (const auto& partition_status : topic_status.second) {
                     /*
-                     * partition_status is the partition health reported by a
-                     * replica. a reported epoch is valid when it is collected,
-                     * independent of the replica's current leadership status.
-                     * we reduce across replicas using `max` because that is the
-                     * most optimistic value we can take.
+                     * calculate the max gc epoch for each partition. the catch
+                     * here is that this value is reported through the health
+                     * reporting system, and that system reports information for
+                     * all partition replicas (leader and followers). so how do
+                     * we know which value to use here? first, the max gc epoch
+                     * only increases in value. second, we recognize that
+                     * all reported values from any replica are valid at (and
+                     * forever after) the moment they are reported. third, only
+                     * the leader advances the epoch.
+                     *
+                     * because of the second point, using max gc epoch from any
+                     * replica will result in correct behavior, however it may
+                     * be pessimistic. using the one from the leader is better,
+                     * but leadership is a lagging signal. instead, we can take
+                     * the maximum reported as the most optimistic value.
                      *
                      * if a replica reports no epoch then it is considered to be
                      * in an indeterminite state and it has no affect on the
