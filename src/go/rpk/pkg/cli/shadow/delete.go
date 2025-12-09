@@ -67,9 +67,13 @@ Force delete a Shadow Link with active shadow topics:
 
 			linkName := args[0]
 
-			promptConfirm := func() {
+			promptConfirm := func(isCloud bool) {
 				if !noConfirm && !forceDelete {
-					ok, err := out.Confirm("Are you sure you want to delete this Shadow Link?")
+					msg := "Are you sure you want to delete this Shadow Link?"
+					if isCloud {
+						msg = "Are you sure you want to delete this Shadow Link? This action is not recoverable and will fail over all the synced shadow topics."
+					}
+					ok, err := out.Confirm("%s", msg)
 					out.MaybeDie(err, "unable to confirm Shadow Link deletion: %v", err)
 					if !ok {
 						out.Exit("Shadow Link deletion cancelled")
@@ -89,7 +93,7 @@ Force delete a Shadow Link with active shadow topics:
 				out.MaybeDie(err, "unable to find Shadow Link %q", linkName)
 
 				printCloudShadowLinkInfo(link)
-				promptConfirm()
+				promptConfirm(true)
 
 				op, err := cloudClient.ShadowLink.DeleteShadowLink(cmd.Context(), connect.NewRequest(&controlplanev1.DeleteShadowLinkRequest{
 					Id: link.GetId(),
@@ -110,7 +114,7 @@ Force delete a Shadow Link with active shadow topics:
 				}))
 				out.MaybeDie(err, "unable to get Redpanda Shadow Link information: %v", handleConnectError(err, "get", linkName))
 				printShadowLinkInfo(link.Msg.GetShadowLink())
-				promptConfirm()
+				promptConfirm(false)
 
 				_, err = cl.ShadowLinkService().DeleteShadowLink(cmd.Context(), connect.NewRequest(&adminv2.DeleteShadowLinkRequest{
 					Name:  linkName,
