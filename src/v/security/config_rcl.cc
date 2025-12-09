@@ -258,5 +258,28 @@ std::istream& operator>>(std::istream& is, nested_group_behavior& b) {
     return is;
 }
 
+std::expected<group_claim_policy, std::error_code> parse_group_claim_path(
+  const ss::sstring& path, nested_group_behavior nested_behavior) {
+    if (!path.starts_with("$.")) {
+        return std::unexpected(errc::invalid_group_claim_pointer);
+    }
+    auto group_path = ss::sstring(path.substr(1));
+    std::ranges::replace(group_path, '.', '/');
+    auto pointer = json::Pointer{group_path};
+    if (!pointer.IsValid()) {
+        return std::unexpected(errc::invalid_group_claim_pointer);
+    }
+    return group_claim_policy{std::move(pointer), nested_behavior};
+}
+
+std::optional<ss::sstring> validate_group_claim_path(const ss::sstring& path) {
+    // This is validating the path, so the nested group behavior is irrelevant
+    auto res = parse_group_claim_path(path, nested_group_behavior::none);
+    if (!res) {
+        return res.error().message();
+    }
+    return std::nullopt;
+}
+
 } // namespace oidc
 } // namespace security

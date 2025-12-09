@@ -63,4 +63,9 @@ std::istream& operator>>(std::istream& is, nested_group_behavior& b);
 std::optional<ss::sstring>
 validate_principal_mapping_rule(const ss::sstring& rule);
 
-}
+/// \brief Validates the path to the group claim in the OIDC JWT.
+///
+/// \returns std::nullopt on no error, ss::sstring with error message
+std::optional<ss::sstring> validate_group_claim_path(const ss::sstring& path);
+
+} // namespace security::oidc
