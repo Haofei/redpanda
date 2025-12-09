@@ -593,7 +593,11 @@ post_subject_versions(server::request_t rq, server::reply_t rp) {
 
     const auto matched = id_matches && version_matches;
 
-    schema_id schema_id{s_id.value_or(invalid_schema_id)};
+    schema_definition definition;
+    post_subject_versions_response response{
+      .id = s_id.value_or(invalid_schema_id),
+      .version = v_id.value_or(invalid_schema_version)};
+
     if (!matched) {
         // Check if the request is appropriate for the mode
         const auto mode = co_await st.get_mode(sub, default_to_global::yes);
@@ -637,11 +641,18 @@ post_subject_versions(server::request_t rq, server::reply_t rp) {
                       ? s_id.value_or(invalid_schema_id)
                       : schema.id;
 
-        schema_id = co_await wr.write_subject_version(std::move(schema));
+        auto definition = schema.schema.def().share();
+        auto insert_result = co_await wr.write_subject_version(
+          std::move(schema));
+        response = post_subject_versions_response{
+          .schema = std::move(definition),
+          .id = insert_result.id,
+          .version = insert_result.version};
+    } else {
+        response.schema = co_await st.get_schema_definition(response.id);
     }
 
-    auto resp = ppj::rjson_serialize_iobuf(
-      post_subject_versions_response{.id{schema_id}});
+    auto resp = ppj::rjson_serialize_iobuf(std::move(response));
     log_response(*rq.req, resp);
     rp.rep->write_body("json", ppj::as_body_writer(std::move(resp)));
     co_return rp;

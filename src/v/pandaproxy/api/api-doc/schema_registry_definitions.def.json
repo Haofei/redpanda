@@ -67,6 +67,29 @@
         }
       }
     },
+    "post_subject_versions_response": {
+      "type": "object",
+      "properties": {
+        "id": {
+          "type": "integer"
+        },
+        "version": {
+          "type": "integer"
+        },
+        "schemaType": {
+          "type": "string"
+        },
+        "references": {
+          "type": "array",
+          "items": {
+            "$ref": "#/definitions/schema_reference"
+          }
+        },
+        "schema": {
+          "type": "string"
+        }
+      }
+    },
     "get_compatibility": {
       "type": "object",
       "properties": {

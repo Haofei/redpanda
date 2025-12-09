@@ -787,10 +787,7 @@
           "200": {
             "description": "OK",
             "schema": {
-              "type": "array",
-              "items": {
-                "type": "integer"
-              }
+              "$ref": "#/definitions/post_subject_versions_response"
             }
           },
           "404": {
@@ -845,12 +842,7 @@
           "200": {
             "description": "OK",
             "schema": {
-              "type": "object",
-              "properties": {
-                "id": {
-                  "type": "integer"
-                }
-              }
+              "$ref": "#/definitions/post_subject_versions_response"
             }
           },
           "409": {

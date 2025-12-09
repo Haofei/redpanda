@@ -2493,13 +2493,13 @@ class SchemaRegistryTestMethods(SchemaRegistryEndpoints):
             subject=subject, data=schema_1_data
         )
         assert result_raw.status_code == requests.codes.ok
-        assert result_raw.json() == {"id": 1}
+        assert result_raw.json()["id"] == 1
 
         result_raw = self.sr_client.post_subjects_subject_versions(
             subject=subject, data=schema_2_data
         )
         assert result_raw.status_code == requests.codes.ok
-        assert result_raw.json() == {"id": 2}
+        assert result_raw.json()["id"] == 2
 
         # A 'latest' hard deletion will always fail because it tries
         # to delete the latest non-soft-deleted version
@@ -5392,7 +5392,7 @@ class SchemaRegistryBasicAuthTest(SchemaRegistryEndpoints):
         )
         self.logger.debug(result_raw)
         assert result_raw.status_code == requests.codes.ok
-        assert result_raw.json() == {"id": 1}, f"Json: {result_raw.json()}"
+        assert result_raw.json()["id"] == 1, f"Json: {result_raw.json()}"
 
         self.logger.debug("Get subject versions")
         result_raw = self.sr_client.get_subjects_subject_versions(
@@ -5409,7 +5409,7 @@ class SchemaRegistryBasicAuthTest(SchemaRegistryEndpoints):
         )
         self.logger.debug(result_raw)
         assert result_raw.status_code == requests.codes.ok
-        assert result_raw.json() == {"id": 2}, f"Json: {result_raw.json()}"
+        assert result_raw.json()["id"] == 2, f"Json: {result_raw.json()}"
 
         self.logger.debug("Get subject versions")
         result_raw = self.sr_client.get_subjects_subject_versions(
@@ -5501,7 +5501,7 @@ class SchemaRegistryBasicAuthTest(SchemaRegistryEndpoints):
         assert result_raw.status_code == requests.codes.ok, (
             f"Code: {result_raw.status_code}"
         )
-        assert result_raw.json() == {"id": 1}, f"Json: {result_raw.json()}"
+        assert result_raw.json()["id"] == 1, f"Json: {result_raw.json()}"
 
         self.logger.debug("Soft delete subject")
         result_raw = self.sr_client.delete_subject(

@@ -82,7 +82,9 @@ FIXTURE_TEST(
           client, pps::subject{"test-key"}, avro_int_payload);
         BOOST_REQUIRE_EQUAL(
           res.headers.result(), boost::beast::http::status::ok);
-        BOOST_REQUIRE_EQUAL(res.body, R"({"id":1})");
+        BOOST_REQUIRE_EQUAL(
+          res.body,
+          R"({"id":1,"version":1,"schemaType":"AVRO","schema":"\"int\""})");
         BOOST_REQUIRE_EQUAL(
           res.headers.at(boost::beast::http::field::content_type),
           to_header_value(ppj::serialization_format::schema_registry_v1_json));
@@ -94,7 +96,9 @@ FIXTURE_TEST(
           client, pps::subject{"test-key"}, avro_int_payload);
         BOOST_REQUIRE_EQUAL(
           res.headers.result(), boost::beast::http::status::ok);
-        BOOST_REQUIRE_EQUAL(res.body, R"({"id":1})");
+        BOOST_REQUIRE_EQUAL(
+          res.body,
+          R"({"id":1,"version":1,"schemaType":"AVRO","schema":"\"int\""})");
         BOOST_REQUIRE_EQUAL(
           res.headers.at(boost::beast::http::field::content_type),
           to_header_value(ppj::serialization_format::schema_registry_v1_json));
@@ -106,7 +110,9 @@ FIXTURE_TEST(
           client, pps::subject{"test-value"}, avro_int_payload);
         BOOST_REQUIRE_EQUAL(
           res.headers.result(), boost::beast::http::status::ok);
-        BOOST_REQUIRE_EQUAL(res.body, R"({"id":1})");
+        BOOST_REQUIRE_EQUAL(
+          res.body,
+          R"({"id":1,"version":1,"schemaType":"AVRO","schema":"\"int\""})");
         BOOST_REQUIRE_EQUAL(
           res.headers.at(boost::beast::http::field::content_type),
           to_header_value(ppj::serialization_format::schema_registry_v1_json));
@@ -118,7 +124,9 @@ FIXTURE_TEST(
           client, pps::subject{"test-key"}, avro_long_payload);
         BOOST_REQUIRE_EQUAL(
           res.headers.result(), boost::beast::http::status::ok);
-        BOOST_REQUIRE_EQUAL(res.body, R"({"id":2})");
+        BOOST_REQUIRE_EQUAL(
+          res.body,
+          R"({"id":2,"version":2,"schemaType":"AVRO","schema":"\"long\""})");
         BOOST_REQUIRE_EQUAL(
           res.headers.at(boost::beast::http::field::content_type),
           to_header_value(ppj::serialization_format::schema_registry_v1_json));
@@ -261,7 +269,7 @@ FIXTURE_TEST(
   "schema": "syntax = \"proto3\"; message Simple { string i = 1; }",
   "schemaType": "PROTOBUF"
 })");
-        BOOST_REQUIRE_EQUAL(res.body, R"({"id":1})");
+        BOOST_REQUIRE_MESSAGE(res.body.starts_with(R"({"id":1)"), res.body);
         BOOST_REQUIRE_EQUAL(
           res.headers.at(boost::beast::http::field::content_type),
           to_header_value(ppj::serialization_format::schema_registry_v1_json));
@@ -328,7 +336,7 @@ FIXTURE_TEST(schema_registry_post_avro_references, pandaproxy_test_fixture) {
     info("Post company schema (expect schema_id=1)");
     auto res = post_schema(
       client, company_req.schema.sub(), ppj::rjson_serialize_str(company_req));
-    BOOST_REQUIRE_EQUAL(res.body, R"({"id":1})");
+    BOOST_REQUIRE_MESSAGE(res.body.starts_with(R"({"id":1)"), res.body);
     BOOST_REQUIRE_EQUAL(
       res.headers.at(boost::beast::http::field::content_type),
       to_header_value(ppj::serialization_format::schema_registry_v1_json));
@@ -338,7 +346,7 @@ FIXTURE_TEST(schema_registry_post_avro_references, pandaproxy_test_fixture) {
       client,
       employee_req.schema.sub(),
       ppj::rjson_serialize_str(employee_req));
-    BOOST_REQUIRE_EQUAL(res.body, R"({"id":2})");
+    BOOST_REQUIRE_MESSAGE(res.body.starts_with(R"({"id":2)"), res.body);
     BOOST_REQUIRE_EQUAL(
       res.headers.at(boost::beast::http::field::content_type),
       to_header_value(ppj::serialization_format::schema_registry_v1_json));
@@ -434,7 +442,7 @@ FIXTURE_TEST(
       client,
       simple_req_first.schema.sub(),
       ppj::rjson_serialize_str(simple_req_first));
-    BOOST_REQUIRE_EQUAL(res.body, R"({"id":1})");
+    BOOST_REQUIRE_MESSAGE(res.body.starts_with(R"({"id":1)"), res.body);
     BOOST_REQUIRE_EQUAL(
       res.headers.at(boost::beast::http::field::content_type),
       to_header_value(ppj::serialization_format::schema_registry_v1_json));
@@ -444,7 +452,7 @@ FIXTURE_TEST(
       client,
       simple_req_second.schema.sub(),
       ppj::rjson_serialize_str(simple_req_second));
-    BOOST_REQUIRE_EQUAL(res.body, R"({"id":2})");
+    BOOST_REQUIRE_MESSAGE(res.body.starts_with(R"({"id":2)"), res.body);
     BOOST_REQUIRE_EQUAL(
       res.headers.at(boost::beast::http::field::content_type),
       to_header_value(ppj::serialization_format::schema_registry_v1_json));

@@ -283,16 +283,28 @@ private:
 };
 
 struct post_subject_versions_response {
+    schema_definition schema;
     schema_id id;
+    schema_version version;
 };
 
 template<typename Buffer>
 void rjson_serialize(
-  ::json::Writer<Buffer>& w,
+  ::json::iobuf_writer<Buffer>& w,
   const schema_registry::post_subject_versions_response& res) {
     w.StartObject();
     w.Key("id");
     ::json::rjson_serialize(w, res.id);
+    w.Key("version");
+    ::json::rjson_serialize(w, res.version);
+    w.Key("schemaType");
+    ::json::rjson_serialize(w, to_string_view(res.schema.type()));
+    if (!res.schema.refs().empty()) {
+        w.Key("references");
+        ::json::rjson_serialize(w, res.schema.refs());
+    }
+    w.Key("schema");
+    ::json::rjson_serialize(w, res.schema.raw());
     w.EndObject();
 }
 
