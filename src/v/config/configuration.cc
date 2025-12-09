@@ -4517,11 +4517,10 @@ configuration::configuration()
       "The interval at which the cluster epoch is incremented",
       {.needs_restart = needs_restart::no, .visibility = visibility::tunable},
       10min)
-  , epoch_service_cached_epoch_age_soft_limit(
+  , cloud_topics_epoch_service_local_epoch_cache_duration(
       *this,
-      "epoch_service_cached_epoch_age_soft_limit",
-      "When the age of a cached epoch reaches the soft limit it triggers a "
-      "background refresh",
+      "cloud_topics_epoch_service_local_epoch_cache_duration",
+      "The local cache duration of a cluster wide epoch",
       {.needs_restart = needs_restart::no, .visibility = visibility::tunable},
       1min)
   , development_feature_property_testing_only(

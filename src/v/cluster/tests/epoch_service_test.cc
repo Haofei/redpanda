@@ -100,7 +100,8 @@ TEST_F_CORO(ClusterEpochService, TestCaching) {
     EXPECT_EQ(accesses, 1);
     // After the timeout we async re-fetch the value
     ss::manual_clock::advance(
-      config::shard_local_cfg().epoch_service_cached_epoch_age_soft_limit()
+      config::shard_local_cfg()
+        .cloud_topics_epoch_service_local_epoch_cache_duration()
       + 1us);
     auto barrier = co_await acquire_barrier();
     EXPECT_EQ(co_await get_cached_epoch(), cluster_epoch - 1);
@@ -124,7 +125,8 @@ TEST_F_CORO(ClusterEpochService, IncrementMustHappenEventually) {
                                  + epoch_service::max_same_epoch_cache_duration;
     // After the timeout we async re-fetch the value
     ss::manual_clock::advance(
-      config::shard_local_cfg().epoch_service_cached_epoch_age_soft_limit()
+      config::shard_local_cfg()
+        .cloud_topics_epoch_service_local_epoch_cache_duration()
       + 1us);
     while (ss::manual_clock::now() < must_refresh_deadline) {
         auto accesses_before = accesses.load();
@@ -132,7 +134,8 @@ TEST_F_CORO(ClusterEpochService, IncrementMustHappenEventually) {
         co_await tests::drain_task_queue();
         EXPECT_EQ(accesses, accesses_before + 1);
         ss::manual_clock::advance(
-          config::shard_local_cfg().epoch_service_cached_epoch_age_soft_limit()
+          config::shard_local_cfg()
+            .cloud_topics_epoch_service_local_epoch_cache_duration()
           + 1us);
     }
     // After the max duration we wait to fetch the value, and will fail if we
@@ -161,7 +164,8 @@ TEST_F_CORO(ClusterEpochService, FetchesLimitedToShard0) {
     // one additional fetch
     ++cluster_epoch;
     ss::manual_clock::advance(
-      config::shard_local_cfg().epoch_service_cached_epoch_age_soft_limit()
+      config::shard_local_cfg()
+        .cloud_topics_epoch_service_local_epoch_cache_duration()
       + 1us);
     auto barrier = co_await acquire_barrier();
     EXPECT_THAT(co_await all_epochs(), ElementsAre(0, 0));

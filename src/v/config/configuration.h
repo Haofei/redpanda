@@ -821,7 +821,7 @@ public:
     property<std::chrono::milliseconds>
       cloud_topics_epoch_service_epoch_increment_interval;
     property<std::chrono::milliseconds>
-      epoch_service_cached_epoch_age_soft_limit;
+      cloud_topics_epoch_service_local_epoch_cache_duration;
 
     development_feature_property<int> development_feature_property_testing_only;
 

@@ -37,7 +37,7 @@ class CloudTopicsL0GCTest(RedpandaTest):
             CLOUD_TOPICS_CONFIG_STR: True,
             "cloud_topics_reconciliation_interval": 2000,
             "cloud_topics_epoch_service_epoch_increment_interval": 5000,
-            "epoch_service_cached_epoch_age_soft_limit": 5000,
+            "cloud_topics_epoch_service_local_epoch_cache_duration": 5000,
         }
         super(CloudTopicsL0GCTest, self).__init__(
             test_context=test_context,
