@@ -67,6 +67,13 @@ class ClientSwarmBase(Service, ABC):
     def _additional_args(self) -> str:
         pass
 
+    def _pre_run_tasks(self):
+        """
+        Can be overriden in child classes to run something before the cmd runs
+        on the remote node.
+        """
+        pass
+
     def start_node(self, node, clean=None):
         assert self._node is None or self._node == node, (
             f"started on more than one node? {self._node} {node}"
@@ -85,6 +92,7 @@ class ClientSwarmBase(Service, ABC):
         cmd += f" --client-spawn-wait-ms={self.CLIENT_SPAWN_WAIT_MS}"
 
         cmd = f'RUST_LOG={self._log_level} bash /opt/remote/control/start.sh {self.EXE} "{cmd}"'
+        self._pre_run_tasks()
         node.account.ssh(cmd)
         self._redpanda.wait_until(
             self.is_alive,
