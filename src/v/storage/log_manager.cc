@@ -444,10 +444,13 @@ log_manager::housekeeping_scan(model::timestamp collection_threshold) {
 
         vlog(
           gclog.trace,
-          "{}: max tombstone remove offset: {}, max tx remove offset: {}",
+          "{}: max tombstone remove offset: {}, max tx remove offset: {}, max "
+          "tx end remove snapshot: {}, tx_snapshot_offset: {}",
           ntp,
           max_tombstone_remove_offset,
-          max_tx_remove_offset);
+          max_tx_remove_offset,
+          max_tx_end_remove_offset,
+          tx_snapshot_offset);
         if (
           max_unpinned_offset
           && *max_unpinned_offset < max_compactible_offset) {
