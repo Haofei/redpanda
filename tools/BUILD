@@ -1,4 +1,5 @@
 load("@buildifier_prebuilt//:rules.bzl", "buildifier")
+load("@rules_pkg//pkg:tar.bzl", "pkg_tar")
 load("@rules_python//python:defs.bzl", "py_binary")
 load("@rules_shell//shell:sh_binary.bzl", "sh_binary")
 
@@ -23,6 +24,14 @@ buildifier(
     lint_mode = "fix",
     mode = "fix",
 )
+
+DEV_CLUSTER_PYTHON_DEPS = [
+    "@python_deps//aioboto3",
+    "@python_deps//boto3",
+    "@python_deps//psutil",
+    "@python_deps//pyyaml",
+    "@python_deps//s3transfer",
+]
 
 # Run a dev_cluster, by default the data directory is in the repository root.
 #
@@ -56,13 +65,67 @@ py_binary(
         "//src/v/redpanda",
     ],
     visibility = ["//visibility:public"],
-    deps = [
-        "@python_deps//aioboto3",
-        "@python_deps//boto3",
-        "@python_deps//psutil",
-        "@python_deps//pyyaml",
-        "@python_deps//s3transfer",
+    deps = DEV_CLUSTER_PYTHON_DEPS,
+)
+
+# dev cluster target for the pgo genrule. We need dev_cluster as a tool
+# dependency such that it provides the deps/runfiles. That however makes it
+# dependencies (redpanda) built in "host-config" which is not what we want.
+py_binary(
+    name = "dev_cluster_for_pgo",
+    testonly = True,
+    srcs = [
+        "dev_cluster.py",
     ],
+    data = [
+        "//bazel/thirdparty:grafana",
+        "//bazel/thirdparty:minio",
+        "//bazel/thirdparty:prometheus",
+    ],
+    main = "dev_cluster.py",
+    visibility = ["//visibility:private"],
+    deps = DEV_CLUSTER_PYTHON_DEPS,
+)
+
+# Package redpanda binary into a tarball alongside with all needed runfiles. We
+# can't make a redpanda a "tool" dependency as otherwise it will run under
+# "host-config"
+pkg_tar(
+    name = "redpanda_package_for_pgo",
+    srcs = ["//src/v/redpanda"],
+    extension = "tar",
+    include_runfiles = True,
+    package_dir = "redpanda",
+    strip_prefix = "/",
+    tags = ["manual"],
+    visibility = ["//visibility:private"],
+)
+
+genrule(
+    name = "pgo_profile",
+    testonly = True,
+    srcs = [
+        "//bazel/thirdparty:omb_minimal",
+        "@current_llvm_toolchain//:llvm-profdata",
+        "pgo_bolt/train_pgo.py",
+        ":redpanda_package_for_pgo",
+    ],
+    outs = ["pgo_profile.profdata"],
+    cmd = "$(execpath pgo_bolt/train_pgo.py) " +
+          "--dev-cluster-py $(execpath :dev_cluster_for_pgo) " +
+          "--llvm-profdata-bin $(execpath @current_llvm_toolchain//:llvm-profdata) " +
+          "--redpanda-tar $(location :redpanda_package_for_pgo) " +
+          "--omb-benchmark $(execpath //bazel/thirdparty:omb_minimal) " +
+          "--combined-profile-file $(RULEDIR)/pgo_profile.profdata",
+    tags = [
+        "manual",
+        "no-sandbox",
+        "supports-graceful-termination",
+    ],
+    tools = [
+        ":dev_cluster_for_pgo",
+    ],
+    visibility = ["//visibility:public"],
 )
 
 sh_binary(

@@ -1,0 +1,23 @@
+name: poc-aw
+
+topics: 1
+
+messageSize: 100
+useRandomizedPayloads: True
+randomBytesRatio: 0.5
+randomizedPayloadPoolSize: 1000
+# payloadFile: 'payload/payload-100b.data'
+
+partitionsPerTopic: 18
+subscriptionsPerTopic: 1
+producersPerTopic: 10
+consumerPerSubscription: 10
+
+producerRate: 100000
+
+consumerBacklogSizeGB: 0
+
+warmupDurationMinutes: 1
+testDurationMinutes: 1
+
+keyDistributor: NO_KEY

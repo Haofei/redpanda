@@ -1,0 +1,209 @@
+#!/usr/bin/env python3
+import argparse
+import glob
+import subprocess
+import os
+import signal
+import asyncio
+import tarfile
+import tempfile
+from typing import Any
+
+CLUSTER_STARTUP_MARKER = "Successfully started Redpanda"
+BENCH_START_MARKER = "Starting benchmark traffic"
+PERF_PROFILE_FILE = "perf.data"
+
+# Helper script to run PGO training workloads against a RP dev cluster
+# We use the devcluster to launch a basic rf=3 cluster and run OMB against it.
+# Finally we use llvm-profdata to merge the generated profiles (from all
+# brokers) into one file.
+
+
+async def read_until(proc: asyncio.subprocess.Process, marker: str, tag: str):
+    while True:
+        assert proc.stdout
+        line = await proc.stdout.readline()
+        if not line:
+            raise RuntimeError("EOF reached without readiness phrase")
+        line = line.decode("utf8").rstrip()
+        print(f"[{tag}] - {line}")
+        if marker in line:
+            print(f"Detected {tag} startup")
+            return
+
+
+async def continue_stream(proc: asyncio.subprocess.Process, tag: str):
+    while True:
+        assert proc.stdout
+        line = await proc.stdout.readline()
+        if not line:
+            break
+        line = line.decode("utf8").rstrip()
+        print(f"[{tag}] - {line}")
+
+
+async def start_dev_cluster(dev_cluster_py: str, redpanda_bin: str):
+    data_dir = "/dev/shm/rp_data/"
+    os.makedirs(data_dir, exist_ok=True)
+    cmd = [
+        dev_cluster_py,
+        "--cores",
+        "2",
+        "-d",
+        data_dir,
+        "--no-use-grafana",
+        "--no-use-prometheus",
+        "--no-use-minio",
+        "-e",
+        redpanda_bin,
+    ]
+    print(f"Launching dev_cluster: {' '.join(cmd)}")
+    proc = await asyncio.create_subprocess_exec(
+        *cmd,
+        stdout=asyncio.subprocess.PIPE,
+        stderr=asyncio.subprocess.STDOUT,
+        start_new_session=True,
+    )
+    return proc
+
+
+async def start_omb(omb_benchmark: str):
+    bench_cmd: list[str] = [
+        omb_benchmark,
+        "--drivers",
+        f"{os.path.dirname(os.path.realpath(__file__))}/omb_config/driver.yaml",
+        "--output",
+        "/tmp/ombout",
+        "--service-version",
+        "unknown_version",
+        f"{os.path.dirname(os.path.realpath(__file__))}/omb_config/workload.yaml",
+    ]
+    print(f"Launching omb: {' '.join(bench_cmd)}")
+    proc = await asyncio.create_subprocess_exec(
+        *bench_cmd,
+        stdout=asyncio.subprocess.PIPE,
+        stderr=asyncio.subprocess.STDOUT,
+        start_new_session=True,
+    )
+    return proc
+
+
+async def terminate(proc: asyncio.subprocess.Process, name: str):
+    if not proc:
+        return
+    try:
+        print(f"Terminating {name} (pid {proc.pid})")
+        os.killpg(proc.pid, signal.SIGINT)
+        await proc.wait()
+    except Exception as e:
+        print(f"Error terminating {name}: {e}")
+
+
+async def profile(args: argparse.Namespace, redpanda_bin: str):
+    cluster_proc: asyncio.subprocess.Process | None = None
+    omb_proc: asyncio.subprocess.Process | None = None
+    cluster_task: asyncio.Task[None] | None = None
+    try:
+        cluster_proc = await start_dev_cluster(
+            args.dev_cluster_py,
+            redpanda_bin,
+        )
+        await read_until(cluster_proc, CLUSTER_STARTUP_MARKER, "cluster")
+        cluster_task = asyncio.create_task(continue_stream(cluster_proc, "cluster"))
+
+        omb_proc = await start_omb(args.omb_benchmark)
+        await read_until(omb_proc, BENCH_START_MARKER, "omb")
+        await asyncio.create_task(continue_stream(omb_proc, "omb"))
+
+    finally:
+        if omb_proc:
+            await terminate(omb_proc, "omb")
+        if cluster_proc:
+            await terminate(cluster_proc, "cluster")
+        if cluster_task:
+            await cluster_task
+
+
+def combine_profiles(
+    args: argparse.Namespace, base_profile_dir: str, combined_profile_file: str
+):
+    profiles = glob.glob(f"{base_profile_dir}/*.profraw")
+
+    assert len(profiles) > 0, f"No profiles found in {base_profile_dir}"
+
+    llvm_profdata_cmd: list[str] = [
+        args.llvm_profdata_bin,
+        "merge",
+        "-o",
+        combined_profile_file,
+        *profiles,
+    ]
+    print(f"Combining profiles: {' '.join(llvm_profdata_cmd)}")
+    subprocess.check_call(llvm_profdata_cmd)
+
+
+def extra_rp_tar(rp_tar: str, temp_dir: str):
+    extract_path = os.path.join(temp_dir, "redpanda_extracted")
+    os.makedirs(extract_path)
+
+    with tarfile.open(rp_tar, "r") as tar:
+        for member in tar.getmembers():
+            tar.extract(member, path=extract_path)
+
+    # Find the redpanda binary (to avoid hardcoding the a little bit brittle path)
+    for root, _, files in os.walk(extract_path):
+        if "redpanda" in files:
+            redpanda_bin = os.path.join(root, "redpanda")
+            return redpanda_bin
+
+    raise FileNotFoundError("redpanda binary not found in the tarball")
+
+
+def main(args: argparse.Namespace):
+    with tempfile.TemporaryDirectory(prefix="redpanda_pgo_") as tmpdirname:
+        profile_dir = os.path.join(tmpdirname, "profile_dir")
+        os.makedirs(profile_dir)
+        os.environ["LLVM_PROFILE_FILE"] = f"{profile_dir}/data-%p.profraw"
+
+        redpanda_bin = extra_rp_tar(args.redpanda_tar, tmpdirname)
+
+        asyncio.run(profile(args, redpanda_bin))
+        combine_profiles(args, profile_dir, args.combined_profile_file)
+
+
+if __name__ == "__main__":
+    # bazel will send us SIGTERM on ctrl-c, so we need to handle it gracefully
+    def handler(signum: Any, frame: Any):
+        raise KeyboardInterrupt()
+
+    signal.signal(signal.SIGINT, handler)
+    signal.signal(signal.SIGTERM, handler)
+
+    parser = argparse.ArgumentParser()
+    parser.add_argument(
+        "--dev-cluster-py",
+        type=str,
+        help="path to dev_cluster.py",
+    )
+    parser.add_argument(
+        "--llvm-profdata-bin",
+        type=str,
+        help="path to llvm-profdata binary",
+    )
+    parser.add_argument(
+        "--redpanda-tar",
+        type=str,
+        help="path to redpanda tarball (bazel packaged with runfiles)",
+    )
+    parser.add_argument(
+        "--omb-benchmark",
+        type=str,
+        help="path to omb benchmark executable",
+    )
+    parser.add_argument(
+        "--combined-profile-file",
+        type=str,
+        help="output path for combined PGO profile file",
+    )
+    args = parser.parse_args()
+    main(args)
