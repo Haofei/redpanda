@@ -642,6 +642,9 @@ class ClusterConfigTest(RedpandaTest, ClusterConfigHelpersMixin):
         # Don't modify oidc_principal mapping, the value is complex and tested elsewhere.
         exclude_settings.add("oidc_principal_mapping")
 
+        # Don't modify oidc_group_claim_path, the value is complex and tested elsewhere
+        exclude_settings.add("oidc_group_claim_path")
+
         # Don't modify iceberg_default_partition_spec, it has its own syntax
         # and is tested elsewhere.
         exclude_settings.add("iceberg_default_partition_spec")

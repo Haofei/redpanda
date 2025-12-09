@@ -722,6 +722,7 @@ struct configuration final : public config_store {
     property<std::chrono::seconds> oidc_clock_skew_tolerance;
     property<ss::sstring> oidc_principal_mapping;
     property<std::chrono::seconds> oidc_keys_refresh_interval;
+    property<ss::sstring> oidc_group_claim_path;
 
     // HTTP Authentication
     enterprise<property<std::vector<ss::sstring>>> http_authentication;

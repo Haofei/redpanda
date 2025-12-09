@@ -3876,6 +3876,12 @@ configuration::configuration()
       "access tokens.",
       {.needs_restart = needs_restart::no, .visibility = visibility::user},
       1h)
+  , oidc_group_claim_path(
+      *this,
+      "oidc_group_claim_path",
+      "JSON path to extract groups from the JWT payload.",
+      {.needs_restart = needs_restart::no, .visibility = visibility::user},
+      "$.groups")
   , http_authentication(
       *this,
       "OIDC",
