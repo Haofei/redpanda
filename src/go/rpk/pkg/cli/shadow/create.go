@@ -10,10 +10,12 @@
 package shadow
 
 import (
+	"context"
 	"errors"
 	"fmt"
 	"strings"
 
+	"buf.build/gen/go/redpandadata/cloud/connectrpc/go/redpanda/api/controlplane/v1/controlplanev1connect"
 	controlplanev1 "buf.build/gen/go/redpandadata/cloud/protocolbuffers/go/redpanda/api/controlplane/v1"
 	adminv2 "buf.build/gen/go/redpandadata/core/protocolbuffers/go/redpanda/core/admin/v2"
 	"connectrpc.com/connect"
@@ -102,11 +104,16 @@ Create a Shadow Link without confirmation prompt:
 				out.MaybeDie(err, "unable to create Shadow Link: %v", err)
 
 				isComplete, err := waitForOperation(cmd.Context(), cloudClient, op.Msg.GetOperation().GetId())
-				out.MaybeDie(err, "unable to confirm Shadow Link creation: %v", err)
+				if err != nil {
+					if oErr := new(OperationFailedError); errors.As(err, &oErr) {
+						out.Die(tryShadowLinkErrReason(cmd.Context(), cloudClient.ShadowLink, oErr))
+					}
+					out.Die("unable to confirm Shadow Link creation: %v", err)
+				}
 				if isComplete {
 					out.Exit(successMsgTmpl, slCfg.Name, op.Msg.GetOperation().GetResourceId())
 				}
-				out.Exit("Shadow link creation is taking longer than expected. Please check the status of the shadow link using 'rpk shadow status %q'", slCfg.Name)
+				out.Exit("Shadow link creation is taking longer than expected. Please check the state of the shadow link using 'rpk shadow describe %v' and 'rpk shadow status %v'", slCfg.Name, slCfg.Name)
 			}
 			cl, err := adminapi.NewClient(cmd.Context(), fs, prof)
 			out.MaybeDie(err, "unable to initialize admin client: %v", err)
@@ -228,4 +235,18 @@ func authPassword(co *ShadowLinkClientOptions) string {
 		return auth.PlainConfiguration.Password
 	}
 	return ""
+}
+
+// tryShadowLinkErrReason attempts to extract a more specific error reason from
+// the Shadow Link response, defaulting to a generic error message if the call
+// fails or there is no additional information.
+func tryShadowLinkErrReason(ctx context.Context, cl controlplanev1connect.ShadowLinkServiceClient, oErr *OperationFailedError) string {
+	errMsg := oErr.Error()
+	link, err := cl.GetShadowLink(ctx, connect.NewRequest(&controlplanev1.GetShadowLinkRequest{
+		Id: oErr.Operation.GetResourceId(),
+	}))
+	if err != nil || link.Msg.GetShadowLink().GetReason() == "" {
+		return errMsg
+	}
+	return fmt.Sprintf("%v. Reason: %v", errMsg, link.Msg.GetShadowLink().GetReason())
 }

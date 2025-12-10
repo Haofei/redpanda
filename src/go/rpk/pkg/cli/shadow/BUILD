@@ -27,6 +27,7 @@ go_library(
         "//src/go/rpk/pkg/os",
         "//src/go/rpk/pkg/out",
         "//src/go/rpk/pkg/publicapi",
+        "@build_buf_gen_go_redpandadata_cloud_connectrpc_go//redpanda/api/controlplane/v1/controlplanev1connect",
         "@build_buf_gen_go_redpandadata_cloud_protocolbuffers_go//redpanda/api/controlplane/v1:controlplane",
         "@build_buf_gen_go_redpandadata_core_protocolbuffers_go//redpanda/core/admin/v2:admin",
         "@build_buf_gen_go_redpandadata_core_protocolbuffers_go//redpanda/core/common/v1:common",

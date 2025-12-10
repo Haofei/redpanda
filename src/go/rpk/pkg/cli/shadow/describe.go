@@ -15,7 +15,6 @@ import (
 	"time"
 
 	controlplanev1 "buf.build/gen/go/redpandadata/cloud/protocolbuffers/go/redpanda/api/controlplane/v1"
-
 	adminv2 "buf.build/gen/go/redpandadata/core/protocolbuffers/go/redpanda/core/admin/v2"
 	corecommonv1 "buf.build/gen/go/redpandadata/core/protocolbuffers/go/redpanda/core/common/v1"
 	"connectrpc.com/connect"
@@ -216,6 +215,9 @@ func printCloudOverview(link *controlplanev1.ShadowLink) {
 	tw.Print("NAME", link.GetName())
 	tw.Print("ID", link.GetId())
 	tw.Print("STATE", strings.TrimPrefix(link.GetState().String(), "STATE_"))
+	if link.GetReason() != "" {
+		tw.Print("REASON", link.GetReason())
+	}
 	tw.Print("SHADOW REDPANDA ID", link.GetShadowRedpandaId())
 	if createdAt := link.GetCreatedAt(); createdAt != nil {
 		tw.Print("CREATED AT", createdAt.AsTime().Format(time.RFC3339))

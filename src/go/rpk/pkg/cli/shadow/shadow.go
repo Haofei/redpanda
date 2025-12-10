@@ -70,7 +70,7 @@ func waitForOperation(ctx context.Context, cloudClient *publicapi.CloudClientSet
 		time.Sleep(time.Duration(sleepTime) * time.Millisecond)
 	}
 	for i := range maxOpRetries {
-		shadowLink, err := cloudClient.Operations.GetOperation(ctx, connect.NewRequest(&controlplanev1.GetOperationRequest{
+		slOp, err := cloudClient.Operations.GetOperation(ctx, connect.NewRequest(&controlplanev1.GetOperationRequest{
 			Id: opID,
 		}))
 		if err != nil {
@@ -81,11 +81,11 @@ func waitForOperation(ctx context.Context, cloudClient *publicapi.CloudClientSet
 			}
 			return false, fmt.Errorf("unable to get Shadow Link Operation: %v", err)
 		}
-		switch shadowLink.Msg.GetOperation().GetState() {
+		switch slOp.Msg.GetOperation().GetState() {
 		case controlplanev1.Operation_STATE_COMPLETED:
 			return true, nil
 		case controlplanev1.Operation_STATE_FAILED:
-			return false, fmt.Errorf("an error occurred while attempting to perform the operation. %v", shadowLink.Msg.GetOperation().GetError().GetMessage())
+			return false, &OperationFailedError{Operation: slOp.Msg.GetOperation()}
 		default:
 			if i < maxOpRetries-1 {
 				backoff(i)
@@ -95,4 +95,12 @@ func waitForOperation(ctx context.Context, cloudClient *publicapi.CloudClientSet
 		}
 	}
 	return false, nil
+}
+
+type OperationFailedError struct {
+	Operation *controlplanev1.Operation
+}
+
+func (e *OperationFailedError) Error() string {
+	return fmt.Sprintf("operation %q failed: %s", e.Operation.GetId(), e.Operation.GetError().GetMessage())
 }
