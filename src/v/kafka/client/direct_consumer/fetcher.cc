@@ -740,7 +740,8 @@ fetcher::partition_response_actions fetcher::do_process_partition_response(
   chunked_vector<model::record_batch> response_batches,
   size_t response_size,
   fetcher::epoch_set epoch_set) {
-    // this was done to keep this method synchronous
+    // Record deserialization is async, extract the records before calling this
+    // method
     vassert(
       !partition_response.records.has_value(),
       "a precondition of calling this function is moving the records into the "
@@ -909,7 +910,9 @@ ss::future<kafka::error_code> fetcher::maybe_initialise_fetch_offsets(
               response_topic.topic, response_partition.partition_id);
             vassert(
               maybe_fetch_state.has_value(),
-              "fetch state should be found if the tp is consistent");
+              "Initializing list offsets should be performed behind a "
+              "partition consistency check. The partition must be assigned to "
+              "be consistent, which means the fetcher state must be found.");
             auto& fetch_state = maybe_fetch_state->get();
 
             vlog(
