@@ -15,7 +15,6 @@
 #include "cloud_storage_clients/s3_client.h"
 #include "model/timeout_clock.h"
 #include "ssx/future-util.h"
-#include "utils/functional.h"
 
 #include <seastar/core/smp.hh>
 #include <seastar/core/timed_out_error.hh>
@@ -31,7 +30,7 @@ using namespace std::chrono_literals;
 namespace {
 constexpr auto self_configure_attempts = 3;
 constexpr auto self_configure_backoff = 1s;
-constexpr auto self_config_timeout = 15s;
+constexpr auto pool_ready_timeout = 15s;
 } // namespace
 
 namespace cloud_storage_clients {
@@ -156,8 +155,6 @@ ss::future<> client_pool::accept_self_configure_result(
           _config, *result);
     }
 
-    populate_client_pool();
-
     // We signal the waiters only after the client pool is initialized, so
     // that any upload operations waiting are ready to proceed.
     _self_config_barrier.signal(_self_config_barrier.max_counter());
@@ -165,12 +162,23 @@ ss::future<> client_pool::accept_self_configure_result(
 
 ss::future<> client_pool::start(
   std::optional<std::reference_wrapper<stop_signal>> application_stop_signal) {
+    _transport_config = co_await build_transport_configuration(_config);
+
     if (ss::this_shard_id() == self_config_shard) {
         ssx::spawn_with_gate(
           _gate, [this, app_stop_signal = application_stop_signal]() {
               return client_self_configure(app_stop_signal);
           });
     }
+
+    // All shards wait for self-configuration to complete before populating
+    // client pool. By that time we have built transport configuration (happened
+    // above), have valid credentials (self configuration waits on them), and
+    // have applied self-configuration results (if any).
+    ssx::spawn_with_gate(_gate, [this]() {
+        return ss::get_units(_self_config_barrier, 1, _as)
+          .then([this](ssx::semaphore_units) { populate_client_pool(); });
+    });
 
     co_await _credential_manager.start();
 }
@@ -277,7 +285,7 @@ ss::future<client_pool::client_lease> client_pool::acquire(
         // but we have scheduled an upload. This wait ensures that when we call
         // the storage API we have a set of valid credentials.
         if (std::optional<ssx::semaphore_units> u = ss::try_get_units(
-              _self_config_barrier, 1);
+              _pool_ready_barrier, 1);
             !u.has_value()) {
             // Timeout exception will be thrown if the credentials are not
             // refreshed yet. The code in the 'remote' class handles this
@@ -286,7 +294,7 @@ ss::future<client_pool::client_lease> client_pool::acquire(
             // properly.
             try {
                 u = co_await ss::get_units(
-                  _self_config_barrier, 1, self_config_timeout);
+                  _pool_ready_barrier, 1, pool_ready_timeout);
             } catch (const ss::timed_out_error&) {
                 vlog(
                   pool_log.error,
@@ -543,6 +551,8 @@ size_t client_pool::size() const noexcept { return _pool.size(); }
 size_t client_pool::max_size() const noexcept { return _capacity; }
 
 void client_pool::populate_client_pool() {
+    vlog(pool_log.info, "Populating client pool with {} clients", _capacity);
+
     _pool.reserve(_capacity);
     for (size_t i = 0; i < _capacity; i++) {
         _pool.emplace_back(make_client());
@@ -555,23 +565,21 @@ void client_pool::populate_client_pool() {
       !_cvar.has_waiters(),
       "This is a bug: _cvar is not expected to have waiters at this point. "
       "Missing synchronization?");
+
+    _pool_ready_barrier.signal(_pool_ready_barrier.max_counter());
 }
 
 client_pool::http_client_ptr client_pool::make_client() noexcept {
-    return std::visit(
-      [this](const auto& cfg) -> http_client_ptr {
-          using cfg_type = std::decay_t<decltype(cfg)>;
-          if constexpr (std::is_same_v<s3_configuration, cfg_type>) {
-              return ss::make_shared<s3_client>(
-                weak_from_this(), cfg, _as, _apply_credentials);
-          } else if constexpr (std::is_same_v<abs_configuration, cfg_type>) {
-              return ss::make_shared<abs_client>(
-                weak_from_this(), cfg, _as, _apply_credentials);
-          } else {
-              static_assert(always_false_v<cfg_type>, "Unknown client type");
-          }
+    return ss::visit(
+      _config,
+      [this](const s3_configuration& cfg) -> http_client_ptr {
+          return ss::make_shared<s3_client>(
+            weak_from_this(), cfg, _transport_config, _as, _apply_credentials);
       },
-      _config);
+      [this](const abs_configuration& cfg) -> http_client_ptr {
+          return ss::make_shared<abs_client>(
+            weak_from_this(), cfg, _transport_config, _as, _apply_credentials);
+      });
 }
 
 void client_pool::release(http_client_ptr leased) {

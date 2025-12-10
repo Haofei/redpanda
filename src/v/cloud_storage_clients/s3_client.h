@@ -22,11 +22,7 @@
 #include <seastar/core/lowres_clock.hh>
 #include <seastar/core/shared_ptr.hh>
 
-#include <chrono>
-#include <initializer_list>
-#include <span>
 #include <string>
-#include <string_view>
 
 namespace cloud_storage_clients {
 
@@ -128,11 +124,13 @@ public:
     s3_client(
       ss::weak_ptr<client_pool> pool_ptr,
       const s3_configuration& conf,
+      const net::base_transport::configuration& transport_conf,
       ss::lw_shared_ptr<const cloud_roles::apply_credentials>
         apply_credentials);
     s3_client(
       ss::weak_ptr<client_pool> pool_ptr,
       const s3_configuration& conf,
+      const net::base_transport::configuration& transport_conf,
       const ss::abort_source& as,
       ss::lw_shared_ptr<const cloud_roles::apply_credentials>
         apply_credentials);

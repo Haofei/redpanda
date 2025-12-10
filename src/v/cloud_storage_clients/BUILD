@@ -58,7 +58,6 @@ redpanda_cc_library(
         "//src/v/strings:string_switch",
         "//src/v/thirdparty/libxml2",
         "//src/v/utils:base64",
-        "//src/v/utils:functional",
         "//src/v/utils:log_hist",
         "//src/v/utils:named_type",
         "//src/v/utils:retry_chain_node",

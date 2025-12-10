@@ -200,7 +200,10 @@ private:
 
     /// Configured capacity per shard
     const size_t _capacity;
+
     client_configuration _config;
+    net::base_transport::configuration _transport_config;
+
     ss::shared_ptr<client_probe> _probe;
     client_pool_overdraft_policy _policy;
 
@@ -221,6 +224,7 @@ private:
     ss::condition_variable _credentials_var;
 
     ssx::semaphore _self_config_barrier{0, "self_config_barrier"};
+    ssx::semaphore _pool_ready_barrier{0, "pool_barrier"};
 
     credential_manager _credential_manager;
 };

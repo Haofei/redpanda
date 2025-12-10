@@ -20,12 +20,9 @@
 
 namespace {
 
-ss::future<ss::shared_ptr<ss::tls::certificate_credentials>>
-build_tls_credentials(
-  ss::sstring name,
-  std::optional<cloud_storage_clients::ca_trust_file> trust_file,
-  ss::logger&) {
-    auto cred_builder = co_await net::get_credentials_builder({
+ss::future<ss::tls::credentials_builder> make_tls_credentials_builder(
+  std::optional<cloud_storage_clients::ca_trust_file> trust_file) {
+    return net::get_credentials_builder({
       .truststore = trust_file.transform(
         [](auto& f) { return net::certificate(std::filesystem::path(f)); }),
       .k_store = std::nullopt,
@@ -36,10 +33,6 @@ build_tls_credentials(
       .enable_renegotiation = false,
       .require_client_auth = false,
     });
-
-    co_return co_await net::build_reloadable_credentials_with_probe<
-      ss::tls::certificate_credentials>(
-      std::move(cred_builder), "cloud_storage_client", std::move(name));
 };
 
 } // namespace
@@ -119,8 +112,8 @@ ss::future<s3_configuration> s3_configuration::make_configuration(
     client_cfg.uri = access_point_uri(base_endpoint_uri);
 
     if (overrides.disable_tls == false) {
-        client_cfg.credentials = co_await build_tls_credentials(
-          "s3", overrides.trust_file, s3_log);
+        client_cfg.tls_credentials_builder
+          = co_await make_tls_credentials_builder(overrides.trust_file);
     }
 
     // When using virtual host addressing, the client must connect to
@@ -186,8 +179,8 @@ ss::future<abs_configuration> abs_configuration::make_configuration(
     client_cfg.shared_key = shared_key;
     client_cfg.uri = access_point_uri{endpoint_uri};
     if (overrides.disable_tls == false) {
-        client_cfg.credentials = co_await build_tls_credentials(
-          "abs", overrides.trust_file, abs_log);
+        client_cfg.tls_credentials_builder
+          = co_await make_tls_credentials_builder(overrides.trust_file);
     }
 
     client_cfg.server_addr = net::unresolved_address(
@@ -205,30 +198,6 @@ ss::future<abs_configuration> abs_configuration::make_configuration(
                                  ? *overrides.max_idle_time
                                  : default_max_idle_time;
     co_return client_cfg;
-}
-
-abs_configuration abs_configuration::make_adls_configuration() const {
-    abs_configuration adls_config{*this};
-
-    const auto endpoint_uri = [&]() -> ss::sstring {
-        auto adls_endpoint_override
-          = config::shard_local_cfg().cloud_storage_azure_adls_endpoint.value();
-        if (adls_endpoint_override.has_value()) {
-            return adls_endpoint_override.value();
-        }
-        return ssx::sformat("{}.dfs.core.windows.net", storage_account_name());
-    }();
-
-    adls_config.tls_sni_hostname = endpoint_uri;
-    adls_config.uri = access_point_uri{endpoint_uri};
-
-    auto adls_port_override
-      = config::shard_local_cfg().cloud_storage_azure_adls_port();
-    adls_config.server_addr = net::unresolved_address{
-      endpoint_uri,
-      adls_port_override.has_value() ? *adls_port_override : default_port};
-
-    return adls_config;
 }
 
 void apply_self_configuration_result(
@@ -421,6 +390,43 @@ build_refresh_credentials_source(
               return cloud_roles::auth_refresh_bg_op::abs_config{};
           });
     }
+}
+
+namespace {
+ss::future<ss::shared_ptr<ss::tls::certificate_credentials>>
+build_tls_credentials(
+  ss::sstring name, const ss::tls::credentials_builder& cred_builder) {
+    co_return co_await net::build_reloadable_credentials_with_probe<
+      ss::tls::certificate_credentials>(
+      cred_builder, "cloud_storage_client", std::move(name));
+}
+
+ss::future<net::base_transport::configuration> build_transport_configuration(
+  ss::sstring name, const common_configuration& config) {
+    co_return net::base_transport::configuration{
+      .server_addr = config.server_addr,
+      .credentials = config.tls_credentials_builder
+                       ? co_await build_tls_credentials(
+                           std::move(name), *config.tls_credentials_builder)
+                       : nullptr,
+      .tls_sni_hostname = config.tls_sni_hostname,
+      .wait_for_tls_server_eof = config.wait_for_tls_server_eof,
+    };
+}
+} // namespace
+
+ss::future<net::base_transport::configuration>
+build_transport_configuration(const client_configuration& config) {
+    return ss::visit(
+      config,
+      [](const cloud_storage_clients::s3_configuration& s3_cfg)
+        -> ss::future<net::base_transport::configuration> {
+          return build_transport_configuration("s3", s3_cfg);
+      },
+      [](const cloud_storage_clients::abs_configuration& abs_cfg)
+        -> ss::future<net::base_transport::configuration> {
+          return build_transport_configuration("abs", abs_cfg);
+      });
 }
 
 } // namespace cloud_storage_clients
