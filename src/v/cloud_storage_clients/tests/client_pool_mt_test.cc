@@ -176,9 +176,11 @@ SEASTAR_THREAD_TEST_CASE(test_client_pool_acquire_blocked_on_this_shard) {
     leases
       .invoke_on_all(
         [&pool, num_connections_per_shard](shard_leases& sl) mutable {
-            for (size_t i = 0; i < num_connections_per_shard; i++) {
-                sl.leases.push_back(pool.local().acquire(sl.as).get());
-            }
+            return ss::async([&] {
+                for (size_t i = 0; i < num_connections_per_shard; i++) {
+                    sl.leases.push_back(pool.local().acquire(sl.as).get());
+                }
+            });
         })
       .get();
 
