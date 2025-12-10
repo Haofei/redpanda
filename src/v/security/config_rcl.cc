@@ -16,6 +16,7 @@
 #include "security/oidc_principal_mapping.h"
 #include "security/oidc_url_parser.h"
 #include "ssx/sformat.h"
+#include "strings/string_switch.h"
 
 #include <boost/algorithm/string/case_conv.hpp>
 
@@ -235,6 +236,26 @@ validate_principal_mapping_rule(const ss::sstring& rule) {
         return rule_res.assume_error().message();
     }
     return std::nullopt;
+}
+
+auto format_as(nested_group_behavior b) { return to_string_view(b); }
+
+std::ostream& operator<<(std::ostream& os, nested_group_behavior b) {
+    os << to_string_view(b);
+    return os;
+}
+
+std::istream& operator>>(std::istream& is, nested_group_behavior& b) {
+    ss::sstring s;
+    is >> s;
+    b = string_switch<nested_group_behavior>(s)
+          .match(
+            to_string_view(nested_group_behavior::none),
+            nested_group_behavior::none)
+          .match(
+            to_string_view(nested_group_behavior::suffix),
+            nested_group_behavior::suffix);
+    return is;
 }
 
 } // namespace oidc

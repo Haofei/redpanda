@@ -28,6 +28,7 @@
 #include "model/metadata.h"
 #include "model/timestamp.h"
 #include "pandaproxy/schema_registry/schema_id_validation.h"
+#include "security/config.h"
 #include "utils/unresolved_address.h"
 
 #include <seastar/core/sstring.hh>

@@ -18,6 +18,9 @@ redpanda_cc_library(
         "oidc_principal_mapping.h",
         "oidc_url_parser.h",
     ],
+    implementation_deps = [
+        "//src/v/strings:string_switch",
+    ],
     visibility = ["//visibility:public"],
     deps = [
         "//src/v/base",
