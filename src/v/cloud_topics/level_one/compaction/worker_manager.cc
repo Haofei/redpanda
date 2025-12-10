@@ -66,7 +66,11 @@ worker_manager::try_acquire_work(ss::shard_id shard) {
         return std::nullopt;
     }
 
-    log->inflight = shard;
+    dassert(
+      log->state == log_compaction_meta::log_state::queued,
+      "Expected log state to be queued when acquiring work");
+    log->state = log_compaction_meta::log_state::inflight;
+    log->inflight_shard = shard;
     return ss::make_foreign(log);
 }
 
@@ -76,7 +80,12 @@ void worker_manager::complete_work(log_compaction_meta* log) {
       "Expected calls to worker_manager::complete_work() to always execute on "
       "shard {}",
       worker_manager_shard);
-    log->inflight.reset();
+    dassert(
+      log->state == log_compaction_meta::log_state::inflight,
+      "Expected log state to be inflight when completing work");
+    log->state = log_compaction_meta::log_state::idle;
+    log->inflight_shard.reset();
+    log->info_and_ts.reset();
 }
 
 ss::future<>
@@ -85,7 +94,7 @@ worker_manager::request_stop_compaction(log_compaction_meta_ptr log) {
         co_return;
     }
 
-    auto shard_opt = log->inflight;
+    auto shard_opt = log->inflight_shard;
     if (!shard_opt.has_value()) {
         co_return;
     }

@@ -52,10 +52,10 @@ ss::future<> compaction_worker::start() {
 ss::future<> compaction_worker::stop() {
     terminate_current_job();
     _worker_state = worker_state::stopped;
-    co_await _worker_update_queue.shutdown();
-
     _as.request_abort();
     _worker_cv.broken();
+
+    co_await _worker_update_queue.shutdown();
 
     auto close_fut = _gate.close();
 

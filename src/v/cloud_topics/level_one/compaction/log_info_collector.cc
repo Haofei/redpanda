@@ -100,7 +100,7 @@ log_info_collector::get_logs_to_collect(
             continue;
         }
 
-        if (log.inflight) {
+        if (log.state == log_compaction_meta::log_state::inflight) {
             // No need to sample inflight logs
             vlog(
               compaction_log.debug,
@@ -179,7 +179,7 @@ void log_info_collector::populate_log_infos(
             continue;
         }
 
-        if (log.inflight) {
+        if (log.state == log_compaction_meta::log_state::inflight) {
             // Don't step on compaction info that is actively being used.
             continue;
         }
@@ -213,6 +213,11 @@ void log_info_collector::populate_log_infos(
           log.ntp,
           log.info_and_ts->info);
 
+        if (log.state != log_compaction_meta::log_state::idle) {
+            // We don't need to queue an already queued log.
+            continue;
+        }
+
         auto topic_cfg_opt = _topic_metadata_provider->get_topic_cfg(
           model::topic_namespace_view(log.ntp));
 
@@ -225,6 +230,7 @@ void log_info_collector::populate_log_infos(
         if (needs_compaction(log, topic_cfg)) {
             auto ptr_it = logs_set.find(log.tidp);
             if (ptr_it != logs_set.end()) {
+                log.state = log_compaction_meta::log_state::queued;
                 compaction_queue.push(*ptr_it);
             }
         }

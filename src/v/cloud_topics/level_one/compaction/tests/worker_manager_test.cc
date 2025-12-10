@@ -88,15 +88,19 @@ TEST_F(WorkerManagerTestFixture, AcquireWork) {
     auto meta = ss::make_lw_shared<l1::log_compaction_meta>(
       test_tidp, test_ntp);
     list.push_back(*meta);
+    using state = l1::log_compaction_meta::log_state;
+    meta->state = state::queued;
     pq.emplace(meta);
 
     auto work_opt = manager.try_acquire_work(ss::this_shard_id());
     ASSERT_TRUE(work_opt.has_value());
     ASSERT_EQ(work_opt.value()->ntp, test_ntp);
     ASSERT_EQ(work_opt.value()->tidp, test_tidp);
-    ASSERT_TRUE(work_opt.value()->inflight.has_value());
-    ASSERT_EQ(work_opt.value()->inflight.value(), ss::this_shard_id());
+    ASSERT_TRUE(work_opt.value()->inflight_shard.has_value());
+    ASSERT_EQ(work_opt.value()->state, state::inflight);
+    ASSERT_EQ(work_opt.value()->inflight_shard.value(), ss::this_shard_id());
 
     manager.complete_work(work_opt.value().get());
-    ASSERT_FALSE(work_opt.value()->inflight.has_value());
+    ASSERT_FALSE(work_opt.value()->inflight_shard.has_value());
+    ASSERT_EQ(work_opt.value()->state, state::idle);
 }
