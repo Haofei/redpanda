@@ -41,6 +41,8 @@ struct common_configuration : net::base_transport::configuration {
     ss::shared_ptr<client_probe> _probe;
 
     bool requires_self_configuration{false};
+    model::cloud_credentials_source cloud_credentials_source{
+      model::cloud_credentials_source::config_file};
 };
 
 struct s3_configuration : common_configuration {
@@ -69,6 +71,7 @@ struct s3_configuration : common_configuration {
     ///        truststore
     /// \return future that returns initialized configuration
     static ss::future<s3_configuration> make_configuration(
+      model::cloud_credentials_source cloud_credentials_source,
       const std::optional<cloud_roles::public_key_str>& pkey,
       const std::optional<cloud_roles::private_key_str>& skey,
       const cloud_roles::aws_region_name& region,
@@ -91,6 +94,7 @@ struct abs_configuration : common_configuration {
     abs_configuration make_adls_configuration() const;
 
     static ss::future<abs_configuration> make_configuration(
+      model::cloud_credentials_source cloud_credentials_source,
       const std::optional<cloud_roles::private_key_str>& shared_key,
       const cloud_roles::storage_account& storage_account_name,
       const default_overrides& overrides = {},

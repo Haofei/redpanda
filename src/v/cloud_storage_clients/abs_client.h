@@ -118,11 +118,13 @@ private:
 class abs_client : public client {
 public:
     abs_client(
+      ss::weak_ptr<client_pool> pool_ptr,
       const abs_configuration& conf,
       ss::lw_shared_ptr<const cloud_roles::apply_credentials>
         apply_credentials);
 
     abs_client(
+      ss::weak_ptr<client_pool> pool_ptr,
       const abs_configuration& conf,
       const ss::abort_source& as,
       ss::lw_shared_ptr<const cloud_roles::apply_credentials>

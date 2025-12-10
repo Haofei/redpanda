@@ -64,6 +64,7 @@ class PartitionManifestDownloaderTest
 public:
     void SetUp() override {
         pool_.start(10, ss::sharded_parameter([this] { return conf; })).get();
+        pool_.invoke_on_all(&cloud_storage_clients::client_pool::start).get();
         io_
           .start(
             std::ref(pool_),

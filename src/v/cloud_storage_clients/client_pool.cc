@@ -44,7 +44,11 @@ client_pool::client_pool(
   : _capacity(size)
   , _config(std::move(conf))
   , _probe(std::visit([](auto&& p) { return p._probe; }, _config))
-  , _policy(policy) {
+  , _policy(policy)
+  , _credential_manager(
+      *this, _config, ss::visit(_config, [](const common_configuration& c) {
+          return c.cloud_credentials_source;
+      })) {
     if (ss::this_shard_id() == self_config_shard) {
         ssx::spawn_with_gate(
           _gate, [this, app_stop_signal = application_stop_signal]() {
@@ -169,6 +173,8 @@ ss::future<> client_pool::accept_self_configure_result(
     _self_config_barrier.signal(_self_config_barrier.max_counter());
 }
 
+ss::future<> client_pool::start() { co_await _credential_manager.start(); }
+
 ss::future<> client_pool::stop() {
     vlog(pool_log.info, "Stopping client pool: {}", _pool.size());
 
@@ -191,6 +197,8 @@ ss::future<> client_pool::stop() {
     }
 
     co_await ss::when_all_succeed(stops.begin(), stops.end());
+
+    co_await _credential_manager.stop();
 
     vlog(pool_log.info, "Stopped client pool");
     _probe = nullptr;
@@ -549,14 +557,16 @@ void client_pool::populate_client_pool() {
       "Missing synchronization?");
 }
 
-client_pool::http_client_ptr client_pool::make_client() const noexcept {
+client_pool::http_client_ptr client_pool::make_client() noexcept {
     return std::visit(
       [this](const auto& cfg) -> http_client_ptr {
           using cfg_type = std::decay_t<decltype(cfg)>;
           if constexpr (std::is_same_v<s3_configuration, cfg_type>) {
-              return ss::make_shared<s3_client>(cfg, _as, _apply_credentials);
+              return ss::make_shared<s3_client>(
+                weak_from_this(), cfg, _as, _apply_credentials);
           } else if constexpr (std::is_same_v<abs_configuration, cfg_type>) {
-              return ss::make_shared<abs_client>(cfg, _as, _apply_credentials);
+              return ss::make_shared<abs_client>(
+                weak_from_this(), cfg, _as, _apply_credentials);
           } else {
               static_assert(always_false_v<cfg_type>, "Unknown client type");
           }
@@ -575,6 +585,23 @@ void client_pool::release(http_client_ptr leased) {
       "tried to release a client but the pool is at capacity");
     _pool.emplace_back(std::move(leased));
     _cvar.signal();
+}
+
+void client_pool::maybe_refresh_credentials() {
+    if (ss::this_shard_id() == cloud_roles::auth_refresh_shard_id) {
+        return _credential_manager.maybe_refresh_credentials();
+    } else {
+        return ssx::spawn_with_gate(_gate, [this] {
+            return container().invoke_on(
+              cloud_roles::auth_refresh_shard_id, [](client_pool& pool) {
+                  pool._credential_manager.maybe_refresh_credentials();
+              });
+        });
+    }
+}
+
+uint64_t client_pool::token_refresh_count() const noexcept {
+    return _credential_manager.token_refresh_count();
 }
 
 void client_pool::load_credentials(cloud_roles::credentials credentials) {

@@ -14,6 +14,7 @@
 #include "bytes/iostream.h"
 #include "bytes/streambuf.h"
 #include "cloud_storage_clients/abs_error.h"
+#include "cloud_storage_clients/client_pool.h"
 #include "cloud_storage_clients/configuration.h"
 #include "cloud_storage_clients/logger.h"
 #include "cloud_storage_clients/types.h"
@@ -415,9 +416,11 @@ abs_request_creator::make_delete_file_request(
 }
 
 abs_client::abs_client(
+  ss::weak_ptr<client_pool> pool_ptr,
   const abs_configuration& conf,
   ss::lw_shared_ptr<const cloud_roles::apply_credentials> apply_credentials)
-  : _data_lake_v2_client_config(
+  : client(std::move(pool_ptr))
+  , _data_lake_v2_client_config(
       conf.is_hns_enabled ? std::make_optional(conf.make_adls_configuration())
                           : std::nullopt)
   , _is_oauth(apply_credentials->is_oauth())
@@ -431,10 +434,12 @@ abs_client::abs_client(
 }
 
 abs_client::abs_client(
+  ss::weak_ptr<client_pool> pool_ptr,
   const abs_configuration& conf,
   const ss::abort_source& as,
   ss::lw_shared_ptr<const cloud_roles::apply_credentials> apply_credentials)
-  : _data_lake_v2_client_config(
+  : client(std::move(pool_ptr))
+  , _data_lake_v2_client_config(
       conf.is_hns_enabled ? std::make_optional(conf.make_adls_configuration())
                           : std::nullopt)
   , _is_oauth(apply_credentials->is_oauth())
@@ -525,6 +530,9 @@ ss::future<result<T, error_outcome>> abs_client::send_request(
                 // the expired token will trigger generic AuthenticationFailed
                 // error.
                 outcome = error_outcome::authentication_failed;
+                if (auto p = _pool_ptr.get()) {
+                    p->maybe_refresh_credentials();
+                }
             } else {
                 outcome = error_outcome::fail;
             }

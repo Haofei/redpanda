@@ -1734,6 +1734,9 @@ void application::wire_up_redpanda_services(
                 return std::nullopt;
             }))
           .get();
+        cloud_storage_clients
+          .invoke_on_all(&cloud_storage_clients::client_pool::start)
+          .get();
         construct_service(
           cloud_io,
           std::ref(cloud_storage_clients),

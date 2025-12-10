@@ -17,6 +17,7 @@
 #include "bytes/iobuf_parser.h"
 #include "bytes/iostream.h"
 #include "bytes/streambuf.h"
+#include "cloud_storage_clients/client_pool.h"
 #include "cloud_storage_clients/logger.h"
 #include "cloud_storage_clients/s3_error.h"
 #include "cloud_storage_clients/util.h"
@@ -591,6 +592,9 @@ ss::future<result<T, error_outcome>> s3_client::send_request(
               key,
               bucket);
             outcome = error_outcome::authentication_failed;
+            if (auto p = _pool_ptr.get()) {
+                p->maybe_refresh_credentials();
+            }
         } else {
             // Unexpected REST API error, we can't recover from this
             // because the issue is not temporary (e.g. bucket doesn't
@@ -617,17 +621,21 @@ ss::future<result<T, error_outcome>> s3_client::send_request(
 }
 
 s3_client::s3_client(
+  ss::weak_ptr<client_pool> pool_ptr,
   const s3_configuration& conf,
   ss::lw_shared_ptr<const cloud_roles::apply_credentials> apply_credentials)
-  : _requestor(conf, std::move(apply_credentials))
+  : client(std::move(pool_ptr))
+  , _requestor(conf, std::move(apply_credentials))
   , _client(conf)
   , _probe(conf._probe) {}
 
 s3_client::s3_client(
+  ss::weak_ptr<client_pool> pool_ptr,
   const s3_configuration& conf,
   const ss::abort_source& as,
   ss::lw_shared_ptr<const cloud_roles::apply_credentials> apply_credentials)
-  : _requestor(conf, std::move(apply_credentials))
+  : client(std::move(pool_ptr))
+  , _requestor(conf, std::move(apply_credentials))
   , _client(conf, &as, conf._probe, conf.max_idle_time)
   , _probe(conf._probe) {}
 

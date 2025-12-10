@@ -90,7 +90,6 @@ redpanda_cc_library(
         ":provider",
         ":remote_api",
         "//src/v/base",
-        "//src/v/cloud_roles:auth_refresh_bg_op",
         "//src/v/cloud_roles:types",
         "//src/v/cloud_storage_clients",
         "//src/v/config",

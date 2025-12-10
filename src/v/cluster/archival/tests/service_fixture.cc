@@ -91,6 +91,7 @@ archiver_fixture::archiver_fixture()
     auto sharded_creds_source = ss::sharded_parameter(
       [cfg = remote_cfg] { return cfg.cloud_credentials_source; });
     pool.start(remote_cfg.connection_limit(), sharded_client_conf).get();
+    pool.invoke_on_all(&cloud_storage_clients::client_pool::start).get();
     io.start(
         std::ref(pool),
         sharded_client_conf,

@@ -56,6 +56,7 @@ static constexpr ss::lowres_clock::duration default_max_idle_time
 static constexpr uint16_t default_port = 443;
 
 ss::future<s3_configuration> s3_configuration::make_configuration(
+  model::cloud_credentials_source cloud_credentials_source,
   const std::optional<cloud_roles::public_key_str>& pkey,
   const std::optional<cloud_roles::private_key_str>& skey,
   const cloud_roles::aws_region_name& region,
@@ -66,6 +67,7 @@ ss::future<s3_configuration> s3_configuration::make_configuration(
   net::metrics_disabled disable_metrics,
   net::public_metrics_disabled disable_public_metrics) {
     s3_configuration client_cfg;
+    client_cfg.cloud_credentials_source = cloud_credentials_source;
 
     if (url_style.has_value()) {
         vassert(
@@ -157,12 +159,14 @@ std::ostream& operator<<(std::ostream& o, const s3_configuration& c) {
 }
 
 ss::future<abs_configuration> abs_configuration::make_configuration(
+  model::cloud_credentials_source cloud_credentials_source,
   const std::optional<cloud_roles::private_key_str>& shared_key,
   const cloud_roles::storage_account& storage_account_name,
   const default_overrides& overrides,
   net::metrics_disabled disable_metrics,
   net::public_metrics_disabled disable_public_metrics) {
     abs_configuration client_cfg;
+    client_cfg.cloud_credentials_source = cloud_credentials_source;
 
     client_cfg.requires_self_configuration = true;
 

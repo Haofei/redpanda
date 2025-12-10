@@ -52,6 +52,7 @@ public:
           .start(
             10, ss::sharded_parameter([this] { return get_configuration(); }))
           .get();
+        pool.invoke_on_all(&cloud_storage_clients::client_pool::start).get();
         io.start(
             std::ref(pool),
             ss::sharded_parameter([this] { return get_configuration(); }),

@@ -14,7 +14,6 @@
 #include "cloud_io/io_result.h"
 #include "cloud_io/provider.h"
 #include "cloud_io/remote_api.h"
-#include "cloud_roles/auth_refresh_bg_op.h"
 #include "cloud_storage_clients/client.h"
 #include "cloud_storage_clients/client_pool.h"
 #include "model/metadata.h"
@@ -73,7 +72,6 @@ public:
     /// can perform.
     size_t concurrency() const;
 
-    model::cloud_storage_backend backend() const;
     const provider& provider() const;
 
     bool is_batch_delete_supported() const;
@@ -209,21 +207,12 @@ public:
 
     const io_resources& resources() const { return *_resources; }
 
-    // The method is supposed to be used by tests.
-    uint64_t token_refresh_count() const noexcept;
-
 private:
-    ss::future<> propagate_credentials(cloud_roles::credentials credentials);
-    void maybe_request_auth_refresh();
-
     ss::sharded<cloud_storage_clients::client_pool>& _pool;
+
     ss::gate _gate;
     ss::abort_source _as;
-    cloud_roles::auth_refresh_bg_op _auth_refresh_bg_op;
     std::unique_ptr<io_resources> _resources;
-
-    cloud_storage_clients::client_configuration _client_conf;
-    config::binding<std::optional<ss::sstring>> _azure_shared_key_binding;
 
     model::cloud_storage_backend _cloud_storage_backend;
     cloud_io::provider _provider;

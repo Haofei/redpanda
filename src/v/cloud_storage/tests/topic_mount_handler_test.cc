@@ -58,6 +58,7 @@ get_topic_configuration(cluster::topic_properties topic_props) {
 struct TopicMountHandlerFixture : public s3_imposter_fixture {
     TopicMountHandlerFixture() {
         pool.start(10, ss::sharded_parameter([this] { return conf; })).get();
+        pool.invoke_on_all(&cloud_storage_clients::client_pool::start).get();
         io.start(
             std::ref(pool),
             ss::sharded_parameter([this] { return conf; }),
