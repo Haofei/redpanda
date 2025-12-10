@@ -32,7 +32,7 @@ ss::logger test_log("test-log");
 static const uint16_t httpd_port_number = 4434;
 static constexpr const char* httpd_host_name = "localhost";
 
-static cloud_storage_clients::s3_configuration transport_configuration() {
+static cloud_storage_clients::s3_configuration client_configuration() {
     net::unresolved_address server_addr(httpd_host_name, httpd_port_number);
     cloud_storage_clients::s3_configuration conf;
     conf.uri = cloud_storage_clients::access_point_uri(httpd_host_name);
@@ -47,10 +47,10 @@ static cloud_storage_clients::s3_configuration transport_configuration() {
 
 SEASTAR_THREAD_TEST_CASE(test_client_pool_acquire_abortable) {
     auto sconf = ss::sharded_parameter([] {
-        auto conf = transport_configuration();
+        auto conf = client_configuration();
         return conf;
     });
-    auto conf = transport_configuration();
+    auto conf = client_configuration();
 
     ss::sharded<cloud_storage_clients::client_pool> pool;
     size_t num_connections_per_shard = 0;
@@ -83,10 +83,10 @@ SEASTAR_THREAD_TEST_CASE(test_client_pool_acquire_abortable) {
 
 SEASTAR_THREAD_TEST_CASE(test_client_pool_acquire_with_timeout) {
     auto sconf = ss::sharded_parameter([] {
-        auto conf = transport_configuration();
+        auto conf = client_configuration();
         return conf;
     });
-    auto conf = transport_configuration();
+    auto conf = client_configuration();
 
     ss::sharded<cloud_storage_clients::client_pool> pool;
     size_t num_connections_per_shard = 1;
@@ -149,10 +149,10 @@ SEASTAR_THREAD_TEST_CASE(test_client_pool_acquire_with_timeout) {
 
 SEASTAR_THREAD_TEST_CASE(test_client_pool_acquire_timeout) {
     auto sconf = ss::sharded_parameter([] {
-        auto conf = transport_configuration();
+        auto conf = client_configuration();
         return conf;
     });
-    auto conf = transport_configuration();
+    auto conf = client_configuration();
 
     ss::sharded<cloud_storage_clients::client_pool> pool;
     size_t num_connections_per_shard = 0;
