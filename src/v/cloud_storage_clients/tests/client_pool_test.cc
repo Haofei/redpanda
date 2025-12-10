@@ -11,6 +11,7 @@
 #include "base/seastarx.h"
 #include "cloud_io/tests/s3_imposter.h"
 #include "cloud_storage_clients/client_pool.h"
+#include "cloud_storage_clients/tests/client_pool_builder.h"
 
 #include <seastar/core/abort_source.hh>
 #include <seastar/core/future.hh>
@@ -27,6 +28,7 @@
 #include <boost/test/tools/interface.hpp>
 
 using namespace std::chrono_literals;
+using namespace cloud_storage_clients::tests;
 
 ss::logger test_log("test-log");
 static const uint16_t httpd_port_number = 4434;
@@ -45,27 +47,19 @@ static cloud_storage_clients::s3_configuration client_configuration() {
     return conf;
 }
 
+static const client_pool_builder test_pool_builder{client_configuration()};
+
 SEASTAR_THREAD_TEST_CASE(test_client_pool_acquire_abortable) {
-    auto sconf = ss::sharded_parameter([] {
-        auto conf = client_configuration();
-        return conf;
-    });
-    auto conf = client_configuration();
+    constexpr size_t num_connections_per_shard = 0;
 
     ss::sharded<cloud_storage_clients::client_pool> pool;
-    size_t num_connections_per_shard = 0;
-    pool
-      .start(
-        num_connections_per_shard,
-        sconf,
-        cloud_storage_clients::client_pool_overdraft_policy::borrow_if_empty)
-      .get();
-
-    pool.invoke_on_all(&cloud_storage_clients::client_pool::start, std::nullopt)
-      .get();
-
-    auto pool_stop = ss::defer([&pool] { pool.stop().get(); });
-
+    auto stop_guard = test_pool_builder
+                        .connections_per_shard(num_connections_per_shard)
+                        .overdraft_policy(
+                          cloud_storage_clients::client_pool_overdraft_policy::
+                            borrow_if_empty)
+                        .build(pool)
+                        .get();
     ss::abort_source as;
 
     auto f = pool.local().acquire(as);
@@ -82,23 +76,15 @@ SEASTAR_THREAD_TEST_CASE(test_client_pool_acquire_abortable) {
 }
 
 SEASTAR_THREAD_TEST_CASE(test_client_pool_acquire_with_timeout) {
-    auto sconf = ss::sharded_parameter([] {
-        auto conf = client_configuration();
-        return conf;
-    });
-    auto conf = client_configuration();
+    constexpr size_t num_connections_per_shard = 1;
 
     ss::sharded<cloud_storage_clients::client_pool> pool;
-    size_t num_connections_per_shard = 1;
-    pool
-      .start(
-        num_connections_per_shard,
-        sconf,
-        cloud_storage_clients::client_pool_overdraft_policy::wait_if_empty)
-      .get();
-
-    pool.invoke_on_all(&cloud_storage_clients::client_pool::start, std::nullopt)
-      .get();
+    auto stop_guard
+      = test_pool_builder.connections_per_shard(num_connections_per_shard)
+          .overdraft_policy(
+            cloud_storage_clients::client_pool_overdraft_policy::wait_if_empty)
+          .build(pool)
+          .get();
 
     auto pool_stop = ss::defer([&pool] { pool.stop().get(); });
 
@@ -148,25 +134,15 @@ SEASTAR_THREAD_TEST_CASE(test_client_pool_acquire_with_timeout) {
 }
 
 SEASTAR_THREAD_TEST_CASE(test_client_pool_acquire_timeout) {
-    auto sconf = ss::sharded_parameter([] {
-        auto conf = client_configuration();
-        return conf;
-    });
-    auto conf = client_configuration();
-
+    constexpr size_t num_connections_per_shard = 0;
     ss::sharded<cloud_storage_clients::client_pool> pool;
-    size_t num_connections_per_shard = 0;
-    pool
-      .start(
-        num_connections_per_shard,
-        sconf,
-        cloud_storage_clients::client_pool_overdraft_policy::borrow_if_empty)
-      .get();
-
-    pool.invoke_on_all(&cloud_storage_clients::client_pool::start, std::nullopt)
-      .get();
-
-    auto pool_stop = ss::defer([&pool] { pool.stop().get(); });
+    auto stop_guard = test_pool_builder
+                        .connections_per_shard(num_connections_per_shard)
+                        .overdraft_policy(
+                          cloud_storage_clients::client_pool_overdraft_policy::
+                            borrow_if_empty)
+                        .build(pool)
+                        .get();
 
     {
         // acquire should time out. no abort required.

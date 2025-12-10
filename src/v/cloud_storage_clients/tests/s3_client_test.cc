@@ -14,6 +14,7 @@
 #include "bytes/iostream.h"
 #include "cloud_storage_clients/client_pool.h"
 #include "cloud_storage_clients/s3_client.h"
+#include "cloud_storage_clients/tests/client_pool_builder.h"
 #include "hashing/secure.h"
 #include "http/tests/utils.h"
 #include "net/dns.h"
@@ -50,6 +51,7 @@
 #include <chrono>
 
 using namespace std::chrono_literals;
+using namespace cloud_storage_clients::tests;
 
 static const uint16_t httpd_port_number = 4434;
 static constexpr const char* httpd_host_name = "localhost";
@@ -862,17 +864,14 @@ public:
     client_pool_fixture()
       : s3_conf(client_configuration())
       , server(ss::make_shared<ss::httpd::http_server_control>()) {
-        pool
-          .start(
-            2,
-            ss::sharded_parameter([] { return client_configuration(); }),
-            cloud_storage_clients::client_pool_overdraft_policy::wait_if_empty)
-          .get();
-
-        pool
-          .invoke_on_all(
-            &cloud_storage_clients::client_pool::start, std::nullopt)
-          .get();
+        auto stop_guard = client_pool_builder{client_configuration()}
+                            .connections_per_shard(2)
+                            .overdraft_policy(
+                              cloud_storage_clients::
+                                client_pool_overdraft_policy::wait_if_empty)
+                            .build(pool)
+                            .get();
+        stop_guard.release(); // managed by fixture
 
         server->start().get();
         server->set_routes(set_routes).get();
