@@ -124,6 +124,13 @@ public:
         cmp_meta.cleaned_at = model::timestamp::now();
         return *this;
     }
+    cm_builder& set_expected_epoch(
+      std::string_view tpr_str, metastore::compaction_epoch epoch) {
+        auto tp = model::topic_id_partition::from(tpr_str);
+        auto& cmp_meta = out[tp];
+        cmp_meta.expected_compaction_epoch = epoch;
+        return *this;
+    }
     cmap_t build() { return std::move(out); }
 
 private:
@@ -857,6 +864,7 @@ TEST(SimpleMetastoreTest, TestCompactionOffsets) {
 
         auto cmb = cm_builder();
         cmb.clean(tid_a, 3_o, 5_o, 3000_t);
+        cmb.set_expected_epoch(tid_a, metastore::compaction_epoch{0});
         auto compact_res = m.compact_objects(new_os, cmb.build()).get();
         ASSERT_TRUE(compact_res.has_value());
     }
@@ -902,6 +910,7 @@ TEST(SimpleMetastoreTest, TestCompactionOffsets) {
         auto cmb = cm_builder();
         cmb.clean(tid_a, 0_o, 2_o);
         cmb.remove_tombstones(tid_a, 3_o, 4_o);
+        cmb.set_expected_epoch(tid_a, metastore::compaction_epoch{1});
         auto compact_res = m.compact_objects(new_os, cmb.build()).get();
         ASSERT_TRUE(compact_res.has_value());
     }
@@ -926,6 +935,7 @@ TEST(SimpleMetastoreTest, TestCompactionOffsets) {
         auto cmb = cm_builder();
         cmb.clean(tid_a, 6_o, 10_o);
         cmb.remove_tombstones(tid_a, 5_o, 5_o);
+        cmb.set_expected_epoch(tid_a, metastore::compaction_epoch{2});
         auto compact_res = m.compact_objects(new_os, cmb.build()).get();
         ASSERT_TRUE(compact_res.has_value());
     }
@@ -956,6 +966,7 @@ TEST(SimpleMetastoreTest, TestCompactionOffsetsNoTombstones) {
 
         auto cmb = cm_builder();
         cmb.clean(tid_a, 3_o, 5_o);
+        cmb.set_expected_epoch(tid_a, metastore::compaction_epoch{0});
         auto compact_res = m.compact_objects(new_os, cmb.build()).get();
         ASSERT_TRUE(compact_res.has_value());
     }
@@ -999,6 +1010,7 @@ TEST(SimpleMetastoreTest, TestCompactionOffsetsNoTombstones) {
 
         auto cmb = cm_builder();
         cmb.clean(tid_a, 0_o, 2_o);
+        cmb.set_expected_epoch(tid_a, metastore::compaction_epoch{1});
         auto compact_res = m.compact_objects(new_os, cmb.build()).get();
         ASSERT_TRUE(compact_res.has_value());
     }
@@ -1021,6 +1033,7 @@ TEST(SimpleMetastoreTest, TestCompactionOffsetsNoTombstones) {
 
         auto cmb = cm_builder();
         cmb.clean(tid_a, 6_o, 10_o);
+        cmb.set_expected_epoch(tid_a, metastore::compaction_epoch{2});
         auto compact_res = m.compact_objects(new_os, cmb.build()).get();
         ASSERT_TRUE(compact_res.has_value());
     }
@@ -1227,6 +1240,7 @@ TEST(SimpleMetastoreTest, TestUpdateWithObjectBuilder) {
 
         cm_builder cmb;
         cmb.clean(tid_a, 10_o, 19_o);
+        cmb.set_expected_epoch(tid_a, metastore::compaction_epoch{0});
         auto compact_obj_res = m.compact_objects(*ob, cmb.build()).get();
         ASSERT_TRUE(compact_obj_res.has_value());
 
@@ -1508,6 +1522,7 @@ TEST(SimpleMetastoreTest, TestSetStartWithCompactionState) {
 
         auto cmb = cm_builder();
         cmb.clean(tid_a, 5_o, 15_o, 3000_t);
+        cmb.set_expected_epoch(tid_a, metastore::compaction_epoch{0});
         auto compact_res = m.compact_objects(new_os, cmb.build()).get();
         ASSERT_TRUE(compact_res.has_value());
     }
@@ -1569,6 +1584,7 @@ TEST(SimpleMetastoreTest, TestDirtyRatio) {
 
         auto cmb = cm_builder();
         cmb.clean(tid_a, 0_o, 5_o, 3000_t);
+        cmb.set_expected_epoch(tid_a, metastore::compaction_epoch{0});
         auto compact_res = m.compact_objects(new_os, cmb.build()).get();
         ASSERT_TRUE(compact_res.has_value());
     }
@@ -1588,6 +1604,7 @@ TEST(SimpleMetastoreTest, TestDirtyRatio) {
 
         auto cmb = cm_builder();
         cmb.clean(tid_a, 6_o, 9_o, 3000_t);
+        cmb.set_expected_epoch(tid_a, metastore::compaction_epoch{1});
         auto compact_res = m.compact_objects(new_os, cmb.build()).get();
         ASSERT_TRUE(compact_res.has_value());
     }
@@ -1605,6 +1622,7 @@ TEST(SimpleMetastoreTest, TestDirtyRatio) {
 
         auto cmb = cm_builder();
         cmb.clean(tid_a, 10_o, 19_o, 3000_t);
+        cmb.set_expected_epoch(tid_a, metastore::compaction_epoch{2});
         auto compact_res = m.compact_objects(new_os, cmb.build()).get();
         ASSERT_TRUE(compact_res.has_value());
     }
@@ -1672,6 +1690,7 @@ TEST(SimpleMetastoreTest, TestCompactionMultipleDirtyRangesMadeClean) {
 
         auto cmb = cm_builder();
         cmb.clean(tid_a, 5_o, 15_o, 3000_t);
+        cmb.set_expected_epoch(tid_a, metastore::compaction_epoch{0});
         auto compact_res = m.compact_objects(os, cmb.build()).get();
         ASSERT_TRUE(compact_res.has_value());
     }
@@ -1701,6 +1720,7 @@ TEST(SimpleMetastoreTest, TestCompactionMultipleDirtyRangesMadeClean) {
         auto cmb = cm_builder();
         cmb.clean(tid_a, 0_o, 4_o, 6000_t);
         cmb.clean(tid_a, 16_o, 20_o, 6000_t);
+        cmb.set_expected_epoch(tid_a, metastore::compaction_epoch{1});
         auto compact_res = m.compact_objects(os, cmb.build()).get();
         ASSERT_TRUE(compact_res.has_value());
     }

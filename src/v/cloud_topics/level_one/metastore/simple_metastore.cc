@@ -483,6 +483,8 @@ simple_metastore::compact_objects(
         }
         p_update.removed_tombstones_ranges = cm.removed_tombstones_ranges;
         p_update.cleaned_at = cm.cleaned_at;
+        p_update.expected_compaction_epoch
+          = partition_state::compaction_epoch_t{cm.expected_compaction_epoch()};
         compaction_updates[tp] = std::move(p_update);
     }
 
@@ -655,6 +657,19 @@ simple_metastore::get_earliest_dirty_ts(
     return std::nullopt;
 }
 
+std::expected<metastore::compaction_epoch, metastore::errc>
+simple_metastore::get_compaction_epoch(
+  const state& state, const model::topic_id_partition& tp) {
+    auto prt_ref = state.partition_state(tp);
+
+    if (!prt_ref.has_value()) {
+        return std::unexpected(errc::missing_ntp);
+    }
+
+    const auto& prt = prt_ref->get();
+    return metastore::compaction_epoch{prt.compaction_epoch()};
+}
+
 ss::future<std::expected<metastore::compaction_info_response, metastore::errc>>
 simple_metastore::get_compaction_info(const compaction_info_spec& log) {
     co_return get_compaction_info(
@@ -681,10 +696,16 @@ simple_metastore::get_compaction_info(
         return std::unexpected(offsets.error());
     }
 
+    auto compaction_epoch = get_compaction_epoch(state, tidp);
+    if (!compaction_epoch.has_value()) {
+        return std::unexpected(compaction_epoch.error());
+    }
+
     return compaction_info_response{
       .dirty_ratio = dirty_ratio.value(),
       .earliest_dirty_ts = earliest_dirty_ts.value(),
-      .offsets_response = std::move(offsets).value()};
+      .offsets_response = std::move(offsets).value(),
+      .compaction_epoch = compaction_epoch.value()};
 }
 
 } // namespace cloud_topics::l1

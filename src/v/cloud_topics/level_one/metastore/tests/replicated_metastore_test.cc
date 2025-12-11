@@ -326,6 +326,7 @@ TEST_F(ReplicatedMetastoreTest, TestBasicAdd) {
           testing::ElementsAre(MatchesRange(o{0}, o{999})));
         EXPECT_FLOAT_EQ(cmp_info->dirty_ratio, 1.0);
         EXPECT_TRUE(cmp_info->earliest_dirty_ts.has_value());
+        EXPECT_EQ(cmp_info->compaction_epoch, metastore::compaction_epoch{0});
     }
 }
 
@@ -348,6 +349,7 @@ TEST_F(ReplicatedMetastoreTest, TestBasicCompact) {
         update.new_cleaned_ranges.push_back(
           metastore::compaction_update::cleaned_range{
             .base_offset = o{0}, .last_offset = o{999}});
+        update.expected_compaction_epoch = metastore::compaction_epoch{0};
         cmap[make_tp(i)] = std::move(update);
     }
     auto cmp_res = meta.compact_objects(*new_objs, cmap).get();
@@ -417,6 +419,7 @@ TEST_F(ReplicatedMetastoreTest, TestBasicCompact) {
           << fmt::format("{} is not cleaned", tp);
         EXPECT_FLOAT_EQ(cmp_info->dirty_ratio, 0.0);
         EXPECT_TRUE(!cmp_info->earliest_dirty_ts.has_value());
+        EXPECT_EQ(cmp_info->compaction_epoch, metastore::compaction_epoch{1});
     }
 }
 

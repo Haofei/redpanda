@@ -121,6 +121,8 @@ private:
     get_dirty_ratio(const state&, const model::topic_id_partition&);
     static std::expected<std::optional<model::timestamp>, errc>
     get_earliest_dirty_ts(const state&, const model::topic_id_partition&);
+    static std::expected<compaction_epoch, errc>
+    get_compaction_epoch(const state&, const model::topic_id_partition&);
     static std::expected<compaction_info_response, errc> get_compaction_info(
       const state&, const model::topic_id_partition&, model::timestamp);
     static std::expected<kafka::offset, errc> get_end_offset_for_term(

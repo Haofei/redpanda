@@ -118,6 +118,14 @@ public:
         c_state.removed_tombstones_ranges.insert(base, last);
         return *this;
     }
+    replace_objects_builder& set_expected_epoch(
+      std::string_view tp_str,
+      partition_state::compaction_epoch_t compaction_epoch) {
+        auto tp = model::topic_id_partition::from(tp_str);
+        auto& c_state = out.compaction_updates[tp.topic_id][tp.partition];
+        c_state.expected_compaction_epoch = compaction_epoch;
+        return *this;
+    }
     replace_objects_update build() { return std::move(out); }
 
 private:
@@ -916,6 +924,7 @@ TEST(StateUpdateTest, TestReplaceWithCompaction) {
             range{
               .base_offset = 5_o, .last_offset = 10_o, .has_tombstones = true},
             1999_t)
+          .set_expected_epoch(tidp_a, partition_state::compaction_epoch_t{0})
           .build();
 
     auto replace_res = replace.apply(s);
@@ -932,6 +941,7 @@ TEST(StateUpdateTest, TestReplaceWithCompaction) {
     EXPECT_THAT(
       prt_a.compaction_state->cleaned_ranges_with_tombstones,
       ElementsAre(MatchesRange(5_o, 10_o)));
+    EXPECT_EQ(prt_a.compaction_epoch, partition_state::compaction_epoch_t{1});
 
     // Compact an extent, marking [3, 4] cleaned with tombstones.
     replace
@@ -944,6 +954,7 @@ TEST(StateUpdateTest, TestReplaceWithCompaction) {
             range{
               .base_offset = 3_o, .last_offset = 4_o, .has_tombstones = true},
             1999_t)
+          .set_expected_epoch(tidp_a, partition_state::compaction_epoch_t{1})
           .build();
     replace_res = replace.apply(s);
     ASSERT_TRUE(replace_res.has_value());
@@ -955,6 +966,7 @@ TEST(StateUpdateTest, TestReplaceWithCompaction) {
     EXPECT_THAT(
       prt_a.compaction_state->cleaned_ranges_with_tombstones,
       ElementsAre(MatchesRange(3_o, 4_o), MatchesRange(5_o, 10_o)));
+    EXPECT_EQ(prt_a.compaction_epoch, partition_state::compaction_epoch_t{2});
 
     // Now mark [3, 8] as having removed tombstones.
     replace = replace_objects_builder()
@@ -962,6 +974,8 @@ TEST(StateUpdateTest, TestReplaceWithCompaction) {
                        .add(tidp_a, 0_o, 10_o, 1999_t, 0, 99)
                        .build())
                 .clean_tombstones(tidp_a, 3_o, 8_o)
+                .set_expected_epoch(
+                  tidp_a, partition_state::compaction_epoch_t{2})
                 .build();
     replace_res = replace.apply(s);
     ASSERT_TRUE(replace_res.has_value()) << replace_res.error();
@@ -973,6 +987,7 @@ TEST(StateUpdateTest, TestReplaceWithCompaction) {
     EXPECT_THAT(
       prt_a.compaction_state->cleaned_ranges_with_tombstones,
       ElementsAre(MatchesRange(9_o, 10_o)));
+    EXPECT_EQ(prt_a.compaction_epoch, partition_state::compaction_epoch_t{3});
 }
 
 TEST(StateUpdateTest, TestCompactionMissingExtent) {
@@ -1001,6 +1016,7 @@ TEST(StateUpdateTest, TestCompactionMissingExtent) {
             range{
               .base_offset = 5_o, .last_offset = 10_o, .has_tombstones = true},
             1999_t)
+          .set_expected_epoch(tidp_a, partition_state::compaction_epoch_t{0})
           .build();
     auto replace_res = replace.apply(s);
     ASSERT_FALSE(replace_res.has_value());
@@ -1035,6 +1051,7 @@ TEST(StateUpdateTest, TestCompactionDoesntReplaceExtents) {
             range{
               .base_offset = 5_o, .last_offset = 11_o, .has_tombstones = true},
             1999_t)
+          .set_expected_epoch(tidp_a, partition_state::compaction_epoch_t{0})
           .build();
     auto replace_res = replace.apply(s);
     ASSERT_FALSE(replace_res.has_value());
@@ -1079,6 +1096,7 @@ TEST(StateUpdateTest, TestCompactionDoesntReplaceExtentsStart) {
             range{
               .base_offset = 0_o, .last_offset = 20_o, .has_tombstones = true},
             1999_t)
+          .set_expected_epoch(tidp_a, partition_state::compaction_epoch_t{0})
           .build();
     auto replace_res = replace.apply(s);
     ASSERT_FALSE(replace_res.has_value());
@@ -1122,6 +1140,7 @@ TEST(StateUpdateTest, TestCompactionDoesntReplaceLogStart) {
             range{
               .base_offset = 11_o, .last_offset = 20_o, .has_tombstones = true},
             1999_t)
+          .set_expected_epoch(tidp_a, partition_state::compaction_epoch_t{0})
           .build();
     auto replace_res = replace.apply(s);
     ASSERT_FALSE(replace_res.has_value());
@@ -1156,6 +1175,7 @@ TEST(StateUpdateTest, TestOverlappingTombstones) {
             range{
               .base_offset = 5_o, .last_offset = 10_o, .has_tombstones = true},
             1999_t)
+          .set_expected_epoch(tidp_a, partition_state::compaction_epoch_t{0})
           .build();
     auto replace_res = replace.apply(s);
     ASSERT_TRUE(replace_res.has_value());
@@ -1170,6 +1190,7 @@ TEST(StateUpdateTest, TestOverlappingTombstones) {
             range{
               .base_offset = 10_o, .last_offset = 10_o, .has_tombstones = true},
             1999_t)
+          .set_expected_epoch(tidp_a, partition_state::compaction_epoch_t{1})
           .build();
     replace_res = replace.apply(s);
     ASSERT_FALSE(replace_res.has_value());
@@ -1199,6 +1220,8 @@ TEST(StateUpdateTest, TestRemoveNonExistingTombstones) {
                             .add(tidp_a, 0_o, 10_o, 1999_t, 0, 99)
                             .build())
                      .clean_tombstones(tidp_a, 5_o, 10_o)
+                     .set_expected_epoch(
+                       tidp_a, partition_state::compaction_epoch_t{0})
                      .build();
     auto replace_res = replace.apply(s);
     ASSERT_FALSE(replace_res.has_value());
@@ -1601,6 +1624,7 @@ TEST(StateUpdateTest, TestSetStartOffsetWithCompactionState) {
             range{
               .base_offset = 5_o, .last_offset = 15_o, .has_tombstones = true},
             3000_t)
+          .set_expected_epoch(tidp_a, partition_state::compaction_epoch_t{0})
           .build();
     auto replace_res = replace_update.apply(s);
     ASSERT_TRUE(replace_res.has_value());
@@ -1617,6 +1641,8 @@ TEST(StateUpdateTest, TestSetStartOffsetWithCompactionState) {
     EXPECT_THAT(
       p_state->get().compaction_state->cleaned_ranges_with_tombstones,
       ElementsAre(MatchesRange(5_o, 15_o)));
+    EXPECT_EQ(
+      p_state->get().compaction_epoch, partition_state::compaction_epoch_t{1});
 
     // Set start offset to fall within the cleaned range (offset 10)
     auto set_start_update = set_start_offset_update::build(s, tp, 10_o);
@@ -1640,6 +1666,8 @@ TEST(StateUpdateTest, TestSetStartOffsetWithCompactionState) {
     EXPECT_THAT(
       p_state->get().compaction_state->cleaned_ranges_with_tombstones,
       ElementsAre(MatchesRange(10_o, 15_o)));
+    EXPECT_EQ(
+      p_state->get().compaction_epoch, partition_state::compaction_epoch_t{1});
 }
 
 TEST(StateUpdateTest, TestRemoveObjectsBasic) {
@@ -1894,4 +1922,73 @@ TEST(StateUpdateTest, TestRemoveMissingTopic) {
     ASSERT_TRUE(remove_topics_res->apply(s).has_value());
     EXPECT_EQ(0, s.topic_to_state.size());
     EXPECT_EQ(1, s.objects.size());
+}
+
+TEST(StateUpdateTest, TestCompactionValidatesEpoch) {
+    using testing::ElementsAre;
+    using range = struct compaction_state_update::cleaned_range;
+    auto add = add_objects_builder()
+                 .add(new_obj_builder(oid1, 300, 1300)
+                        .add(tidp_a, 0_o, 10_o, 1999_t, 0, 99)
+                        .build())
+                 .add_term_start(tidp_a, 0_tm, 0_o)
+                 .build();
+    state s;
+    auto add_res = add.apply(s);
+    ASSERT_TRUE(add_res.has_value());
+
+    {
+        // Attempt to fully compact partition A with an invalid compaction
+        // epoch.
+        auto replace = replace_objects_builder()
+                         .add(new_obj_builder(oid2, 100, 1100)
+                                .add(tidp_a, 0_o, 10_o, 1999_t, 0, 99)
+                                .build())
+                         .clean(
+                           tidp_a,
+                           range{
+                             .base_offset = 0_o,
+                             .last_offset = 10_o,
+                             .has_tombstones = true},
+                           1999_t)
+                         .set_expected_epoch(
+                           tidp_a, partition_state::compaction_epoch_t{999})
+                         .build();
+
+        auto replace_res = replace.apply(s);
+        ASSERT_FALSE(replace_res.has_value());
+        EXPECT_THAT(
+          std::string(replace_res.error()()),
+          testing::ContainsRegex(
+            "Expected compaction epoch .+ does not match the current"));
+    }
+
+    {
+        // Fix the expected epoch and see state increment its internal
+        // compaction_epoch.
+        auto replace = replace_objects_builder()
+                         .add(new_obj_builder(oid2, 100, 1100)
+                                .add(tidp_a, 0_o, 10_o, 1999_t, 0, 99)
+                                .build())
+                         .clean(
+                           tidp_a,
+                           range{
+                             .base_offset = 0_o,
+                             .last_offset = 10_o,
+                             .has_tombstones = true},
+                           1999_t)
+                         .set_expected_epoch(
+                           tidp_a, partition_state::compaction_epoch_t{0})
+                         .build();
+
+        auto replace_res = replace.apply(s);
+        ASSERT_TRUE(replace_res.has_value());
+        auto tp = model::topic_id_partition::from(tidp_a);
+        auto p_state = s.partition_state(tp);
+        ASSERT_TRUE(p_state.has_value());
+        ASSERT_TRUE(p_state->get().compaction_state.has_value());
+        ASSERT_EQ(
+          p_state->get().compaction_epoch,
+          partition_state::compaction_epoch_t{1});
+    }
 }

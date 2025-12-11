@@ -459,15 +459,28 @@ replace_objects_update::can_apply(const state& state) {
             model::topic_id_partition tidp{t, p};
             auto p_ref = state.partition_state(tidp);
             const auto& p_state = p_ref->get();
-            // Validate that any cleaned ranges actually correspond to the new
-            // extents.
+            // Validate the expected compaction epoch. If it does not match the
+            // current compaction epoch, there has been a concurrent race.
+            if (
+              compaction_update.expected_compaction_epoch
+              != p_state.compaction_epoch) {
+                return std::unexpected(stm_update_error(
+                  fmt::format(
+                    "Expected compaction epoch {} does not match the current "
+                    "compaction epoch {} for {}",
+                    compaction_update.expected_compaction_epoch,
+                    p_state.compaction_epoch,
+                    tidp)));
+            }
+
+            // Validate that any cleaned ranges actually correspond to the
+            // new extents.
             auto new_extent_iter = new_extents_by_tp.find(tidp);
             if (new_extent_iter == new_extents_by_tp.end()) {
                 return std::unexpected(stm_update_error(
                   fmt::format(
                     "New cleaned range does not refer to partition with "
-                    "extent: "
-                    "{}",
+                    "extent: {}",
                     tidp)));
             }
             if (!compaction_update.new_cleaned_ranges.empty()) {
@@ -551,8 +564,7 @@ replace_objects_update::can_apply(const state& state) {
                     return std::unexpected(stm_update_error(
                       fmt::format(
                         "Tombstone-removed range [{}, {}] for {} is not "
-                        "tracked "
-                        "as having tombstones",
+                        "tracked as having tombstones",
                         req_range.base_offset,
                         req_range.last_offset,
                         tidp)));
@@ -697,6 +709,7 @@ replace_objects_update::apply(state& state) {
                   cleaned_range.base_offset,
                   cleaned_range.last_offset);
             }
+            ++p_state.compaction_epoch;
         }
     }
     return std::monostate{};
