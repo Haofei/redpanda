@@ -125,6 +125,12 @@ public:
         // get_or_create_object_for() will not return the finished object ID.
         virtual std::expected<void, error>
         finish(object_id, size_t footer_pos, size_t object_size) = 0;
+
+        // Returns `true` if this builder has no finalized objects in it, and
+        // `false` if it does. Intended to be called after all pending objects
+        // have been either removed or finished, but before this builder is
+        // passed to a metastore interface.
+        virtual bool is_empty() const = 0;
     };
 
     struct offsets_response {

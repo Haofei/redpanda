@@ -92,6 +92,10 @@ simple_object_builder::finish(
     return {};
 }
 
+bool simple_object_builder::is_empty() const {
+    return finished_objects_.empty();
+}
+
 std::expected<
   chunked_vector<metastore::object_metadata>,
   metastore::object_metadata_builder::error>

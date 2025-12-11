@@ -106,6 +106,7 @@ public:
       add(object_id, metastore::object_metadata::ntp_metadata) override;
     std::expected<void, error>
     finish(object_id, size_t footer_pos, size_t object_size) override;
+    bool is_empty() const override;
 
 private:
     friend class cloud_topics::l1::replicated_metastore;
@@ -208,6 +209,16 @@ replicated_object_builder::finish(
     objects.pending_objects_.erase(it);
 
     return {};
+}
+
+bool replicated_object_builder::is_empty() const {
+    if (partitions_.empty()) {
+        return true;
+    }
+
+    return std::ranges::all_of(partitions_, [](const auto& id_and_objects) {
+        return id_and_objects.second.finished_objects_.empty();
+    });
 }
 
 metastore::extent_metadata_vec
