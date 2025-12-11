@@ -4523,23 +4523,23 @@ configuration::configuration()
       "The local cache duration of a cluster wide epoch.",
       {.needs_restart = needs_restart::no, .visibility = visibility::tunable},
       1min)
-  , cloud_topics_l0_gc_minimum_object_age(
+  , cloud_topics_short_term_gc_minimum_object_age(
       *this,
-      "cloud_topics_l0_gc_minimum_object_age",
+      "cloud_topics_short_term_gc_minimum_object_age",
       "The minimum age of an L0 object before it becomes eligible for garbage "
       "collection.",
       {.needs_restart = needs_restart::no, .visibility = visibility::tunable},
       12h)
-  , cloud_topics_l0_gc_interval(
+  , cloud_topics_short_term_gc_interval(
       *this,
-      "cloud_topics_l0_gc_interval",
+      "cloud_topics_short_term_gc_interval",
       "The interval between invocations of the L0 garbage collection work loop "
       "when progress is being made.",
       {.needs_restart = needs_restart::no, .visibility = visibility::tunable},
       10s)
-  , cloud_topics_l0_gc_backoff_interval(
+  , cloud_topics_short_term_gc_backoff_interval(
       *this,
-      "cloud_topics_l0_gc_backoff_interval",
+      "cloud_topics_short_term_gc_backoff_interval",
       "The interval between invocations of the L0 garbage collection work loop "
       "when no progress is being made or errors are occurring.",
       {.needs_restart = needs_restart::no, .visibility = visibility::tunable},

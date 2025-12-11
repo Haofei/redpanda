@@ -342,11 +342,12 @@ level_zero_gc::level_zero_gc(
       level_zero_gc_config{
         .deletion_grace_period
         = config::shard_local_cfg()
-            .cloud_topics_l0_gc_minimum_object_age.bind(),
+            .cloud_topics_short_term_gc_minimum_object_age.bind(),
         .throttle_progress
-        = config::shard_local_cfg().cloud_topics_l0_gc_interval.bind(),
+        = config::shard_local_cfg().cloud_topics_short_term_gc_interval.bind(),
         .throttle_no_progress
-        = config::shard_local_cfg().cloud_topics_l0_gc_backoff_interval.bind(),
+        = config::shard_local_cfg()
+            .cloud_topics_short_term_gc_backoff_interval.bind(),
       },
       std::make_unique<object_storage_remote_impl>(remote, std::move(bucket)),
       std::make_unique<epoch_source_impl>(
