@@ -50,12 +50,12 @@ compaction_coordinator::compaction_coordinator(
         return features
           .await_feature(features::feature::coordinated_compaction, as)
           .then([this, &as] {
+              _started = true;
               arm_timer_if_needed(true);
               _as_sub = ssx::subscribe_or_trigger(
                 as, [this] noexcept { cancel_timer(); });
               _tombstone_retention_ms_binding.watch(
                 [this] { on_ntp_config_change(); });
-              _started = true;
               vlog(_logger.info, "compaction coordinator started");
           });
     });
