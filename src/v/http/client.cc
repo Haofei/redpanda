@@ -264,7 +264,8 @@ ss::future<ss::temporary_buffer<char>> client::receive() {
     // Protect the receive operation with the dispatch gate to prevent
     // the input stream from being invalidated while reads are in flight
     auto holder = _dispatch_gate.hold();
-    return _in.read()
+    return in()
+      .read()
       .then([this](ss::temporary_buffer<char>&& tmpbuf) {
           _probe->add_inbound_bytes(tmpbuf.size());
           return std::move(tmpbuf);

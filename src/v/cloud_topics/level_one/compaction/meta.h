@@ -20,6 +20,7 @@
 #include "model/timestamp.h"
 
 #include <seastar/core/gate.hh>
+#include <seastar/core/sharded.hh>
 
 #include <memory>
 

@@ -697,20 +697,17 @@ get_integer_query_param(const ss::http::request& req, std::string_view name) {
 } // namespace
 
 void admin_server::configure_metrics_route() {
-    ss::prometheus::add_prometheus_routes(
-      _server,
-      {.metric_help = "redpanda metrics",
-       .prefix = "vectorized",
-       .handle = ss::metrics::default_handle(),
-       .route = "/metrics"})
-      .get();
-    ss::prometheus::add_prometheus_routes(
-      _server,
-      {.metric_help = "redpanda metrics",
-       .prefix = "redpanda",
-       .handle = metrics::public_metrics_handle,
-       .route = "/public_metrics"})
-      .get();
+    ss::prometheus::config private_config;
+    private_config.prefix = "vectorized";
+    private_config.handle = ss::metrics::default_handle();
+    private_config.route = "/metrics";
+    ss::prometheus::add_prometheus_routes(_server, private_config).get();
+
+    ss::prometheus::config public_config;
+    public_config.prefix = "redpanda";
+    public_config.handle = metrics::public_metrics_handle;
+    public_config.route = "/public_metrics";
+    ss::prometheus::add_prometheus_routes(_server, public_config).get();
 }
 
 ss::future<> admin_server::configure_listeners() {
