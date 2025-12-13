@@ -93,6 +93,8 @@ public:
      */
     void set_probe(client_probe*);
 
+    bool has_tls() const { return static_cast<bool>(_creds); }
+
 protected:
     virtual void fail_outstanding_futures() {}
 
