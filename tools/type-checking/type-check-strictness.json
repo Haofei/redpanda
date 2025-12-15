@@ -261,7 +261,6 @@
         "rptest/tests/e2e_finjector.py",
         "rptest/tests/flink_basic_test.py",
         "rptest/tests/pkcs12_test.py",
-        "rptest/tests/raft_slow_follower_test.py",
         "rptest/tests/tls_version_test.py",
         "rptest/tests/topic_recovery_test.py",
         "rptest/utils/expect_rate.py",
