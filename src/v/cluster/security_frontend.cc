@@ -230,7 +230,7 @@ ss::future<std::vector<errc>> security_frontend::do_create_acls(
 
     errc err;
     if (should_sanction) {
-        err = errc::feature_disabled;
+        err = errc::feature_sanctioned;
         vlog(
           clusterlog.warn,
           "{}",
