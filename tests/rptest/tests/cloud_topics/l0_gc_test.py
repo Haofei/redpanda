@@ -38,9 +38,9 @@ class CloudTopicsL0GCTest(RedpandaTest):
             "cloud_topics_reconciliation_interval": 2000,
             "cloud_topics_epoch_service_epoch_increment_interval": 5000,
             "cloud_topics_epoch_service_local_epoch_cache_duration": 5000,
-            "cloud_topics_l0_gc_minimum_object_age": 10000,
-            "cloud_topics_l0_gc_interval": 2000,
-            "cloud_topics_l0_gc_backoff_interval": 10000,
+            "cloud_topics_short_term_gc_minimum_object_age": 10000,
+            "cloud_topics_short_term_gc_interval": 2000,
+            "cloud_topics_short_term_gc_backoff_interval": 10000,
         }
         super(CloudTopicsL0GCTest, self).__init__(
             test_context=test_context,

@@ -823,9 +823,11 @@ public:
     property<std::chrono::milliseconds>
       cloud_topics_epoch_service_local_epoch_cache_duration;
 
-    property<std::chrono::milliseconds> cloud_topics_l0_gc_minimum_object_age;
-    property<std::chrono::milliseconds> cloud_topics_l0_gc_interval;
-    property<std::chrono::milliseconds> cloud_topics_l0_gc_backoff_interval;
+    property<std::chrono::milliseconds>
+      cloud_topics_short_term_gc_minimum_object_age;
+    property<std::chrono::milliseconds> cloud_topics_short_term_gc_interval;
+    property<std::chrono::milliseconds>
+      cloud_topics_short_term_gc_backoff_interval;
 
     development_feature_property<int> development_feature_property_testing_only;
 
