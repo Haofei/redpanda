@@ -445,13 +445,8 @@ ss::future<pb::FileDescriptorProto> build_file_with_refs(
         try {
             auto dep_ss = co_await store.get_subject_schema(
               ref.sub, ref.version, include_deleted::yes);
-            auto [_, dep] = std::move(dep_ss.schema).destructure();
             co_await build_file_with_refs(
-              dp,
-              store,
-              ref.name,
-              subject_schema{subject{ref.name}, std::move(dep)},
-              normalize::no);
+              dp, store, ref.name, std::move(dep_ss.schema), normalize::no);
         } catch (const exception& e) {
             if (failed_subject_schema_lookup(e.code())) {
                 throw as_exception(

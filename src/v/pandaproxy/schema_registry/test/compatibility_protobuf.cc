@@ -141,7 +141,7 @@ SEASTAR_THREAD_TEST_CASE(test_protobuf_missing_nested_reference_error_subject) {
       [](const pps::exception& ex) {
           auto msg = std::string_view(ex.message());
           return ex.code() == pps::error_code::schema_missing_reference
-                 && msg.contains("subject=b.proto")
+                 && msg.contains("subject=subject-for-B")
                  && msg.contains("subject \"subject-for-C\"");
       });
 }
