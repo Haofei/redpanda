@@ -88,4 +88,10 @@ ss::future<get_compaction_info_reply> service::get_compaction_info(
       std::move(request), leader_router::local_only::yes);
 }
 
+ss::future<get_compaction_infos_reply> service::get_compaction_infos(
+  get_compaction_infos_request request, ::rpc::streaming_context&) {
+    return _leader_router->local().get_compaction_infos(
+      std::move(request), leader_router::local_only::yes);
+}
+
 } // namespace cloud_topics::l1::rpc

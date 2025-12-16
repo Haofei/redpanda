@@ -708,4 +708,14 @@ simple_metastore::get_compaction_info(
       .compaction_epoch = compaction_epoch.value()};
 }
 
+ss::future<std::expected<metastore::compaction_info_map, metastore::errc>>
+simple_metastore::get_compaction_infos(
+  const chunked_vector<compaction_info_spec>& logs) {
+    compaction_info_map infos;
+    for (const auto& log : logs) {
+        infos.emplace(log.tidp, co_await get_compaction_info(log));
+    }
+    co_return infos;
+}
+
 } // namespace cloud_topics::l1

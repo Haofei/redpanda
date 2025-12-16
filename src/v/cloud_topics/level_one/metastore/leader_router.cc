@@ -149,6 +149,17 @@ ss::future<rpc::remove_topics_reply> do_remove_topics(
     co_return co_await domain_mgr->remove_topics(std::move(req));
 }
 
+ss::future<rpc::get_compaction_infos_reply> do_get_compaction_infos(
+  domain_supervisor& domain_supervisor,
+  const model::ntp& ntp,
+  rpc::get_compaction_infos_request req) {
+    auto domain_mgr = domain_supervisor.get(ntp);
+    if (!domain_mgr) {
+        co_return rpc::get_compaction_infos_reply{.ec = rpc::errc::not_leader};
+    }
+    co_return co_await domain_mgr->get_compaction_infos(std::move(req));
+}
+
 } // namespace
 
 template<auto Func, typename req_t>
@@ -601,6 +612,27 @@ ss::future<rpc::remove_topics_reply> leader_router::remove_topics(
     co_return co_await process<
       &leader_router::remove_topics_locally,
       &client::remove_topics>(std::move(request), bool(local_only_exec));
+}
+
+ss::future<rpc::get_compaction_infos_reply>
+leader_router::get_compaction_infos_locally(
+  rpc::get_compaction_infos_request request,
+  const model::ntp& metastore_ntp,
+  ss::shard_id shard) {
+    co_return co_await container().invoke_on(
+      shard,
+      [metastore_ntp, req = std::move(request)](leader_router& fe) mutable {
+          return do_get_compaction_infos(
+            *(fe._domain_supervisor), metastore_ntp, std::move(req));
+      });
+}
+
+ss::future<rpc::get_compaction_infos_reply> leader_router::get_compaction_infos(
+  rpc::get_compaction_infos_request request, local_only local_only_exec) {
+    auto holder = _gate.hold();
+    co_return co_await process<
+      &leader_router::get_compaction_infos_locally,
+      &client::get_compaction_infos>(std::move(request), bool(local_only_exec));
 }
 
 } // namespace cloud_topics::l1

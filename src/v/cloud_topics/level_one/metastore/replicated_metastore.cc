@@ -693,4 +693,73 @@ replicated_metastore::get_compaction_info(const compaction_info_spec& log) {
     co_return resp;
 }
 
+ss::future<std::expected<metastore::compaction_info_map, metastore::errc>>
+replicated_metastore::get_compaction_infos(
+  const chunked_vector<metastore::compaction_info_spec>& logs) {
+    chunked_hash_map<model::partition_id, rpc::get_compaction_infos_request>
+      partitioned_reqs;
+    metastore::compaction_info_map resp;
+    for (const auto& log : logs) {
+        const auto& tp = log.tidp;
+        auto metastore_partition = fe_.metastore_partition(tp);
+        if (!metastore_partition) {
+            vlog(cd_log.warn, "Unable to get metastore partition for {}", tp);
+            resp.insert_or_assign(tp, std::unexpected(errc::transport_error));
+            continue;
+        }
+        auto [it, inserted] = partitioned_reqs.try_emplace(
+          metastore_partition.value(),
+          rpc::get_compaction_infos_request{
+            .metastore_partition = metastore_partition.value()});
+        auto& req = it->second;
+
+        req.logs.push_back(
+          rpc::get_compaction_info_request{
+            .tp = tp,
+            .tombstone_removal_upper_bound_ts
+            = log.tombstone_removal_upper_bound_ts});
+    }
+
+    static constexpr auto max_rpc_concurrency = 10;
+    auto fut = co_await ss::coroutine::as_future(
+      ss::max_concurrent_for_each(
+        partitioned_reqs,
+        max_rpc_concurrency,
+        [this, &resp](auto& partition_and_request) {
+            auto& request = partition_and_request.second;
+            auto logs = request.logs.copy();
+            return fe_.get_compaction_infos(std::move(request))
+              .then([&resp, &logs](rpc::get_compaction_infos_reply reply) {
+                  if (reply.ec != rpc::errc::ok) {
+                      for (const auto& l : logs) {
+                          resp[l.tp] = std::unexpected(
+                            rpc_to_meta_errc(reply.ec));
+                      }
+                  }
+
+                  for (auto& [log, log_reply] : reply.responses) {
+                      metastore::compaction_info_response log_resp{
+			.dirty_ratio = log_reply.dirty_ratio,
+			.earliest_dirty_ts = log_reply.earliest_dirty_ts,
+			.offsets_response = {
+			  .dirty_ranges = std::move(log_reply.dirty_ranges),
+			  .removable_tombstone_ranges = std::move(log_reply.removable_tombstone_ranges),
+			  .extents = rpc_to_meta_extent_metadata(std::move(log_reply.extents))},
+			.compaction_epoch = metastore::compaction_epoch{log_reply.compaction_epoch()}
+		      };
+                      resp.insert_or_assign(log, std::move(log_resp));
+                  }
+              });
+        }));
+
+    if (fut.failed()) {
+        auto e = fut.get_exception();
+        vlog(
+          cd_log.warn, "Error while sending compaction info requests: {}", e);
+        co_return std::unexpected(metastore::errc::transport_error);
+    }
+
+    co_return resp;
+}
+
 } // namespace cloud_topics::l1

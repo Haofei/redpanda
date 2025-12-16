@@ -79,8 +79,17 @@ ss::future<> log_info_collector::collect_info_for_logs(
 
     auto to_collect = get_logs_to_collect(logs_list, logs_set.size(), now);
 
-    auto compaction_infos = co_await _metastore->get_compaction_infos(
+    auto compaction_infos_res = co_await _metastore->get_compaction_infos(
       to_collect);
+    if (!compaction_infos_res.has_value()) {
+        vlog(
+          compaction_log.warn,
+          "Failed to retrieve compaction info from metastore: {}",
+          compaction_infos_res.error());
+        co_return;
+    }
+
+    auto compaction_infos = std::move(compaction_infos_res).value();
 
     populate_log_infos(
       compaction_infos, logs_set, logs_list, compaction_queue, now);

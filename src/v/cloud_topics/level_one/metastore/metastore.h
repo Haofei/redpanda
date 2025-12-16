@@ -425,14 +425,8 @@ public:
       std::expected<compaction_info_response, errc>>;
 
     // Vectorized RPC for obtaining compaction state for a number of partitions.
-    virtual ss::future<compaction_info_map> get_compaction_infos(
-      const chunked_vector<compaction_info_spec>& to_collect) {
-        compaction_info_map ret;
-        for (const auto& log : to_collect) {
-            ret.emplace(log.tidp, co_await get_compaction_info(log));
-        }
-        co_return ret;
-    }
+    virtual ss::future<std::expected<compaction_info_map, errc>>
+    get_compaction_infos(const chunked_vector<compaction_info_spec>&) = 0;
 };
 
 } // namespace cloud_topics::l1

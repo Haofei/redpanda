@@ -101,6 +101,9 @@ public:
     ss::future<std::expected<compaction_info_response, errc>>
     get_compaction_info(const compaction_info_spec&) override;
 
+    ss::future<std::expected<compaction_info_map, errc>>
+    get_compaction_infos(const chunked_vector<compaction_info_spec>&) override;
+
 private:
     friend class domain_manager;
     static std::expected<offsets_response, errc>

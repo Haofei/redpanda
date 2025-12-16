@@ -330,6 +330,30 @@ struct remove_topics_request
     chunked_vector<model::topic_id> topics;
 };
 
+struct get_compaction_infos_reply
+  : serde::envelope<
+      get_compaction_infos_reply,
+      serde::version<0>,
+      serde::compat_version<0>> {
+    auto serde_fields() { return std::tie(ec, responses); }
+
+    errc ec;
+
+    chunked_hash_map<model::topic_id_partition, get_compaction_info_reply>
+      responses;
+};
+struct get_compaction_infos_request
+  : serde::envelope<
+      get_compaction_infos_request,
+      serde::version<0>,
+      serde::compat_version<0>> {
+    using resp_t = get_compaction_infos_reply;
+    auto serde_fields() { return std::tie(metastore_partition, logs); }
+
+    model::partition_id metastore_partition;
+    chunked_vector<get_compaction_info_request> logs;
+};
+
 } //  namespace cloud_topics::l1::rpc
 
 template<>
