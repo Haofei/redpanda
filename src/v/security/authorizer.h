@@ -64,6 +64,9 @@ struct auth_result {
     // If found, the role that was matched to provide authZ decision
     std::optional<security::role_name> role;
 
+    // If found, the group that was matched to provide authz decision
+    std::optional<acl_principal> group;
+
     friend std::ostream& operator<<(std::ostream& os, const auth_result& a);
 
     explicit operator bool() const noexcept { return is_authorized(); }
@@ -175,6 +178,27 @@ struct auth_result {
           .resource_name = resource(),
           .operation = operation,
           .role = role};
+    }
+
+    template<typename T>
+    static auth_result group_acl_match(
+      const security::acl_principal& principal,
+      const security::acl_principal& group,
+      security::acl_host host,
+      security::acl_operation operation,
+      const T& resource,
+      bool authorized,
+      const security::acl_match& match) {
+        return {
+          .authorized = authorized,
+          .resource_pattern = match.resource,
+          .acl = match.acl,
+          .principal = principal,
+          .host = host,
+          .resource_type = get_resource_type<T>(),
+          .resource_name = resource(),
+          .operation = operation,
+          .group = group};
     }
 
     template<typename T>
