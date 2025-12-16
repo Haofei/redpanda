@@ -57,6 +57,7 @@ redpanda_cc_library(
         "//src/v/bytes:ioarray",
         "//src/v/bytes:iobuf",
         "//src/v/cloud_io:io_result",
+        "//src/v/config",
         "//src/v/lsm/core:exceptions",
         "//src/v/lsm/core/internal:files",
         "//src/v/utils:retry_chain_node",

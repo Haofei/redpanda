@@ -12,6 +12,7 @@
 
 #include "cloud_io/io_result.h"
 #include "cloud_storage_clients/types.h"
+#include "config/configuration.h"
 #include "lsm/core/exceptions.h"
 #include "lsm/core/internal/files.h"
 #include "lsm/io/file_io.h"
@@ -22,11 +23,21 @@
 #include <seastar/core/reactor.hh>
 
 #include <memory>
-#include <ranges>
 
 namespace lsm::io {
 
 namespace {
+
+retry_chain_node make_rtc(ss::abort_source& as) {
+    constexpr auto timeout = std::chrono::seconds(10);
+    auto backoff
+      = config::shard_local_cfg().cloud_storage_initial_backoff_ms.value();
+    return retry_chain_node{
+      as,
+      timeout,
+      backoff,
+    };
+}
 
 bool check_result(cloud_io::download_result result) {
     switch (result) {
@@ -128,7 +139,7 @@ public:
 
 private:
     ss::future<> upload() {
-        retry_chain_node root(*_as);
+        auto root = make_rtc(*_as);
         lazy_abort_source las{[this] {
             return _as->abort_requested()
                      ? std::make_optional("abort requested")
@@ -187,7 +198,7 @@ public:
         if (reader) {
             co_return reader;
         }
-        retry_chain_node root{_as};
+        auto root = make_rtc(_as);
         cloud_io::download_result result{};
         try {
             result = co_await _remote->download_stream(
@@ -252,7 +263,7 @@ public:
     ss::future<> remove_file(internal::file_handle h) override {
         _as.check();
         auto _ = _gate.hold();
-        retry_chain_node rtc(_as);
+        auto rtc = make_rtc(_as);
         auto filename = internal::sst_file_name(h);
         cloud_io::upload_result result{};
         try {
@@ -278,7 +289,7 @@ public:
     list_files() override {
         _as.check();
         auto _ = _gate.hold();
-        retry_chain_node rtc(_as);
+        auto rtc = make_rtc(_as);
         // TODO: Consider merging with on disk file listing.
         cloud_io::list_result result
           = cloud_storage_clients::error_outcome::fail;
@@ -399,7 +410,7 @@ public:
     read_manifest(internal::database_epoch epoch) override {
         _as.check();
         auto _ = _gate.hold();
-        retry_chain_node root{_as};
+        auto rtc = make_rtc(_as);
         auto max_key = manifest_key(epoch);
         auto keys = co_await list_manifests();
         // list_manifests gives you biggest to smallest key, so find the first
@@ -414,7 +425,7 @@ public:
           .transfer_details = {
             .bucket = _bucket,
             .key = std::move(*it),
-            .parent_rtc = root,
+            .parent_rtc = rtc,
           },
           .display_str = "LSM Manifest download",
           .payload = b,
@@ -428,13 +439,13 @@ public:
     write_manifest(internal::database_epoch epoch, iobuf b) override {
         _as.check();
         auto _ = _gate.hold();
-        retry_chain_node root{_as};
+        auto rtc = make_rtc(_as);
         auto my_key = manifest_key(epoch);
         auto result = co_await _remote->upload_object({
           .transfer_details = {
             .bucket = _bucket,
             .key = my_key,
-            .parent_rtc = root,
+            .parent_rtc = rtc,
           },
           .display_str = "LSM Manifest upload",
           .payload = std::move(b),
@@ -449,7 +460,7 @@ public:
             keys_to_delete.push_back(key);
         }
         result = co_await _remote->delete_objects(
-          _bucket, std::move(keys_to_delete), root, [](size_t) {});
+          _bucket, std::move(keys_to_delete), rtc, [](size_t) {});
     }
 
     ss::future<> close() override {
@@ -462,9 +473,9 @@ private:
     ss::future<chunked_vector<cloud_storage_clients::object_key>>
     list_manifests() {
         using namespace cloud_storage_clients;
-        retry_chain_node root{_as};
+        auto rtc = make_rtc(_as);
         auto list_result = co_await _remote->list_objects(
-          _bucket, root, manifest_prefix());
+          _bucket, rtc, manifest_prefix());
         if (list_result.has_error()) {
             switch (list_result.error()) {
             case error_outcome::fail:
