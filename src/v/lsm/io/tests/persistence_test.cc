@@ -9,7 +9,12 @@
  * by the Apache License, Version 2.0
  */
 
+#include "cloud_io/remote.h"
+#include "cloud_io/tests/s3_imposter.h"
+#include "cloud_io/tests/scoped_remote.h"
+#include "cloud_storage_clients/types.h"
 #include "lsm/core/internal/files.h"
+#include "lsm/io/cloud_persistence.h"
 #include "lsm/io/disk_persistence.h"
 #include "lsm/io/memory_persistence.h"
 #include "lsm/io/persistence.h"
@@ -22,9 +27,9 @@
 #include <gtest/gtest.h>
 
 using namespace lsm::io;
-using lsm::internal::file_handle;
-using lsm::internal::operator""_file_id;
-using lsm::internal::operator""_db_epoch;
+namespace lsm_internal = lsm::internal;
+using lsm_internal::operator""_file_id;
+using lsm_internal::operator""_db_epoch;
 
 using data_persistence_factory
   = std::function<ss::future<std::unique_ptr<data_persistence>>()>;
@@ -40,9 +45,9 @@ protected:
         }
     }
 
-    ss::future<std::vector<file_handle>> list_files() {
+    ss::future<std::vector<lsm_internal::file_handle>> list_files() {
         auto gen = persistence->list_files();
-        std::vector<file_handle> files;
+        std::vector<lsm_internal::file_handle> files;
         while (auto file = co_await gen()) {
             files.push_back(*file);
         }
@@ -73,7 +78,7 @@ TEST_P(PersistenceTest, CanWriteAndReadAFile) {
 }
 
 TEST_P(PersistenceTest, ListFiles) {
-    std::vector<file_handle> files;
+    std::vector<lsm_internal::file_handle> files;
     {
         for (auto i = 0_file_id; i < 25_file_id; ++i) {
             files.emplace_back(i, 0_db_epoch);
@@ -245,6 +250,49 @@ TEST_P(PersistenceTest, RandomAccessReaderComprehensive) {
     persistence->remove_file({}).get();
 }
 
+// Mock cloud data persistence that owns s3_imposter and proxies to the real
+// cloud_data_persistence implementation. This allows cloud persistence to be
+// tested within the parameterized test framework.
+class mock_cloud_data_persistence : public data_persistence {
+public:
+    mock_cloud_data_persistence(
+      std::unique_ptr<s3_imposter_fixture> fixture,
+      std::unique_ptr<cloud_io::scoped_remote> sr,
+      std::unique_ptr<data_persistence> impl)
+      : fixture_(std::move(fixture))
+      , sr_(std::move(sr))
+      , impl_(std::move(impl)) {}
+
+    ss::future<std::unique_ptr<sequential_file_writer>>
+    open_sequential_writer(lsm_internal::file_handle handle) override {
+        return impl_->open_sequential_writer(handle);
+    }
+
+    ss::future<optional_pointer<random_access_file_reader>>
+    open_random_access_reader(lsm_internal::file_handle handle) override {
+        return impl_->open_random_access_reader(handle);
+    }
+
+    ss::future<> remove_file(lsm_internal::file_handle handle) override {
+        co_await impl_->remove_file(handle);
+        // We also need to remove the expectation from the s3 imposter as well
+        fixture_->remove_expectations(
+          {fmt::format("test-prefix/{}", lsm_internal::sst_file_name(handle))});
+    }
+
+    ss::coroutine::experimental::generator<lsm_internal::file_handle>
+    list_files() override {
+        return impl_->list_files();
+    }
+
+    ss::future<> close() override { return impl_->close(); }
+
+private:
+    std::unique_ptr<s3_imposter_fixture> fixture_;
+    std::unique_ptr<cloud_io::scoped_remote> sr_;
+    std::unique_ptr<data_persistence> impl_;
+};
+
 INSTANTIATE_TEST_SUITE_P(
   PersistenceSuite,
   PersistenceTest,
@@ -255,6 +303,24 @@ INSTANTIATE_TEST_SUITE_P(
         // Ensure each testcase has it's own directory.
         auto subdir = ss::sstring(uuid_t::create());
         return open_disk_data_persistence(tmpdir / std::string_view(subdir));
+    },
+    []() -> ss::future<std::unique_ptr<data_persistence>> {
+        std::filesystem::path tmpdir = std::getenv("TEST_TMPDIR");
+        auto staging_subdir = ss::sstring(uuid_t::create());
+        auto staging = tmpdir / std::string_view(staging_subdir);
+
+        auto fixture = std::make_unique<s3_imposter_fixture>();
+        fixture->set_expectations_and_listen({});
+        auto sr = cloud_io::scoped_remote::create(10, fixture->conf);
+
+        auto impl = co_await open_cloud_data_persistence(
+          staging,
+          &sr->remote.local(),
+          fixture->bucket_name,
+          cloud_storage_clients::object_key("test-prefix"));
+
+        co_return std::make_unique<mock_cloud_data_persistence>(
+          std::move(fixture), std::move(sr), std::move(impl));
     }),
   [](const testing::TestParamInfo<data_persistence_factory>& info) {
       switch (info.index) {
@@ -262,6 +328,8 @@ INSTANTIATE_TEST_SUITE_P(
           return "memory";
       case 1:
           return "disk";
+      case 2:
+          return "cloud";
       default:
           return "unknown";
       }

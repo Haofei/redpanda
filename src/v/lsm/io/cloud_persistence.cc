@@ -523,6 +523,14 @@ ss::future<std::unique_ptr<data_persistence>> open_cloud_data_persistence(
   cloud_io::remote* remote,
   cloud_storage_clients::bucket_name bucket,
   cloud_storage_clients::object_key prefix) {
+    try {
+        co_await ss::recursive_touch_directory(staging_directory.native());
+    } catch (const std::system_error& e) {
+        throw io_error_exception(e.code(), "io error touching db dir: {}", e);
+    } catch (...) {
+        throw io_error_exception(
+          "io error touching db dir: {}", std::current_exception());
+    }
     co_return std::make_unique<cloud_data_persistence>(
       std::move(staging_directory),
       remote,
