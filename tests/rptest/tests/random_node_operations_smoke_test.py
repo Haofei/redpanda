@@ -813,8 +813,8 @@ class RedpandaNodeOperationsSmokeTest(RandomNodeOperationsBase):
                 "info",
                 {
                     "storage-resources": "warn",
-                    "storage-gc": "debug",
-                    "raft": "debug",
+                    "storage-gc": "trace",
+                    "raft": "trace",
                     "cluster": "debug",
                     "datalake": "trace",
                     "cloud_storage": "debug",
