@@ -315,8 +315,8 @@ ss::future<client_pool::client_lease> client_pool::acquire(
                   _pool_ready_barrier, 1, wait_as.as());
             } catch (const ss::timed_out_error&) {
                 vlog(
-                  pool_log.error,
-                  "Failed to acquire credentials within timeout");
+                  pool_log.warn,
+                  "Timed out waiting for client pool to be ready");
                 throw;
             }
         }
