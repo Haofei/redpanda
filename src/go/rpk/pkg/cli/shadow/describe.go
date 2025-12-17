@@ -34,6 +34,7 @@ const (
 	secTopicSync      = "Topic Sync"
 	secConsumerOffset = "Consumer Offset Sync"
 	secSecurity       = "Security Sync"
+	secSchemaRegistry = "Schema Registry Sync"
 )
 
 func newDescribeCommand(fs afero.Fs, p *config.Params) *cobra.Command {
@@ -109,6 +110,7 @@ Display only the client configuration:
 	cmd.Flags().BoolVarP(&opts.topic, "print-topic", "t", false, "Print the detailed topic configuration section")
 	cmd.Flags().BoolVarP(&opts.co, "print-consumer", "r", false, "Print the detailed consumer offset configuration section")
 	cmd.Flags().BoolVarP(&opts.sec, "print-security", "s", false, "Print the detailed security configuration section")
+	cmd.Flags().BoolVarP(&opts.sr, "print-registry", "y", false, "Print the detailed schema registry configuration section")
 	cmd.Flags().BoolVarP(&opts.all, "print-all", "a", false, "Print all sections")
 	return cmd
 }
@@ -120,16 +122,17 @@ type slDescribeOptions struct {
 	topic    bool
 	co       bool // consumer offset
 	sec      bool // security
+	sr       bool // schema registry
 }
 
 // If no flags are set, default to overview and client sections.
 func (o *slDescribeOptions) defaultOrAll() {
-	if !o.all && !o.overview && !o.client && !o.topic && !o.co && !o.sec {
+	if !o.all && !o.overview && !o.client && !o.topic && !o.co && !o.sec && !o.sr {
 		o.overview, o.client = true, true
 	}
 
 	if o.all {
-		o.overview, o.client, o.topic, o.co, o.sec = true, true, true, true, true
+		o.overview, o.client, o.topic, o.co, o.sec, o.sr = true, true, true, true, true, true
 	}
 }
 
@@ -141,6 +144,7 @@ func printShadowLinkDescription(link *adminv2.ShadowLink, opts slDescribeOptions
 			secTopicSync:      opts.topic,
 			secConsumerOffset: opts.co,
 			secSecurity:       opts.sec,
+			secSchemaRegistry: opts.sr,
 		})...,
 	)
 
@@ -164,6 +168,10 @@ func printShadowLinkDescription(link *adminv2.ShadowLink, opts slDescribeOptions
 
 	sections.Add(secSecurity, func() {
 		printSecuritySync(cfg.GetSecuritySyncOptions())
+	})
+
+	sections.Add(secSchemaRegistry, func() {
+		printSchemaRegistrySync(cfg.GetSchemaRegistrySyncOptions())
 	})
 }
 
@@ -196,6 +204,10 @@ func printCloudShadowLinkDescription(link *controlplanev1.ShadowLink, opts slDes
 
 	sections.Add(secSecurity, func() {
 		printSecuritySync(link.GetSecuritySyncOptions())
+	})
+
+	sections.Add(secSchemaRegistry, func() {
+		printSchemaRegistrySync(link.GetSchemaRegistrySyncOptions())
 	})
 }
 
@@ -446,6 +458,16 @@ func printSecuritySync(opts *adminv2.SecuritySettingsSyncOptions) {
 			)
 		}
 	}
+}
+
+func printSchemaRegistrySync(opts *adminv2.SchemaRegistrySyncOptions) {
+	tw := out.NewTabWriter()
+	defer tw.Flush()
+	if opts == nil {
+		tw.Print("No schema registry sync configuration")
+		return
+	}
+	tw.Print("SHADOWING MODE", strings.ReplaceAll(opts.WhichSchemaRegistryShadowingMode().String(), "_", " "))
 }
 
 func formatScramMechanism(m adminv2.ScramMechanism) string {
