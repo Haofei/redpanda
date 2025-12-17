@@ -36,9 +36,9 @@ namespace pandaproxy {
 namespace {
 void set_mime_type(ss::http::reply& rep, json::serialization_format fmt) {
     if (fmt != json::serialization_format::none) {
-        rep.set_mime_type(ss::sstring(name(fmt)));
+        rep.set_content_type(ss::sstring(name(fmt)));
     } else { // TODO(Ben Pope): Remove this branch when endpoints are migrated
-        rep.set_mime_type("application/vnd.kafka.binary.v2+json");
+        rep.set_content_type("application/vnd.kafka.binary.v2+json");
     }
 }
 

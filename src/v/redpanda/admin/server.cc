@@ -387,7 +387,7 @@ public:
                   return write_iobuf_to_output_stream(
                     payload.share(0, payload.size_bytes()), writer);
               });
-            rep->set_mime_type(
+            rep->set_content_type(
               is_proto ? "application/proto" : "application/json");
         } catch (const serde::pb::rpc::base_exception& e) {
             rep = e.handle(std::move(rep));
