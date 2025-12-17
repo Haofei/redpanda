@@ -739,14 +739,13 @@ replicated_metastore::get_compaction_infos(
 
                   for (auto& [log, log_reply] : reply.responses) {
                       metastore::compaction_info_response log_resp{
-			.dirty_ratio = log_reply.dirty_ratio,
-			.earliest_dirty_ts = log_reply.earliest_dirty_ts,
-			.offsets_response = {
-			  .dirty_ranges = std::move(log_reply.dirty_ranges),
-			  .removable_tombstone_ranges = std::move(log_reply.removable_tombstone_ranges),
-			  .extents = rpc_to_meta_extent_metadata(std::move(log_reply.extents))},
-			.compaction_epoch = metastore::compaction_epoch{log_reply.compaction_epoch()}
-		      };
+                        .dirty_ratio = log_reply.dirty_ratio,
+                        .earliest_dirty_ts = log_reply.earliest_dirty_ts,
+                        .offsets_response = {
+                          .dirty_ranges = std::move(log_reply.dirty_ranges),
+                          .removable_tombstone_ranges = std::move(log_reply.removable_tombstone_ranges),
+                          .extents = rpc_to_meta_extent_metadata(std::move(log_reply.extents))},
+                        .compaction_epoch = metastore::compaction_epoch{log_reply.compaction_epoch()}};
                       resp.insert_or_assign(log, std::move(log_resp));
                   }
               });
