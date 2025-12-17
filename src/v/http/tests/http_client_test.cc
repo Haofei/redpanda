@@ -485,12 +485,12 @@ private:
         int it = 0;
         const int max_iter = 1000;
         while (it++ < max_iter) {
-            auto tmpbuf = _fin.read().get();
+            auto tmpbuf = _fin->read().get();
             buffer.append(std::move(tmpbuf));
             if (buffer.size_bytes() > _expected_data.size()) {
                 ss::sstring body = buffer.linearize_to_string();
                 if (body.find(_expected_data) != ss::sstring::npos) {
-                    _fin.close().get();
+                    _fin->close().get();
                     return buffer;
                 }
             }
@@ -501,17 +501,17 @@ private:
 
     void do_send_response() {
         for (const auto& buf : _response) {
-            _fout.write(buf).get();
-            _fout.flush().get();
+            _fout->write(buf).get();
+            _fout->flush().get();
             ss::sleep(std::chrono::milliseconds(1)).get();
         }
-        _fout.close().get();
+        _fout->close().get();
     }
 
     ss::server_socket _server_socket;
     ss::connected_socket _socket;
-    ss::input_stream<char> _fin;
-    ss::output_stream<char> _fout;
+    std::optional<ss::input_stream<char>> _fin;
+    std::optional<ss::output_stream<char>> _fout;
     ss::sstring _expected_data;
     std::vector<ss::sstring> _response;
     ss::gate _gate;
