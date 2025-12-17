@@ -82,7 +82,7 @@ private:
     const metastore::compaction_epoch _expected_compaction_epoch;
 
     // The start offset of the log.
-    kafka::offset _start_offset{0};
+    kafka::offset _start_offset;
 
     // The compaction job, if initialized, as returned by the `_committer`.
     compaction_committer::compaction_job* _job{nullptr};

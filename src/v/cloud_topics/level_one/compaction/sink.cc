@@ -100,8 +100,7 @@ compaction_sink::initialize(compaction::sliding_window_reducer::source& src) {
 
     bool has_removable_tombstones = !_removable_tombstone_ranges.empty();
     bool has_dirty_ranges = !_dirty_range_intervals.empty();
-    bool should_compact = !ct_src._extents.empty()
-                          && (has_removable_tombstones || has_dirty_ranges);
+    bool should_compact = has_removable_tombstones || has_dirty_ranges;
 
     if (!should_compact) {
         co_return false;
