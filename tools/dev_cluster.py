@@ -79,7 +79,7 @@ class DefaultMinioRedpandaConfig:
     cloud_storage_disable_tls: bool = True
     cloud_storage_backend: str = "aws"
     iceberg_enabled: bool = True
-    cloud_topics_enabled: bool = True
+    unstable_beta_feature_cloud_topics_enabled: bool = True
 
 
 @dataclasses.dataclass
