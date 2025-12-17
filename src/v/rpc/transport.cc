@@ -346,7 +346,7 @@ ss::future<> transport::do_dispatch_send() {
           auto units = std::move(resp_entry->resource_units);
           auto msg_size = v.size();
 
-          auto f = _out.write(std::move(v));
+          auto f = out().write(std::move(v));
           resp_entry->timing.dispatched_at = clock_type::now();
           vlog(
             rpclog.trace,

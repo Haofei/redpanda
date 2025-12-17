@@ -111,7 +111,16 @@ protected:
         return *_in;
     }
 
-    net::batched_output_stream _out;
+    const net::batched_output_stream& out() const {
+        vassert(_out.has_value(), "output stream not initialized");
+        return *_out;
+    }
+
+    net::batched_output_stream& out() {
+        vassert(_out.has_value(), "output stream not initialized");
+        return *_out;
+    }
+
     ss::gate _dispatch_gate;
 
 private:
@@ -119,6 +128,7 @@ private:
 
     std::unique_ptr<ss::connected_socket> _fd;
     std::optional<ss::input_stream<char>> _in;
+    std::optional<net::batched_output_stream> _out;
 
     unresolved_address _server_addr;
     ss::shared_ptr<ss::tls::certificate_credentials> _creds;

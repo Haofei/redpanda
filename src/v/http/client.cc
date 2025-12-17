@@ -309,7 +309,7 @@ ss::future<> client::send(ss::scattered_message<char> msg) {
     // the output stream from being invalidated while writes are in flight
     auto holder = _dispatch_gate.hold();
     try {
-        co_await _out.write(std::move(msg));
+        co_await out().write(std::move(msg));
     } catch (...) {
         _probe->register_transport_error();
         throw;
