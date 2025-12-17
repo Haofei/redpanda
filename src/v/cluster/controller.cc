@@ -683,6 +683,7 @@ ss::future<> controller::start(
       std::ref(_members_table),
       std::ref(_partition_balancer),
       std::ref(_partition_manager),
+      std::ref(_partition_leaders),
       std::ref(_as));
 
     co_await _members_backend.invoke_on(

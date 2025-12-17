@@ -49,6 +49,7 @@ controller_api::controller_api(
   ss::sharded<members_table>& members,
   ss::sharded<partition_balancer_backend>& partition_balancer,
   ss::sharded<partition_manager>& partition_manager,
+  ss::sharded<partition_leaders_table>& partition_leaders,
   ss::sharded<ss::abort_source>& as)
   : _self(self)
   , _backend(backend)
@@ -58,6 +59,7 @@ controller_api::controller_api(
   , _members(members)
   , _partition_balancer(partition_balancer)
   , _partition_manager(partition_manager)
+  , _partition_leaders(partition_leaders)
   , _as(as) {}
 
 ss::future<chunked_vector<ntp_reconciliation_state>>
