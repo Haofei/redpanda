@@ -605,6 +605,51 @@ TEST_F(CompactionTest, NoCompactionBelowThreshold) {
     EXPECT_FALSE(c.has_value());
 }
 
+TEST_F(CompactionTest, SameUserKeyDifferentSeqnosOverlap) {
+    // Tests overlap detection when the same user key exists at different
+    // sequence numbers across files. This is critical for tombstone
+    // compaction - if we don't detect these as overlapping, tombstones
+    // won't compact with older versions of the key and deletions won't work.
+    //
+    // In leveldb, get_overlapping_inputs uses user key comparison specifically
+    // to handle this case. If we use internal key comparison instead, we might
+    // miss these overlaps.
+
+    // Add L0 files to trigger compaction
+    // File 1: has "apple" at seqno 200 (newest)
+    add_file(0_level, 1_file_id, "apple@200"_key, "apple@200"_key);
+    add_file(0_level, 2_file_id, "bar"_key, "baz"_key);
+    add_file(0_level, 3_file_id, "qux"_key, "quy"_key);
+    add_file(0_level, 4_file_id, "xyz"_key, "zzz"_key);
+
+    // L1 files: each contains "apple" at different sequence numbers
+    // File 10: "apple" at seqno 100
+    add_file(1_level, 10_file_id, "apple@100"_key, "apple@100"_key);
+
+    // File 11: "apple" at seqno 50 (could be a tombstone)
+    add_file(1_level, 11_file_id, "apple@50"_key, "apple@50"_key);
+
+    auto c = version_set().pick_compaction();
+
+    ASSERT_TRUE(c.has_value());
+    EXPECT_EQ(c->level(), 0_level);
+    // File 1 from L0 should be selected
+    EXPECT_THAT(input_file_ids(*c), ElementsAre(1_file_id));
+
+    // Both L1 files should be included in the output because they
+    // contain the same user key "apple", even though they have different
+    // seqnos. If we're using internal key comparison and this test fails (only
+    // includes one L1 file), it means we're not properly detecting overlaps for
+    // the same user key at different sequence numbers.
+    //
+    // This would be a bug because:
+    // 1. Tombstones (deletes) wouldn't compact with older versions
+    // 2. Old versions of keys would accumulate
+    // 3. Space wouldn't be reclaimed properly
+    EXPECT_THAT(
+      output_file_ids(*c), UnorderedElementsAre(10_file_id, 11_file_id));
+}
+
 TEST_F(CompactionTest, CompactionPointerRespected) {
     // Tests that the compaction pointer is respected during compaction
     // selection. Files before the pointer should not be selected.
