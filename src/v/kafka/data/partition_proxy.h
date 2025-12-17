@@ -17,7 +17,6 @@
 #include "kafka/protocol/types.h"
 #include "model/fundamental.h"
 #include "model/ktp.h"
-#include "model/record_batch_reader.h"
 #include "raft/replicate.h"
 #include "storage/translating_reader.h"
 #include "storage/types.h"
@@ -49,6 +48,13 @@ struct partition_info {
 class partition_proxy {
 public:
     struct impl {
+        impl() = default;
+        impl(const impl&) = default;
+        impl& operator=(const impl&) = default;
+        impl(impl&&) = default;
+        impl& operator=(impl&&) = default;
+        virtual ~impl() noexcept = default;
+
         virtual const model::ntp& ntp() const = 0;
         virtual ss::future<result<model::offset, error_code>>
           sync_effective_start(model::timeout_clock::duration) = 0;
@@ -91,7 +97,6 @@ public:
         virtual size_t estimate_size_between(kafka::offset, kafka::offset) const
           = 0;
         virtual cluster::partition_probe& probe() = 0;
-        virtual ~impl() noexcept = default;
     };
 
     explicit partition_proxy(std::unique_ptr<impl> impl) noexcept
