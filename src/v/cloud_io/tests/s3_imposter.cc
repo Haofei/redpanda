@@ -336,8 +336,7 @@ struct s3_imposter_fixture::content_handler {
               fixt_log.trace, "S3 imposter response: {}", repl.response_line());
             return "";
         } else if (
-          request._method == "POST"
-          && request.query_parameters.contains("delete")) {
+          request._method == "POST" && request.has_query_param("delete")) {
             vlog(fixt_log.trace, "Received DELETE request to {}", request._url);
             if (
               expect_iter != expectations.end()

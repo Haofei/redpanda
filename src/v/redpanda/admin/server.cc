@@ -679,18 +679,17 @@ namespace {
  * an integer.
  */
 std::optional<uint64_t>
-get_integer_query_param(const ss::http::request& req, std::string_view name) {
-    auto key = ss::sstring(name);
-    if (!req.query_parameters.contains(key)) {
+get_integer_query_param(const ss::http::request& req, std::string_view key) {
+    if (!req.has_query_param(key)) {
         return std::nullopt;
     }
 
-    const ss::sstring& str_param = req.query_parameters.at(key);
+    const ss::sstring& str_param = req.get_query_param(key);
     try {
         return std::stoull(str_param);
     } catch (const std::invalid_argument&) {
         throw ss::httpd::bad_request_exception(
-          fmt::format("Parameter {} must be an integer", name));
+          fmt::format("Parameter {} must be an integer", key));
     }
 }
 
@@ -1093,7 +1092,7 @@ ss::future<ss::httpd::redirect_exception> admin_server::redirect_to_leader(
     // next request being made, it may result in a valid redirect to the
     // new leader, and no backoff should be added. This leads to adding
     // client backoff every other redirect.
-    req.query_parameters[redirect_str] = ss::to_sstring(num_redirects);
+    req.set_query_param(redirect_str, ss::to_sstring(num_redirects));
     if (num_redirects % 2 == 0) {
         retry_after = retry_after_seconds;
         vlog(
@@ -3907,7 +3906,7 @@ ss::future<ss::json::json_return_type>
 admin_server::get_cluster_partitions_handler(
   std::unique_ptr<ss::http::request> req) {
     std::optional<bool> disabled_filter;
-    if (req->query_parameters.contains("disabled")) {
+    if (req->has_query_param("disabled")) {
         disabled_filter = get_boolean_query_param(*req, "disabled");
     }
 
@@ -3998,7 +3997,7 @@ admin_server::get_cluster_partitions_topic_handler(
       model::topic{req->get_path_param("topic")}};
 
     std::optional<bool> disabled_filter;
-    if (req->query_parameters.contains("disabled")) {
+    if (req->has_query_param("disabled")) {
         disabled_filter = get_boolean_query_param(*req, "disabled");
     }
 

@@ -232,7 +232,7 @@ void set_routes(ss::httpd::routes& r) {
       "xml");
     auto delete_objects_response = new function_handler(
       [](const_req req, reply& reply) -> std::string {
-          if (!req.query_parameters.contains("delete")) {
+          if (!req.has_query_param("delete")) {
               reply.set_status(reply::status_type::bad_request);
               return "wrong query_parameter";
           }
