@@ -80,7 +80,7 @@ write_pipeline<Clock>::write_and_debounce(
 
     // Register data influx
     _probe.register_bytes_in(sz);
-    _probe.set_memory_usage_gauge(_current_size + sz);
+    _probe.set_memory_usage_gauge(current_size() + sz);
     _probe.register_request();
     auto lat_measure = _probe.register_request_processing_time();
     auto err_probe = ss::defer([this] { _probe.register_request_error(); });
@@ -94,12 +94,13 @@ write_pipeline<Clock>::write_and_debounce(
         units = co_await ss::get_units(
           _mem_budget, sz, this->get_root_rtc().root_abort_source());
     }
-    _current_size += sz;
     _bytes_total += sz;
-    auto d = ss::defer([this, sz] { _current_size -= sz; });
-    auto stage = this->first_stage();
     l0::write_request<Clock> request(
-      std::move(ntp), min_epoch, std::move(data_chunk), timeout, stage);
+      std::move(ntp), min_epoch, std::move(data_chunk), timeout);
+    auto stage_cleanup = ss::defer([this, &request] {
+        transfer_stage_bytes(
+          request.stage, unassigned_pipeline_stage, request.size_bytes());
+    });
     vlog(
       cd_log.trace,
       "write_pipeline.write_and_debounce, created write_request(size={}, "
@@ -109,10 +110,7 @@ write_pipeline<Clock>::write_and_debounce(
         timeout - Clock::now())
         .count());
     auto fut = request.response.get_future();
-    this->get_pending().push_back(request);
-
-    // Notify all active event_filter instances
-    this->signal(stage);
+    reenqueue(request, /*signal=*/true);
 
     auto res = co_await std::move(fut);
     if (!res.has_value()) {
@@ -142,7 +140,7 @@ void write_pipeline<Clock>::reenqueue(write_request<Clock>& r, bool signal) {
           r.stage);
         // Move all re-enqueued requests to the next stage automatically
         // and notify the corresponding event filter.
-        r.stage = this->next_stage(r.stage);
+        advance_request_stage(r);
         this->get_pending().push_back(r);
         if (signal) {
             this->signal(r.stage);
@@ -187,8 +185,20 @@ write_pipeline<Clock>::get_write_requests(
             break;
         }
     }
+    // There are three steps to sever the connection between the requests
+    // and their original pipeline:
+    // 1. Splice them out of the pending list.
+    // 2. Decrement their bytes from their stage.
+    // 3. Set the stage to unassigned.
     result.requests.splice(result.requests.end(), pending, pending.begin(), it);
     result.complete = pending.empty();
+    for (auto& req : result.requests) {
+        if (req.stage != unassigned_pipeline_stage) {
+            auto idx = static_cast<size_t>(req.stage()->get_numeric_id());
+            _stage_bytes[idx] -= req.size_bytes();
+            req.stage = unassigned_pipeline_stage;
+        }
+    }
     vlog(
       cd_log.trace,
       "get_write_requests returned {} elements, containing {} ({}B)",
@@ -207,7 +217,7 @@ write_pipeline<Clock>::register_write_pipeline_stage() noexcept {
 template<class Clock>
 void write_pipeline<Clock>::signal(pipeline_stage stage) {
     this->do_signal(
-      stage, event_type::new_write_request, _current_size, _bytes_total);
+      stage, event_type::new_write_request, stage_bytes(stage), _bytes_total);
 }
 
 template<class Clock>
@@ -215,7 +225,7 @@ event write_pipeline<Clock>::trigger_event(pipeline_stage stage) {
     return event{
       .stage = stage,
       .type = event_type::new_write_request,
-      .pending_write_bytes = _current_size,
+      .pending_write_bytes = stage_bytes(stage),
       .total_write_bytes = _bytes_total,
     };
 }
@@ -316,6 +326,41 @@ write_pipeline<Clock>::stage::choose_abort_source(ss::abort_source* maybe_as) {
         }
     }
     return std::make_pair(std::move(sub), as);
+}
+
+template<class Clock>
+void write_pipeline<Clock>::transfer_stage_bytes(
+  pipeline_stage from, pipeline_stage to, size_t bytes) {
+    if (from != unassigned_pipeline_stage) {
+        _stage_bytes[static_cast<size_t>(from()->get_numeric_id())] -= bytes;
+    }
+    if (to != unassigned_pipeline_stage) {
+        _stage_bytes[static_cast<size_t>(to()->get_numeric_id())] += bytes;
+    }
+}
+
+template<class Clock>
+void write_pipeline<Clock>::advance_request_stage(write_request<Clock>& req) {
+    auto next = this->next_stage(req.stage);
+    transfer_stage_bytes(req.stage, next, req.size_bytes());
+    req.stage = next;
+}
+
+template<class Clock>
+size_t write_pipeline<Clock>::stage_bytes(pipeline_stage s) const {
+    if (s == unassigned_pipeline_stage) {
+        return 0;
+    }
+    return _stage_bytes[static_cast<size_t>(s()->get_numeric_id())];
+}
+
+template<class Clock>
+size_t write_pipeline<Clock>::current_size() const {
+    size_t total = 0;
+    for (auto bytes : _stage_bytes) {
+        total += bytes;
+    }
+    return total;
 }
 
 template class write_pipeline<ss::lowres_clock>;

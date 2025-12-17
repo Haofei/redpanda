@@ -44,6 +44,7 @@ struct write_request : ss::weakly_referencable<write_request<Clock>> {
     /// with timeout error
     timestamp_t expiration_time;
     /// Current pipeline stage
+    /// Use write_pipeline::advance_next_stage to change stage.
     pipeline_stage stage;
     /// List of all write requests
     intrusive_list_hook _hook;

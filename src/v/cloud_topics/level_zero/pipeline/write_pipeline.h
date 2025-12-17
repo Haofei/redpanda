@@ -24,6 +24,7 @@
 #include <seastar/core/lowres_clock.hh>
 #include <seastar/util/optimized_optional.hh>
 
+#include <array>
 #include <exception>
 #include <expected>
 #include <functional>
@@ -128,11 +129,11 @@ public:
                     }
                     switch (r.value()) {
                     case request_processing_result::advance_and_continue:
-                        req.stage = _parent->next_stage(req.stage);
+                        _parent->advance_request_stage(req);
                         count++;
                         continue;
                     case request_processing_result::advance_and_stop:
-                        req.stage = _parent->next_stage(req.stage);
+                        _parent->advance_request_stage(req);
                         count++;
                         break;
                     case request_processing_result::ignore_and_continue:
@@ -187,7 +188,18 @@ public:
 
     event trigger_event(pipeline_stage stage);
 
+    /// Advance a request to the next stage, updating per-stage byte accounting.
+    /// This is the canonical way to change a request's stage.
+    void advance_request_stage(write_request<Clock>& req);
+
+    /// Get the number of bytes at a specific pipeline stage.
+    size_t stage_bytes(pipeline_stage s) const;
+
 private:
+    /// Transfer bytes from one stage to another.
+    void
+    transfer_stage_bytes(pipeline_stage from, pipeline_stage to, size_t bytes);
+
     /// Get write requests atomically.
     /// The total size of returned write requests and the stage to which they
     /// belong to should be specified.
@@ -209,8 +221,12 @@ private:
     /// available
     void reenqueue(write_request<Clock>& req, bool signal = true);
 
-    // Current bytes (gauge)
-    size_t _current_size{0};
+    // Bytes per pipeline stage.
+    std::array<size_t, max_pipeline_stages> _stage_bytes{};
+
+    /// Sum of bytes across all pipeline stages.
+    size_t current_size() const;
+
     // Total bytes went through the pipeline
     size_t _bytes_total{0};
     // Semaphore that represents memory budget that we have

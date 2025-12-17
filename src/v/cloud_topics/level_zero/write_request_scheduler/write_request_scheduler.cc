@@ -80,7 +80,9 @@ ss::future<> write_request_scheduler<Clock>::stop() {
 
 template<typename Clock>
 size_t write_request_scheduler<Clock>::shard_bytes() noexcept {
-    // Count bytes but take limits into account.
+    // Count bytes but take limits into account. We intentionally don't use
+    // stage_bytes() here because we need to respect _max_cardinality and
+    // _max_buffer_size limits.
     size_t total_bytes = 0;
     size_t total_requests = 0;
     _stage.process(
@@ -191,10 +193,12 @@ ss::future<> write_request_scheduler<Clock>::pull_and_roundtrip(
         if (ss::this_shard_id() == info.shard && info.bytes > 0) {
             // Fast path: process requests locally
             // This shard is the one that has the most data.
-            _stage.process([&signaled](write_request<Clock>&) noexcept {
-                signaled = true;
-                return request_processing_result::advance_and_continue;
-            });
+            _stage.process(
+              [this, &signaled](const write_request<Clock>& r) noexcept {
+                  signaled = true;
+                  _probe.register_time_fallback(r.size_bytes());
+                  return request_processing_result::advance_and_continue;
+              });
             break;
         }
     }
@@ -344,14 +348,12 @@ write_request_scheduler<Clock>::proxy_write_request(
     // the holder was created on the target shard and
     // it will be destroyed on the target shard as well.
     auto h = _gate.hold();
-    _probe.register_time_fallback(req->size_bytes());
     _probe.register_receive_xshard(req->size_bytes());
     write_request<Clock> proxy(
       req->ntp,
       req->topic_start_epoch,
       shallow_copy(req->data_chunk),
-      req->expiration_time,
-      _stage.id());
+      req->expiration_time);
     auto fut = proxy.response.get_future();
     _stage.push_next_stage(proxy, false);
     target_gate_holder.release();
