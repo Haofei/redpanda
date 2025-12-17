@@ -80,8 +80,6 @@ public:
           model::offset, bool, model::timeout_clock::time_point)
           = 0;
 
-        virtual ss::future<result<model::offset>>
-          replicate(model::record_batch, raft::replicate_options) = 0;
         virtual ss::future<result<model::offset>> replicate(
           chunked_vector<model::record_batch>, raft::replicate_options)
           = 0;
@@ -170,11 +168,6 @@ public:
 
     size_t estimate_size_between(kafka::offset begin, kafka::offset end) const {
         return _impl->estimate_size_between(begin, end);
-    }
-
-    ss::future<result<model::offset>>
-    replicate(model::record_batch batch, raft::replicate_options opts) const {
-        return _impl->replicate(std::move(batch), opts);
     }
 
     ss::future<result<model::offset>> replicate(
