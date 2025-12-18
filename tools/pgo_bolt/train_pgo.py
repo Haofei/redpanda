@@ -46,6 +46,7 @@ async def start_dev_cluster(dev_cluster_py: str, redpanda_bin: str):
     data_dir = "/dev/shm/rp_data/"
     os.makedirs(data_dir, exist_ok=True)
     cmd = [
+        sys.executable,
         dev_cluster_py,
         "--cores",
         "2",
