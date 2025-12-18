@@ -167,6 +167,15 @@ public:
     ss::future<> setup() {
         auto opts = ss::make_lw_shared<lsm::internal::options>(
           lsm::internal::options{
+            .levels = lsm::internal::options::make_levels(
+              {
+                .max_total_bytes = _cfg.write_buffer_size
+                                   * lsm::internal::options::
+                                     default_level_zero_stop_writes_trigger,
+                .max_file_size = _cfg.write_buffer_size,
+              },
+              lsm::internal::options::default_level_multipler,
+              lsm::internal::options::default_max_level),
             .write_buffer_size = _cfg.write_buffer_size,
             .compression = _cfg.compression ? lsm::compression_type::zstd
                                             : lsm::compression_type::none,
