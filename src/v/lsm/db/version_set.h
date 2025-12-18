@@ -190,6 +190,7 @@ private:
         ss::lw_shared_ptr<version> version;
         internal::file_id next_file_id;
         internal::sequence_number last_seqno;
+        internal::database_epoch epoch;
     };
     // Write this version to a manifest file as a snapshot.
     ss::future<> write_manifest(manifest);

@@ -533,6 +533,7 @@ ss::future<> version_set::log_and_apply(version_edit edit) {
       .version = v,
       .next_file_id = _next_file_id,
       .last_seqno = updated_seqno,
+      .epoch = _options->database_epoch,
     };
     co_await write_manifest(std::move(m));
     // Now that the new version is persisted successfully, install the new
@@ -597,6 +598,7 @@ ss::future<> version_set::write_manifest(manifest m) {
     manifest_proto.set_version(std::move(version_proto));
     manifest_proto.set_next_file_id(m.next_file_id());
     manifest_proto.set_last_seqno(m.last_seqno());
+    manifest_proto.set_database_epoch(m.epoch());
     auto serialized = co_await manifest_proto.to_proto();
     co_await _persistence->write_manifest(
       _options->database_epoch, std::move(serialized));
@@ -639,6 +641,7 @@ ss::future<std::optional<version_set::manifest>> version_set::read_manifest() {
     m.version = std::move(v);
     m.next_file_id = internal::file_id(manifest_proto.get_next_file_id());
     m.last_seqno = internal::sequence_number(manifest_proto.get_last_seqno());
+    m.epoch = internal::database_epoch(manifest_proto.get_database_epoch());
     co_return m;
 }
 

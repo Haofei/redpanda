@@ -23,7 +23,9 @@ message Manifest {
     // The next file ID to be used.
     uint64 next_file_id = 2;
     // The last seqno written.
-    uint64 last_seqno = 4;
+    uint64 last_seqno = 3;
+    // The epoch of the database at which this was written.
+    uint64 database_epoch = 4;
 }
 
 // An immutable version of the database
