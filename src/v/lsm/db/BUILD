@@ -1,6 +1,4 @@
-load("@rules_proto//proto:defs.bzl", "proto_library")
 load("//bazel:build.bzl", "redpanda_cc_library")
-load("//bazel/pbgen:pbgen.bzl", "redpanda_proto_library")
 
 package(default_visibility = ["//src/v/lsm:__subpackages__"])
 
@@ -65,6 +63,7 @@ redpanda_cc_library(
     ],
     deps = [
         ":memtable",
+        ":snapshot",
         ":table_cache",
         ":version_set",
         "//src/v/base",
@@ -180,10 +179,10 @@ redpanda_cc_library(
     ],
     implementation_deps = [
         ":file_utils",
-        ":manifest_redpanda_proto",
         "//src/v/lsm/core:exceptions",
         "//src/v/lsm/core/internal:merging_iterator",
         "//src/v/lsm/core/internal:two_level_iterator",
+        "//src/v/lsm/proto:manifest_redpanda_proto",
         "//src/v/utils:to_string",
         "@abseil-cpp//absl/container:btree",
     ],
@@ -226,15 +225,4 @@ redpanda_cc_library(
         "//src/v/base",
         "@seastar",
     ],
-)
-
-proto_library(
-    name = "manifest_proto",
-    srcs = ["manifest.proto"],
-    deps = ["//proto/redpanda/core/pbgen:options_proto"],
-)
-
-redpanda_proto_library(
-    name = "manifest_redpanda_proto",
-    protos = [":manifest_proto"],
 )

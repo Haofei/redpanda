@@ -19,8 +19,8 @@
 #include "lsm/core/internal/merging_iterator.h"
 #include "lsm/core/internal/two_level_iterator.h"
 #include "lsm/db/file_utils.h"
-#include "lsm/db/manifest.proto.h"
 #include "lsm/db/version_edit.h"
+#include "lsm/proto/manifest.proto.h"
 
 #include <seastar/core/coroutine.hh>
 #include <seastar/coroutine/as_future.hh>

@@ -111,18 +111,12 @@ ss::lw_shared_ptr<internal::options> translate_options(options opts) {
     return internal_opts;
 }
 
-model::offset seqno_cast(internal::sequence_number seqno) {
-    return model::offset(static_cast<int64_t>(seqno()));
+sequence_number from_internal_seqno(internal::sequence_number seqno) {
+    return sequence_number(seqno());
 }
 
-internal::sequence_number seqno_cast(model::offset o) {
-    if (o < model::offset{0}) {
-        throw std::invalid_argument(
-          fmt::format(
-            "unable to translate negative offset {} into a sequence number",
-            o));
-    }
-    return internal::sequence_number(static_cast<uint64_t>(o()));
+internal::sequence_number to_internal_seqno(sequence_number seqno) {
+    return internal::sequence_number(seqno());
 }
 
 } // namespace
@@ -163,14 +157,14 @@ ss::future<database> database::open(options opts, io::persistence p) {
 
 ss::future<> database::close() { return _impl->close(); }
 
-std::optional<model::offset> database::max_persisted_offset() const {
+std::optional<sequence_number> database::max_persisted_seqno() const {
     return _impl->max_persisted_seqno().transform(
-      [](auto seqno) { return seqno_cast(seqno); });
+      [](auto seqno) { return from_internal_seqno(seqno); });
 }
 
-std::optional<model::offset> database::max_applied_offset() const {
+std::optional<sequence_number> database::max_applied_seqno() const {
     return _impl->max_applied_seqno().transform(
-      [](auto seqno) { return seqno_cast(seqno); });
+      [](auto seqno) { return from_internal_seqno(seqno); });
 }
 
 ss::future<> database::flush() { return _impl->flush(); }
@@ -191,8 +185,16 @@ ss::future<std::optional<iobuf>> database::get(std::string_view target) {
 }
 
 ss::future<iterator> database::create_iterator() {
-    auto iter = co_await _impl->create_iterator(std::nullopt);
+    auto iter = co_await _impl->create_iterator({});
     co_return iterator(std::move(iter));
+}
+
+snapshot database::create_snapshot() {
+    auto snap = _impl->create_snapshot();
+    if (!snap) {
+        return {nullptr, _impl.get()};
+    }
+    return {std::move(*snap), _impl.get()};
 }
 
 write_batch database::create_write_batch() { return write_batch{_impl.get()}; }
@@ -204,19 +206,20 @@ write_batch::write_batch(write_batch&&) noexcept = default;
 write_batch& write_batch::operator=(write_batch&&) noexcept = default;
 write_batch::~write_batch() noexcept = default;
 
-void write_batch::put(std::string_view key, iobuf value, model::offset offset) {
+void write_batch::put(
+  std::string_view key, iobuf value, sequence_number seqno) {
     auto k = internal::key::encode({
       .key = lsm::user_key_view(key),
-      .seqno = seqno_cast(offset),
+      .seqno = to_internal_seqno(seqno),
       .type = internal::value_type::value,
     });
     _batch->put(std::move(k), std::move(value));
 }
 
-void write_batch::remove(std::string_view key, model::offset offset) {
+void write_batch::remove(std::string_view key, sequence_number seqno) {
     auto k = internal::key::encode({
       .key = lsm::user_key_view(key),
-      .seqno = seqno_cast(offset),
+      .seqno = to_internal_seqno(seqno),
       .type = internal::value_type::tombstone,
     });
     _batch->remove(std::move(k));
@@ -236,7 +239,35 @@ ss::future<std::optional<iobuf>> write_batch::get(std::string_view target) {
 }
 
 ss::future<iterator> write_batch::create_iterator() {
-    auto iter = co_await _db->create_iterator(_batch);
+    auto iter = co_await _db->create_iterator({.memtable = _batch});
+    co_return iterator(std::move(iter));
+}
+
+snapshot::snapshot(std::unique_ptr<db::snapshot> snap, db::impl* db)
+  : _snap(std::move(snap))
+  , _db(db) {}
+snapshot& snapshot::operator=(snapshot&&) noexcept = default;
+snapshot::snapshot(snapshot&&) noexcept = default;
+snapshot::~snapshot() = default;
+
+ss::future<std::optional<iobuf>> snapshot::get(std::string_view target) {
+    if (_snap == nullptr) {
+        co_return std::nullopt;
+    }
+    auto key = internal::key::encode({
+      .key = lsm::user_key_view(target),
+      .seqno = _snap->seqno(),
+      .type = internal::value_type::value,
+    });
+    auto result = co_await _db->get(key);
+    co_return std::move(result).take_value();
+}
+
+ss::future<iterator> snapshot::create_iterator() {
+    if (_snap == nullptr) {
+        co_return iterator(internal::iterator::create_empty());
+    }
+    auto iter = co_await _db->create_iterator({.snapshot = _snap.get()});
     co_return iterator(std::move(iter));
 }
 

@@ -36,7 +36,6 @@
 namespace lsm::db {
 
 using internal::operator""_level;
-using internal::operator""_seqno;
 
 impl::impl(ctor, io::persistence p, ss::lw_shared_ptr<internal::options> o)
   : _persistence(std::move(p))
@@ -200,44 +199,45 @@ ss::future<lookup_result> impl::get(internal::key_view key) {
 }
 
 ss::future<std::unique_ptr<internal::iterator>>
-impl::create_iterator(ss::optimized_optional<ss::lw_shared_ptr<memtable>> wb) {
-    auto iter = co_await create_internal_iterator(wb->get());
+impl::create_iterator(iterator_options opts) {
     std::optional<internal::sequence_number> iter_seqno = max_applied_seqno();
-    if (wb) {
-        auto wb_seqno = (*wb)->last_seqno();
-        vassert(
-          wb_seqno > iter_seqno,
-          "write memtable seqno must be greater than the current "
-          "max_applied_seqno: {} > {}",
-          wb_seqno.value_or(0_seqno),
-          iter_seqno.value_or(0_seqno));
-        iter_seqno = wb_seqno;
-    }
+    std::unique_ptr<internal::iterator> iter;
     if (!iter_seqno) {
-        // If there is no data in the memtable and the database, then we create
+        // If there is no data in the database, then we create
         // a view of empty data, since we cannot pin before 0.
-        co_return internal::iterator::create_empty();
+        iter = internal::iterator::create_empty();
+    } else {
+        iter = create_db_iterator(
+          co_await create_internal_iterator(),
+          opts.snapshot ? (*opts.snapshot)->seqno() : iter_seqno.value(),
+          _opts,
+          [this](internal::key_view key) {
+              return _versions->current()->record_read_sample(key).then(
+                [this](bool compaction_needed) {
+                    if (compaction_needed) {
+                        maybe_schedule_compaction();
+                    }
+                });
+          });
     }
-    co_return create_db_iterator(
-      std::move(iter),
-      iter_seqno.value(),
-      _opts,
-      [this](internal::key_view key) {
-          return _versions->current()->record_read_sample(key).then(
-            [this](bool compaction_needed) {
-                if (compaction_needed) {
-                    maybe_schedule_compaction();
-                }
-            });
-      });
+    // If there is a non-empty memtable, wrap our existing iterator on top of
+    // it and clamp further writes to the memtable to be applied.
+    if (auto table = opts.memtable->get(); table && !table->empty()) {
+        chunked_vector<std::unique_ptr<internal::iterator>> merged;
+        merged.push_back(table->create_iterator());
+        merged.push_back(std::move(iter));
+        iter = create_db_iterator(
+          internal::create_merging_iterator(std::move(merged)),
+          table->last_seqno().value(),
+          _opts,
+          [](internal::key_view) { return ss::now(); });
+    }
+    co_return iter;
 }
 
 ss::future<std::unique_ptr<internal::iterator>>
-impl::create_internal_iterator(ss::optimized_optional<memtable*> wb) {
+impl::create_internal_iterator() {
     chunked_vector<std::unique_ptr<internal::iterator>> list;
-    if (wb) {
-        list.push_back((*wb)->create_iterator());
-    }
     list.push_back(_mem->create_iterator());
     if (_imm) {
         list.push_back((*_imm)->create_iterator());
@@ -383,8 +383,14 @@ ss::future<> impl::run_background_compaction() {
         co_return;
     }
     compaction_state state{
-      // TODO: If we support snapshot reads we need to track the last seqno.
-      .smallest_snapshot = _versions->last_seqno().value(),
+      // We need to preserve intermediate data between snapshots so we can
+      // surface the correct snapshot isolation. So we use the oldest snapshot,
+      // otherwise the lastest sequence number because we don't have to preserve
+      // any intermediate versions.
+      // Note we can call `value` on `last_seqno` because we have to have some
+      // data in the database in order to trigger compaction.
+      .smallest_snapshot = _snapshots.oldest_seqno().value_or(
+        _versions->last_seqno().value()),
     };
     auto output_level = compaction.level() + 1_level;
     auto max_file_size = _opts->levels[output_level].max_file_size;
@@ -552,6 +558,13 @@ std::optional<internal::sequence_number> impl::max_applied_seqno() const {
         }
     }
     return max_persisted_seqno();
+}
+
+ss::optimized_optional<std::unique_ptr<snapshot>> impl::create_snapshot() {
+    if (auto seqno = max_applied_seqno()) {
+        return _snapshots.create(*seqno);
+    }
+    return std::nullopt;
 }
 
 } // namespace lsm::db
