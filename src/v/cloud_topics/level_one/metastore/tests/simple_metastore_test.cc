@@ -1735,3 +1735,345 @@ TEST(SimpleMetastoreTest, TestCompactionMultipleDirtyRangesMadeClean) {
           testing::ElementsAre(MatchesRange(0_o, 20_o)));
     }
 }
+
+TEST(SimpleMetastoreTest, TestGetExtentMetadataForwards) {
+    simple_metastore m;
+    om_list_t os;
+    constexpr size_t data_size = 99;
+    os.emplace_back(om_builder(oid1, 100, 1100)
+                      .add(tid_a, 0_o, 9_o, 2000_t, 0, data_size)
+                      .build());
+    os.emplace_back(om_builder(oid2, 100, 1100)
+                      .add(tid_a, 10_o, 19_o, 2000_t, 0, data_size)
+                      .build());
+    os.emplace_back(om_builder(oid3, 100, 1100)
+                      .add(tid_a, 20_o, 29_o, 2000_t, 0, data_size)
+                      .build());
+    auto add_res
+      = m.add_objects(os, terms_builder().add(tid_a, 0_tm, 0_o).build()).get();
+    ASSERT_TRUE(add_res.has_value());
+
+    auto tp = model::topic_id_partition::from(tid_a);
+
+    // A few basic test cases with an expanding `max_offset`.
+    {
+        auto min_offset = kafka::offset{0};
+        auto max_offset = kafka::offset{9};
+        auto extent_metadata_res = m.get_extent_metadata_forwards(
+                                      tp, min_offset, max_offset, 10)
+                                     .get();
+        ASSERT_TRUE(extent_metadata_res.has_value());
+        EXPECT_THAT(
+          extent_metadata_res->extents,
+          testing::ElementsAre(MatchesRange(0_o, 9_o)));
+    }
+    {
+        auto min_offset = kafka::offset{0};
+        auto max_offset = kafka::offset{15};
+        auto extent_metadata_res = m.get_extent_metadata_forwards(
+                                      tp, min_offset, max_offset, 10)
+                                     .get();
+        ASSERT_TRUE(extent_metadata_res.has_value());
+        EXPECT_THAT(
+          extent_metadata_res->extents,
+          testing::ElementsAre(
+            MatchesRange(0_o, 9_o), MatchesRange(10_o, 19_o)));
+    }
+    {
+        auto min_offset = kafka::offset{0};
+        auto max_offset = kafka::offset{19};
+        auto extent_metadata_res = m.get_extent_metadata_forwards(
+                                      tp, min_offset, max_offset, 10)
+                                     .get();
+        ASSERT_TRUE(extent_metadata_res.has_value());
+        EXPECT_THAT(
+          extent_metadata_res->extents,
+          testing::ElementsAre(
+            MatchesRange(0_o, 9_o), MatchesRange(10_o, 19_o)));
+    }
+    {
+        auto min_offset = kafka::offset{0};
+        auto max_offset = kafka::offset{20};
+        auto extent_metadata_res = m.get_extent_metadata_forwards(
+                                      tp, min_offset, max_offset, 10)
+                                     .get();
+        ASSERT_TRUE(extent_metadata_res.has_value());
+        EXPECT_THAT(
+          extent_metadata_res->extents,
+          testing::ElementsAre(
+            MatchesRange(0_o, 9_o),
+            MatchesRange(10_o, 19_o),
+            MatchesRange(20_o, 29_o)));
+    }
+    {
+        auto min_offset = kafka::offset{0};
+        auto max_offset = kafka::offset{100};
+        auto extent_metadata_res = m.get_extent_metadata_forwards(
+                                      tp, min_offset, max_offset, 10)
+                                     .get();
+        ASSERT_TRUE(extent_metadata_res.has_value());
+        EXPECT_THAT(
+          extent_metadata_res->extents,
+          testing::ElementsAre(
+            MatchesRange(0_o, 9_o),
+            MatchesRange(10_o, 19_o),
+            MatchesRange(20_o, 29_o)));
+    }
+
+    // A few test cases where the number of extents is limited.
+    {
+        auto min_offset = kafka::offset{0};
+        auto max_offset = kafka::offset{9};
+        auto extent_metadata_res
+          = m.get_extent_metadata_forwards(tp, min_offset, max_offset, 0).get();
+        ASSERT_TRUE(extent_metadata_res.has_value());
+        ASSERT_TRUE(extent_metadata_res->extents.empty());
+    }
+    {
+        auto min_offset = kafka::offset{0};
+        auto max_offset = kafka::offset{15};
+        auto extent_metadata_res
+          = m.get_extent_metadata_forwards(tp, min_offset, max_offset, 1).get();
+        ASSERT_TRUE(extent_metadata_res.has_value());
+        EXPECT_THAT(
+          extent_metadata_res->extents,
+          testing::ElementsAre(MatchesRange(0_o, 9_o)));
+    }
+    {
+        auto min_offset = kafka::offset{0};
+        auto max_offset = kafka::offset{20};
+        auto extent_metadata_res
+          = m.get_extent_metadata_forwards(tp, min_offset, max_offset, 2).get();
+        ASSERT_TRUE(extent_metadata_res.has_value());
+        EXPECT_THAT(
+          extent_metadata_res->extents,
+          testing::ElementsAre(
+            MatchesRange(0_o, 9_o), MatchesRange(10_o, 19_o)));
+    }
+
+    // Non zero min_offset test cases.
+    {
+        auto min_offset = kafka::offset{5};
+        auto max_offset = kafka::offset{9};
+        auto extent_metadata_res = m.get_extent_metadata_forwards(
+                                      tp, min_offset, max_offset, 10)
+                                     .get();
+        ASSERT_TRUE(extent_metadata_res.has_value());
+        EXPECT_THAT(
+          extent_metadata_res->extents,
+          testing::ElementsAre(MatchesRange(0_o, 9_o)));
+    }
+    {
+        auto min_offset = kafka::offset{9};
+        auto max_offset = kafka::offset{29};
+        auto extent_metadata_res = m.get_extent_metadata_forwards(
+                                      tp, min_offset, max_offset, 10)
+                                     .get();
+        ASSERT_TRUE(extent_metadata_res.has_value());
+        EXPECT_THAT(
+          extent_metadata_res->extents,
+          testing::ElementsAre(
+            MatchesRange(0_o, 9_o),
+            MatchesRange(10_o, 19_o),
+            MatchesRange(20_o, 29_o)));
+    }
+}
+
+TEST(SimpleMetastoreTest, TestGetExtentMetadataBackwards) {
+    simple_metastore m;
+    om_list_t os;
+    constexpr size_t data_size = 99;
+    os.emplace_back(om_builder(oid1, 100, 1100)
+                      .add(tid_a, 0_o, 9_o, 2000_t, 0, data_size)
+                      .build());
+    os.emplace_back(om_builder(oid2, 100, 1100)
+                      .add(tid_a, 10_o, 19_o, 2000_t, 0, data_size)
+                      .build());
+    os.emplace_back(om_builder(oid3, 100, 1100)
+                      .add(tid_a, 20_o, 29_o, 2000_t, 0, data_size)
+                      .build());
+    auto add_res
+      = m.add_objects(os, terms_builder().add(tid_a, 0_tm, 0_o).build()).get();
+    ASSERT_TRUE(add_res.has_value());
+
+    auto tp = model::topic_id_partition::from(tid_a);
+
+    // A few basic test cases with an expanding `max_offset`.
+    {
+        auto min_offset = kafka::offset{0};
+        auto max_offset = kafka::offset{9};
+        auto extent_metadata_res = m.get_extent_metadata_backwards(
+                                      tp, min_offset, max_offset, 10)
+                                     .get();
+        ASSERT_TRUE(extent_metadata_res.has_value());
+        EXPECT_THAT(
+          extent_metadata_res->extents,
+          testing::ElementsAre(MatchesRange(0_o, 9_o)));
+    }
+    {
+        auto min_offset = kafka::offset{0};
+        auto max_offset = kafka::offset{15};
+        auto extent_metadata_res = m.get_extent_metadata_backwards(
+                                      tp, min_offset, max_offset, 10)
+                                     .get();
+        ASSERT_TRUE(extent_metadata_res.has_value());
+        EXPECT_THAT(
+          extent_metadata_res->extents,
+          testing::ElementsAre(
+            MatchesRange(10_o, 19_o), MatchesRange(0_o, 9_o)));
+    }
+    {
+        auto min_offset = kafka::offset{0};
+        auto max_offset = kafka::offset{19};
+        auto extent_metadata_res = m.get_extent_metadata_backwards(
+                                      tp, min_offset, max_offset, 10)
+                                     .get();
+        ASSERT_TRUE(extent_metadata_res.has_value());
+        EXPECT_THAT(
+          extent_metadata_res->extents,
+          testing::ElementsAre(
+            MatchesRange(10_o, 19_o), MatchesRange(0_o, 9_o)));
+    }
+    {
+        auto min_offset = kafka::offset{0};
+        auto max_offset = kafka::offset{20};
+        auto extent_metadata_res = m.get_extent_metadata_backwards(
+                                      tp, min_offset, max_offset, 10)
+                                     .get();
+        ASSERT_TRUE(extent_metadata_res.has_value());
+        EXPECT_THAT(
+          extent_metadata_res->extents,
+          testing::ElementsAre(
+            MatchesRange(20_o, 29_o),
+            MatchesRange(10_o, 19_o),
+            MatchesRange(0_o, 9_o)));
+    }
+    {
+        auto min_offset = kafka::offset{0};
+        auto max_offset = kafka::offset{100};
+        auto extent_metadata_res = m.get_extent_metadata_backwards(
+                                      tp, min_offset, max_offset, 10)
+                                     .get();
+        ASSERT_TRUE(extent_metadata_res.has_value());
+        EXPECT_THAT(
+          extent_metadata_res->extents,
+          testing::ElementsAre(
+            MatchesRange(20_o, 29_o),
+            MatchesRange(10_o, 19_o),
+            MatchesRange(0_o, 9_o)));
+    }
+
+    // A few test cases where the number of extents is limited.
+    {
+        auto min_offset = kafka::offset{0};
+        auto max_offset = kafka::offset{9};
+        auto extent_metadata_res = m.get_extent_metadata_backwards(
+                                      tp, min_offset, max_offset, 0)
+                                     .get();
+        ASSERT_TRUE(extent_metadata_res.has_value());
+        ASSERT_TRUE(extent_metadata_res->extents.empty());
+    }
+    {
+        auto min_offset = kafka::offset{0};
+        auto max_offset = kafka::offset{15};
+        auto extent_metadata_res = m.get_extent_metadata_backwards(
+                                      tp, min_offset, max_offset, 1)
+                                     .get();
+        ASSERT_TRUE(extent_metadata_res.has_value());
+        EXPECT_THAT(
+          extent_metadata_res->extents,
+          testing::ElementsAre(MatchesRange(10_o, 19_o)));
+    }
+    {
+        auto min_offset = kafka::offset{0};
+        auto max_offset = kafka::offset{21};
+        auto extent_metadata_res = m.get_extent_metadata_backwards(
+                                      tp, min_offset, max_offset, 1)
+                                     .get();
+        ASSERT_TRUE(extent_metadata_res.has_value());
+        EXPECT_THAT(
+          extent_metadata_res->extents,
+          testing::ElementsAre(MatchesRange(20_o, 29_o)));
+    }
+    {
+        auto min_offset = kafka::offset{0};
+        auto max_offset = kafka::offset{20};
+        auto extent_metadata_res = m.get_extent_metadata_backwards(
+                                      tp, min_offset, max_offset, 2)
+                                     .get();
+        ASSERT_TRUE(extent_metadata_res.has_value());
+        EXPECT_THAT(
+          extent_metadata_res->extents,
+          testing::ElementsAre(
+            MatchesRange(20_o, 29_o), MatchesRange(10_o, 19_o)));
+    }
+
+    // Non zero min_offset test cases.
+    {
+        auto min_offset = kafka::offset{5};
+        auto max_offset = kafka::offset{9};
+        auto extent_metadata_res = m.get_extent_metadata_backwards(
+                                      tp, min_offset, max_offset, 10)
+                                     .get();
+        ASSERT_TRUE(extent_metadata_res.has_value());
+        EXPECT_THAT(
+          extent_metadata_res->extents,
+          testing::ElementsAre(MatchesRange(0_o, 9_o)));
+    }
+    {
+        auto min_offset = kafka::offset{9};
+        auto max_offset = kafka::offset{29};
+        auto extent_metadata_res = m.get_extent_metadata_backwards(
+                                      tp, min_offset, max_offset, 10)
+                                     .get();
+        ASSERT_TRUE(extent_metadata_res.has_value());
+        EXPECT_THAT(
+          extent_metadata_res->extents,
+          testing::ElementsAre(
+            MatchesRange(20_o, 29_o),
+            MatchesRange(10_o, 19_o),
+            MatchesRange(0_o, 9_o)));
+    }
+}
+
+TEST(SimpleMetastoreTest, TestGetExtentMetadataEmpty) {
+    simple_metastore m;
+    om_list_t os;
+    constexpr size_t data_size = 99;
+    os.emplace_back(om_builder(oid1, 100, 1100)
+                      .add(tid_a, 0_o, 9_o, 2000_t, 0, data_size)
+                      .build());
+    os.emplace_back(om_builder(oid2, 100, 1100)
+                      .add(tid_a, 10_o, 19_o, 2000_t, 0, data_size)
+                      .build());
+    os.emplace_back(om_builder(oid3, 100, 1100)
+                      .add(tid_a, 20_o, 29_o, 2000_t, 0, data_size)
+                      .build());
+    auto add_res
+      = m.add_objects(os, terms_builder().add(tid_a, 0_tm, 0_o).build()).get();
+    ASSERT_TRUE(add_res.has_value());
+
+    auto tp = model::topic_id_partition::from(tid_a);
+
+    auto set_start_res = m.set_start_offset(tp, 30_o).get();
+    ASSERT_TRUE(set_start_res.has_value());
+
+    {
+        auto min_offset = kafka::offset{0};
+        auto max_offset = kafka::offset{100};
+        auto extent_metadata_ge_res = m.get_extent_metadata_forwards(
+                                         tp, min_offset, max_offset, 10)
+                                        .get();
+        ASSERT_TRUE(extent_metadata_ge_res.has_value());
+        ASSERT_TRUE(extent_metadata_ge_res->extents.empty());
+    }
+    {
+        auto min_offset = kafka::offset{0};
+        auto max_offset = kafka::offset{100};
+        auto extent_metadata_le_res = m.get_extent_metadata_backwards(
+                                         tp, min_offset, max_offset, 10)
+                                        .get();
+        ASSERT_TRUE(extent_metadata_le_res.has_value());
+        ASSERT_TRUE(extent_metadata_le_res->extents.empty());
+    }
+}

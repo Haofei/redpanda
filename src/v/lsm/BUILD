@@ -20,7 +20,7 @@ redpanda_cc_library(
     deps = [
         "//src/v/base",
         "//src/v/lsm/io:persistence",
-        "//src/v/model",
+        "//src/v/utils:named_type",
         "@seastar",
     ],
 )

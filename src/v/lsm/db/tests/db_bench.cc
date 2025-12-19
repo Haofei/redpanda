@@ -167,6 +167,15 @@ public:
     ss::future<> setup() {
         auto opts = ss::make_lw_shared<lsm::internal::options>(
           lsm::internal::options{
+            .levels = lsm::internal::options::make_levels(
+              {
+                .max_total_bytes = _cfg.write_buffer_size
+                                   * lsm::internal::options::
+                                     default_level_zero_stop_writes_trigger,
+                .max_file_size = _cfg.write_buffer_size,
+              },
+              lsm::internal::options::default_level_multipler,
+              lsm::internal::options::default_max_level),
             .write_buffer_size = _cfg.write_buffer_size,
             .compression = _cfg.compression ? lsm::compression_type::zstd
                                             : lsm::compression_type::none,
@@ -475,7 +484,7 @@ private:
         stats.bytes_read = 0;
 
         // Perform sequential iteration
-        auto iter = co_await _db->create_iterator(std::nullopt);
+        auto iter = co_await _db->create_iterator({});
         co_await iter->seek_to_first();
 
         size_t count = 0;
@@ -667,7 +676,7 @@ private:
 
         // Build a set of all keys from iterator
         std::map<ss::sstring, iobuf> db_keys;
-        auto iter = co_await _db->create_iterator(std::nullopt);
+        auto iter = co_await _db->create_iterator({});
         co_await iter->seek_to_first();
 
         while (iter->valid()) {

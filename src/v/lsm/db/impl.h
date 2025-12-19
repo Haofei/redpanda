@@ -16,6 +16,7 @@
 #include "lsm/core/internal/keys.h"
 #include "lsm/core/internal/options.h"
 #include "lsm/db/memtable.h"
+#include "lsm/db/snapshot.h"
 #include "lsm/db/table_cache.h"
 #include "lsm/db/version_set.h"
 #include "lsm/io/persistence.h"
@@ -57,12 +58,26 @@ public:
     // Get a key from the database
     ss::future<lookup_result> get(internal::key_view);
 
+    // Additional options to apply when creating an iterator.
+    struct iterator_options {
+        // The memtable to apply ontop of the changes in the database.
+        ss::optimized_optional<ss::lw_shared_ptr<memtable>> memtable;
+        // The snapshot to open the iterator at. If this is used
+        // data after will not be seen.
+        ss::optimized_optional<snapshot*> snapshot = nullptr;
+    };
+
     // Create an interator over the database.
     //
     // If a non-null memtable is passed in, then a frozen state of the memtable
     // is applied ontop of the existing database.
     ss::future<std::unique_ptr<internal::iterator>>
-      create_iterator(ss::optimized_optional<ss::lw_shared_ptr<memtable>>);
+      create_iterator(iterator_options);
+
+    // Create a snapshot of the database contents. If the database is empty,
+    // then this will return `nullptr` to signify the snapshot is to just return
+    // nothing.
+    ss::optimized_optional<std::unique_ptr<snapshot>> create_snapshot();
 
     // Flush any pending state in memtables to disk.
     ss::future<> flush();
@@ -74,14 +89,14 @@ public:
     ss::future<> close();
 
 private:
+    friend class snapshot;
     // Create an iterator over the database. Note that this iterator
     // results in ALL entries from the database, a deduplicating iterator
     // needs to be added on top to give a traditional iterator view.
     //
     // If a non-null memtable is passed in, then a frozen state of the memtable
     // is applied ontop of the existing database.
-    ss::future<std::unique_ptr<internal::iterator>>
-      create_internal_iterator(ss::optimized_optional<memtable*>);
+    ss::future<std::unique_ptr<internal::iterator>> create_internal_iterator();
 
     ss::future<> recover();
 
@@ -108,6 +123,7 @@ private:
     ss::abort_source _as;
     bool _background_work_running = false;
     std::optional<ss::future<>> _background_work;
+    snapshot_list _snapshots;
 };
 
 } // namespace lsm::db

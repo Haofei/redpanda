@@ -115,6 +115,8 @@ private:
 
 class ImplTest : public testing::Test {
 public:
+    using shadow_map = std::map<ss::sstring, iobuf>;
+
     void SetUp() override {
         // Make a smaller sized database so we get some actual leveling
         // happening.
@@ -165,11 +167,24 @@ public:
     }
 
     testing::AssertionResult matches_shadow() {
-        auto iter = _db->create_iterator(std::nullopt).get();
-        auto it = _shadow.begin();
+        return matches_shadow(_shadow, nullptr);
+    }
+
+    shadow_map clone_shadow_map() {
+        shadow_map s;
+        for (auto& [k, v] : _shadow) {
+            s.emplace(k, v.share());
+        }
+        return s;
+    }
+
+    testing::AssertionResult
+    matches_shadow(const shadow_map& shadow, lsm::db::snapshot* snapshot) {
+        auto iter = _db->create_iterator({.snapshot = snapshot}).get();
+        auto it = shadow.begin();
         std::vector<std::string> errors;
         for (iter->seek_to_first().get(); iter->valid(); iter->next().get()) {
-            if (it == _shadow.end()) {
+            if (it == shadow.end()) {
                 errors.emplace_back("extra elements");
                 break;
             }
@@ -185,7 +200,7 @@ public:
             }
             ++it;
         }
-        if (it != _shadow.end()) {
+        if (it != shadow.end()) {
             errors.emplace_back("missing elements");
         }
         if (errors.empty()) {
@@ -232,7 +247,7 @@ public:
     }
 
 protected:
-    std::map<ss::sstring, iobuf> _shadow;
+    shadow_map _shadow;
     ss::lw_shared_ptr<lsm::internal::options> _options;
     std::unique_ptr<lsm::io::data_persistence> _underlying_data_persistence;
     std::unique_ptr<lsm::io::metadata_persistence> _meta_persistence;
@@ -311,7 +326,7 @@ TEST_F(ImplTest, ReadYourOwnWrites) {
     pending_batch->put(key3, value3.share());
 
     // Verify new key is visible through iterator with write batch
-    auto iter = _db->create_iterator(pending_batch).get();
+    auto iter = _db->create_iterator({.memtable = pending_batch}).get();
     std::map<ss::sstring, iobuf> seen;
     for (iter->seek_to_first().get(); iter->valid(); iter->next().get()) {
         seen.insert_or_assign(
@@ -334,7 +349,7 @@ TEST_F(ImplTest, ReadYourOwnWrites) {
     update_batch->put(key2_updated, value2_updated.share());
 
     // Verify updated value is visible through iterator with write batch
-    auto iter2 = _db->create_iterator(update_batch).get();
+    auto iter2 = _db->create_iterator({.memtable = update_batch}).get();
     seen.clear();
     for (iter2->seek_to_first().get(); iter2->valid(); iter2->next().get()) {
         seen.insert_or_assign(
@@ -347,7 +362,7 @@ TEST_F(ImplTest, ReadYourOwnWrites) {
     // Apply the update batch and verify all data is now committed
     _db->apply(update_batch).get();
 
-    auto iter3 = _db->create_iterator(std::nullopt).get();
+    auto iter3 = _db->create_iterator({}).get();
     seen.clear();
     for (iter3->seek_to_first().get(); iter3->valid(); iter3->next().get()) {
         seen.insert_or_assign(
@@ -408,8 +423,8 @@ TEST_F(ImplTest, Readonly) {
     EXPECT_ANY_THROW(write_at_least(1_KiB));
 }
 
-TEST_F(ImplTest, SnapshotEmpty) {
-    auto it = _db->create_iterator(std::nullopt).get();
+TEST_F(ImplTest, ImplicitSnapshotEmpty) {
+    auto it = _db->create_iterator({}).get();
     it->seek_to_first().get();
     EXPECT_FALSE(it->valid());
     write_at_least(512_KiB);
@@ -419,6 +434,32 @@ TEST_F(ImplTest, SnapshotEmpty) {
     EXPECT_FALSE(it->valid());
     it->seek_to_last().get();
     EXPECT_FALSE(it->valid());
+}
+
+TEST_F(ImplTest, ExplicitSnapshotEmpty) {
+    EXPECT_FALSE(_db->create_snapshot());
+}
+
+TEST_F(ImplTest, ExplicitSnapshot) {
+    write_at_least(512_KiB);
+    auto snap = _db->create_snapshot();
+    EXPECT_TRUE(snap);
+    auto shadow = clone_shadow_map();
+    EXPECT_TRUE(matches_shadow(shadow, snap->get()));
+    write_at_least(512_KiB);
+    EXPECT_TRUE(matches_shadow(shadow, snap->get()));
+    EXPECT_FALSE(matches_shadow(shadow, nullptr));
+    _db->flush().get();
+    EXPECT_TRUE(matches_shadow(shadow, snap->get()));
+    write_at_least(512_KiB);
+    write_at_least(512_KiB);
+    tests::drain_task_queue().get();
+    _db->flush().get();
+    // Wait for any compaction to finish
+    tests::drain_task_queue().get();
+    EXPECT_TRUE(matches_shadow(shadow, snap->get()));
+    EXPECT_FALSE(matches_shadow(shadow, nullptr));
+    EXPECT_TRUE(matches_shadow());
 }
 
 } // namespace

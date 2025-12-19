@@ -354,6 +354,36 @@ struct get_compaction_infos_request
     chunked_vector<get_compaction_info_request> logs;
 };
 
+struct get_extent_metadata_reply
+  : serde::envelope<
+      get_extent_metadata_reply,
+      serde::version<0>,
+      serde::compat_version<0>> {
+    auto serde_fields() { return std::tie(ec, extents); }
+
+    errc ec;
+    chunked_vector<extent_metadata> extents;
+};
+struct get_extent_metadata_request
+  : serde::envelope<
+      get_extent_metadata_request,
+      serde::version<0>,
+      serde::compat_version<0>> {
+    using resp_t = get_extent_metadata_reply;
+
+    enum class order { forwards, backwards };
+
+    auto serde_fields() {
+        return std::tie(tp, min_offset, max_offset, o, max_num_extents);
+    }
+
+    model::topic_id_partition tp;
+    kafka::offset min_offset;
+    kafka::offset max_offset;
+    order o;
+    size_t max_num_extents;
+};
+
 } //  namespace cloud_topics::l1::rpc
 
 template<>
