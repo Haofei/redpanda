@@ -255,7 +255,8 @@ ss::future<> batcher<Clock>::bg_controller_loop() {
         }
 
         auto list = _stage.pull_write_requests(
-          10_MiB); // TODO: use configuration parameter
+          config::shard_local_cfg()
+            .cloud_topics_produce_batching_size_threshold());
 
         // We can spawn the work in the background without worrying about memory
         // usage because the pipeline tracks the memory usage for us and will
