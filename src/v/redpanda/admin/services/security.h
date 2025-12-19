@@ -15,15 +15,39 @@
 #include "kafka/server/fwd.h"
 #include "proto/redpanda/core/admin/v2/security.proto.h"
 #include "redpanda/admin/proxy/client.h"
+#include "security/fwd.h"
 
 namespace admin {
+
+// Internal helper functions exposed for testing.
+// These are implementation details and should not be used outside of
+// security_service_impl and its tests.
+namespace internal {
+
+void validate_role_name(const ss::sstring& role_name);
+
+void validate_pb_role_member(const proto::admin::role_member& pb_member);
+
+security::role_member
+convert_to_security_role_member(const proto::admin::role_member& pb_member);
+
+security::role convert_to_security_role(const proto::admin::role& pb_role);
+
+proto::admin::role_member
+convert_to_pb_role_member(const security::role_member& role_member);
+
+proto::admin::role
+convert_to_pb_role(ss::sstring role_name, const security::role& role);
+
+} // namespace internal
 
 class security_service_impl : public proto::admin::security_service {
 public:
     security_service_impl(
       admin::proxy::client proxy_client,
       cluster::controller* controller,
-      ss::sharded<kafka::server>& kafka_server);
+      ss::sharded<kafka::server>& kafka_server,
+      ss::sharded<cluster::metadata_cache>& md_cache);
 
     seastar::future<proto::admin::create_role_response> create_role(
       serde::pb::rpc::context, proto::admin::create_role_request) override;
@@ -68,6 +92,7 @@ private:
     admin::proxy::client _proxy_client;
     cluster::controller* _controller;
     ss::sharded<kafka::server>& _kafka_server;
+    ss::sharded<cluster::metadata_cache>& _md_cache;
 };
 
 } // namespace admin
