@@ -37,6 +37,10 @@ level_zero_log_reader_impl::level_zero_log_reader_impl(
 ss::future<model::record_batch_reader::storage_t>
 level_zero_log_reader_impl::do_load_slice(
   model::timeout_clock::time_point deadline) {
+    if (is_over_limit(0)) {
+        _current = state::end_of_stream_state;
+        co_return chunked_circular_buffer<model::record_batch>{};
+    }
     // We're only fetching from the record batch cache if the reader is in
     // the 'empty' state. It doesn't make any difference if the reader is in
     // the 'materialized' state. If we're in 'ready' state we risk to go out
@@ -80,13 +84,10 @@ level_zero_log_reader_impl::do_load_slice(
 std::optional<chunked_circular_buffer<model::record_batch>>
 level_zero_log_reader_impl::maybe_load_slices_from_cache() {
     chunked_circular_buffer<model::record_batch> ret;
-    size_t materialized_bytes = 0;
     auto current = _config.start_offset;
-    while (materialized_bytes < _config.max_bytes
-           && current <= _config.max_offset) {
+    while (current <= _config.max_offset) {
         auto batch = _ct_api->cache_get(
           _ctp->ntp(), kafka::offset_cast(current));
-        size_t batch_size = 0;
         if (!batch.has_value()) {
             // We hit a gap in the cache and have to download objects
             // from S3.
@@ -105,12 +106,8 @@ level_zero_log_reader_impl::maybe_load_slices_from_cache() {
           batch.value().term() > model::term_id{-1},
           "Batch without term in the cache: {}",
           batch.value().header());
-        batch_size = batch.value().size_bytes();
-        if (
-          !ret.empty() && batch_size + materialized_bytes > _config.max_bytes) {
-            // The batch will cause over the limit.
-            // We want to accept the oversized batch if the res is empty to
-            // avoid stalling the reader.
+        auto batch_size = batch.value().size_bytes();
+        if (is_over_limit(batch_size)) {
             break;
         }
         vassert(
@@ -122,8 +119,7 @@ level_zero_log_reader_impl::maybe_load_slices_from_cache() {
           batch->last_offset(),
           current);
         ret.push_back(std::move(batch.value()));
-        materialized_bytes += batch_size;
-        // Invariant: it's guaranteed that the 'ret' is not empty.
+        _config.bytes_consumed += batch_size;
         current = model::offset_cast(
           model::next_offset(ret.back().last_offset()));
     }
