@@ -23,6 +23,8 @@
 #include "security/role_store.h"
 #include "security/scram_algorithm.h"
 
+#include <algorithm>
+
 namespace admin {
 
 namespace {
@@ -560,6 +562,11 @@ security_service_impl::resolve_oidc_identity(
       absl::FromChrono(
         std::chrono::system_clock::time_point{
           res.assume_value().expiry.time_since_epoch()}));
+
+    resp.set_groups(
+      {std::from_range,
+       auth_result->get_groups()
+         | std::views::transform(&security::acl_principal::name)});
 
     co_return resp;
 }
