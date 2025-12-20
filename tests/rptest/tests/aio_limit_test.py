@@ -22,7 +22,7 @@ class AioLimitTest(RedpandaTest):
     TARGET_IOCBS = 100
 
     def __init__(self, ctx: TestContext):
-        super().__init__(test_context=ctx)
+        super().__init__(test_context=ctx, num_brokers=1)
 
     def setUp(self):
         aio_arg = f"--max-networking-io-control-blocks={self.TARGET_IOCBS}"
