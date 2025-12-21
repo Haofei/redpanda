@@ -111,6 +111,7 @@ redpanda_cc_library(
     deps = [
         ":ctp_stm_state",
         ":types",
+        "//src/v/cloud_topics/level_zero/common:producer_queue",
         "//src/v/raft",
         "@seastar",
     ],
@@ -135,6 +136,7 @@ redpanda_cc_library(
         ":dl_snapshot",
         ":dl_version",
         "//src/v/base",
+        "//src/v/cloud_topics/level_zero/common:producer_queue",
         "//src/v/model",
         "//src/v/ssx:future_util",
         "//src/v/utils:retry_chain_node",

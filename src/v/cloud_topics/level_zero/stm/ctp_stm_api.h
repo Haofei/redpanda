@@ -10,6 +10,7 @@
 
 #pragma once
 
+#include "cloud_topics/level_zero/common/producer_queue.h"
 #include "cloud_topics/level_zero/stm/types.h"
 #include "cloud_topics/types.h"
 #include "model/fundamental.h"
@@ -95,6 +96,8 @@ public:
     std::optional<cluster_epoch> get_max_epoch() const;
 
     std::optional<cluster_epoch> get_max_seen_epoch() const;
+
+    l0::producer_queue& producer_queue();
 
 private:
     /// Replicate a record batch and wait for it to be applied to the ctp_stm.

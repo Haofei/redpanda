@@ -372,4 +372,7 @@ ss::future<cluster_epoch_fence> ctp_stm::fence_epoch(cluster_epoch e) {
 model::offset ctp_stm::max_removable_local_log_offset() {
     return _state.get_max_collectible_offset();
 }
+
+l0::producer_queue& ctp_stm::producer_queue() { return _producer_queue; }
+
 }; // namespace cloud_topics

@@ -193,4 +193,8 @@ std::optional<cluster_epoch> ctp_stm_api::get_max_seen_epoch() const {
     return _stm->state().get_max_seen_epoch();
 }
 
+l0::producer_queue& ctp_stm_api::producer_queue() {
+    return _stm->producer_queue();
+}
+
 }; // namespace cloud_topics
