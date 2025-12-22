@@ -22,6 +22,7 @@
 #include "security/role.h"
 #include "security/role_store.h"
 #include "security/scram_algorithm.h"
+#include "serde/protobuf/rpc.h"
 
 #include <algorithm>
 
@@ -165,6 +166,36 @@ security_service_impl::security_service_impl(
   , _controller(controller)
   , _kafka_server(kafka_server)
   , _md_cache(md_cache) {}
+
+seastar::future<proto::admin::create_scram_credential_response>
+security_service_impl::create_scram_credential(
+  serde::pb::rpc::context, proto::admin::create_scram_credential_request) {
+    throw serde::pb::rpc::unimplemented_exception("Not implemented");
+}
+
+seastar::future<proto::admin::get_scram_credential_response>
+security_service_impl::get_scram_credential(
+  serde::pb::rpc::context, proto::admin::get_scram_credential_request) {
+    throw serde::pb::rpc::unimplemented_exception("Not implemented");
+}
+
+seastar::future<proto::admin::list_scram_credentials_response>
+security_service_impl::list_scram_credentials(
+  serde::pb::rpc::context, proto::admin::list_scram_credentials_request) {
+    throw serde::pb::rpc::unimplemented_exception("Not implemented");
+}
+
+seastar::future<proto::admin::update_scram_credential_response>
+security_service_impl::update_scram_credential(
+  serde::pb::rpc::context, proto::admin::update_scram_credential_request) {
+    throw serde::pb::rpc::unimplemented_exception("Not implemented");
+}
+
+seastar::future<proto::admin::delete_scram_credential_response>
+security_service_impl::delete_scram_credential(
+  serde::pb::rpc::context, proto::admin::delete_scram_credential_request) {
+    throw serde::pb::rpc::unimplemented_exception("Not implemented");
+}
 
 seastar::future<proto::admin::create_role_response>
 security_service_impl::create_role(
