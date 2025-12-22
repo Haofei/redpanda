@@ -162,8 +162,9 @@ public:
       ss::lowres_clock::duration deadline,
       std::optional<ss::sstring> ctx = std::nullopt);
 
-    /// \brief Get number of connections
-    size_t size() const noexcept;
+    /// \brief Idle clients waiting in the pool. If this number is less than
+    /// capacity, some clients are currently leased out, borrowed, or shutdown.
+    size_t idle_count() const noexcept;
 
     /// \brief Configured capacity of the pool. Does not take into account
     /// connections that may be borrowed from other shards, i.e. when

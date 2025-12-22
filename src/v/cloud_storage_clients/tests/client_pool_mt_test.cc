@@ -405,7 +405,7 @@ SEASTAR_THREAD_TEST_CASE(test_client_pool_concurrent_acquire_release) {
     // Verify all clients returned to the pool.
     pool
       .invoke_on_all([&](client_pool& p) {
-          BOOST_CHECK_EQUAL(p.size(), num_connections_per_shard);
+          BOOST_CHECK_EQUAL(p.idle_count(), num_connections_per_shard);
       })
       .get();
 }
