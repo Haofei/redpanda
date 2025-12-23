@@ -1,6 +1,27 @@
 load("//bazel:build.bzl", "redpanda_cc_library")
 
 redpanda_cc_library(
+    name = "keys",
+    srcs = [
+        "keys.cc",
+    ],
+    hdrs = [
+        "keys.h",
+    ],
+    implementation_deps = [
+        "//src/v/bytes",
+        "//src/v/utils:uuid",
+        "@boost//:algorithm",
+        "@seastar",
+    ],
+    visibility = ["//visibility:public"],
+    deps = [
+        "//src/v/cloud_topics/level_one/common:object_id",
+        "//src/v/model",
+    ],
+)
+
+redpanda_cc_library(
     name = "write_batch_row",
     hdrs = [
         "write_batch_row.h",
@@ -95,5 +116,19 @@ redpanda_cc_library(
         "//src/v/model",
         "//src/v/raft",
         "@seastar",
+    ],
+)
+
+redpanda_cc_library(
+    name = "values",
+    hdrs = [
+        "values.h",
+    ],
+    visibility = ["//visibility:public"],
+    deps = [
+        "//src/v/cloud_topics/level_one/common:object_id",
+        "//src/v/cloud_topics/level_one/metastore:state",
+        "//src/v/model",
+        "//src/v/serde",
     ],
 )

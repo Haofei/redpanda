@@ -16,3 +16,19 @@ redpanda_cc_gtest(
         "@googletest//:gtest",
     ],
 )
+
+redpanda_cc_gtest(
+    name = "keys_test",
+    timeout = "short",
+    srcs = [
+        "keys_test.cc",
+    ],
+    deps = [
+        "//src/v/cloud_topics/level_one/common:object_id",
+        "//src/v/cloud_topics/level_one/metastore/lsm:keys",
+        "//src/v/model",
+        "//src/v/random:generators",
+        "//src/v/test_utils:gtest",
+        "@googletest//:gtest",
+    ],
+)
