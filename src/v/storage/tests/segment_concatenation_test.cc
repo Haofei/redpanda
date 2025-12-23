@@ -127,6 +127,7 @@ void concatenate_segments_from_log(
     compaction::compaction_config cfg(
       model::offset::max(),
       model::offset::max(),
+      model::offset::max(),
       std::nullopt,
       std::nullopt,
       never_abort);

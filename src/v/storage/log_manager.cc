@@ -431,6 +431,8 @@ log_manager::housekeeping_scan(model::timestamp collection_threshold) {
           = current_log.handle->stm_manager()->max_removable_local_log_offset();
         model::offset max_tombstone_remove_offset
           = current_log.handle->stm_manager()->max_tombstone_remove_offset();
+        model::offset max_tx_end_remove_offset
+          = current_log.handle->stm_manager()->max_tx_end_remove_offset();
         model::offset tx_snapshot_offset
           = current_log.handle->stm_manager()->tx_snapshot_offset();
         // We clamp the offset up to which we can remove transactional control
@@ -438,14 +440,17 @@ log_manager::housekeeping_scan(model::timestamp collection_threshold) {
         // ensures that we do not remove control batches that may be needed to
         // reconstruct the state machine during recovery.
         model::offset max_tx_remove_offset = std::min(
-          max_tombstone_remove_offset, tx_snapshot_offset);
+          max_tx_end_remove_offset, tx_snapshot_offset);
 
         vlog(
           gclog.trace,
-          "{}: max tombstone remove offset: {}, max tx remove offset: {}",
+          "{}: max tombstone remove offset: {}, max tx remove offset: {}, max "
+          "tx end remove snapshot: {}, tx_snapshot_offset: {}",
           ntp,
           max_tombstone_remove_offset,
-          max_tx_remove_offset);
+          max_tx_remove_offset,
+          max_tx_end_remove_offset,
+          tx_snapshot_offset);
         if (
           max_unpinned_offset
           && *max_unpinned_offset < max_compactible_offset) {
@@ -466,8 +471,8 @@ log_manager::housekeeping_scan(model::timestamp collection_threshold) {
             max_compactible_offset,
             max_tombstone_remove_offset,
             max_tx_remove_offset,
-            current_log.handle->config().tombstone_retention_ms(),
-            current_log.handle->config().tx_retention_ms(),
+            current_log.handle->config().delete_retention_ms(),
+            current_log.handle->config().delete_retention_ms(),
             current_log.handle->config().min_compaction_lag_ms(),
             _abort_source,
             std::move(ntp_sanitizer_cfg),

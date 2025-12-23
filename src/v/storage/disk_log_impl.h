@@ -320,6 +320,9 @@ public:
     // Exclusive: returns the first offset that is not within the cleanly
     // compacted prefix
     model::offset cleanly_compacted_prefix_offset() const final;
+    // Exclusive as well. Returns the first offset that may contain
+    // transactional data or fence batches
+    model::offset transaction_free_prefix_offset() const final;
 
 private:
     friend class disk_log_appender; // for multi-term appends
@@ -445,6 +448,14 @@ private:
 
     void throw_if_closed() const;
 
+    // Walk segments from the beginning, calling the provided predicate on each
+    // segment index. Returns the base offset of the first "bad" segment for
+    // which the predicate returned false. The cached offset is updated to avoid
+    // repeated work on subsequent calls.
+    model::offset get_good_prefix_end_offset(
+      bool (segment_index::*good_segment_predicate)() const,
+      model::offset& cached) const;
+
 private:
     // Computes the segment size based on the latest max_segment_size
     // configuration. This takes into consideration any segment size
@@ -560,6 +571,10 @@ private:
     // Exclusive: the offset that marks the first offset beyond the cleanly
     // compacted prefix.
     mutable model::offset _cleanly_compacted_offset{0};
+
+    // Exclusive as well: first offset beyond the prefix without transaction
+    // data or fence batches.
+    mutable model::offset _transaction_free_offset{0};
 };
 
 } // namespace storage

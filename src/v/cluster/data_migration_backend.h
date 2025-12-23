@@ -363,7 +363,7 @@ private:
      * Reconciliation-related data.
      *
      * When we are not the coordinator, _migration_states stores sought states
-     * and topics only, but no partititons, _node_states, _nodes_to_retry and
+     * and topics only, but no partitions, _node_states, _nodes_to_retry and
      * _topic_work_to_retry are empty. The same applies to the migration states
      * with topic scoped work only needed.
      *
