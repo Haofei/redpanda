@@ -100,7 +100,6 @@ void compaction_committer::compaction_job::cancel_job() {
     _as.request_abort();
     _upload_sem.broken();
     _last_upload_scheduled.broken();
-    _metadata_builder_mutex.broken();
 }
 
 ss::future<> compaction_committer::compaction_job::remove_staging_files() {
@@ -157,19 +156,8 @@ compaction_committer::compaction_job::do_upload(
   staging_file* file,
   object_builder::object_info info,
   metastore::object_metadata::ntp_metadata ntp_md) {
-    auto holder_res = co_await ss::coroutine::as_future(
-      _metadata_builder_mutex.get_units());
-    if (holder_res.failed()) {
-        auto e = holder_res.get_exception();
-        co_return std::unexpected(
-          error{
-            .t = error::type::shutdown_failure, .msg = fmt::format("{}", e)});
-    }
-
-    auto holder = std::move(holder_res).get();
-
     auto& metadata_builder = _metadata_builder;
-    auto oid_res = metadata_builder->get_or_create_object_for(_tp);
+    auto oid_res = metadata_builder->create_object_for(_tp);
     if (!oid_res.has_value()) {
         co_return std::unexpected(
           error{

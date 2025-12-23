@@ -19,7 +19,6 @@
 #include "container/chunked_circular_buffer.h"
 #include "container/chunked_hash_map.h"
 #include "model/fundamental.h"
-#include "ssx/mutex.h"
 #include "utils/uuid.h"
 
 class ReducerTestFixture;
@@ -158,9 +157,6 @@ public:
 
         compaction_job_id _id;
         model::topic_id_partition _tp;
-        // TODO: remove when we have better primitives around "one tidp,
-        // multiple objects" for the `metadata_builder`.
-        ssx::mutex _metadata_builder_mutex{"metadata_builder_mutex"};
         // The `metadata_builder` that is receiving a stream of L1 objects
         // as they are pushed to the `committer` and continually building up
         // an update for the `metastore`.

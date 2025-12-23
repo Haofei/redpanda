@@ -217,7 +217,6 @@ redpanda_cc_library(
         "//src/v/container:chunked_circular_buffer",
         "//src/v/container:chunked_hash_map",
         "//src/v/model",
-        "//src/v/ssx:mutex",
         "//src/v/ssx:semaphore",
         "//src/v/ssx:when_all",
         "//src/v/utils:uuid",
