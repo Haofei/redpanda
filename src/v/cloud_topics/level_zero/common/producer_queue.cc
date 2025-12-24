@@ -76,6 +76,9 @@ public:
         // next element instead.
         if (_prev != nullptr) {
             _prev->_next = _next;
+            // We also resolve our own future if we were waiting on something
+            // but were released early.
+            _p.set_value();
         }
         if (_next != nullptr) {
             // If we have no previous node, then we can set the next as
@@ -93,6 +96,8 @@ public:
             _map->erase(_pid);
         }
         _map = nullptr;
+        _prev = nullptr;
+        _next = nullptr;
     }
 
 private:
@@ -143,6 +148,22 @@ producer_ticket& producer_ticket::operator=(producer_ticket&&) noexcept
   = default;
 
 ss::future<> producer_ticket::redeem() { return _impl->redeem(); }
+ss::future<> producer_ticket::redeem(ss::abort_source& as) {
+    std::exception_ptr ep;
+    auto sub = as.subscribe(
+      [this, &as, &ep](const std::optional<std::exception_ptr>& e) noexcept {
+          ep = e.value_or(as.get_default_exception());
+          _impl->release(); // this will trigger the waiting future to resolve
+      });
+    if (!sub) {
+        co_await ss::coroutine::return_exception_ptr(
+          as.abort_requested_exception_ptr());
+    }
+    co_await _impl->redeem();
+    if (ep) {
+        co_await ss::coroutine::return_exception_ptr(ep);
+    }
+}
 
 void producer_ticket::release() { _impl->release(); }
 

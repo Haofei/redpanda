@@ -168,6 +168,44 @@ TEST_CORO(producer_queue_test, continuation_cleanup) {
     co_return;
 }
 
+TEST_CORO(producer_queue_test, redeem_with_abort_source) {
+    producer_queue queue;
+    model::producer_id pid{1};
+
+    // Test 1: Abort while waiting for previous ticket
+    auto ticket1 = queue.reserve(pid);
+    auto ticket2 = queue.reserve(pid);
+
+    co_await ticket1.redeem();
+
+    ss::abort_source as;
+    auto redeem_fut = ticket2.redeem(as);
+
+    // Give it a moment to start waiting
+    co_await ss::sleep(std::chrono::milliseconds(10));
+
+    // Trigger abort while ticket2 is waiting
+    as.request_abort();
+
+    // Should get an exception
+    ASSERT_THROW_CORO(
+      co_await std::move(redeem_fut), ss::abort_requested_exception);
+
+    // ticket2 should have auto-released due to abort
+    ticket1.release();
+
+    // Test 2: Successful redeem followed by abort (should be no-op)
+    auto ticket3 = queue.reserve(pid);
+    ss::abort_source as2;
+    co_await ticket3.redeem(as2);
+
+    // Abort after successful redeem - should not affect anything
+    as2.request_abort();
+    ticket3.release();
+
+    ASSERT_EQ_CORO(queue.size(), 0);
+}
+
 namespace {
 
 ss::future<> random_sleep() {
@@ -244,8 +282,9 @@ TEST_CORO(producer_queue_test, concurrent_operations_with_drops) {
                 queue.reserve(pid),
                 i,
                 completion_order,
-                [pid](auto& ticket, int request_id, auto& order) {
-                    auto n = random_generators::get_int(0, 3);
+                ss::abort_source{},
+                [pid](auto& ticket, int request_id, auto& order, auto& as) {
+                    auto n = random_generators::get_int(0, 5);
                     if (n == 0) {
                         // Explicit release
                         return random_sleep().then(
@@ -253,9 +292,45 @@ TEST_CORO(producer_queue_test, concurrent_operations_with_drops) {
                     } else if (n == 1) {
                         // No release, just destructor
                         return random_sleep();
+                    } else if (n == 2) {
+                        // Abort before redeem completes
+                        auto redeem_fut = ticket.redeem(as);
+                        as.request_abort();
+                        return std::move(redeem_fut)
+                          .then([&ticket, request_id, &order, pid] {
+                              (*order)[pid].push_back(request_id);
+                              ticket.release();
+                          })
+                          .handle_exception([](auto) {
+                              // Abort exception is expected, ignore
+                          });
+                    } else if (n == 3) {
+                        // Random abort during operation
+                        auto redeem_fut = ticket.redeem(as);
+                        return random_sleep().then(
+                          [&as,
+                           redeem_fut = std::move(redeem_fut),
+                           &ticket,
+                           request_id,
+                           &order,
+                           pid]() mutable {
+                              // Maybe abort, maybe not
+                              if (random_generators::get_int(0, 1) == 0) {
+                                  as.request_abort();
+                              }
+                              return std::move(redeem_fut)
+                                .then([&ticket, request_id, &order, pid] {
+                                    return random_sleep().then(
+                                      [&ticket, request_id, &order, pid] {
+                                          (*order)[pid].push_back(request_id);
+                                          ticket.release();
+                                      });
+                                })
+                                .handle_exception([](auto) {});
+                          });
                     } else {
-                        // happy path
-                        return ticket.redeem().then(
+                        // Happy path with abort source (but no abort)
+                        return ticket.redeem(as).then(
                           [&ticket, request_id, &order, pid] {
                               // Add random sleep to encourage interleaving
                               return random_sleep().then(

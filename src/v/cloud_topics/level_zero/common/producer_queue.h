@@ -86,8 +86,12 @@ public:
     // Redeem the ticket for usage, this waits for all previous tickets to be
     // released.
     ss::future<> redeem();
+    ss::future<> redeem(ss::abort_source&);
 
     // Release the ticket so that other later tickets in the queue can proceed.
+    //
+    // Can be called concurrently with `redeem`, which will cause it to return
+    // immediately.
     void release();
 
 private:

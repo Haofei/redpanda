@@ -599,7 +599,11 @@ ss::future<result<raft::replicate_result>> do_upload_and_replicate(
       "Expected single batch, got {}",
       placeholders.batches.size());
     // Wait for all previous requests from this producer to be processed
-    co_await ticket.redeem();
+    if (opts.as) {
+        co_await ticket.redeem(opts.as->get());
+    } else {
+        co_await ticket.redeem();
+    }
     // Replicate now that our ticket is redeemed
     opts = update_replicate_options(opts, fence.term);
     auto replicate_stages = partition->replicate_in_stages(
