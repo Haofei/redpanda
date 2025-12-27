@@ -110,6 +110,17 @@ public:
         virtual std::expected<object_id, error>
         get_or_create_object_for(const model::topic_id_partition&) = 0;
 
+        // Creates a new object for the given partition. It is guaranteed that
+        // this object is brand new/unused. It is not guaranteed, however, that
+        // it cannot be accessed concurrently by other users of this
+        // `object_metadata_builder` who call `get_or_create_object_for()`. If
+        // complete isolation of objects is required, ensure that all users of
+        // this particular `object_metadata_builder` only invoke
+        // `create_object_for()` and `finish()` for the provided `object_id`
+        // within a tightly bounded scope.
+        virtual std::expected<object_id, error>
+        create_object_for(const model::topic_id_partition&) = 0;
+
         // Removes a pending object from the builder. The object must be in the
         // pending state. Further calls to get_or_create_object_for() will not
         // return the object id. Any other call that references the object id

@@ -101,6 +101,8 @@ public:
 
     std::expected<object_id, error>
     get_or_create_object_for(const model::topic_id_partition&) override;
+    std::expected<object_id, error>
+    create_object_for(const model::topic_id_partition&) override;
     std::expected<void, error> remove_pending_object(object_id) override;
     std::expected<void, error>
       add(object_id, metastore::object_metadata::ntp_metadata) override;
@@ -139,6 +141,22 @@ replicated_object_builder::get_or_create_object_for(
         return oid;
     }
     return partition_objects.pending_objects_.begin()->first;
+}
+
+std::expected<object_id, replicated_object_builder::error>
+replicated_object_builder::create_object_for(
+  const model::topic_id_partition& tidp) {
+    auto metastore_pid = fe_.metastore_partition(tidp);
+    if (!metastore_pid) {
+        return std::unexpected(
+          error{
+            "could not determine metastore partition for create_object_for()"});
+    }
+    auto& partition_objects = partitions_[*metastore_pid];
+
+    auto oid = create_object_id();
+    partition_objects.pending_objects_[oid] = {};
+    return oid;
 }
 
 std::expected<void, replicated_object_builder::error>

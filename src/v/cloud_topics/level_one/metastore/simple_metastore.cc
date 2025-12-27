@@ -49,6 +49,13 @@ simple_object_builder::get_or_create_object_for(
     return pending_objects_.begin()->first;
 }
 
+std::expected<object_id, simple_object_builder::error>
+simple_object_builder::create_object_for(const model::topic_id_partition&) {
+    auto oid = create_object_id();
+    pending_objects_[oid] = {};
+    return oid;
+}
+
 std::expected<void, simple_object_builder::error>
 simple_object_builder::remove_pending_object(object_id oid) {
     auto it = pending_objects_.find(oid);

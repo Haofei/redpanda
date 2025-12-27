@@ -999,6 +999,24 @@ TEST(SimpleMetastoreTest, TestObjectBuilder) {
     ASSERT_EQ(0, release_res.value()[1].ntp_metas.size());
 }
 
+TEST(SimpleMetastoreTest, TestObjectBuilderCreatesNewObjects) {
+    simple_metastore m;
+    auto ob = m.object_builder().get().value();
+    auto tp = model::topic_id_partition::from(tid_a);
+
+    chunked_hash_set<object_id> oids;
+    static constexpr size_t num_objects = 1000;
+    // Creating objects for the same partition will result in a different object
+    // everytime.
+    for (size_t i = 0; i < num_objects; ++i) {
+        auto oid_opt = ob->create_object_for(tp);
+        ASSERT_TRUE(oid_opt.has_value());
+        auto [_, inserted] = oids.insert(oid_opt.value());
+        ASSERT_TRUE(inserted);
+    }
+    ASSERT_EQ(oids.size(), num_objects);
+}
+
 TEST(SimpleMetastoreTest, TestObjectBuilderBadObjects) {
     // Test calls for objects that don't exist in the builder.
     simple_metastore m;
