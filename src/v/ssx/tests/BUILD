@@ -349,3 +349,31 @@ redpanda_cc_gtest(
         "@seastar",
     ],
 )
+
+redpanda_cc_gtest(
+    name = "time_test",
+    timeout = "short",
+    srcs = [
+        "time_test.cc",
+    ],
+    deps = [
+        "//src/v/ssx:time",
+        "//src/v/test_utils:gtest",
+        "@googletest//:gtest",
+    ],
+)
+
+redpanda_cc_gtest(
+    name = "clock_test",
+    timeout = "short",
+    srcs = [
+        "clock_test.cc",
+    ],
+    deps = [
+        "//src/v/ssx:clock",
+        "//src/v/ssx:time",
+        "//src/v/test_utils:gtest",
+        "@googletest//:gtest",
+        "@seastar",
+    ],
+)
