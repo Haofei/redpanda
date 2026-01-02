@@ -24,7 +24,20 @@ namespace admin {
 // security_service_impl and its tests.
 namespace internal {
 
-void validate_role_name(const ss::sstring& role_name);
+bool match_scram_credential(
+  const proto::admin::scram_credential&, const security::scram_credential&);
+
+void validate_scram_credential_name(const ss::sstring&);
+
+void validate_pb_scram_credential(const proto::admin::scram_credential&);
+
+security::scram_credential
+convert_to_security_scram_credential(const proto::admin::scram_credential&);
+
+proto::admin::scram_credential
+convert_to_pb_scram_credential(ss::sstring, const security::scram_credential&);
+
+void validate_role_name(const ss::sstring&);
 
 void validate_pb_role_member(const proto::admin::role_member& pb_member);
 
