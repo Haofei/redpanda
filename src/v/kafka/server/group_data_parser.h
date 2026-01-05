@@ -18,6 +18,8 @@
 #include "model/record.h"
 #include "model/record_batch_types.h"
 
+namespace kafka {
+namespace detail {
 template<typename T>
 T parse_tx_batch(const model::record_batch& batch, int8_t version) {
     vassert(batch.record_count() == 1, "tx batch must contain a single record");
@@ -54,7 +56,7 @@ T parse_tx_batch(const model::record_batch& batch, int8_t version) {
     return cmd;
 }
 
-namespace kafka {
+} // namespace detail
 
 template<class T>
 concept GroupDataParserBase = requires(T base, model::record_batch b) {
@@ -108,17 +110,18 @@ protected:
             // silently ignore raft configuration.
             return ss::now();
         case model::record_batch_type::group_prepare_tx: {
-            auto data = parse_tx_batch<kafka::group_tx::offsets_metadata>(
-              b, group::prepared_tx_record_version);
+            auto data
+              = detail::parse_tx_batch<kafka::group_tx::offsets_metadata>(
+                b, group::prepared_tx_record_version);
             return handle_tx_offsets(b.header(), std::move(data));
         }
         case model::record_batch_type::group_commit_tx: {
-            auto data = parse_tx_batch<group_tx::commit_metadata>(
+            auto data = detail::parse_tx_batch<group_tx::commit_metadata>(
               b, group::commit_tx_record_version);
             return handle_commit(b.header(), std::move(data));
         }
         case model::record_batch_type::group_abort_tx: {
-            auto data = parse_tx_batch<group_tx::abort_metadata>(
+            auto data = detail::parse_tx_batch<group_tx::abort_metadata>(
               b, group::aborted_tx_record_version);
             return handle_abort(b.header(), std::move(data));
         }
