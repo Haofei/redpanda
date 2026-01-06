@@ -154,6 +154,37 @@ struct context_subject {
         return H::combine(std::move(h), ctx_sub.ctx, ctx_sub.sub);
     }
 
+    /// Parse from qualified subject ":.context:subject" or unqualified
+    /// "subject" (which uses the default context)
+    static context_subject from_string(std::string_view input) {
+        // Check for qualified syntax: starts with ":."
+        if (input.starts_with(":.")) {
+            // Find the second colon that separates context from subject
+            auto second_colon = input.find(':', 2);
+
+            if (second_colon != std::string_view::npos) {
+                auto ctx_str = input.substr(1, second_colon - 1);
+                auto sub_str = input.substr(second_colon + 1);
+
+                return context_subject{context{ctx_str}, subject{sub_str}};
+            }
+        }
+
+        // Default case: unqualified subject or invalid qualified syntax
+        return context_subject{default_context, subject{input}};
+    }
+
+    /// Format as qualified subject ":.context:subject" or "subject" if in the
+    /// default context
+    ss::sstring to_string() const { return ssx::sformat("{}", *this); }
+
+    fmt::iterator format_to(fmt::iterator it) const {
+        if (ctx == pandaproxy::schema_registry::default_context) {
+            return fmt::format_to(it, "{}", sub);
+        }
+        return fmt::format_to(it, ":{}:{}", ctx, sub);
+    }
+
     context ctx;
     subject sub;
 };
