@@ -114,19 +114,6 @@ redpanda_cc_gtest(
     ],
 )
 
-redpanda_cc_gtest(
-    name = "bucket_name_parts_test",
-    timeout = "short",
-    srcs = [
-        "bucket_name_parts_test.cc",
-    ],
-    deps = [
-        "//src/v/cloud_storage_clients",
-        "//src/v/test_utils:gtest",
-        "@googletest//:gtest",
-    ],
-)
-
 redpanda_test_cc_library(
     name = "client_pool_builder",
     hdrs = [

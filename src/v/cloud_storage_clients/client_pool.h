@@ -11,7 +11,6 @@
 #pragma once
 
 #include "cloud_roles/apply_credentials.h"
-#include "cloud_storage_clients/bucket_name_parts.h"
 #include "cloud_storage_clients/client.h"
 #include "cloud_storage_clients/client_probe.h"
 #include "cloud_storage_clients/credential_manager.h"
@@ -143,7 +142,6 @@ public:
     /// \return client pointer (via future that can wait if all clients
     ///         are in use)
     ss::future<client_lease> acquire(
-      const bucket_name_parts& bucket,
       ss::abort_source& as,
       std::optional<ss::lowres_clock::time_point> deadline = std::nullopt);
 
@@ -163,7 +161,6 @@ public:
     /// \param ctx - Optional context for the log message. e.g. the string
     ///              representation of a retry_chain_node.
     ss::future<client_lease> acquire_with_timeout(
-      const bucket_name_parts& bucket,
       ss::abort_source& as,
       ss::lowres_clock::duration deadline,
       std::optional<ss::sstring> ctx = std::nullopt);

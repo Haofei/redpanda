@@ -28,10 +28,6 @@
 using namespace std::chrono_literals;
 using namespace cloud_storage_clients::tests;
 
-static const cloud_storage_clients::bucket_name_parts test_bucket{
-  .name = cloud_storage_clients::plain_bucket_name("test-bucket"),
-};
-
 ss::logger test_log("test-log");
 static const uint16_t httpd_port_number = 4434;
 static constexpr const char* httpd_host_name = "localhost";
@@ -64,7 +60,7 @@ SEASTAR_THREAD_TEST_CASE(test_client_pool_acquire_abortable) {
                         .get();
     ss::abort_source as;
 
-    auto f = pool.local().acquire(test_bucket, as);
+    auto f = pool.local().acquire(as);
     while (!pool.local().has_waiters()) {
         ss::yield().get();
     }
@@ -94,15 +90,13 @@ SEASTAR_THREAD_TEST_CASE(test_client_pool_acquire_with_timeout) {
     using namespace std::chrono_literals;
 
     {
-        auto lease
-          = pool.local().acquire_with_timeout(test_bucket, as, 100ms).get();
+        auto lease = pool.local().acquire_with_timeout(as, 100ms).get();
 
         // The request should fail w/in 500ms due to lease expiry
         // Note that the default timeout for the request itself is 5s
         auto res = ss::with_timeout(
                      ss::lowres_clock::now() + 500ms,
-                     lease.client->list_objects(
-                       random_test_plain_bucket_name()))
+                     lease.client->list_objects(random_test_bucket_name()))
                      .get();
 
         BOOST_REQUIRE(res.has_error());
@@ -113,11 +107,11 @@ SEASTAR_THREAD_TEST_CASE(test_client_pool_acquire_with_timeout) {
     }
 
     {
-        auto lease = pool.local().acquire(test_bucket, as).get();
+        auto lease = pool.local().acquire(as).get();
 
         auto f = ss::with_timeout(
           ss::lowres_clock::now() + 500ms,
-          lease.client->list_objects(random_test_plain_bucket_name()));
+          lease.client->list_objects(random_test_bucket_name()));
 
         // This time the lease never expires, so internally we should keep
         // trying to connect for at least 500ms.
@@ -130,7 +124,7 @@ SEASTAR_THREAD_TEST_CASE(test_client_pool_acquire_with_timeout) {
 
         auto lease = pool.local()
                        .acquire_with_timeout(
-                         test_bucket, as, ss::lowres_clock::duration::max())
+                         as, ss::lowres_clock::duration::max())
                        .get();
 
         BOOST_REQUIRE_EQUAL(lease._wd, nullptr);
@@ -152,8 +146,7 @@ SEASTAR_THREAD_TEST_CASE(test_client_pool_acquire_timeout) {
         // acquire should time out. no abort required.
         ss::abort_source as;
 
-        auto f = pool.local().acquire(
-          test_bucket, as, ss::lowres_clock::now() + 100ms);
+        auto f = pool.local().acquire(as, ss::lowres_clock::now() + 100ms);
         while (!pool.local().has_waiters()) {
             ss::yield().get();
         }
@@ -169,8 +162,7 @@ SEASTAR_THREAD_TEST_CASE(test_client_pool_acquire_timeout) {
         // soon.
         ss::abort_source as;
 
-        auto f = pool.local().acquire(
-          test_bucket, as, ss::lowres_clock::time_point::max());
+        auto f = pool.local().acquire(as, ss::lowres_clock::time_point::max());
         while (!pool.local().has_waiters()) {
             ss::yield().get();
         }
@@ -192,7 +184,7 @@ SEASTAR_THREAD_TEST_CASE(test_client_pool_acquire_timeout) {
         // client acquisition.
 
         ss::abort_source as;
-        auto f = pool.local().acquire_with_timeout(test_bucket, as, 100ms);
+        auto f = pool.local().acquire_with_timeout(as, 100ms);
         ss::sleep(500ms).get();
         as.request_abort();
         BOOST_REQUIRE_THROW(f.get(), ss::abort_requested_exception);
@@ -202,9 +194,7 @@ SEASTAR_THREAD_TEST_CASE(test_client_pool_acquire_timeout) {
         // passing a deadline in the past should behave sanely
         ss::abort_source as;
         BOOST_REQUIRE_THROW(
-          pool.local()
-            .acquire(test_bucket, as, ss::lowres_clock::time_point::min())
-            .get(),
+          pool.local().acquire(as, ss::lowres_clock::time_point::min()).get(),
           ss::timed_out_error);
     }
 }
@@ -216,8 +206,7 @@ SEASTAR_THREAD_TEST_CASE(test_client_pool_acquire_self_configure_deadline) {
     auto stop_guard = test_pool_builder.skip_start(true).build(pool).get();
 
     ss::abort_source as;
-    auto f = pool.local().acquire(
-      test_bucket, as, ss::lowres_clock::now() - 100ms);
+    auto f = pool.local().acquire(as, ss::lowres_clock::now() - 100ms);
 
     ss::with_timeout(
       ss::lowres_clock::now() + 1s,
@@ -236,7 +225,7 @@ SEASTAR_THREAD_TEST_CASE(test_client_pool_acquire_self_configure_abortable) {
     auto stop_guard = test_pool_builder.skip_start(true).build(pool).get();
 
     ss::abort_source as;
-    auto f = pool.local().acquire(test_bucket, as);
+    auto f = pool.local().acquire(as);
 
     while (!pool.local().has_waiters()) {
         ss::yield().get();

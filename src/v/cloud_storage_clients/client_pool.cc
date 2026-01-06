@@ -282,13 +282,8 @@ std::tuple<unsigned int, unsigned int> pick_two_random_shards() {
 /// \return client pointer (via future that can wait if all clients
 ///         are in use)
 ss::future<client_pool::client_lease> client_pool::acquire(
-  const bucket_name_parts& bucket,
-  ss::abort_source& as,
-  std::optional<ss::lowres_clock::time_point> deadline) {
+  ss::abort_source& as, std::optional<ss::lowres_clock::time_point> deadline) {
     auto guard = _gate.hold();
-
-    // Support for bucket_name_parts connection parameters is currently a no-op.
-    std::ignore = bucket;
 
     std::optional<unsigned int> source_sid;
     std::optional<client_ptr> client;
@@ -483,11 +478,10 @@ ss::future<client_pool::client_lease> client_pool::acquire(
 }
 
 auto client_pool::acquire_with_timeout(
-  const bucket_name_parts& bucket,
   ss::abort_source& as,
   ss::lowres_clock::duration timeout,
   std::optional<ss::sstring> ctx) -> ss::future<client_lease> {
-    auto lease = co_await acquire(bucket, as);
+    auto lease = co_await acquire(as);
     if (timeout < ss::lowres_clock::duration::max()) {
         // take a copy of the shared_ptr held by the lease to avoid racing with
         // client_pool teardown

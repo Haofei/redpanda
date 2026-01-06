@@ -5,7 +5,6 @@ redpanda_cc_library(
     srcs = [
         "abs_client.cc",
         "abs_error.cc",
-        "bucket_name_parts.cc",
         "client_pool.cc",
         "client_probe.cc",
         "configuration.cc",
@@ -18,7 +17,6 @@ redpanda_cc_library(
     hdrs = [
         "abs_client.h",
         "abs_error.h",
-        "bucket_name_parts.h",
         "client.h",
         "client_pool.h",
         "client_probe.h",
@@ -66,7 +64,6 @@ redpanda_cc_library(
         "//src/v/utils:named_type",
         "//src/v/utils:retry_chain_node",
         "//src/v/utils:stop_signal",
-        "@ada",
         "@boost//:beast",
         "@boost//:lexical_cast",
         "@boost//:property_tree",
