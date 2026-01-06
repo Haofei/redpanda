@@ -131,6 +131,33 @@ using registry_resource = named_type<ss::sstring, struct registry_resource_tag>;
 using subject = named_type<ss::sstring, struct subject_tag>;
 inline const subject invalid_subject{};
 
+/// \brief A schema context, used for namespacing schemas and schema ids. Can be
+/// used to implement multi-tenancy, environment (e.g., dev, staging, prod)
+/// separation, and so on. By default, schemas are stored under the "." context.
+using context = named_type<ss::sstring, struct context_tag>;
+inline const context default_context{"."};
+
+// A subject bound to a context
+struct context_subject {
+    constexpr context_subject() = default;
+
+    context_subject(context c, subject s)
+      : ctx{std::move(c)}
+      , sub{std::move(s)} {}
+
+    friend auto
+    operator<=>(const context_subject& lhs, const context_subject& rhs)
+      = default;
+
+    template<typename H>
+    friend H AbslHashValue(H h, const context_subject& ctx_sub) {
+        return H::combine(std::move(h), ctx_sub.ctx, ctx_sub.sub);
+    }
+
+    context ctx;
+    subject sub;
+};
+
 ///\brief The version of the schema registered with a subject.
 ///
 /// A subject may evolve its schema over time. Each version is associated with a
@@ -417,6 +444,25 @@ private:
 ///\brief Globally unique identifier for a schema.
 using schema_id = named_type<int32_t, struct schema_id_tag>;
 inline constexpr schema_id invalid_schema_id{-1};
+
+// A schema id that is valid within a context.
+struct context_schema_id {
+    context_schema_id(context c, schema_id s)
+      : ctx{std::move(c)}
+      , id{s} {}
+
+    friend auto
+    operator<=>(const context_schema_id& lhs, const context_schema_id& rhs)
+      = default;
+
+    template<typename H>
+    friend H AbslHashValue(H h, const context_schema_id& ctx_id) {
+        return H::combine(std::move(h), ctx_id.ctx, ctx_id.id);
+    }
+
+    context ctx;
+    schema_id id;
+};
 
 struct subject_version {
     subject_version(subject s, schema_version v)
