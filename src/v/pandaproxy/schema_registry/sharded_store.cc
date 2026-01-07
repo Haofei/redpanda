@@ -43,6 +43,8 @@ namespace pandaproxy::schema_registry {
 
 namespace {
 
+constexpr auto shard_for_next_schema_id = ss::shard_id{0};
+
 ss::shard_id shard_for(const subject& sub) {
     auto hash = xxhash_64(sub().data(), sub().length());
     return jump_consistent_hash(hash, ss::smp::count);
@@ -657,23 +659,16 @@ sharded_store::clear_compatibility(seq_marker marker, subject sub) {
 
 ss::future<bool> sharded_store::upsert_schema(
   schema_id id, schema_definition def, bool mark_schema) {
-    co_await maybe_update_max_schema_id(id);
+    co_await _store.invoke_on(
+      shard_for_next_schema_id, _smp_opts, [id](store& s) {
+          s.maybe_update_max_schema_id(id);
+      });
     co_return co_await _store.invoke_on(
       shard_for(id),
       _smp_opts,
       [id, mark_schema, def{std::move(def)}](store& s) mutable {
           return s.upsert_schema(id, std::move(def), mark_schema);
       });
-}
-
-ss::future<sharded_store::insert_subject_result>
-sharded_store::insert_subject(subject sub, schema_id id) {
-    auto sub_shard{shard_for(sub)};
-    auto [version, inserted] = co_await _store.invoke_on(
-      sub_shard, _smp_opts, [sub{std::move(sub)}, id](store& s) mutable {
-          return s.insert_subject(sub, id);
-      });
-    co_return insert_subject_result{version, inserted};
 }
 
 ss::future<bool> sharded_store::upsert_subject(
@@ -691,30 +686,11 @@ ss::future<bool> sharded_store::upsert_subject(
       });
 }
 
-/// \brief Get the schema ID to be used for next insert
 ss::future<schema_id> sharded_store::project_schema_id() {
-    // This is very simple because we only allow one write in
-    // flight at a time.  Could be extended to track N in flight
-    // operations if needed.  _next_schema_id gets updated
-    // if the operation was successful, as a side effect
-    // of applying the write to the store.
-    auto fetch = [this] { return _next_schema_id; };
-    co_return co_await ss::smp::submit_to(
-      ss::shard_id{0}, _smp_opts, std::move(fetch));
-}
-
-ss::future<> sharded_store::maybe_update_max_schema_id(schema_id id) {
-    auto update = [this, id] {
-        auto old = _next_schema_id;
-        _next_schema_id = std::max(_next_schema_id, id + 1);
-        vlog(
-          srlog.debug,
-          "maybe_update_max_schema_id: {}->{}",
-          old,
-          _next_schema_id);
-    };
-    co_return co_await ss::smp::submit_to(
-      ss::shard_id{0}, _smp_opts, std::move(update));
+    co_return co_await _store.invoke_on(
+      shard_for_next_schema_id, _smp_opts, [](auto& s) {
+          return s.project_schema_id();
+      });
 }
 
 ss::future<bool> sharded_store::is_compatible(
@@ -878,11 +854,11 @@ void sharded_store::check_mode_mutability(force f) const {
     _store.local().check_mode_mutability(f).value();
 }
 
-ss::future<bool> sharded_store::has_version(
-  const subject& sub, schema_id id, include_deleted i) {
+ss::future<bool>
+sharded_store::has_version(subject sub, schema_id id, include_deleted i) {
     auto sub_shard{shard_for(sub)};
     auto has_id = co_await _store.invoke_on(
-      sub_shard, _smp_opts, [id, sub, i](class store& s) mutable {
+      sub_shard, _smp_opts, [id, sub{std::move(sub)}, i](class store& s) {
           return s.has_version(sub, id, i);
       });
     co_return has_id.has_value() && has_id.assume_value();

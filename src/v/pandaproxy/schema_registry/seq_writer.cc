@@ -37,10 +37,9 @@ namespace pandaproxy::schema_registry {
 namespace {
 
 struct batch_builder : public storage::record_batch_builder {
-    explicit batch_builder(
-      model::offset base_offset, std::optional<subject> sub)
-      : record_batch_builder{model::record_batch_type::raft_data, model::offset{base_offset}}
-      , sub{std::move(sub)} {}
+    explicit batch_builder(model::offset base_offset)
+      : record_batch_builder{
+          model::record_batch_type::raft_data, model::offset{base_offset}} {}
 
     using record_batch_builder::add_raw_kv;
     using record_batch_builder::build;
@@ -60,7 +59,7 @@ struct batch_builder : public storage::record_batch_builder {
           to_json_iobuf(std::forward<V>(value)));
     }
 
-    void operator()(const seq_marker& s) {
+    void add_tombstone(const subject& sub, const seq_marker& s) {
         vlog(
           srlog.debug,
           "Delete {} tombstoning sub={} at {}",
@@ -73,12 +72,12 @@ struct batch_builder : public storage::record_batch_builder {
         switch (s.key_type) {
         case seq_marker_key_type::schema: {
             auto key = schema_key{
-              .seq{s.seq}, .node{s.node}, .sub{*sub}, .version{s.version}};
+              .seq{s.seq}, .node{s.node}, .sub{sub}, .version{s.version}};
             add_raw_kv(to_json_iobuf(std::move(key)), std::nullopt);
         } break;
         case seq_marker_key_type::delete_subject: {
             auto key = delete_subject_key{
-              .seq{s.seq}, .node{s.node}, .sub{*sub}};
+              .seq{s.seq}, .node{s.node}, .sub{sub}};
             add_raw_kv(to_json_iobuf(std::move(key)), std::nullopt);
         } break;
         case seq_marker_key_type::config: {
@@ -95,13 +94,12 @@ struct batch_builder : public storage::record_batch_builder {
         }
     }
 
-    void operator()(const chunked_vector<seq_marker>& sequences) {
+    void add_tombstones(
+      const subject& sub, const chunked_vector<seq_marker>& sequences) {
         for (const seq_marker& s : sequences) {
-            (*this)(s);
+            add_tombstone(sub, s);
         }
     }
-
-    std::optional<subject> sub;
 };
 
 } // namespace
@@ -269,7 +267,7 @@ seq_writer::do_write_subject_version(
           .id{projected.id},
           .deleted = is_deleted::no};
 
-        batch_builder rb(write_at, sub);
+        batch_builder rb(write_at);
         rb(std::move(key), std::move(value));
 
         if (co_await produce_and_apply(write_at, std::move(rb).build())) {
@@ -318,7 +316,7 @@ ss::future<std::optional<bool>> seq_writer::do_write_config(
         // ignore
     }
 
-    batch_builder rb(write_at, sub);
+    batch_builder rb(write_at);
     rb(
       config_key{.seq{write_at}, .node{_node_id}, .sub{sub}},
       config_value{.compat = compat});
@@ -351,8 +349,8 @@ ss::future<std::optional<bool>> seq_writer::do_delete_config(subject sub) {
         co_return false;
     }
 
-    batch_builder rb{model::offset{0}, sub};
-    rb(co_await _store.get_subject_config_written_at(sub));
+    batch_builder rb{model::offset{0}};
+    rb.add_tombstones(sub, co_await _store.get_subject_config_written_at(sub));
 
     if (co_await produce_and_apply(std::nullopt, std::move(rb).build())) {
         co_return true;
@@ -425,7 +423,7 @@ ss::future<std::optional<bool>> seq_writer::do_write_mode(
         // 2. Hard delete them before moving to import mode
     }
 
-    batch_builder rb(write_at, sub);
+    batch_builder rb(write_at);
     rb(
       mode_key{.seq{write_at}, .node{_node_id}, .sub{sub}},
       mode_value{.mode = m});
@@ -454,8 +452,8 @@ seq_writer::do_delete_mode(subject sub, model::offset write_at) {
     co_await _store.get_mode(sub, default_to_global::no);
     _store.check_mode_mutability(force::no);
 
-    batch_builder rb{write_at, sub};
-    rb(co_await _store.get_subject_mode_written_at(sub));
+    batch_builder rb{write_at};
+    rb.add_tombstones(sub, co_await _store.get_subject_mode_written_at(sub));
     if (co_await produce_and_apply(std::nullopt, std::move(rb).build())) {
         co_return true;
     } else {
@@ -492,14 +490,15 @@ ss::future<std::optional<bool>> seq_writer::do_delete_subject_version(
       .id{s_id},
       .deleted{is_deleted::yes}};
 
-    batch_builder rb(write_at, sub);
+    batch_builder rb(write_at);
     rb(std::move(key), std::move(value));
 
     {
         // Clear config if this is a delete of the last version
         auto vec = co_await _store.get_versions(sub, include_deleted::no);
         if (vec.size() == 1 && vec.front() == version) {
-            rb(co_await _store.get_subject_config_written_at(sub));
+            rb.add_tombstones(
+              sub, co_await _store.get_subject_config_written_at(sub));
         }
     }
     if (co_await produce_and_apply(write_at, std::move(rb).build())) {
@@ -536,13 +535,14 @@ seq_writer::do_delete_subject_impermanent(subject sub, model::offset write_at) {
     }
 
     // Proceed to write
-    batch_builder rb{write_at, sub};
+    batch_builder rb{write_at};
     rb(
       delete_subject_key{.seq{write_at}, .node{_node_id}, .sub{sub}},
       delete_subject_value{.sub{sub}});
 
     try {
-        rb(co_await _store.get_subject_mode_written_at(sub));
+        rb.add_tombstones(
+          sub, co_await _store.get_subject_mode_written_at(sub));
     } catch (const exception& e) {
         if (e.code() != error_code::subject_not_found) {
             throw;
@@ -550,7 +550,8 @@ seq_writer::do_delete_subject_impermanent(subject sub, model::offset write_at) {
     }
 
     try {
-        rb(co_await _store.get_subject_config_written_at(sub));
+        rb.add_tombstones(
+          sub, co_await _store.get_subject_config_written_at(sub));
     } catch (const exception& e) {
         if (e.code() != error_code::subject_not_found) {
             throw;
@@ -590,7 +591,7 @@ ss::future<std::optional<chunked_vector<schema_version>>>
 seq_writer::delete_subject_permanent_inner(
   subject sub, std::optional<schema_version> version) {
     chunked_vector<seq_marker> sequences;
-    batch_builder rb{model::offset{0}, sub};
+    batch_builder rb{model::offset{0}};
 
     /// Check for whether our victim is already soft-deleted happens
     /// within these store functions (will throw a 404-equivalent if so)
@@ -609,9 +610,9 @@ seq_writer::delete_subject_permanent_inner(
 
     // Deleting the subject, or the last version, deletes the subject
     if (!version.has_value() || versions.size() == 1) {
-        rb(co_await _store.get_subject_written_at(sub));
+        rb.add_tombstones(sub, co_await _store.get_subject_written_at(sub));
     }
-    rb(sequences);
+    rb.add_tombstones(sub, sequences);
 
     if (co_await produce_and_apply(std::nullopt, std::move(rb).build())) {
         co_return versions;

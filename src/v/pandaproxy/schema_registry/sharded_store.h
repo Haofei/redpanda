@@ -205,7 +205,7 @@ public:
     ss::future<compatibility_result> is_compatible(
       schema_version version, subject_schema new_schema, verbose is_verbose);
 
-    ss::future<bool> has_version(const subject&, schema_id, include_deleted);
+    ss::future<bool> has_version(subject, schema_id, include_deleted);
 
     //// \brief Throw if the store is not mutable
     void check_mode_mutability(force f) const;
@@ -222,12 +222,6 @@ private:
     upsert_schema(schema_id id, schema_definition def, bool mark_schema);
     ss::future<> delete_schema(schema_id id);
 
-    struct insert_subject_result {
-        schema_version version;
-        bool inserted;
-    };
-    ss::future<insert_subject_result> insert_subject(subject sub, schema_id id);
-
     ss::future<bool> upsert_subject(
       seq_marker marker,
       subject sub,
@@ -235,15 +229,12 @@ private:
       schema_id id,
       is_deleted deleted);
 
-    ss::future<> maybe_update_max_schema_id(schema_id id);
-
     ss::future<schema_id> project_schema_id();
 
     ss::smp_submit_to_options _smp_opts;
     ss::sharded<store> _store;
 
     ///\brief Access must occur only on shard 0.
-    schema_id _next_schema_id{1};
 };
 
 } // namespace pandaproxy::schema_registry

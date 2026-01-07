@@ -111,6 +111,41 @@ SEASTAR_THREAD_TEST_CASE(test_protobuf_imported_failure) {
       });
 }
 
+// Setup: A -> B -> C (missing). Error should mention that the subject
+// "subject-for-B" is missing the reference to C.
+SEASTAR_THREAD_TEST_CASE(test_protobuf_missing_nested_reference_error_subject) {
+    ppstu::store_fixture store;
+
+    auto schema_b = pps::subject_schema{
+      pps::subject{"subject-for-B"},
+      pps::schema_definition{
+        R"(syntax = "proto3"; import "c.proto"; message B { C c = 1; })",
+        pps::schema_type::protobuf,
+        {{"c.proto", pps::subject{"subject-for-C"}, pps::schema_version{1}}},
+        {}}};
+
+    auto schema_a = pps::subject_schema{
+      pps::subject{"subject-for-A"},
+      pps::schema_definition{
+        R"(syntax = "proto3"; import "b.proto"; message A { B b = 1; })",
+        pps::schema_type::protobuf,
+        {{"b.proto", pps::subject{"subject-for-B"}, pps::schema_version{1}}},
+        {}}};
+
+    store.insert(schema_b.share(), pps::schema_version{1});
+
+    BOOST_REQUIRE_EXCEPTION(
+      pps::make_protobuf_schema_definition(store.store(), schema_a.share())
+        .get(),
+      pps::exception,
+      [](const pps::exception& ex) {
+          auto msg = std::string_view(ex.message());
+          return ex.code() == pps::error_code::schema_missing_reference
+                 && msg.contains("subject=subject-for-B")
+                 && msg.contains("subject \"subject-for-C\"");
+      });
+}
+
 SEASTAR_THREAD_TEST_CASE(test_protobuf_imported_not_referenced) {
     ppstu::store_fixture store;
 
