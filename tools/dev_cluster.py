@@ -357,6 +357,7 @@ class Grafana:
                             "type": "file",
                             "editable": True,
                             "disableDeletion": False,
+                            "updateIntervalSeconds": 1,
                             "options": {
                                 "path": dashboards_dir,
                             },
