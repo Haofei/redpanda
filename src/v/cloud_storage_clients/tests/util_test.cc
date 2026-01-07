@@ -2,6 +2,7 @@
 #include "bytes/iobuf_parser.h"
 #include "cloud_storage_clients/util.h"
 
+#include <gmock/gmock.h>
 #include <gtest/gtest.h>
 
 TEST(Util, AllPathsToFile) {
@@ -805,3 +806,137 @@ TEST(MultipartMalformed, OnlyEndBoundary) {
 // accomplish here. As long as multipart_response_parser returns iobuf parts
 // that themselves contain properly trimmed HTTP responses (header + body w/
 // correct line endings), then multipart_subresponse should work as expected.
+
+// ============================================================================
+// find_multipart_boundary tests
+// ============================================================================
+
+TEST(FindMultipartBoundary, ValidBoundary) {
+    using namespace cloud_storage_clients;
+
+    http::client::response_header headers;
+    headers.insert(
+      boost::beast::http::field::content_type,
+      "multipart/mixed; boundary=batch_boundary_123");
+
+    auto result = util::find_multipart_boundary(headers);
+
+    EXPECT_TRUE(result.has_value());
+    EXPECT_EQ(result.value(), "batch_boundary_123");
+}
+
+TEST(FindMultipartBoundary, BoundaryWithWhitespace) {
+    using namespace cloud_storage_clients;
+
+    http::client::response_header headers;
+    headers.insert(
+      boost::beast::http::field::content_type,
+      "multipart/mixed; boundary =\t batch_boundary_123");
+
+    auto result = util::find_multipart_boundary(headers);
+
+    EXPECT_TRUE(result.has_value());
+    // Whitespace should be stripped
+    EXPECT_EQ(result.value(), "batch_boundary_123");
+}
+
+TEST(FindMultipartBoundary, BoundaryWithQuotes) {
+    using namespace cloud_storage_clients;
+
+    http::client::response_header headers;
+    headers.insert(
+      boost::beast::http::field::content_type,
+      R"(multipart/mixed; boundary="batch_boundary_123")");
+
+    auto result = util::find_multipart_boundary(headers);
+
+    EXPECT_TRUE(result.has_value());
+    // Quotes should be stripped
+    EXPECT_EQ(result.value(), "batch_boundary_123");
+}
+
+namespace {
+ss::sstring eptr_what(std::exception_ptr eptr) {
+    if (eptr == nullptr) {
+        return {};
+    }
+    try {
+        std::rethrow_exception(eptr);
+    } catch (const std::runtime_error& e) {
+        return e.what();
+    }
+    return {};
+}
+} // namespace
+
+TEST(FindMultipartBoundary, MissingContentType) {
+    using namespace cloud_storage_clients;
+
+    http::client::response_header headers;
+    // No Content-Type header set
+
+    auto result = util::find_multipart_boundary(headers);
+
+    EXPECT_FALSE(result.has_value()) << result.value();
+    EXPECT_THAT(
+      eptr_what(result.error()), testing::HasSubstr("Content-Type missing"));
+}
+
+TEST(FindMultipartBoundary, NotMultipartContentType) {
+    using namespace cloud_storage_clients;
+
+    http::client::response_header headers;
+    headers.insert(boost::beast::http::field::content_type, "application/json");
+
+    auto result = util::find_multipart_boundary(headers);
+
+    EXPECT_FALSE(result.has_value()) << result.value();
+    EXPECT_THAT(
+      eptr_what(result.error()),
+      testing::HasSubstr("Expected multipart Content-Type"));
+}
+
+TEST(FindMultipartBoundary, MissingBoundaryParameter) {
+    using namespace cloud_storage_clients;
+
+    http::client::response_header headers;
+    headers.insert(boost::beast::http::field::content_type, "multipart/mixed");
+
+    auto result = util::find_multipart_boundary(headers);
+
+    EXPECT_FALSE(result.has_value()) << result.value();
+    EXPECT_THAT(
+      eptr_what(result.error()),
+      testing::HasSubstr("Boundary missing from multipart"));
+}
+
+TEST(FindMultipartBoundary, MissingBoundaryEqualSign) {
+    using namespace cloud_storage_clients;
+
+    http::client::response_header headers;
+    headers.insert(
+      boost::beast::http::field::content_type,
+      "multipart/mixed; boundary   foobar");
+
+    auto result = util::find_multipart_boundary(headers);
+
+    EXPECT_FALSE(result.has_value()) << result.value();
+    EXPECT_THAT(
+      eptr_what(result.error()),
+      testing::HasSubstr("Boundary missing from multipart"));
+}
+
+TEST(FindMultipartBoundary, EmptyBoundaryParameter) {
+    using namespace cloud_storage_clients;
+
+    http::client::response_header headers;
+    headers.insert(
+      boost::beast::http::field::content_type, R"(multipart/mixed; boundary=)");
+
+    auto result = util::find_multipart_boundary(headers);
+
+    EXPECT_FALSE(result.has_value()) << result.value();
+    EXPECT_THAT(
+      eptr_what(result.error()),
+      testing::HasSubstr("Boundary missing from multipart"));
+}

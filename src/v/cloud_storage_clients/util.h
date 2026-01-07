@@ -19,6 +19,8 @@
 
 #include <boost/property_tree/ptree.hpp>
 
+#include <expected>
+
 namespace cloud_storage_clients::util {
 
 /// \brief; Handle all client errors which are not error responses from the
@@ -201,5 +203,8 @@ private:
     bool _header_done{false};
     iobuf _body;
 };
+
+std::expected<std::string_view, std::exception_ptr>
+find_multipart_boundary(const http::client::response_header&);
 
 } // namespace cloud_storage_clients::util

@@ -512,4 +512,66 @@ multipart_subresponse::iobuf_to_constbufseq(const iobuf& buf) {
     return seq;
 };
 
+std::expected<std::string_view, std::exception_ptr>
+find_multipart_boundary(const http::client::response_header& headers) {
+    constexpr std::string_view boundary_name{"boundary"};
+    constexpr std::string_view content_type_multipart{"multipart/mixed"};
+
+    auto content_type_it = headers.find(
+      boost::beast::http::field::content_type);
+    std::string_view boundary;
+    if (content_type_it == headers.end()) {
+        return std::unexpected(
+          std::make_exception_ptr(
+            std::runtime_error(
+              "find_multipart_boundary: Content-Type missing")));
+    }
+    std::string_view content_type{content_type_it->value()};
+    if (auto pos = content_type.find(content_type_multipart);
+        pos == content_type.npos) {
+        return std::unexpected(
+          std::make_exception_ptr(
+            std::runtime_error(
+              fmt::format(
+                "find_multipart_boundary: Expected multipart Content-Type: {}",
+                content_type))));
+    }
+    if (auto boundary_pos = content_type.find(boundary_name);
+        boundary_pos != content_type.npos) {
+        boundary = content_type.substr(boundary_pos + boundary_name.size());
+        // remove whitespace (if present) and find exactly one equals sign
+        int n_eq = 0;
+        while (!boundary.empty()) {
+            auto c = boundary.front();
+            bool is_eq = c == '=';
+            bool is_whitespace = (c == ' ' || c == '\t');
+            if (!is_eq && !is_whitespace) {
+                break;
+            }
+            n_eq += is_eq;
+            boundary = boundary.substr(1);
+        }
+        if (n_eq != 1) {
+            boundary = {};
+        }
+        // Remove quotes if present
+        if (!boundary.empty() && boundary.front() == '"') {
+            boundary = boundary.substr(1);
+        }
+        if (!boundary.empty() && boundary.back() == '"') {
+            boundary = boundary.substr(0, boundary.size() - 1);
+        }
+    }
+    if (boundary.empty()) {
+        return std::unexpected(
+          std::make_exception_ptr(
+            std::runtime_error(
+              fmt::format(
+                "find_multipart_boundary: Boundary missing from multipart "
+                "response Content-Type: {}",
+                content_type))));
+    }
+    return boundary;
+}
+
 } // namespace cloud_storage_clients::util
