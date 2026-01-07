@@ -185,6 +185,9 @@ void application::wire_up_redpanda_services(
           cloud_config->client_config, cloud_config->cloud_credentials_source);
         construct_service(upstreams, cloud_config->client_config).get();
         upstreams
+          .invoke_on_all(&cloud_storage_clients::upstream_registry::start)
+          .get();
+        upstreams
           .invoke_on_all(
             &cloud_storage_clients::upstream_registry::start_evictor,
             /*interval=*/30s,

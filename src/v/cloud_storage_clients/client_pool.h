@@ -10,11 +10,9 @@
 
 #pragma once
 
-#include "cloud_roles/apply_credentials.h"
 #include "cloud_storage_clients/bucket_name_parts.h"
 #include "cloud_storage_clients/client.h"
 #include "cloud_storage_clients/client_probe.h"
-#include "cloud_storage_clients/credential_manager.h"
 #include "cloud_storage_clients/upstream_registry.h"
 #include "container/intrusive_list_helpers.h"
 #include "ssx/watchdog.h"
@@ -128,13 +126,7 @@ public:
 
     bool shutdown_initiated();
 
-    void maybe_refresh_credentials();
-    uint64_t token_refresh_count() const noexcept;
-
-    /// Performs the dual functions of loading refreshed credentials into
-    /// apply_credentials object, as well as initializing the client pool
-    /// the first time this function is called.
-    void load_credentials(cloud_roles::credentials credentials);
+    uint64_t token_refresh_count() const;
 
     /// \brief Acquire http client from the pool.
     ///
@@ -208,26 +200,16 @@ private:
         intrusive_list_hook _hook;
     };
 
-    ss::future<> client_self_configure(
-      std::optional<std::reference_wrapper<stop_signal>>
-        application_stop_signal);
-    ss::future<
-      std::optional<cloud_storage_clients::client_self_configuration_output>>
-    do_client_self_configure(client_ptr client);
-    ss::future<> accept_self_configure_result(
-      std::optional<client_self_configuration_output> result);
-
-    void populate_client_pool();
-    client_ptr make_client() noexcept;
+    void populate_client_pool(upstream_registry::handle& up);
 
     /// Return [0, 100] normalized number of clients currently in use by this
     /// pool (leased locally or lent to other shards) .
     size_t normalized_num_clients_in_use() const;
     bool borrow_one(unsigned other) noexcept;
-    void return_one(unsigned other) noexcept;
+    void return_one(upstream_registry::handle& up, unsigned other) noexcept;
 
     /// Add a new idle client to the pool.
-    void emplace_idle() noexcept;
+    void emplace_idle(upstream_registry::handle& up) noexcept;
 
     /// Pop the most recently used idle client from the pool.
     [[nodiscard]]
@@ -246,18 +228,13 @@ private:
 
     void update_usage_stats();
 
-    ///  Wait for credentials to be acquired. Once credentials are acquired,
-    ///  based on the policy, optionally wait for client pool to initialize.
-    ss::future<> wait_for_credentials();
-
-    [[maybe_unused]] upstream_registry& _upstreams;
+    upstream_registry& _upstreams;
+    std::optional<upstream_registry::handle> _default_upstream;
 
     /// Configured capacity per shard
     const size_t _capacity;
 
     client_configuration _config;
-    ss::shared_ptr<ss::tls::certificate_credentials> _tls_credentials;
-    net::base_transport::configuration _transport_config;
 
     ss::shared_ptr<client_probe> _probe;
     client_pool_overdraft_policy _policy;
@@ -281,15 +258,7 @@ private:
     // invariants.
     ss::gate _bg_gate;
 
-    /// Holds and applies the credentials for requests to S3. Shared pointer to
-    /// enable rotating credentials to all clients.
-    ss::lw_shared_ptr<cloud_roles::apply_credentials> _apply_credentials;
-    ss::condition_variable _credentials_var;
-
-    ssx::semaphore _self_config_barrier{0, "self_config_barrier"};
     ssx::semaphore _pool_ready_barrier{0, "pool_barrier"};
-
-    credential_manager _credential_manager;
 };
 
 } // namespace cloud_storage_clients

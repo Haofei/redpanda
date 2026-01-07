@@ -49,6 +49,12 @@ public:
         pool_ = nullptr;
     }
 
+    ss::sharded<upstream_registry>& upstreams() {
+        vassert(
+          upstreams_ != nullptr, "Upstream registry is not owned by the guard");
+        return *upstreams_;
+    }
+
     ~client_pool_stop_guard() {
         if (pool_) {
             pool_->stop().get();
@@ -67,6 +73,8 @@ class [[nodiscard]] client_pool_builder {
 public:
     explicit constexpr client_pool_builder(client_configuration conf) noexcept
       : conf_(std::move(conf)) {}
+
+    client_pool_builder copy() const { return *this; }
 
     client_pool_builder connections_per_shard(size_t count) const {
         auto copy = *this;
@@ -88,7 +96,7 @@ public:
     }
 
     ss::future<client_pool_stop_guard>
-    build(ss::sharded<cloud_storage_clients::client_pool>& pool) && {
+    build(ss::sharded<cloud_storage_clients::client_pool>& pool) const {
         auto upstreams = std::make_unique<ss::sharded<upstream_registry>>();
         co_await upstreams->start(conf_);
 
@@ -96,7 +104,7 @@ public:
           ss::sharded_parameter(
             [&upstreams] { return std::ref(upstreams->local()); }),
           num_connections_,
-          std::move(conf_),
+          conf_,
           overdraft_policy_);
 
         std::exception_ptr e;

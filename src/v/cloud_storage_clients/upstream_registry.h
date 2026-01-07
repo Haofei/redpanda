@@ -38,12 +38,18 @@ class upstream_registry final
 public:
     explicit upstream_registry(client_configuration config);
 
+    ss::future<> start();
+
+    ss::shared_ptr<client_probe> probe() const noexcept { return _probe; }
+
 protected:
     ss::future<>
     start_svc(sharded_constructor& ctor, const upstream_key&) final;
 
 private:
     client_configuration _config;
+    ss::shared_ptr<ss::tls::certificate_credentials> _tls_credentials;
+    ss::shared_ptr<client_probe> _probe;
 };
 
 extern template class detail::
