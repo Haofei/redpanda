@@ -312,6 +312,7 @@ class ResolveOidcIdentityResponse(google.protobuf.message.Message):
     DESCRIPTOR: google.protobuf.descriptor.Descriptor
     PRINCIPAL_FIELD_NUMBER: builtins.int
     EXPIRE_FIELD_NUMBER: builtins.int
+    GROUPS_FIELD_NUMBER: builtins.int
     principal: builtins.str
     'The principal resolved from the OIDC token.'
 
@@ -319,13 +320,17 @@ class ResolveOidcIdentityResponse(google.protobuf.message.Message):
     def expire(self) -> google.protobuf.timestamp_pb2.Timestamp:
         """The timestamp of the token's expiry."""
 
-    def __init__(self, *, principal: builtins.str=..., expire: google.protobuf.timestamp_pb2.Timestamp | None=...) -> None:
+    @property
+    def groups(self) -> google.protobuf.internal.containers.RepeatedScalarFieldContainer[builtins.str]:
+        """The groups resolved from the OIDC token."""
+
+    def __init__(self, *, principal: builtins.str=..., expire: google.protobuf.timestamp_pb2.Timestamp | None=..., groups: collections.abc.Iterable[builtins.str] | None=...) -> None:
         ...
 
     def HasField(self, field_name: typing.Literal['expire', b'expire']) -> builtins.bool:
         ...
 
-    def ClearField(self, field_name: typing.Literal['expire', b'expire', 'principal', b'principal']) -> None:
+    def ClearField(self, field_name: typing.Literal['expire', b'expire', 'groups', b'groups', 'principal', b'principal']) -> None:
         ...
 Global___ResolveOidcIdentityResponse: typing_extensions.TypeAlias = ResolveOidcIdentityResponse
 

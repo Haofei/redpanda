@@ -278,6 +278,9 @@ message ResolveOidcIdentityResponse {
 
     // The timestamp of the token's expiry.
     google.protobuf.Timestamp expire = 2;
+
+    // The groups resolved from the OIDC token.
+    repeated string groups = 3;
 }
 
 // RefreshOidcKeysRequest is the request for the RefreshOidcKeys RPC.
