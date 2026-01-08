@@ -121,16 +121,13 @@ private:
       = absl::flat_hash_map<id, migration_reconciliation_state>;
 
     struct replica_work_state {
-        id migration_id;
         state sought_state;
         // shard may only be assigned if replica_status is can_run
         std::optional<seastar::shard_id> shard;
         migrated_replica_status status;
 
-        replica_work_state(
-          id migration_id, state sought_state, migrated_replica_status status)
-          : migration_id(migration_id)
-          , sought_state(sought_state)
+        replica_work_state(state sought_state, migrated_replica_status status)
+          : sought_state(sought_state)
           , status(status) {}
     };
 
@@ -178,6 +175,8 @@ private:
     using tsws_lwptr_t = ss::lw_shared_ptr<topic_scoped_work_state>;
 
 private:
+    using partition_work_state_t = chunked_hash_map<id, replica_work_state>;
+    using rwstate_entry = partition_work_state_t::value_type;
     struct topic_namespace_migration {
         model::topic_namespace nt;
         id migration;
@@ -272,9 +271,10 @@ private:
     do_unmount_topic(const model::topic_namespace& nt, retry_chain_node& rcn);
 
     /* communication with partition workers */
-    void start_partition_work(
-      const model::ntp& ntp, const replica_work_state& rwstate);
-    void stop_partition_work(model::ntp ntp, const replica_work_state& rwstate);
+    void
+    start_partition_work(const model::ntp& ntp, const rwstate_entry& rwstate);
+    void
+    stop_partition_work(const model::ntp ntp, const rwstate_entry& rwstate);
     void
     on_partition_work_completed(model::ntp&& ntp, id migration, state state);
 
@@ -288,7 +288,7 @@ private:
 
     void update_partition_shard(
       const model::ntp& ntp,
-      replica_work_state& rwstate,
+      rwstate_entry& rwstate,
       std::optional<ss::shard_id> new_shard);
     void mark_migration_step_done_for_ntp(
       migration_reconciliation_states_t::iterator rs_it, const model::ntp& ntp);
@@ -330,8 +330,8 @@ private:
       work_scope scope,
       bool schedule_local_partition_work);
 
-    std::optional<std::reference_wrapper<replica_work_state>>
-    get_replica_work_state(const model::ntp& ntp);
+    std::optional<std::reference_wrapper<partition_work_state_t>>
+    get_replica_work_states(const model::ntp& ntp);
     bool has_local_replica(const model::ntp& ntp);
     const inbound_topic& get_inbound_topic(
       const model::topic_namespace_view& nt,
@@ -441,7 +441,7 @@ private:
 
     /* Node-local data for partition-scoped work */
     using topic_work_state_t
-      = chunked_hash_map<model::partition_id, replica_work_state>;
+      = chunked_hash_map<model::partition_id, partition_work_state_t>;
     chunked_hash_map<
       model::topic_namespace,
       topic_work_state_t,
