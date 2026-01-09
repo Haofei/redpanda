@@ -326,7 +326,7 @@ template<typename Buffer>
 void rjson_serialize(::json::iobuf_writer<Buffer>& w, const schema_value& val) {
     w.StartObject();
     w.Key("subject");
-    ::json::rjson_serialize(w, val.schema.sub());
+    w.String(val.schema.sub().to_string());
     w.Key("version");
     ::json::rjson_serialize(w, val.version);
     w.Key("id");

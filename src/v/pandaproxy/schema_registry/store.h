@@ -75,10 +75,8 @@ public:
     /// return the schema_version and schema_id, and whether it's new.
     insert_result insert(subject_schema schema) {
         auto [sub, def] = std::move(schema).destructure();
-        // TODO: deduce the context from the subject
-        auto ctx_sub = context_subject{default_context, std::move(sub)};
-        auto id = insert_schema(ctx_sub.ctx, std::move(def)).id;
-        auto [version, inserted] = insert_subject(std::move(ctx_sub), id);
+        auto id = insert_schema(sub.ctx, std::move(def)).id;
+        auto [version, inserted] = insert_subject(std::move(sub), id);
         return {version, id, inserted};
     }
 
@@ -174,8 +172,7 @@ public:
         auto def = BOOST_OUTCOME_TRYX(get_schema_definition(v_id.id));
 
         return stored_schema{
-          // TODO: pass sub directly instead of sub.sub
-          .schema = {sub.sub, std::move(def)},
+          .schema = {sub, std::move(def)},
           .version = v_id.version,
           .id = v_id.id.id,
           .deleted = v_id.deleted};

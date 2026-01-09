@@ -229,7 +229,7 @@ ss::future<std::optional<sharded_store::insert_result>>
 seq_writer::do_write_subject_version(
   stored_schema schema, model::offset write_at) {
     const auto& sub = schema.schema.sub();
-    co_await check_mutable(default_context, sub);
+    co_await check_mutable(sub.ctx, sub.sub);
 
     // Check if store already contains this data: if
     // so, we do no I/O and return the schema ID.

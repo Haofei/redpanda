@@ -283,6 +283,21 @@ redpanda_cc_btest(
     ],
 )
 
+redpanda_cc_gtest(
+    name = "protobuf_schema_references_test",
+    timeout = "short",
+    srcs = [
+        "protobuf_schema_references.cc",
+    ],
+    deps = [
+        ":store_fixture",
+        "//src/v/pandaproxy/schema_registry:core",
+        "//src/v/test_utils:gtest",
+        "@googletest//:gtest",
+        "@seastar",
+    ],
+)
+
 redpanda_cc_btest(
     name = "compatibility_avro_test",
     timeout = "short",

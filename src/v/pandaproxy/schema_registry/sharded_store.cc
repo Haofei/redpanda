@@ -169,11 +169,15 @@ sharded_store::project_ids(stored_schema schema) {
     auto s_id = schema.id;
     if (s_id == invalid_schema_id) {
         // New schema, project an ID for it.
-        s_id = co_await project_schema_id(default_context);
-        vlog(srlog.debug, "project_ids: projected new ID {}", s_id);
+        s_id = co_await project_schema_id(sub.ctx);
+        vlog(
+          srlog.debug,
+          "project_ids (context: {}): projected new ID {}",
+          sub.ctx,
+          s_id);
     }
 
-    auto ctx_sub = context_subject{default_context, sub};
+    auto ctx_sub = sub;
     auto sub_shard{shard_for(ctx_sub)};
     auto v_id = co_await _store.invoke_on(
       sub_shard, _smp_opts, [ctx_sub, s_id](store& s) {
@@ -216,15 +220,9 @@ ss::future<bool> sharded_store::upsert(
     // mark schemas that failed to be processed here. They will be given
     // one more chance once we have loaded all the topic to the store.
     co_await upsert_schema(
-      context_schema_id{default_context, id},
-      std::move(def),
-      processing_failed);
+      context_schema_id{sub.ctx, id}, std::move(def), processing_failed);
     co_return co_await upsert_subject(
-      marker,
-      context_subject{default_context, std::move(sub)},
-      version,
-      id,
-      deleted);
+      marker, std::move(sub), version, id, deleted);
 }
 
 ss::future<> sharded_store::process_marked_schemas() {
@@ -285,7 +283,6 @@ sharded_store::has_schema(subject_schema schema, include_deleted inc_del) {
     });
     for (auto entry : versions) {
         try {
-            // TODO: deduce the context from the subject/entry.id
             auto def = co_await get_schema_definition(entry.id);
             if (schema.def() == def) {
                 co_return stored_schema{
@@ -416,8 +413,7 @@ ss::future<stored_schema> sharded_store::get_subject_schema(
       });
 
     co_return stored_schema{
-      // TODO: pass sub directly instead of sub.sub
-      .schema = {sub.sub, std::move(def)},
+      .schema = {std::move(sub), std::move(def)},
       .version = v_id.version,
       .id = v_id.id.id,
       .deleted = v_id.deleted};
