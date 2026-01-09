@@ -56,9 +56,10 @@ ss::future<result<chunked_vector<materialized_extent>>> materialize_sorted_run(
             if (!res.has_value()) {
                 co_return res.error();
             }
-            // Only cache the full object for sharing if it wasn't a range read.
-            // Range reads (res.value() == true) only contain the extent's data,
-            // not the full L0 object.
+            // If reading from cache (res.value() == true), only the
+            // required range was returned. Otherwise, the object
+            // was hydrated and we can place it into the `hydrated`
+            // collection.
             if (!res.value()) {
                 hydrated.insert(
                   std::make_pair(

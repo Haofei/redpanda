@@ -209,6 +209,35 @@ public:
           .WillOnce(::testing::Return(std::move(fut)));
     }
 
+    void expect_get_stream_range(
+      std::filesystem::path p,
+      uint64_t offset,
+      uint64_t length,
+      std::optional<cloud_io::cache_item_stream> item) {
+        auto fut
+          = ss::make_ready_future<std::optional<cloud_io::cache_item_stream>>(
+            std::move(item));
+        EXPECT_CALL(
+          *this,
+          get_stream_range(p, offset, length, ::testing::_, ::testing::_))
+          .Times(1)
+          .WillOnce(::testing::Return(std::move(fut)));
+    }
+
+    void expect_get_stream_range_throws(
+      std::filesystem::path p,
+      uint64_t offset,
+      uint64_t length,
+      std::exception_ptr e) {
+        auto fut = ss::make_exception_future<
+          std::optional<cloud_io::cache_item_stream>>(e);
+        EXPECT_CALL(
+          *this,
+          get_stream_range(p, offset, length, ::testing::_, ::testing::_))
+          .Times(1)
+          .WillOnce(::testing::Return(std::move(fut)));
+    }
+
     void expect_put(std::filesystem::path p, std::exception_ptr e = nullptr) {
         ss::future<> result = ss::now();
         if (e != nullptr) {
