@@ -110,11 +110,6 @@ level_zero_log_reader_impl::maybe_read_batches_from_cache() {
           batch.value().base_offset(),
           batch.value().term());
 
-        vassert(
-          batch.value().term() > model::term_id{-1},
-          "Batch without term in the cache: {}",
-          batch.value().header());
-
         auto batch_size = batch.value().size_bytes();
         if (is_over_limit(batch_size)) {
             break;
