@@ -17,6 +17,8 @@
 #include "config/configuration.h"
 #include "model/timeout_clock.h"
 
+#include <seastar/coroutine/maybe_yield.hh>
+
 #include <chrono>
 #include <exception>
 #include <iterator>
@@ -402,6 +404,7 @@ ss::future<> level_zero_log_reader_impl::materialize_batches(
                     model::record_batch::tag_ctor_ng{});
               });
             hydrated.push_back(std::move(batch));
+            co_await ss::coroutine::maybe_yield();
         }
         vassert(
           batches_it == batches.end(),
