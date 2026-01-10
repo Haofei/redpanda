@@ -65,6 +65,13 @@ struct placeholder_batches_with_size {
 static constexpr auto L0_upload_default_timeout = 1s;
 static constexpr auto L0_replicate_default_timeout = 1s;
 
+// The default `async_algo_traits::interval` value of `100` seems a bit too high
+// to reliably prevent reactor stalls in the `convert_to_placeholders()` loop.
+// Use this lower value instead.
+struct convert_to_placeholders_loop_traits : ssx::async_algo_traits {
+    static constexpr ssize_t interval = 10;
+};
+
 // Utility function to convert array of extent_meta structs to
 // array of placeholder batches.
 static ss::future<placeholder_batches_with_size> convert_to_placeholders(
@@ -72,7 +79,7 @@ static ss::future<placeholder_batches_with_size> convert_to_placeholders(
   const chunked_vector<model::record_batch_header>& headers) {
     placeholder_batches_with_size result;
     result.batches.reserve(extents.size());
-    co_await ssx::async_for_each(
+    co_await ssx::async_for_each<convert_to_placeholders_loop_traits>(
       std::views::zip(extents, headers), [&result](const auto& pair) {
           const auto& [extent, header] = pair;
           vassert(
