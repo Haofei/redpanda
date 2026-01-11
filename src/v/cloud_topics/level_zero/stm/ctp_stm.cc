@@ -380,7 +380,7 @@ ctp_stm::fence_epoch(cluster_epoch e) {
                 co_return cluster_epoch_fence{
                   .unit = std::move(unit), .term = term};
             }
-        } else {
+        } else if (!fence_epoch.has_value() || fence_epoch.value() < e) {
             // Case 2. New epoch, need to acquire write-lock.
             auto epoch_update_lock = _epoch_update_lock.try_get_units();
             if (!epoch_update_lock) {
