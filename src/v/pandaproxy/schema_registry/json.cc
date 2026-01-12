@@ -13,7 +13,6 @@
 
 #include "absl/container/flat_hash_map.h"
 #include "absl/container/flat_hash_set.h"
-#include "absl/container/inlined_vector.h"
 #include "json/chunked_buffer.h"
 #include "json/chunked_input_stream.h"
 #include "json/document.h"
@@ -54,10 +53,38 @@
 #include <filesystem>
 #include <ranges>
 #include <string_view>
+#include <type_traits>
 
 namespace pandaproxy::schema_registry {
 
 namespace {
+
+template<typename E, std::size_t Size>
+requires std::is_enum_v<E>
+struct enum_bitset : std::bitset<Size> {
+    using std::bitset<Size>::bitset;
+    using std::bitset<Size>::set;
+
+    template<typename... Es>
+    requires(std::same_as<Es, E> && ...)
+    explicit enum_bitset(Es... es) {
+        (set(es), ...);
+    }
+
+    enum_bitset& set(E e, bool v = true) {
+        std::bitset<Size>::set(static_cast<size_t>(e), v);
+        return *this;
+    }
+
+    bool test(E e) const {
+        return std::bitset<Size>::test(static_cast<size_t>(e));
+    }
+
+    constexpr friend enum_bitset
+    set_difference(enum_bitset lhs, enum_bitset rhs) {
+        return {(lhs & ~rhs).to_ulong()};
+    }
+};
 
 using json_compatibility_result = raw_compatibility_result;
 
@@ -520,8 +547,7 @@ enum class json_type : uint8_t {
     boolean = 5,
     null = 6
 };
-// enough inlined space to hold all the values of json_type
-using json_type_list = absl::InlinedVector<json_type, 7>;
+using json_type_list = enum_bitset<json_type, 7>;
 
 constexpr std::string_view to_string_view(json_type t) {
     switch (t) {
@@ -641,25 +667,16 @@ json_type_list normalized_type(const json::Value& v) {
     auto ret = json_type_list{};
     if (type_it == v.MemberEnd()) {
         // omit keyword is like accepting all the types
-        ret = {
-          json_type::string,
-          json_type::integer,
-          json_type::number,
-          json_type::object,
-          json_type::array,
-          json_type::boolean,
-          json_type::null};
+        ret.set();
     } else if (type_it->value.IsArray()) {
         // schema ensures that all the values are unique
         for (auto& v : type_it->value.GetArray()) {
-            ret.push_back(parse_json_type(v));
+            ret.set(parse_json_type(v));
         }
     } else {
-        ret.push_back(parse_json_type(type_it->value));
+        ret.set(parse_json_type(type_it->value));
     }
 
-    // to support set difference operations, sort the elements
-    std::ranges::sort(ret);
     return ret;
 }
 
@@ -2143,24 +2160,20 @@ json_compatibility_result is_superset(
 
     // looking for types that are new in `newer`. done as newer_types
     // \ older_types
-    auto newer_minus_older = json_type_list{};
-    std::ranges::set_difference(
-      newer_types, older_types, std::back_inserter(newer_minus_older));
+    auto newer_minus_older = set_difference(newer_types, older_types);
     if (
-      !newer_minus_older.empty()
+      newer_minus_older.any()
       && !(
         newer_minus_older == json_type_list{json_type::integer}
-        && std::ranges::count(older_types, json_type::number) != 0)) {
+        && older_types.test(json_type::number))) {
         // newer_types_not_in_older accepts integer, and we can accept an
         // evolution from number -> integer. everything else is makes `newer`
         // less strict than older
 
-        auto older_minus_newer = json_type_list{};
-        std::ranges::set_difference(
-          older_types, newer_types, std::back_inserter(older_minus_newer));
+        auto older_minus_newer = set_difference(older_types, newer_types);
 
         if (
-          older_minus_newer.empty()
+          older_minus_newer.none()
           || (older_minus_newer == json_type_list{json_type::integer} && newer_minus_older == json_type_list{json_type::number})) {
             // type_narrowed is reported when older has fewer elements or the
             // same but with integer in older instead of number in newer
@@ -2176,32 +2189,23 @@ json_compatibility_result is_superset(
 
     // newer accepts less (or equal) types. for each type, try to find a less
     // strict check
-    for (auto t : newer_types) {
-        // TODO this will perform a depth first search, but it might be better
-        // to do a breadth first search to find a counterexample
-        switch (t) {
-        case json_type::string:
-            res.merge(is_string_superset(older, newer, p));
-            break;
-        case json_type::integer:
-            [[fallthrough]];
-        case json_type::number:
-            res.merge(is_numeric_superset(older, newer, p));
-            break;
-        case json_type::object:
-            res.merge(is_object_superset(ctx, older, newer, p));
-            break;
-        case json_type::array:
-            res.merge(is_array_superset(ctx, older, newer, p));
-            break;
-        case json_type::boolean:
-            // no check needed for boolean;
-            break;
-        case json_type::null:
-            // no check needed for null;
-            break;
-        }
+    // TODO this will perform a depth first search, but it might be better
+    // to do a breadth first search to find a counterexample
+    if (newer_types.test(json_type::string)) {
+        res.merge(is_string_superset(older, newer, p));
     }
+    if (
+      newer_types.test(json_type::integer)
+      || newer_types.test(json_type::number)) {
+        res.merge(is_numeric_superset(older, newer, p));
+    }
+    if (newer_types.test(json_type::object)) {
+        res.merge(is_object_superset(ctx, older, newer, p));
+    }
+    if (newer_types.test(json_type::array)) {
+        res.merge(is_array_superset(ctx, older, newer, p));
+    }
+    // no check needed for boolean and null types
 
     res.merge(is_enum_superset(older, newer, p));
     res.merge(is_not_combinator_superset(ctx, older, newer, p));
