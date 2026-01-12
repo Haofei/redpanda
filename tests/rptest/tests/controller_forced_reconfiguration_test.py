@@ -442,6 +442,55 @@ class ControllerForceReconfigurationTestBase(RedpandaTest):
             topic=ntp.topic, partition=ntp.partition, replicas=new_replicas
         )
 
+    def _execute_cfr_against_node(
+        self,
+        survivor: ClusterNode,
+        admin: AdminV2,
+        dead_node_ids: list[int],
+        surviving_node_count: int,
+    ):
+        """Execute a CFR request against a specific node"""
+        survivor_id = self.redpanda.node_id(survivor)
+        self.redpanda.logger.debug(f"cfr on node {survivor.name} with id {survivor_id}")
+        breakglass_client = admin.breakglass(node=survivor)
+        request = breakglass_pb2.ControllerForcedReconfigurationRequest(
+            dead_node_ids=dead_node_ids,
+            surviving_node_count=surviving_node_count,
+        )
+        result = self._do_request(breakglass_client, request)
+        self.redpanda.logger.debug(f"CFR request on {survivor.name} finished")
+
+        error = result.error()
+        if error is not None:
+            # this happens when there are multiple candidate leaders
+            # and one wins the election before all cfr requests have been finished
+            if "use the existing controller leader" in error.message:
+                return
+            error_message = f"CFR request on node {survivor.name} failed with error {result.error()}"
+            self.redpanda.logger.info(error_message)
+            assert False, error_message
+
+    def _execute_cfr_requests_parallel(
+        self,
+        nodes: list[ClusterNode],
+        admin: AdminV2,
+        dead_node_ids: list[int],
+        surviving_node_count: int,
+    ):
+        """Execute CFR requests in parallel against multiple nodes using threads"""
+        self.redpanda.logger.debug("beginning CFR requests")
+        cfr_threads: list[threading.Thread] = []
+        for survivor in nodes:
+            cfr_thread = threading.Thread(
+                target=self._execute_cfr_against_node,
+                args=(survivor, admin, dead_node_ids, surviving_node_count),
+            )
+            cfr_thread.start()
+            cfr_threads.append(cfr_thread)
+
+        for cfr_thread in cfr_threads:
+            cfr_thread.join()
+
 
 class ControllerForcedReconfiguration_SmokeTest(
     ControllerForceReconfigurationTestBase, PartitionMovementMixin
@@ -516,16 +565,12 @@ class ControllerForcedReconfiguration_SmokeTest(
             recovery_mode_enabled=True,
         )
 
-        self.redpanda.logger.debug("beginning CFR request")
-        breakgass_client = admin.breakglass(node=designated_survivor)
-        request = breakglass_pb2.ControllerForcedReconfigurationRequest(
-            dead_node_ids=killed_node_ids, surviving_node_count=1
+        self._execute_cfr_requests_parallel(
+            nodes=[designated_survivor],
+            admin=admin,
+            dead_node_ids=killed_node_ids,
+            surviving_node_count=1,
         )
-        result = self._do_request(breakgass_client, request)
-        self.redpanda.logger.debug("CFR request finished")
-
-        error = result.error()
-        assert error is None, f"CFR request failed with error {result.error()}"
 
         def controller_available():
             controller = self.redpanda.controller()
@@ -735,24 +780,12 @@ class ControllerForcedReconfiguration_Size5(
         )
 
         """ meat 3: CFR requests"""
-        self.redpanda.logger.debug("beginning CFR requests")
-        for survivor in designated_survivors:
-            self.redpanda.logger.debug(f"cfr on node {survivor.name}")
-            breakgass_client = admin.breakglass(node=survivor)
-            request = breakglass_pb2.ControllerForcedReconfigurationRequest(
-                dead_node_ids=killed_node_ids,
-                surviving_node_count=len(designated_survivors),
-            )
-            result = self._do_request(breakgass_client, request)
-            self.redpanda.logger.debug("CFR request finished")
-
-            error = result.error()
-            if error is not None:
-                # this happens when there are multiple candidate leaders
-                # and one wins the election before all cfr requests have been finished
-                if "use the existing controller leader" in error.message:
-                    continue
-                assert False, f"CFR request failed with error {result.error()}"
+        self._execute_cfr_requests_parallel(
+            nodes=designated_survivors,
+            admin=admin,
+            dead_node_ids=killed_node_ids,
+            surviving_node_count=len(designated_survivors),
+        )
 
         def controller_available():
             controller = self.redpanda.controller()
@@ -959,43 +992,12 @@ class ControllerForcedReconfiguration_Size6(
         )
 
         """ do CFR requests """
-        self.redpanda.logger.debug("beginning CFR requests")
-        cfr_threads: list[threading.Thread] = []
-        for survivor in step_f_survivor_nodes:
-
-            def execute_cfr_against_node():
-                # concurrency: survivor will change definition
-                local_survivor_id = self.redpanda.node_id(survivor)
-                local_survivor = self.redpanda.get_node_by_id(local_survivor_id)
-                self.redpanda.logger.debug(
-                    f"cfr on node {local_survivor.name} with id {local_survivor_id}"
-                )
-                breaklgass_client = admin.breakglass(node=local_survivor)
-                request = breakglass_pb2.ControllerForcedReconfigurationRequest(
-                    dead_node_ids=step_f_dead_ids,
-                    surviving_node_count=len(step_f_survivor_ids),
-                )
-                result = self._do_request(breaklgass_client, request)
-                self.redpanda.logger.debug(
-                    f"CFR request on {local_survivor.name} finished"
-                )
-
-                error = result.error()
-                if error is not None:
-                    # this happens when there are multiple candidate leaders
-                    # and one wins the election before all cfr requests have been finished
-                    if "use the existing controller leader" in error.message:
-                        return
-                    error_message = f"CFR request on node {local_survivor.name} failed with error {result.error()}"
-                    self.redpanda.logger.info(error_message)
-                    assert False, error_message
-
-            cfr_thread = threading.Thread(target=execute_cfr_against_node)
-            cfr_thread.start()
-            cfr_threads.append(cfr_thread)
-
-        for cfr_thread in cfr_threads:
-            cfr_thread.join()
+        self._execute_cfr_requests_parallel(
+            nodes=step_f_survivor_nodes,
+            admin=admin,
+            dead_node_ids=step_f_dead_ids,
+            surviving_node_count=len(step_f_survivor_ids),
+        )
 
         def controller_available():
             controller = self.redpanda.controller()
