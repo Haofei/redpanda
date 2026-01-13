@@ -152,7 +152,7 @@ protected:
         auto it = bim.find(group_id);
         if (unlikely(it != bim.end() && it->second.is_blocked)) {
             vlog(
-              cg_klog.error,
+              cg_klog.warn,
               "[group: {}] skipping {}, group is blocked",
               group_id,
               skipped_msg);
