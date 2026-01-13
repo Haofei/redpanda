@@ -883,12 +883,13 @@ compatibility_subject_version(server::request_t rq, server::reply_t rp) {
     parse_content_type_header(rq);
     parse_accept_header(rq, rp);
     auto ver = parse::request_param<ss::sstring>(*rq.req, "version");
-    auto sub = parse::request_param<subject>(*rq.req, "subject");
+    auto ctx_sub = context_subject::from_string(
+      parse::request_param<ss::sstring>(*rq.req, "subject"));
     auto is_verbose{
       parse::query_param<std::optional<verbose>>(*rq.req, "verbose")
         .value_or(verbose::no)};
     auto unparsed = co_await rjson_parse(
-      *rq.req, post_subject_versions_request_handler<>{sub});
+      *rq.req, post_subject_versions_request_handler<>{ctx_sub});
 
     // Must read, in case we have the subject in cache with an outdated config
     co_await rq.service().writer().read_sync();

@@ -1722,6 +1722,7 @@ class SchemaRegistryTestMethods(SchemaRegistryEndpoints):
         """Verify context-aware endpoints work with qualified subjects."""
 
         schema_data = json.dumps({"schema": schema1_def})
+        compat_schema_data = json.dumps({"schema": schema2_def})
         ctx_subject = ":.ctx1:sub1"
 
         # Register in context
@@ -1735,6 +1736,13 @@ class SchemaRegistryTestMethods(SchemaRegistryEndpoints):
             subject=ctx_subject, data=schema_data
         )
         self.assert_equal(result.status_code, requests.codes.ok)
+
+        # Compatibility check in context
+        result = self.sr_client.post_compatibility_subject_version(
+            subject=ctx_subject, version="latest", data=compat_schema_data
+        )
+        self.assert_equal(result.status_code, requests.codes.ok)
+        self.assert_equal(result.json()["is_compatible"], True)
 
     @cluster(num_nodes=1)
     def test_context_isolation(self):
