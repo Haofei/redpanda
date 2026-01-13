@@ -115,7 +115,9 @@ private:
       chunked_circular_buffer<level_zero_log_reader_impl::local_log_batch>>
     fetch_metadata(model::timeout_clock::time_point deadline) const;
     ss::future<chunked_circular_buffer<model::record_batch>>
-    materialize_batches(model::timeout_clock::time_point deadline);
+    materialize_batches(
+      chunked_circular_buffer<local_log_batch> unhydrated,
+      model::timeout_clock::time_point deadline);
     // Return data from the record batch cache.
     // This method could change state of the reader to end_of_stream_state
     // when it reaches committed offset.

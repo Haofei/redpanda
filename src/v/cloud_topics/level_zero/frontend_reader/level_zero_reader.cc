@@ -93,7 +93,7 @@ level_zero_log_reader_impl::read_some(
             vlog(_log.trace, "Materialize batches without unhydrated batches");
             break;
         }
-        res = co_await materialize_batches(deadline);
+        res = co_await materialize_batches(std::move(_unhydrated), deadline);
         if (res.empty()) {
             _current = state::end_of_stream_state;
         } else {
@@ -114,16 +114,11 @@ level_zero_log_reader_impl::read_some(
         _current = state::end_of_stream_state;
         throw std::runtime_error("Invalid reader state (ready/empty)");
     case state::materialized_state:
-        vlog(
-          _log.debug,
-          "consuming {} materialized batches, cached {} extents",
-          res.size(),
-          _unhydrated.size());
+        vlog(_log.debug, "consuming {} materialized batches", res.size());
         vassert(!res.empty(), "expected non-empty hydrated set");
         _next_offset = model::offset_cast(
           model::next_offset(res.back().last_offset()));
-        _current = _unhydrated.empty() ? state::empty_state
-                                       : state::ready_state;
+        _current = state::empty_state;
         [[fallthrough]];
     case state::end_of_stream_state:
         break;
@@ -287,6 +282,7 @@ level_zero_log_reader_impl::fetch_metadata(
 
 ss::future<chunked_circular_buffer<model::record_batch>>
 level_zero_log_reader_impl::materialize_batches(
+  chunked_circular_buffer<local_log_batch> unhydrated,
   model::timeout_clock::time_point deadline) {
     vassert(
       _current == state::ready_state || _current == state::materialized_state,
@@ -295,9 +291,9 @@ level_zero_log_reader_impl::materialize_batches(
 
     // Cherry-pick enough L0 meta batches to materialize.
     chunked_vector<cloud_topics::extent_meta> to_materialize;
-    auto unhydrated_it = _unhydrated.begin();
+    auto unhydrated_it = unhydrated.begin();
     size_t materialize_bytes = 0;
-    for (; unhydrated_it != _unhydrated.end(); ++unhydrated_it) {
+    for (; unhydrated_it != unhydrated.end(); ++unhydrated_it) {
         size_t hydrated_batch_size = ss::visit(
           unhydrated_it->data,
           [](const local_log_batch::payload& payload) {
@@ -376,7 +372,7 @@ level_zero_log_reader_impl::materialize_batches(
     auto batches_it = batches.begin();
     chunked_circular_buffer<model::record_batch> hydrated;
     auto range_to_materialize = std::ranges::subrange(
-      _unhydrated.begin(), unhydrated_it);
+      unhydrated.begin(), unhydrated_it);
     for (local_log_batch& local_batch : range_to_materialize) {
         if (_config.abort_source.has_value()) {
             _config.abort_source.value().get().check();
@@ -412,7 +408,6 @@ level_zero_log_reader_impl::materialize_batches(
     }
     vassert(
       batches_it == batches.end(), "All materialized batches should be used");
-    _unhydrated.erase(range_to_materialize.begin(), range_to_materialize.end());
     vlog(
       _log.debug,
       "Materialized {} batches from the L0 meta batches",
