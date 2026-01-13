@@ -94,14 +94,6 @@ private:
         std::variant<cloud_topics::extent_meta, payload> data;
     };
 
-    // States
-    enum class state {
-        empty_state,
-        ready_state,
-        materialized_state,
-        end_of_stream_state,
-    };
-
     bool cache_enabled() const;
 
     // Prepare a local log reader configuration for reading placeholder and
@@ -127,8 +119,6 @@ private:
     // If adding a batch of `size` would cause this to go over the bytes limit.
     bool is_over_limit(size_t size) const;
 
-    state _current{state::empty_state};
-
     // Data from the local log that is not yet hydrated from data in L0
     //
     // The data stored in this buffer is ascending order by offset.
@@ -136,6 +126,9 @@ private:
     // All batches in _unhydrated come after the _hydrated batches (in offset
     // ordering).
     chunked_circular_buffer<local_log_batch> _unhydrated;
+
+    void set_end_of_stream();
+    bool _end_of_stream{false};
 
     cloud_topic_log_reader_config _config;
     kafka::offset _next_offset;

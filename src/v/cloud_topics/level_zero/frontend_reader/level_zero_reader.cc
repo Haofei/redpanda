@@ -50,8 +50,7 @@ level_zero_log_reader_impl::do_load_slice(
     } catch (...) {
         vlog(
           _log.error, "Reader caught exception: {}", std::current_exception());
-        _unhydrated.clear();
-        _current = state::end_of_stream_state;
+        set_end_of_stream();
         throw;
     }
 }
@@ -60,7 +59,7 @@ ss::future<model::record_batch_reader::storage_t>
 level_zero_log_reader_impl::read_some(
   model::timeout_clock::time_point deadline) {
     if (is_over_limit(0)) {
-        _current = state::end_of_stream_state;
+        set_end_of_stream();
         co_return chunked_circular_buffer<model::record_batch>{};
     }
     // We're only fetching from the record batch cache if the reader is in
@@ -71,59 +70,33 @@ level_zero_log_reader_impl::read_some(
         co_return cached;
     }
 
-    chunked_circular_buffer<model::record_batch> res;
-    switch (_current) {
-    case state::empty_state:
-        if (_unhydrated.empty()) {
-            _unhydrated = co_await fetch_metadata(deadline);
-        }
-        if (_unhydrated.empty()) {
-            _current = state::end_of_stream_state;
-        } else {
-            _current = state::ready_state;
-        }
-        [[fallthrough]];
-    case state::ready_state:
-        if (_current == state::end_of_stream_state) {
-            vlog(_log.trace, "Materialize batches called while EOS");
-            break;
-        }
-        if (_unhydrated.empty()) {
-            _current = state::end_of_stream_state;
-            vlog(_log.trace, "Materialize batches without unhydrated batches");
-            break;
-        }
-        res = co_await materialize_batches(std::move(_unhydrated), deadline);
-        if (res.empty()) {
-            _current = state::end_of_stream_state;
-        } else {
-            _current = state::materialized_state;
-        }
-        [[fallthrough]];
-    case state::materialized_state:
-    case state::end_of_stream_state:
-        // Handled in the next switch statement
-        break;
+    /*
+     * Read metadata (raft batches, placeholders, etc...) from the underlying
+     * cloud topics partition. In the case of placeholders, the payloads are
+     * missing, and will be handled below.
+     */
+    auto log_read_metadata = co_await fetch_metadata(deadline);
+    if (log_read_metadata.empty()) {
+        set_end_of_stream();
+        co_return model::record_batch_reader::storage_t{};
     }
 
-    // Invariant: in case of success the state will be either materialized
-    // or end_of_stream. In case of error the state will be end_of_stream.
-    switch (_current) {
-    case state::empty_state:
-    case state::ready_state:
-        _current = state::end_of_stream_state;
-        throw std::runtime_error("Invalid reader state (ready/empty)");
-    case state::materialized_state:
-        vlog(_log.debug, "consuming {} materialized batches", res.size());
-        vassert(!res.empty(), "expected non-empty hydrated set");
-        _next_offset = model::offset_cast(
-          model::next_offset(res.back().last_offset()));
-        _current = state::empty_state;
-        [[fallthrough]];
-    case state::end_of_stream_state:
-        break;
+    /*
+     * Combine metadata with payloads (from cache or object storage) to
+     * construct the full batches expected by the caller (e.g. Kafka Fetch).
+     */
+    auto batches = co_await materialize_batches(
+      std::move(log_read_metadata), deadline);
+    if (batches.empty()) {
+        set_end_of_stream();
+        co_return model::record_batch_reader::storage_t{};
     }
-    co_return res;
+
+    vlog(_log.debug, "consuming {} materialized batches", batches.size());
+    _next_offset = model::offset_cast(
+      model::next_offset(batches.back().last_offset()));
+
+    co_return batches;
 }
 
 chunked_circular_buffer<model::record_batch>
@@ -162,6 +135,8 @@ level_zero_log_reader_impl::maybe_read_batches_from_cache() {
           model::next_offset(ret.back().last_offset()));
     }
 
+    // TODO: should this be moved into read_some? should we have a
+    // is_end_of_stream check in read_some? see L1 reader...
     if (_next_offset > _config.max_offset) {
         vlog(
           _log.debug,
@@ -170,7 +145,7 @@ level_zero_log_reader_impl::maybe_read_batches_from_cache() {
           _config.start_offset,
           _config.max_offset,
           _next_offset);
-        _current = state::end_of_stream_state;
+        set_end_of_stream();
     }
 
     return ret;
@@ -229,10 +204,6 @@ level_zero_log_reader_impl::ctp_read_config() const {
 ss::future<chunked_circular_buffer<level_zero_log_reader_impl::local_log_batch>>
 level_zero_log_reader_impl::fetch_metadata(
   model::timeout_clock::time_point deadline) const {
-    vassert(
-      _current == state::empty_state || _current == state::materialized_state,
-      "Invalid state transition, unexpected current state: {}",
-      std::to_underlying(_current));
     chunked_circular_buffer<local_log_batch> ret;
     auto cfg = ctp_read_config();
     auto reader = co_await _ctp->make_local_reader(cfg);
@@ -284,11 +255,6 @@ ss::future<chunked_circular_buffer<model::record_batch>>
 level_zero_log_reader_impl::materialize_batches(
   chunked_circular_buffer<local_log_batch> unhydrated,
   model::timeout_clock::time_point deadline) {
-    vassert(
-      _current == state::ready_state || _current == state::materialized_state,
-      "Invalid state transition, unexpected current state: {}",
-      std::to_underlying(_current));
-
     // Cherry-pick enough L0 meta batches to materialize.
     chunked_vector<cloud_topics::extent_meta> to_materialize;
     auto unhydrated_it = unhydrated.begin();
@@ -346,12 +312,10 @@ level_zero_log_reader_impl::materialize_batches(
     if (!mat_res.has_value()) {
         if (mat_res.error() == errc::shutting_down) {
             vlog(_log.debug, "Materialize aborted due to shutdown");
-            _current = state::end_of_stream_state;
             throw ss::abort_requested_exception();
         }
         if (mat_res.error() == errc::timeout) {
             vlog(_log.debug, "Materialize aborted due to timeout");
-            _current = state::end_of_stream_state;
             throw ss::timed_out_error();
         }
         throw std::runtime_error(
@@ -432,8 +396,10 @@ void level_zero_log_reader_impl::print(std::ostream& o) {
     o << "cloud_topics_reader";
 }
 
+void level_zero_log_reader_impl::set_end_of_stream() { _end_of_stream = true; }
+
 bool level_zero_log_reader_impl::is_end_of_stream() const {
-    return _current == state::end_of_stream_state;
+    return _end_of_stream;
 }
 
 bool level_zero_log_reader_impl::is_over_limit(size_t size) const {
