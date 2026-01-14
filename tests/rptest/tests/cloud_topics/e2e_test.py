@@ -7,11 +7,11 @@
 # the Business Source License, use of this software will be governed
 # by the Apache License, Version 2.0
 
+from ducktape.tests.test import TestContext
+from typing import Any
 from ducktape.utils.util import wait_until
 from ducktape.mark import matrix
-from ducktape.tests.test import TestContext
 from collections.abc import Iterable
-from typing import Any
 
 from rptest.clients.kafka_cli_tools import KafkaCliTools
 from rptest.clients.rpk import RpkTool
@@ -52,7 +52,7 @@ class EndToEndCloudTopicsBase(EndToEndTest):
         test_context: TestContext,
         extra_rp_conf: dict[str, Any] | None = None,
         environment: dict[str, str] | None = None,
-    ) -> None:
+    ):
         super(EndToEndCloudTopicsBase, self).__init__(test_context=test_context)
 
         self.test_context = test_context
@@ -337,7 +337,7 @@ class EndToEndCloudTopicsCompactionTest(EndToEndCloudTopicsBase):
         assert self.redpanda
         assert self.topic
         try:
-            self.producer = KgoVerifierProducer(
+            self.kgo_producer = KgoVerifierProducer(
                 self.test_context,
                 self.redpanda,
                 self.topic,
@@ -348,18 +348,18 @@ class EndToEndCloudTopicsCompactionTest(EndToEndCloudTopicsBase):
                 validate_latest_values=True,
                 tolerate_failed_produce=True,
             )
-            self.producer.start()
-            self.producer.wait_for_latest_value_map()
-            self.producer.wait()
+            self.kgo_producer.start()
+            self.kgo_producer.wait_for_latest_value_map()
+            self.kgo_producer.wait()
         finally:
-            self.producer.stop()
+            self.kgo_producer.stop()
 
     def consume(self):
         assert self.redpanda
         assert self.topic
-        traffic_node = self.producer.nodes[0]
+        traffic_node = self.kgo_producer.nodes[0]
         try:
-            self.consumer = KgoVerifierSeqConsumer(
+            self.kgo_consumer = KgoVerifierSeqConsumer(
                 self.test_context,
                 self.redpanda,
                 self.topic,
@@ -369,10 +369,10 @@ class EndToEndCloudTopicsCompactionTest(EndToEndCloudTopicsBase):
                 validate_latest_values=True,
                 nodes=[traffic_node],
             )
-            self.consumer.start(clean=False)
-            self.consumer.wait()
+            self.kgo_consumer.start(clean=False)
+            self.kgo_consumer.wait()
         finally:
-            self.consumer.stop()
+            self.kgo_consumer.stop()
 
     @cluster(num_nodes=4)
     @matrix(storage_compaction_key_map_memory_kb=[3, 10, 128 * 1024])
@@ -388,8 +388,8 @@ class EndToEndCloudTopicsCompactionTest(EndToEndCloudTopicsBase):
         )
 
         num_rounds = 1
-        self.prev_log_compactions = 0
-        self.prev_removed_records = 0
+        self.prev_log_compactions = 0.0
+        self.prev_removed_records = 0.0
         for i in range(0, num_rounds):
             self.produce()
 
