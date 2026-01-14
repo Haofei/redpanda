@@ -605,20 +605,22 @@ TEST_F_CORO(ctp_stm_fixture, test_previous_epoch_fencing_with_lro) {
         auto fence_4 = co_await leader_api.fence_epoch(ct::cluster_epoch{4});
         ASSERT_TRUE_CORO(fence_4.has_value());
 
-        // Previous epoch should now be epoch 3 (updated by
-        // advance_max_seen_epoch) when we fenced epoch 4
+        // get_previous_epoch() returns the committed _previous_epoch, which
+        // is still 2 because no batch with epoch 4 has been applied yet.
+        // The transient _previous_seen_epoch is 3 (used by epoch_in_window).
         previous_epoch = stm->state().get_previous_epoch();
         ASSERT_TRUE_CORO(previous_epoch.has_value());
-        ASSERT_EQ_CORO(previous_epoch.value(), ct::cluster_epoch{3});
+        ASSERT_EQ_CORO(previous_epoch.value(), ct::cluster_epoch{2});
     }
 
-    // Try to fence an out-of-order epoch (epoch 2) that is < previous epoch (3)
-    // and < max_seen_epoch (4) - should fail because epoch 2 < previous epoch
+    // Try to fence an out-of-order epoch (epoch 2) that is <
+    // _previous_seen_epoch (3) and < max_seen_epoch (4) - should fail because
+    // epoch_in_window checks against the transient _previous_seen_epoch
     {
         auto fence_prev = co_await leader_api.fence_epoch(ct::cluster_epoch{2});
         ASSERT_FALSE_CORO(fence_prev.has_value())
-          << "Should not be able to fence an out-of-order epoch < previous "
-             "epoch";
+          << "Should not be able to fence an out-of-order epoch < "
+             "_previous_seen_epoch";
     }
 
     // Advance LRO to the middle of epoch 1 (kafka offset 5)
@@ -656,10 +658,10 @@ TEST_F_CORO(ctp_stm_fixture, test_previous_epoch_fencing_with_lro) {
     ASSERT_EQ_CORO(estimated_inactive_lro2.value(), ct::cluster_epoch{0});
 
     // Get the previous epoch (lower bound of active epochs)
-    // The previous epoch should still be 3 (hasn't changed since the fence)
+    // The previous epoch is still 2 (no new epochs have been applied)
     previous_epoch = stm->state().get_previous_epoch();
     ASSERT_TRUE_CORO(previous_epoch.has_value());
-    ASSERT_EQ_CORO(previous_epoch.value(), ct::cluster_epoch{3});
+    ASSERT_EQ_CORO(previous_epoch.value(), ct::cluster_epoch{2});
 
     // Advance LRO past epoch 2 (kafka offset 19)
     // This is before _max_applied_epoch_offset (20), so _min_epoch_lower_bound
@@ -682,11 +684,10 @@ TEST_F_CORO(ctp_stm_fixture, test_previous_epoch_fencing_with_lro) {
           << "Estimated inactive epoch should be <= precise value";
     }
 
-    // The previous epoch is still 3 (set when we fenced epoch 4)
-    // Note that inactive_epoch (2) < previous_epoch (3), so the invariant holds
+    // The previous epoch is still 2 (no new epochs have been applied)
     previous_epoch = stm->state().get_previous_epoch();
     ASSERT_TRUE_CORO(previous_epoch.has_value());
-    ASSERT_EQ_CORO(previous_epoch.value(), ct::cluster_epoch{3});
+    ASSERT_EQ_CORO(previous_epoch.value(), ct::cluster_epoch{2});
 
     // Advance LRO past epoch 3 (kafka offset 29)
     // This advances past _max_applied_epoch_offset (20), so
@@ -701,14 +702,15 @@ TEST_F_CORO(ctp_stm_fixture, test_previous_epoch_fencing_with_lro) {
     auto inactive_after_lro4 = co_await leader_api.get_inactive_epoch();
     ASSERT_TRUE_CORO(inactive_after_lro4);
 
-    // Previous epoch should still be 3 (unchanged)
+    // Previous epoch should still be 2 (unchanged, no new epochs applied)
     previous_epoch = stm->state().get_previous_epoch();
     ASSERT_TRUE_CORO(previous_epoch.has_value());
-    ASSERT_EQ_CORO(previous_epoch.value(), ct::cluster_epoch{3});
+    ASSERT_EQ_CORO(previous_epoch.value(), ct::cluster_epoch{2});
 
     // Check the estimate after advancing past _max_applied_epoch_offset
     // Now _min_epoch_lower_bound should be updated to _max_applied_epoch (3)
-    // The estimate should match the precise value or be close to it
+    // estimate_inactive_epoch returns min(_min_epoch_lower_bound - 1,
+    // _previous_epoch - 1) = min(3 - 1, 2 - 1) = min(2, 1) = 1
     auto estimated_inactive_lro4 = leader_api.estimate_inactive_epoch();
-    ASSERT_EQ_CORO(estimated_inactive_lro4.value(), ct::cluster_epoch{2});
+    ASSERT_EQ_CORO(estimated_inactive_lro4.value(), ct::cluster_epoch{1});
 }
