@@ -65,3 +65,36 @@ redpanda_cc_library(
         "@seastar",
     ],
 )
+
+redpanda_cc_library(
+    name = "db_domain_manager",
+    srcs = [
+        "db_domain_manager.cc",
+    ],
+    hdrs = [
+        "db_domain_manager.h",
+    ],
+    implementation_deps = [
+        "//src/v/cloud_topics:logger",
+        "//src/v/cloud_topics/level_one/common:object_id",
+        "//src/v/cloud_topics/level_one/metastore/lsm:keys",
+        "//src/v/cloud_topics/level_one/metastore/lsm:state_reader",
+        "//src/v/cloud_topics/level_one/metastore/lsm:state_update",
+        "//src/v/config",
+        "//src/v/container:chunked_hash_map",
+        "//src/v/lsm/io:cloud_persistence",
+        "//src/v/lsm/proto:manifest_redpanda_proto",
+        "//src/v/model:batch_builder",
+        "//src/v/ssx:future_util",
+        "//src/v/ssx:sleep_abortable",
+    ],
+    visibility = ["//visibility:public"],
+    deps = [
+        ":domain_manager",
+        "//src/v/cloud_topics/level_one/metastore:rpc_types",
+        "//src/v/cloud_topics/level_one/metastore/lsm:replicated_db",
+        "//src/v/cloud_topics/level_one/metastore/lsm:stm",
+        "//src/v/ssx:checkpoint_mutex",
+        "@seastar",
+    ],
+)
