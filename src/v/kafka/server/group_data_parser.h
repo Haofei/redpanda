@@ -63,44 +63,44 @@ using group_block_info_map
   = chunked_hash_map<kafka::group_id, group_block_info>;
 
 template<class T>
-concept GroupDataParserBase = requires(T base, model::record_batch b) {
-    { base.handle_raft_data(std::move(b)) } -> std::same_as<ss::future<>>;
+concept GroupDataParserBase = requires(T impl, model::record_batch b) {
+    { impl.handle_raft_data(std::move(b)) } -> std::same_as<ss::future<>>;
     {
-        base.handle_tx_offsets(b.header(), kafka::group_tx::offsets_metadata{})
+        impl.handle_tx_offsets(b.header(), kafka::group_tx::offsets_metadata{})
     } -> std::same_as<ss::future<>>;
     {
-        base.handle_commit(b.header(), group_tx::commit_metadata{})
+        impl.handle_commit(b.header(), group_tx::commit_metadata{})
     } -> std::same_as<ss::future<>>;
     {
-        base.handle_abort(b.header(), group_tx::abort_metadata{})
+        impl.handle_abort(b.header(), group_tx::abort_metadata{})
     } -> std::same_as<ss::future<>>;
     {
-        base.handle_fence_v0(b.header(), group_tx::fence_metadata_v0{})
+        impl.handle_fence_v0(b.header(), group_tx::fence_metadata_v0{})
     } -> std::same_as<ss::future<>>;
     {
-        base.handle_fence_v1(b.header(), group_tx::fence_metadata_v1{})
+        impl.handle_fence_v1(b.header(), group_tx::fence_metadata_v1{})
     } -> std::same_as<ss::future<>>;
     {
-        base.handle_fence(b.header(), kafka::group_tx::fence_metadata{})
+        impl.handle_fence(b.header(), kafka::group_tx::fence_metadata{})
     } -> std::same_as<ss::future<>>;
     {
-        base.handle_version_fence(features::feature_table::version_fence{})
+        impl.handle_version_fence(features::feature_table::version_fence{})
     } -> std::same_as<ss::future<>>;
     {
-        base.handle_group_block(kafka::group_block{{}, {}})
+        impl.handle_group_block(kafka::group_block{{}, {}})
     } -> std::same_as<void>;
-    { base.group_blocks() } -> std::same_as<group_block_info_map&>;
+    { impl.group_blocks() } -> std::same_as<group_block_info_map&>;
     {
-        std::as_const(base).group_blocks()
+        std::as_const(impl).group_blocks()
     } -> std::same_as<const group_block_info_map&>;
 };
 
-template<class Base>
+template<class Impl>
 class group_data_parser {
 public:
     group_data_parser() {
         static_assert(
-          GroupDataParserBase<Base>,
+          GroupDataParserBase<Impl>,
           "Base does not implement all the required methods.");
     }
 
@@ -148,7 +148,7 @@ protected:
 
     bool is_group_blocked_verbose(
       kafka::group_id group_id, std::string_view skipped_msg) const {
-        const auto& bim = static_cast<const Base*>(this)->group_blocks();
+        const auto& bim = static_cast<const Impl*>(this)->group_blocks();
         auto it = bim.find(group_id);
         if (unlikely(it != bim.end() && it->second.is_blocked)) {
             vlog(
@@ -162,7 +162,7 @@ protected:
     }
 
     void do_handle_group_block(kafka::group_block gb) {
-        auto& bim = static_cast<Base*>(this)->group_blocks();
+        auto& bim = static_cast<Impl*>(this)->group_blocks();
         auto it = bim.find(gb.group_id);
         if (it == bim.end()) {
             bim.emplace(gb.group_id, gb.info);
@@ -250,7 +250,7 @@ private:
     }
 
     ss::future<> handle_raft_data(model::record_batch b) {
-        return static_cast<Base*>(this)->handle_raft_data(std::move(b));
+        return static_cast<Impl*>(this)->handle_raft_data(std::move(b));
     }
     ss::future<> handle_tx_offsets(
       model::record_batch_header header,
@@ -258,7 +258,7 @@ private:
         if (is_group_blocked_verbose(data.group_id, "tx offsets")) {
             return ss::now();
         }
-        return static_cast<Base*>(this)->handle_tx_offsets(
+        return static_cast<Impl*>(this)->handle_tx_offsets(
           header, std::move(data));
     }
     ss::future<> handle_fence_v0(
@@ -267,7 +267,7 @@ private:
         if (is_group_blocked_verbose(data.group_id, "fence v0")) {
             return ss::now();
         }
-        return static_cast<Base*>(this)->handle_fence_v0(
+        return static_cast<Impl*>(this)->handle_fence_v0(
           header, std::move(data));
     }
     ss::future<> handle_fence_v1(
@@ -276,7 +276,7 @@ private:
         if (is_group_blocked_verbose(data.group_id, "fence v1")) {
             return ss::now();
         }
-        return static_cast<Base*>(this)->handle_fence_v1(
+        return static_cast<Impl*>(this)->handle_fence_v1(
           header, std::move(data));
     }
     ss::future<> handle_fence(
@@ -284,11 +284,11 @@ private:
         if (is_group_blocked_verbose(data.group_id, "fence")) {
             return ss::now();
         }
-        return static_cast<Base*>(this)->handle_fence(header, std::move(data));
+        return static_cast<Impl*>(this)->handle_fence(header, std::move(data));
     }
     ss::future<> handle_abort(
       model::record_batch_header header, kafka::group_tx::abort_metadata data) {
-        return static_cast<Base*>(this)->handle_abort(header, std::move(data));
+        return static_cast<Impl*>(this)->handle_abort(header, std::move(data));
     }
     ss::future<> handle_commit(
       model::record_batch_header header,
@@ -296,15 +296,15 @@ private:
         if (is_group_blocked_verbose(data.group_id, "commit")) {
             return ss::now();
         }
-        return static_cast<Base*>(this)->handle_commit(header, std::move(data));
+        return static_cast<Impl*>(this)->handle_commit(header, std::move(data));
     }
     ss::future<>
     handle_version_fence(features::feature_table::version_fence fence) {
-        return static_cast<Base*>(this)->handle_version_fence(fence);
+        return static_cast<Impl*>(this)->handle_version_fence(fence);
     }
     ss::future<> handle_group_block(model::record_batch b) {
         co_await b.for_each_record_async(
-          [that = static_cast<Base*>(this)](model::record r) {
+          [that = static_cast<Impl*>(this)](model::record r) {
               return that->handle_group_block(group_block{std::move(r)});
           });
     }
