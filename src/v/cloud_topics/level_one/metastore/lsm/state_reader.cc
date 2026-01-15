@@ -89,17 +89,17 @@ state_reader::extent_key_range::get_rows() {
     while (_iter.valid()) {
         std::exception_ptr ex;
         try {
+            if (forward ? (_iter.key() > end_key) : (_iter.key() < end_key)) {
+                vlog(cd_log.error, "Unexpected key past last: {}", to_string());
+                co_yield std::unexpected(errc::corruption);
+                co_return;
+            }
             auto val = serde::from_iobuf<extent_row_value>(_iter.value());
             co_yield extent_row{
               .key = ss::sstring(_iter.key()),
               .val = val,
             };
             if (_iter.key() == end_key) {
-                co_return;
-            }
-            if (forward ? (_iter.key() > end_key) : (_iter.key() < end_key)) {
-                vlog(cd_log.error, "Unexpected key past last: {}", to_string());
-                co_yield std::unexpected(errc::corruption);
                 co_return;
             }
             if (forward) {
