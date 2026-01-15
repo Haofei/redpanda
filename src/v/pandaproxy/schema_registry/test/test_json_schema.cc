@@ -2337,6 +2337,66 @@ SEASTAR_THREAD_TEST_CASE(test_json_compat_messages) {
     }
 }
 
+namespace {
+
+// Generate a deeply nested JSON schema with the specified depth.
+// Each level wraps the previous in an object property, creating a schema
+// like:
+// {"type":"object","properties":{"p":{"type":"object","properties":{...}}}}
+ss::sstring generate_deeply_nested_schema(int depth) {
+    if (depth <= 0) {
+        return R"({"type": "string"})";
+    }
+    ss::sstring result = R"({"type": "string"})";
+    for (int i = 0; i < depth; ++i) {
+        result = fmt::format(
+          R"({{"type":"object","properties":{{"p":{}}}}})", result);
+    }
+    return result;
+}
+
+} // namespace
+
+// Test that compatibility checking can handle deeply nested schemas without
+// stack overflow.
+SEASTAR_THREAD_TEST_CASE(test_object_recursion_depths) {
+    store_fixture f;
+    auto make_json_schema = [&](std::string_view schema) {
+        return pps::make_json_schema_definition(
+                 f.store(),
+                 pps::make_canonical_json_schema(
+                   f.store(),
+                   {pps::subject{"test"}, {schema, pps::schema_type::json}})
+                   .get())
+          .get();
+    };
+
+    // Test increasing depths to find stack limits.
+    // Setting the limit to 32 causes corruption of the heap stack due to stack
+    // overflow.
+    constexpr int max_test_depth = 31;
+
+    for (int depth = 1; depth <= max_test_depth; ++depth) {
+        BOOST_TEST_MESSAGE(fmt::format("Testing depth {}", depth));
+        try {
+            auto schema = generate_deeply_nested_schema(depth);
+            auto json_schema = make_json_schema(schema);
+
+            auto result = pps::check_compatible(
+              json_schema, json_schema, pps::verbose::yes);
+
+            BOOST_CHECK_MESSAGE(
+              result.is_compat,
+              fmt::format(
+                "Schema at depth {} should be compatible with itself", depth));
+        } catch (const std::exception& e) {
+            BOOST_TEST_MESSAGE(
+              fmt::format("Depth {} failed: {}", depth, e.what()));
+            break;
+        }
+    }
+}
+
 SEASTAR_THREAD_TEST_CASE(test_refs_fixing) {
     // test that look check that in the in-memory representation of a schema,
     // the refs are absolute
