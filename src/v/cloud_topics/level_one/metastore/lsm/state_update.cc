@@ -549,6 +549,27 @@ replace_objects_db_update::build_rows(
             if (!merge_res.has_value()) {
                 co_return std::unexpected(merge_res.error());
             }
+
+            // If there are new cleaned ranges, check that the extents replace
+            // down to the start of the log. By definition, this is a
+            // requirement of cleaning the log.
+            if (!comp_update.new_cleaned_ranges.empty()) {
+                auto new_extent_iter = new_extents_by_tp.find(tidp);
+                if (new_extent_iter != new_extents_by_tp.end()) {
+                    auto req_extents_base
+                      = new_extent_iter->second.begin()->base_offset;
+                    auto start_offset = updated_metadata[tidp].start_offset;
+                    if (req_extents_base > start_offset) {
+                        co_return std::unexpected(
+                          db_update_error{fmt::format(
+                            "Cleaned range for {} does not replace to the "
+                            "beginning of the log: {} > {}",
+                            tidp,
+                            req_extents_base,
+                            start_offset)});
+                    }
+                }
+            }
         }
     }
 
