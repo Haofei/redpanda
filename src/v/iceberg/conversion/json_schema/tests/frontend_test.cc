@@ -13,7 +13,7 @@
 #include "iceberg/conversion/json_schema/ir.h"
 #include "json/document.h"
 
-#include <fmt/ranges.h>
+#include <fmt/format.h>
 #include <gtest/gtest.h>
 
 #include <optional>
