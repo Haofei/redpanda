@@ -13,7 +13,10 @@
 #include "cloud_topics/level_one/compaction/meta.h"
 #include "cloud_topics/level_one/metastore/metastore.h"
 #include "cluster/metadata_cache.h"
+#include "cluster/partition_manager.h"
+#include "cluster/shard_table.h"
 #include "cluster/types.h"
+#include "model/fundamental.h"
 
 namespace cloud_topics::l1 {
 
@@ -38,6 +41,38 @@ public:
 
 private:
     cluster::metadata_cache* _metadata_cache;
+};
+
+// Provides the maximum offset which is compactible for a given ntp.
+class max_compactible_offset_provider {
+public:
+    virtual ~max_compactible_offset_provider() noexcept = default;
+
+    // Fills the provided map with max compactible offsets for the given NTPs.
+    // NTPs that cannot be looked up (e.g. partition not found) will not have
+    // an entry added to the map.
+    virtual ss::future<> fill_max_compactible_offsets(
+      chunked_hash_map<model::ntp, kafka::offset>&) const
+      = 0;
+};
+
+// Default max_compactible_offset_provider, which uses the `shard_table` and
+// `partition_manager` to access a partition's `lowest_pinned_data_offset()`
+// through its `stm_manager()`. Batches cross-shard calls by grouping NTPs
+// by their owning shard.
+class max_compactible_offset_provider_impl
+  : public max_compactible_offset_provider {
+public:
+    max_compactible_offset_provider_impl(
+      ss::sharded<cluster::shard_table>*,
+      ss::sharded<cluster::partition_manager>*);
+
+    ss::future<> fill_max_compactible_offsets(
+      chunked_hash_map<model::ntp, kafka::offset>&) const final;
+
+private:
+    ss::sharded<cluster::shard_table>* _shard_table;
+    ss::sharded<cluster::partition_manager>* _partition_manager;
 };
 
 // Responsible for issuing `get_compaction_info()` requests to the `metastore`

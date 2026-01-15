@@ -12,6 +12,8 @@
 
 #include "cloud_topics/level_one/compaction/logger.h"
 #include "cloud_topics/level_one/compaction/meta.h"
+#include "cluster/partition_manager.h"
+#include "cluster/shard_table.h"
 #include "compaction/utils.h"
 #include "config/configuration.h"
 #include "container/chunked_vector.h"
@@ -63,6 +65,55 @@ topic_cfg_provider_impl::get_topic_cfg(model::topic_namespace_view tp) const {
     }
 
     return topic_md_ref.value().get().get_configuration();
+}
+
+max_compactible_offset_provider_impl::max_compactible_offset_provider_impl(
+  ss::sharded<cluster::shard_table>* shard_table,
+  ss::sharded<cluster::partition_manager>* partition_manager)
+  : _shard_table(shard_table)
+  , _partition_manager(partition_manager) {}
+
+ss::future<> max_compactible_offset_provider_impl::fill_max_compactible_offsets(
+  chunked_hash_map<model::ntp, kafka::offset>& ntp_to_max_compactible_offset)
+  const {
+    // Group NTPs by their owning shard to batch cross-shard calls.
+    chunked_hash_map<ss::shard_id, chunked_vector<model::ntp>> ntps_by_shard;
+    for (const auto& [ntp, _] : ntp_to_max_compactible_offset) {
+        auto shard_opt = _shard_table->local().shard_for(ntp);
+        if (shard_opt) {
+            ntps_by_shard[*shard_opt].push_back(ntp);
+        }
+    }
+
+    for (auto& [shard, shard_ntps] : ntps_by_shard) {
+        auto shard_results = co_await _partition_manager->invoke_on(
+          shard,
+          [ntps = std::move(shard_ntps)](
+            const cluster::partition_manager& pm) mutable {
+              chunked_hash_map<model::ntp, kafka::offset> results;
+              for (auto& ntp : ntps) {
+                  auto p = pm.get(ntp);
+                  if (!p) {
+                      continue;
+                  }
+                  auto lowest_pinned = p->raft()
+                                         ->log()
+                                         ->stm_manager()
+                                         ->lowest_pinned_data_offset();
+                  auto max_compactible = lowest_pinned.has_value()
+                                           ? kafka::prev_offset(
+                                               lowest_pinned.value())
+                                           : kafka::offset::max();
+                  results.insert_or_assign(std::move(ntp), max_compactible);
+              }
+              return results;
+          });
+
+        for (auto& [ntp, offset] : shard_results) {
+            ntp_to_max_compactible_offset.insert_or_assign(
+              std::move(ntp), offset);
+        }
+    }
 }
 
 log_info_collector::log_info_collector(
