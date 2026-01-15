@@ -315,6 +315,11 @@ void partition_replicator::maybe_synchronize_start_offset() {
     auto shadow_partition_start_offset = _sink->start_offset();
     auto source_offsets = _source->get_offsets();
 
+    if (!_sink->can_prefix_truncate()) {
+        vlog(_log.trace, "Partition does not support prefix truncation");
+        return;
+    }
+
     if (_in_progress_truncate_offset.has_value()) {
         vlog(
           _log.trace,
