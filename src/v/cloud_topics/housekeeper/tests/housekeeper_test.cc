@@ -52,6 +52,11 @@ public:
 
     kafka::offset start_offset() const { return _start_offset; }
 
+    kafka::offset
+    get_max_allowed_start_offset(const model::topic_id_partition&) override {
+        return kafka::offset::max();
+    }
+
 private:
     model::topic_id_partition _tidp;
     kafka::offset _start_offset;
