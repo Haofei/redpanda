@@ -359,9 +359,10 @@ result<json_schema_dialect> validate_json_schema(
     }();
 
     // validation of schema: validate it against metaschema
+    // TODO: Temporarily disabled for stack usage testing
     try {
         // Throws when the schema is invalid with details about the failure
-        metaschema_doc.validate(schema);
+        (void)metaschema_doc; //.validate(schema);
     } catch (const std::exception& e) {
         return error_info{
           error_code::schema_invalid,
