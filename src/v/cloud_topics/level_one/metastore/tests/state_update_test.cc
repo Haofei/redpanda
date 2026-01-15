@@ -1521,10 +1521,7 @@ TEST_P(StateUpdateParamTest, TestAddDecreasingTerm) {
     EXPECT_FALSE(res.has_value());
 }
 
-// This test verifies Simple-specific behavior where bogus extents (base ==
-// last) are accepted but marked as dead. The LSM implementation rejects these
-// entirely.
-TEST(StateUpdateTest, TestAllowBogusTermWithBogusExtent) {
+TEST_P(StateUpdateParamTest, TestRejectBogusTermWithBogusExtent) {
     auto update = add_objects_builder()
                     .add(new_obj_builder(oid1, 100, 1100)
                            .add(tidp_a, 10_o, 10_o, 1999_t, 0, 99)
@@ -1532,22 +1529,10 @@ TEST(StateUpdateTest, TestAllowBogusTermWithBogusExtent) {
                     .add_term_start(tidp_a, 2_tm, 10_o)
                     .add_term_start(tidp_a, 1_tm, 10_o)
                     .build();
-    // If there's a misaligned extent, we won't expect that its terms are valid
-    // either, but we should expect the corrections to be populated.
-    state s;
-    chunked_hash_map<model::topic_id_partition, kafka::offset> corrections;
-    auto res = update.can_apply(s, &corrections);
-    EXPECT_TRUE(res.has_value());
-    EXPECT_EQ(1, corrections.size());
-
-    // When applying, the operation should succeed, but we should be left with
-    // a dead object and no extents.
-    res = update.apply(s);
-    EXPECT_TRUE(res.has_value());
-    EXPECT_TRUE(s.topic_to_state.empty());
-    EXPECT_EQ(1, s.objects.size());
-    auto& dead_obj = s.objects.begin()->second;
-    EXPECT_EQ(dead_obj.removed_data_size, dead_obj.total_data_size);
+    // Invalid terms (same offset for different terms) should be rejected
+    // regardless of whether the extent is misaligned.
+    auto res = apply_add_objects(std::move(update));
+    EXPECT_FALSE(res.has_value());
 }
 
 TEST_P(StateUpdateParamTest, TestTermsWithNoExtent) {
