@@ -13,10 +13,10 @@
 
 #include "absl/container/flat_hash_map.h"
 #include "absl/container/flat_hash_set.h"
+#include "base/format_to.h"
 #include "json/chunked_buffer.h"
 #include "json/chunked_input_stream.h"
 #include "json/document.h"
-#include "json/ostreamwrapper.h"
 #include "json/pointer.h"
 #include "json/writer.h"
 #include "pandaproxy/schema_registry/compatibility.h"
@@ -58,6 +58,22 @@
 namespace pandaproxy::schema_registry {
 
 namespace {
+
+// Helper to create schema errors without inlining fmt::format machinery
+// into the caller's stack frame.
+template<typename... Args>
+[[gnu::noinline]] error_info
+make_invalid_schema(fmt::format_string<Args...> fmt, Args&&... args) {
+    return error_info{
+      error_code::schema_invalid,
+      fmt::format(fmt, std::forward<Args>(args)...)};
+}
+
+template<typename... Args>
+[[noreturn]] void
+throw_invalid_schema(fmt::format_string<Args...> fmt, Args&&... args) {
+    throw as_exception(make_invalid_schema(fmt, std::forward<Args>(args)...));
+}
 
 template<typename E, std::size_t Size>
 requires std::is_enum_v<E>
@@ -284,23 +300,35 @@ ss::future<> check_references(sharded_store& store, subject_schema schema) {
     }
 }
 
+// OutputStream adapter for rapidjson Writer to write directly to fmt::iterator
+struct fmt_iterator_output_stream {
+    using Ch = char;
+    fmt::iterator& it;
+
+    void Put(Ch c) { *it++ = c; }
+    void Flush() {}
+};
+
 // helper struct to format json::Value
 struct pj {
     const json::Value& v;
-    friend std::ostream& operator<<(std::ostream& os, const pj& p) {
-        auto osw = json::OStreamWrapper{os};
-        auto writer = json::Writer<json::OStreamWrapper>{osw};
-        p.v.Accept(writer);
-        return os;
+
+    fmt::iterator format_to(fmt::iterator it) const {
+        fmt_iterator_output_stream os{it};
+        json::Writer<fmt_iterator_output_stream> writer{os};
+        v.Accept(writer);
+        return os.it;
     }
 };
 
+// helper struct to format json::Pointer
 struct pjp {
     const json::Pointer& p;
-    friend std::ostream& operator<<(std::ostream& os, const pjp& p) {
-        auto osw = json::OStreamWrapper{os};
-        p.p.Stringify(osw);
-        return os;
+
+    fmt::iterator format_to(fmt::iterator it) const {
+        fmt_iterator_output_stream os{it};
+        p.Stringify(os);
+        return os.it;
     }
 };
 
@@ -391,12 +419,10 @@ result<json_schema_dialect> validate_json_schema(
         // Throws when the schema is invalid with details about the failure
         (void)metaschema_doc; //.validate(schema);
     } catch (const std::exception& e) {
-        return error_info{
-          error_code::schema_invalid,
-          fmt::format(
-            "Invalid json schema: '{}'. Error: '{}'",
-            schema.to_string(),
-            e.what())};
+        return make_invalid_schema(
+          "Invalid json schema: '{}'. Error: '{}'",
+          schema.to_string(),
+          e.what());
     }
 
     // schema is a syntactically valid json schema, where $schema == Dialect.
@@ -443,13 +469,11 @@ result<document_context> parse_json(iobuf buf) {
     reader.read(ec);
     if (ec || !decoder.is_valid()) {
         // not a valid json document, return error
-        return error_info{
-          error_code::schema_invalid,
-          fmt::format(
-            "Malformed json schema: {} at line {} column {}",
-            ec ? ec.message() : "Invalid document",
-            reader.line(),
-            reader.column())};
+        return make_invalid_schema(
+          "Malformed json schema: {} at line {} column {}",
+          ec ? ec.message() : "Invalid document",
+          reader.line(),
+          reader.column());
     }
     auto schema = decoder.get_result();
 
@@ -470,11 +494,9 @@ result<document_context> parse_json(iobuf buf) {
               it->value().is_string() == false || !maybe_dialect.has_value()) {
                 // if present, "$schema" have to be a string, and it has to be
                 // one the implemented dialects. If not, return an error
-                return error_info{
-                  error_code::schema_invalid,
-                  fmt::format(
-                    "Unsupported json schema dialect: '{}'",
-                    jsoncons::print(it->value()))};
+                return make_invalid_schema(
+                  "Unsupported json schema dialect: '{}'",
+                  jsoncons::print(it->value()));
             }
         }
     }
@@ -510,12 +532,10 @@ result<document_context> parse_json(iobuf buf) {
         // not a valid json document, return error
         // this is unlikely to happen, since we already parsed this stream with
         // jsoncons, but the possibility of a bug exists
-        return error_info{
-          error_code::schema_invalid,
-          fmt::format(
-            "Malformed json schema: {} at offset {}",
-            rapidjson::GetParseError_En(rapidjson_schema.GetParseError()),
-            rapidjson_schema.GetErrorOffset())};
+        return make_invalid_schema(
+          "Malformed json schema: {} at offset {}",
+          rapidjson::GetParseError_En(rapidjson_schema.GetParseError()),
+          rapidjson_schema.GetErrorOffset());
     }
 
     return {
@@ -584,10 +604,7 @@ constexpr auto parse_json_type(const json::Value& v) {
     auto sv = as_string_view(v);
     auto type = from_string_view(sv);
     if (!type) {
-        throw as_exception(
-          error_info{
-            error_code::schema_invalid,
-            fmt::format("Invalid JSON Schema type: '{}'", sv)});
+        throw_invalid_schema("Invalid JSON Schema type: '{}'", sv);
     }
     return *type;
 }
@@ -781,14 +798,11 @@ json::Pointer to_json_pointer(std::string_view sv) {
     auto candidate = json::Pointer{sv.data(), sv.size()};
     if (auto ec = candidate.GetParseErrorCode();
         ec != rapidjson::kPointerParseErrorNone) {
-        throw as_exception(
-          error_info{
-            error_code::schema_invalid,
-            fmt::format(
-              "invalid fragment '{}' error {} at {}",
-              sv,
-              ec,
-              candidate.GetParseErrorOffset())});
+        throw_invalid_schema(
+          "invalid fragment '{}' error {} at {}",
+          sv,
+          ec,
+          candidate.GetParseErrorOffset());
     }
 
     return candidate;
@@ -801,14 +815,10 @@ resolve_pointer(const json::Pointer& p, const json::Value& root) {
     auto unresolved_token = size_t{0};
     auto* value = p.Get(root, &unresolved_token);
     if (value == nullptr) {
-        throw as_exception(
-          error_info{
-            error_code::schema_invalid,
-            fmt::format(
-              "object not found for pointer '{}' unresolved token at index "
-              "{}",
-              pjp{p},
-              unresolved_token)});
+        throw_invalid_schema(
+          "object not found for pointer '{}' unresolved token at index {}",
+          pjp{p},
+          unresolved_token);
     }
 
     return *value;
@@ -842,10 +852,8 @@ resolve_reference(schema_context& ctx, const json::Value& candidate) {
         auto* lookup_p = ctx.find_bundled(id_uri);
         if (lookup_p == nullptr) {
             // TODO use a better error code
-            throw as_exception(
-              error_info{
-                error_code::schema_invalid,
-                fmt::format("schema pointer not found for uri '{}'", id_uri)});
+            throw_invalid_schema(
+              "schema pointer not found for uri '{}'", id_uri);
         }
         const auto& [schema_pointer, dialect] = *lookup_p;
 
@@ -869,19 +877,15 @@ resolve_reference(schema_context& ctx, const json::Value& candidate) {
             // this requirement could be relaxed but it requires to keep track
             // of the dialect for each json::Value
             if (dialect != ctx.dialect()) {
-                throw as_exception(
-                  error_info{
-                    error_code::schema_invalid,
-                    fmt::format(
-                      "schema dialect mismatch for uri '{}'", id_uri)});
+                throw_invalid_schema(
+                  "schema dialect mismatch for uri '{}'", id_uri);
             }
 
             return merge_references(references_objects);
         }
     }
-    throw std::runtime_error(
-      fmt::format(
-        "max traversals reached for uri {} '{}'", id_uri, pjp{fragment_p}));
+    throw_invalid_schema(
+      "max traversals reached for uri {} '{}'", id_uri, pjp{fragment_p});
 }
 
 // helper to convert a boolean to a schema, and to traverse $refs
@@ -895,11 +899,8 @@ json_const_object get_schema(schema_context& ctx, const json::Value& v) {
         // {}/{"not":{}}
         return v.GetBool() ? get_true_schema() : get_false_schema();
     }
-    throw as_exception(
-      error_info{
-        error_code::schema_invalid,
-        fmt::format(
-          "Invalid JSON Schema, should be object or boolean: '{}'", pj{v})});
+    throw_invalid_schema(
+      "Invalid JSON Schema, should be object or boolean: '{}'", pj{v});
 }
 
 // helper to retrieve the object value for a key, or an empty object if the key
@@ -921,11 +922,8 @@ get_object_or_empty(const json::Value& v, std::string_view key) {
         // {}/{"not":{}}
         return it->value.GetBool() ? get_true_schema() : get_false_schema();
     }
-    throw as_exception(
-      error_info{
-        error_code::schema_invalid,
-        fmt::format(
-          "Invalid JSON Schema, should be object or boolean: '{}'", pj{v})});
+    throw_invalid_schema(
+      "Invalid JSON Schema, should be object or boolean: '{}'", pj{v});
 }
 
 // helper to retrieve the array value for a key, or an empty array if the key
@@ -1014,13 +1012,12 @@ json_compatibility_result is_numeric_property_value_superset(
         // representation. this cannot be caught with this, and it would require
         // some sort of decimal type
         if (!it->value.IsLosslessDouble()) {
-            throw as_exception(invalid_schema(
-              fmt::format(
-                R"(is_numeric_property_value_superset-{} not implemented for type {}. input: older: '{}', newer: '{}')",
-                prop_name,
-                it->value.GetType(),
-                pj{older},
-                pj{newer})));
+            throw_invalid_schema(
+              R"(is_numeric_property_value_superset-{} not implemented for type {}. input: older: '{}', newer: '{}')",
+              prop_name,
+              it->value.GetType(),
+              pj{older},
+              pj{newer});
         }
 
         return it->value.GetDouble();
@@ -1296,12 +1293,11 @@ json_compatibility_result is_numeric_superset(
             if (it->value.IsLosslessDouble()) {
                 return it->value.GetDouble();
             }
-            // v could not be decodes as a double, likely a malformed json
-            throw as_exception(invalid_schema(
-              fmt::format(
-                R"(is_numeric_superset-{} not implemented for types other than "boolean" and "number". input: '{}')",
-                prop_name,
-                pj{v})));
+            // v could not be decoded as a double, likely a malformed json
+            throw_invalid_schema(
+              R"(is_numeric_superset-{} not implemented for types other than "boolean" and "number". input: '{}')",
+              prop_name,
+              pj{v});
         };
 
         return std::visit(
@@ -1336,12 +1332,11 @@ json_compatibility_result is_numeric_superset(
                 return json_compatibility_result{};
             },
             [&](auto, auto) -> json_compatibility_result {
-                throw as_exception(invalid_schema(
-                  fmt::format(
-                    R"(is_numeric_superset-{} not implemented for mixed types: older: '{}', newer: '{}')",
-                    prop_name,
-                    pj{older},
-                    pj{newer})));
+                throw_invalid_schema(
+                  R"(is_numeric_superset-{} not implemented for mixed types: older: '{}', newer: '{}')",
+                  prop_name,
+                  pj{older},
+                  pj{newer});
             }),
           get_value(older),
           get_value(newer));
@@ -1791,11 +1786,10 @@ json_compatibility_result is_object_dependencies_superset(
             }
             return;
         } else {
-            throw as_exception(invalid_schema(
-              fmt::format(
-                "dependencies can only be an array or an object for valid "
-                "schemas but it was: {}",
-                pj{o})));
+            throw_invalid_schema(
+              "dependencies can only be an array or an object for valid "
+              "schemas but it was: {}",
+              pj{o});
         }
     });
 
@@ -1979,8 +1973,8 @@ json_compatibility_result is_positive_combinator_superset(
                     // json schema allows more than one of {"oneOf", "anyOf",
                     // "allOf"} to appear, but it's not currently supported for
                     // is_superset
-                    throw as_exception(invalid_schema(
-                      fmt::format("{} has more than one combinator", pj{v})));
+                    throw_invalid_schema(
+                      "{} has more than one combinator", pj{v});
                 }
                 res = c;
             }

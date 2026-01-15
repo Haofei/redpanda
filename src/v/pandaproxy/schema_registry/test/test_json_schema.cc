@@ -2372,10 +2372,10 @@ SEASTAR_THREAD_TEST_CASE(test_object_recursion_depths) {
     };
 
     // Test increasing depths to find stack limits.
-    // Note: jsoncons validation must be disabled in json.cc for this test,
-    // Setting the limit to 88 causes corruption of the heap stack due to stack
-    // overflow.
-    constexpr int max_test_depth = 87;
+    // Note: jsoncons validation must be disabled in json.cc for this test.
+    // Setting the limit above ~130 causes corruption of the heap due to stack
+    // overflow, which manifests as a crash during Seastar shutdown.
+    constexpr int max_test_depth = 129;
 
     for (int depth = 1; depth <= max_test_depth; ++depth) {
         BOOST_TEST_MESSAGE(fmt::format("Testing depth {}", depth));
