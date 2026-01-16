@@ -11,9 +11,8 @@
 
 #include "pandaproxy/schema_registry/json.h"
 
-#include "absl/container/flat_hash_map.h"
-#include "absl/container/flat_hash_set.h"
 #include "base/format_to.h"
+#include "container/chunked_hash_map.h"
 #include "json/chunked_buffer.h"
 #include "json/chunked_input_stream.h"
 #include "json/document.h"
@@ -158,8 +157,9 @@ using json_id_uri = named_type<ss::sstring, struct json_id_uri_tag>;
 // mapping of $id to jsonpointer to the parent object
 // it contains at least the root $id for doc. If the root $id is not
 // present, then the default value "" is used
-using id_to_schema_pointer = absl::
-  flat_hash_map<json_id_uri, std::pair<json::Pointer, json_schema_dialect>>;
+using id_to_schema_pointer = chunked_hash_map<
+  json_id_uri,
+  std::pair<json::Pointer, json_schema_dialect>>;
 
 json_id_uri to_json_id_uri(const jsoncons::uri& uri) {
     // ensure that only scheme, host and path are used
