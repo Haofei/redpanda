@@ -385,10 +385,14 @@ ss::future<> partition_replicator::prefix_truncate(kafka::offset o) {
     // less than or equal to this offset
 
     if (ec != kafka::error_code::none) {
-        vlog(_log.warn, "Failed to truncate source partition to {}: {}", o, ec);
+        vlog(
+          _log.warn,
+          "Failed to prefix truncate shadow partition to {}: {}",
+          o,
+          ec);
         co_return;
     }
-    vlog(_log.debug, "Successfully truncated shadow partition to {}", o);
+    vlog(_log.debug, "Successfully prefix truncated shadow partition to {}", o);
 }
 
 } // namespace cluster_link::replication
