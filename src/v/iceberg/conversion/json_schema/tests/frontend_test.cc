@@ -474,6 +474,23 @@ TEST(frontend_test, multiple_schema_resources) {
     ASSERT_EQ(expected, ir_tree_printer::to_string(schema));
 }
 
+TEST(frontend_test, id_with_dot_dot_path) {
+    auto schema = frontend{}.compile(
+      parse_json(R"({
+          "$id": "https://example.com/schemas/deep/root.json",
+          "items": {
+            "$id": "../types.json"
+          }
+      })"),
+      "https://example.com/irrelevant-base.json",
+      dialect::draft7);
+
+    auto items_schema = std::get<std::reference_wrapper<const subschema>>(
+      schema.root().items());
+    ASSERT_EQ(
+      items_schema.get().base().id(), "https://example.com/schemas/types.json");
+}
+
 TEST(frontend_test, non_object_or_boolean_subschema) {
     EXPECT_THAT(
       []() {
