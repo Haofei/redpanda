@@ -12,6 +12,7 @@ import tarfile
 import tempfile
 from typing import Any
 import yaml
+from pathlib import Path
 
 CLUSTER_STARTUP_MARKER = "Successfully started Redpanda"
 BENCH_START_MARKER = "Starting benchmark traffic"
@@ -71,6 +72,54 @@ async def start_dev_cluster(dev_cluster_py: str, redpanda_bin: str, tmpdir: str)
     return proc
 
 
+def omb_driver_config() -> str:
+    config: dict[str, Any] = {
+        "name": "pgo-bl3-like",
+        "driverClass": "io.openmessaging.benchmark.driver.redpanda.RedpandaBenchmarkDriver",
+        "replicationFactor": 3,
+        "reset": True,
+        "topicConfig": "",
+        "commonConfig": (
+            "bootstrap.servers=localhost:9092\n"
+            "request.timeout.ms=300000\n"
+            "security.protocol=PLAINTEXT\n"
+        ),
+        "producerConfig": (
+            "acks=all\nlinger.ms=1\nbatch.size=1\nenable.idempotence=true\n"
+        ),
+        "consumerConfig": (
+            "auto.offset.reset=earliest\n"
+            "enable.auto.commit=True\n"
+            "max.partition.fetch.bytes=1048576\n"
+        ),
+    }
+
+    return yaml.dump(config)
+
+
+def omb_workload_config() -> str:
+    workload: dict[str, Any] = {
+        "name": "pgo-bl3-like",
+        "topics": 1,
+        "messageSize": 100,
+        "useRandomizedPayloads": True,
+        "randomBytesRatio": 0.5,
+        "randomizedPayloadPoolSize": 1000,
+        # "payloadFile": "payload/payload-100b.data",
+        "partitionsPerTopic": 18,
+        "subscriptionsPerTopic": 1,
+        "producersPerTopic": 10,
+        "consumerPerSubscription": 10,
+        "producerRate": 20000,
+        "consumerBacklogSizeGB": 0,
+        "warmupDurationMinutes": 0,
+        "testDurationMinutes": 1,
+        "keyDistributor": "NO_KEY",
+    }
+
+    return yaml.dump(workload)
+
+
 @dataclass
 class OmbTarget:
     results_path: str
@@ -80,23 +129,26 @@ class OmbTarget:
 async def start_omb(
     tmpdir: str, omb_benchmark: str
 ) -> tuple[asyncio.subprocess.Process, OmbTarget]:
-    workload_path = (
-        f"{os.path.dirname(os.path.realpath(__file__))}/omb_config/workload.yaml"
-    )
-    driver_path = (
-        f"{os.path.dirname(os.path.realpath(__file__))}/omb_config/driver.yaml"
-    )
+    tmp_dir = Path(tmpdir) / "omb"
+    tmp_dir.mkdir()
     results_path = os.path.join(tmpdir, "results.json")
+
+    driver_config = omb_driver_config()
+    driver_path = tmp_dir / "driver.yaml"
+    driver_path.write_text(driver_config)
+    workload_config = omb_workload_config()
+    workload_path = tmp_dir / "workload.yaml"
+    workload_path.write_text(workload_config)
 
     bench_cmd: list[str] = [
         omb_benchmark,
         "--drivers",
-        driver_path,
+        str(driver_path),
         "--output",
         results_path,
         "--service-version",
         "unknown_version",
-        workload_path,
+        str(workload_path),
     ]
     print(f"Launching omb: {' '.join(bench_cmd)}")
     proc = await asyncio.create_subprocess_exec(
