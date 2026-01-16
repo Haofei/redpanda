@@ -60,11 +60,6 @@ public:
         vlog(cd_log.info, "Stopped cloud topics list/delete worker");
     }
 
-    seastar::future<std::expected<size_t, level_zero_gc::collection_error>>
-    collect() {
-        throw std::runtime_error("not implemented");
-    }
-
     bool has_capacity() const { return page_sem_.available_units() > 0; }
 
     seastar::future<std::expected<
