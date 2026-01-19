@@ -15,6 +15,8 @@
 #include "kafka/server/handlers/topics/types.h"
 #include "model/metadata.h"
 
+#include <seastar/core/sstring.hh>
+
 #include <array>
 #include <string_view>
 
@@ -156,6 +158,43 @@ inline bool is_property_valid_for_storage_mode(
     }
 
     return true;
+}
+
+// Get the valid storage modes for a property as a human-readable string.
+// Returns a string like "local, tiered" or "cloud".
+inline ss::sstring
+get_valid_storage_modes_string(std::string_view property_name) {
+    for (const auto& entry : storage_mode_properties) {
+        if (entry.property_name == property_name) {
+            ss::sstring result;
+            bool first = true;
+            if (
+              (entry.valid_modes & storage_mode_mask::local)
+              != storage_mode_mask::none) {
+                result += "local";
+                first = false;
+            }
+            if (
+              (entry.valid_modes & storage_mode_mask::tiered)
+              != storage_mode_mask::none) {
+                if (!first) {
+                    result += ", ";
+                }
+                result += "tiered";
+                first = false;
+            }
+            if (
+              (entry.valid_modes & storage_mode_mask::cloud)
+              != storage_mode_mask::none) {
+                if (!first) {
+                    result += ", ";
+                }
+                result += "cloud";
+            }
+            return result;
+        }
+    }
+    return "unknown";
 }
 
 } // namespace kafka
