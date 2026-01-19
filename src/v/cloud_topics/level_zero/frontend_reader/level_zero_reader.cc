@@ -108,8 +108,22 @@ level_zero_log_reader_impl::read_some(
      * Combine metadata with payloads (from cache or object storage) to
      * construct the full batches expected by the caller (e.g. Kafka Fetch).
      */
-    auto batches = co_await materialize_batches(
+    auto maybe_batches = co_await materialize_batches(
       std::move(log_read_metadata), deadline);
+    if (!maybe_batches.has_value()) {
+        if (maybe_batches.error() == errc::timeout) {
+            if (_bytes_consumed >= _config.min_bytes) {
+                co_return model::record_batch_reader::storage_t{};
+            }
+            throw ss::timed_out_error();
+        }
+        throw std::runtime_error(fmt_with_ctx(
+          fmt::format,
+          "Reader experienced unhandled error: {}",
+          maybe_batches.error()));
+    }
+
+    auto batches = std::move(maybe_batches).value();
     if (batches.empty()) {
         set_end_of_stream();
         co_return model::record_batch_reader::storage_t{};
@@ -247,7 +261,7 @@ level_zero_log_reader_impl::fetch_metadata(
     co_return ret;
 }
 
-ss::future<chunked_circular_buffer<model::record_batch>>
+ss::future<std::expected<chunked_circular_buffer<model::record_batch>, errc>>
 level_zero_log_reader_impl::materialize_batches(
   chunked_circular_buffer<local_log_batch> unhydrated,
   model::timeout_clock::time_point deadline) {
@@ -313,7 +327,7 @@ level_zero_log_reader_impl::materialize_batches(
         }
         if (mat_res.error() == errc::timeout) {
             vlog(_log.debug, "Materialize aborted due to timeout");
-            throw ss::timed_out_error();
+            co_return std::unexpected(errc::timeout);
         }
         throw std::runtime_error(
           fmt::format(
