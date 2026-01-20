@@ -40,10 +40,14 @@ public:
       , details({std::move(detail)}) {}
 
     ~detailed_error() = default;
-    detailed_error(const detailed_error&) = delete;
     detailed_error& operator=(const detailed_error&) = delete;
     detailed_error(detailed_error&&) noexcept = default;
     detailed_error& operator=(detailed_error&&) noexcept = default;
+
+    // NOTE: prefer to not copy if possible -- this is implemented primarily so
+    // that .value() calls from a std::expected can be used, as it requires an
+    // implemented copy constructor.
+    detailed_error(const detailed_error&) = default;
 
     template<typename OtherErrorT>
     detailed_error<OtherErrorT> wrap(OtherErrorT&& other) && {
