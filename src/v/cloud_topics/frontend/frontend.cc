@@ -242,9 +242,8 @@ model::term_id frontend::leader_epoch() const {
     return _partition->raft()->confirmed_term();
 }
 
-ss::future<storage::translating_reader> frontend::make_reader(
-  cloud_topic_log_reader_config cfg,
-  std::optional<model::timeout_clock::time_point>) {
+ss::future<storage::translating_reader>
+frontend::make_reader(cloud_topic_log_reader_config cfg) {
     vassert(_data_plane != nullptr, "cloud topics api not initialized");
 
     const auto lro = _ctp_stm_api->get_last_reconciled_offset();
@@ -471,7 +470,7 @@ frontend::refine_timequery_result(
     // giving the reader a timestamp so it uses the L1 object indexes to seek
     // to the correct spot within the index, this would allow us to optimize IO
     // against the cloud.
-    auto reader = co_await make_reader(reader_cfg, std::nullopt);
+    auto reader = co_await make_reader(reader_cfg);
     auto generator = std::move(reader.reader).generator(model::no_timeout);
     auto query_interval = model::bounded_offset_interval::checked(
       kafka::offset_cast(input.start_offset),
