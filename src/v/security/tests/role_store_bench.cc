@@ -85,9 +85,9 @@ const role_store store_8_r_1Ki_m_data = make_store(
 
 template<bool materialize>
 void run_get_member_roles() {
-    perf_tests::start_measuring_time();
     const auto& m
       = members_data[random_generators::get_int(members_data.size() - 1)];
+    perf_tests::start_measuring_time();
     auto rng = store_512_r_1Ki_m_data.roles_for_member(m);
     perf_tests::do_not_optimize(rng);
     if constexpr (materialize) {
@@ -99,9 +99,9 @@ void run_get_member_roles() {
 
 template<bool materialize>
 void run_range_queries() {
-    perf_tests::start_measuring_time();
     const auto& m
       = members_data[random_generators::get_int(members_data.size() - 1)];
+    perf_tests::start_measuring_time();
     auto rng = store_512_r_1Ki_m_data.range(
       [&m](const auto& e) { return role_store::has_member(e, m); });
     perf_tests::do_not_optimize(rng);
