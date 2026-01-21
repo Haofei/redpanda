@@ -25,7 +25,7 @@ namespace {
 
 error to_error(std::exception_ptr e, std::string_view prefix = "") {
     if (ssx::is_shutdown_exception(e)) {
-        return {errc::shutting_down, fmt::format("{}{}", prefix, e)};
+        return {errc::shutting_down, "{}{}", prefix, e};
     }
     errc ec{};
     ss::sstring msg;
@@ -96,8 +96,8 @@ state_reader::extent_key_range::get_rows() {
         co_return;
     }
     if (!_iter.valid() || _iter.key() != start_key) {
-        co_yield std::unexpected(error(
-          errc::corruption, fmt::format("Expected base key: {}", to_string())));
+        co_yield std::unexpected(
+          error(errc::corruption, "Expected base key: {}", to_string()));
         co_return;
     }
     while (_iter.valid()) {
@@ -106,7 +106,8 @@ state_reader::extent_key_range::get_rows() {
             if (forward ? (_iter.key() > end_key) : (_iter.key() < end_key)) {
                 co_yield std::unexpected(error(
                   errc::corruption,
-                  fmt::format("Unexpected key past last: {}", to_string())));
+                  "Unexpected key past last: {}",
+                  to_string()));
                 co_return;
             }
             auto val = serde::from_iobuf<extent_row_value>(_iter.value());
@@ -214,11 +215,10 @@ state_reader::get_max_term(const model::topic_id_partition& tidp) {
     } catch (...) {
         co_return std::unexpected(error(
           errc::corruption,
-          fmt::format(
-            "Failed to decode term row value for {} term {} key {}",
-            tidp,
-            term,
-            base_key_str)));
+          "Failed to decode term row value for {} term {} key {}",
+          tidp,
+          term,
+          base_key_str));
     }
 }
 
@@ -281,11 +281,10 @@ state_reader::get_extent_ge(
     } catch (...) {
         co_return std::unexpected(error(
           errc::corruption,
-          fmt::format(
-            "Failed to decode extent row value for {} offset {} key {}",
-            tidp,
-            base_offset,
-            base_key_str)));
+          "Failed to decode extent row value for {} offset {} key {}",
+          tidp,
+          base_offset,
+          base_key_str));
     }
 }
 
@@ -334,11 +333,10 @@ state_reader::get_extent_range(
     } catch (...) {
         co_return std::unexpected(error(
           errc::corruption,
-          fmt::format(
-            "Failed to decode extent row value for {} offset {} key {}",
-            tidp,
-            base,
-            base_key)));
+          "Failed to decode extent row value for {} offset {} key {}",
+          tidp,
+          base,
+          base_key));
     }
     // Position iterator back at base_key to return to the caller.
     try {
@@ -591,8 +589,7 @@ state_reader::get_term_end(
         }
         if (!metadata_res.value().has_value()) {
             co_return std::unexpected(error(
-              errc::corruption,
-              fmt::format("Missing partition metadata for {}", tidp)));
+              errc::corruption, "Missing partition metadata for {}", tidp));
         }
         co_return metadata_res.value()->next_offset;
     } catch (...) {
@@ -616,9 +613,8 @@ state_reader::get_val(KeyEncodeArgs... args) {
         auto val = serde::from_iobuf<ValT>(std::move(*opt_buf));
         co_return val;
     } catch (...) {
-        co_return std::unexpected(error(
-          errc::corruption,
-          fmt::format("Failed to decode value at key {}", key_str)));
+        co_return std::unexpected(
+          error(errc::corruption, "Failed to decode value at key {}", key_str));
     }
 }
 

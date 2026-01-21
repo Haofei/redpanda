@@ -22,14 +22,19 @@ namespace {
 
 using enum db_update_errc;
 
-db_update_error wrap_read_err(state_reader::error e, ss::sstring msg) {
+template<typename... T>
+db_update_error wrap_read_err(
+  state_reader::error e, fmt::format_string<T...> msg, T&&... args) {
     switch (e.e) {
     case state_reader::errc::io_error:
-        return std::move(e).wrap(io_error, std::move(msg));
+        return std::move(e).wrap(
+          io_error, std::move(msg), std::forward<T>(args)...);
     case state_reader::errc::corruption:
-        return std::move(e).wrap(corruption, std::move(msg));
+        return std::move(e).wrap(
+          corruption, std::move(msg), std::forward<T>(args)...);
     case state_reader::errc::shutting_down:
-        return std::move(e).wrap(shutting_down, std::move(msg));
+        return std::move(e).wrap(
+          shutting_down, std::move(msg), std::forward<T>(args)...);
     }
 }
 
@@ -79,11 +84,10 @@ ss::future<std::expected<void, db_update_error>> collect_exact_intervals(
         if (!range_res.has_value()) {
             co_return std::unexpected(wrap_read_err(
               std::move(range_res.error()),
-              fmt::format(
-                "Error getting extent range for {} [{}, {}]",
-                tidp,
-                interval.base_offset,
-                interval.last_offset)));
+              "Error getting extent range for {} [{}, {}]",
+              tidp,
+              interval.base_offset,
+              interval.last_offset));
         }
         if (!range_res.value().has_value()) {
             co_return std::unexpected(db_update_error(
@@ -101,11 +105,10 @@ ss::future<std::expected<void, db_update_error>> collect_exact_intervals(
             if (!extent_res->get().has_value()) {
                 co_return std::unexpected(wrap_read_err(
                   std::move(extent_res->get().error()),
-                  fmt::format(
-                    "Error iterating through {} extents in range [{}, {}]",
-                    tidp,
-                    interval.base_offset,
-                    interval.last_offset)));
+                  "Error iterating through {} extents in range [{}, {}]",
+                  tidp,
+                  interval.base_offset,
+                  interval.last_offset));
             }
             auto& row = extent_res->get().value();
             out_sizes[row.val.oid] += row.val.len;
@@ -126,8 +129,8 @@ ss::future<std::expected<void, db_update_error>> merge_compaction_state(
     if (!meta_res.has_value()) {
         co_return std::unexpected(wrap_read_err(
           std::move(meta_res.error()),
-          fmt::format(
-            "Error getting metadata for {} during compaction", tidp)));
+          "Error getting metadata for {} during compaction",
+          tidp));
     }
     if (!meta_res.value().has_value()) {
         co_return std::unexpected(db_update_error(
@@ -152,7 +155,8 @@ ss::future<std::expected<void, db_update_error>> merge_compaction_state(
     if (!comp_res.has_value()) {
         co_return std::unexpected(wrap_read_err(
           std::move(comp_res.error()),
-          fmt::format("Error getting compaction metadata for {}", tidp)));
+          "Error getting compaction metadata for {}",
+          tidp));
     }
 
     // Validate and apply new cleaned ranges.
@@ -270,7 +274,8 @@ add_objects_db_update::build_rows(
         if (!meta_res.has_value()) {
             co_return std::unexpected(wrap_read_err(
               std::move(meta_res.error()),
-              fmt::format("Error getting metadata for {}", tidp)));
+              "Error getting metadata for {}",
+              tidp));
         }
         auto opt = meta_res.value();
         auto expected_next = opt ? opt->next_offset : kafka::offset{0};
@@ -310,7 +315,8 @@ add_objects_db_update::build_rows(
         if (!term_res.has_value()) {
             co_return std::unexpected(wrap_read_err(
               std::move(term_res.error()),
-              fmt::format("Error getting max term for {}", tp)));
+              "Error getting max term for {}",
+              tp));
         }
         auto term_opt = term_res.value();
         if (term_opt.has_value()) {
@@ -528,7 +534,8 @@ replace_objects_db_update::build_rows(
         if (!meta_res.has_value()) {
             co_return std::unexpected(wrap_read_err(
               std::move(meta_res.error()),
-              fmt::format("Error getting metadata for {}", tidp)));
+              "Error getting metadata for {}",
+              tidp));
         }
         if (!meta_res.value().has_value()) {
             co_return std::unexpected(db_update_error(
@@ -554,7 +561,8 @@ replace_objects_db_update::build_rows(
         if (!obj_res.has_value()) {
             co_return std::unexpected(wrap_read_err(
               std::move(obj_res.error()),
-              fmt::format("Error getting object {} for update", oid)));
+              "Error getting object {} for update",
+              oid));
         }
         if (obj_res.value().has_value()) {
             auto obj_entry = obj_res.value().value();
