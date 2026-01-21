@@ -13,6 +13,8 @@
 #include "cloud_topics/errc.h"
 #include "cloud_topics/level_zero/stm/placeholder.h"
 #include "cloud_topics/logger.h"
+#include "cloud_topics/state_accessors.h"
+#include "cluster/metadata_cache.h"
 #include "cluster/partition.h"
 #include "config/configuration.h"
 #include "model/timeout_clock.h"
@@ -26,6 +28,24 @@
 #include <variant>
 
 namespace cloud_topics {
+namespace {
+
+model::topic_id_partition
+get_topic_id_partition(const ss::lw_shared_ptr<cluster::partition>& partition) {
+    const auto& ntp = partition->ntp();
+    auto ct_state = partition->get_cloud_topics_state();
+    auto metadata_cache = ct_state->local().get_metadata_cache();
+    auto topic_cfg = metadata_cache->get_topic_cfg(
+      model::topic_namespace_view(ntp));
+    if (!topic_cfg) {
+        throw std::runtime_error(
+          fmt::format("no config found for cloud topic {}", ntp));
+    }
+    return model::topic_id_partition{
+      topic_cfg->tp_id.value(), ntp.tp.partition};
+}
+
+} // namespace
 
 level_zero_log_reader_impl::level_zero_log_reader_impl(
   const cloud_topic_log_reader_config& cfg,
@@ -143,13 +163,14 @@ level_zero_log_reader_impl::maybe_read_batches_from_cache() {
         return ret;
     }
 
+    auto tidp = get_topic_id_partition(_ctp);
+
     /*
      * Fetch batches from the cache starting at `_next_offset` until we hit a
      * gap or a control batch and must then fetch the data from object storage.
      */
     while (_next_offset <= _config.max_offset) {
-        auto batch = _ct_api->cache_get(
-          _ctp->ntp(), kafka::offset_cast(_next_offset));
+        auto batch = _ct_api->cache_get(tidp, kafka::offset_cast(_next_offset));
         if (!batch.has_value()) {
             break;
         }
@@ -265,6 +286,7 @@ ss::future<std::expected<chunked_circular_buffer<model::record_batch>, errc>>
 level_zero_log_reader_impl::materialize_batches(
   chunked_circular_buffer<local_log_batch> unhydrated,
   model::timeout_clock::time_point deadline) {
+    auto tidp = get_topic_id_partition(_ctp);
     // Cherry-pick enough L0 meta batches to materialize.
     chunked_vector<cloud_topics::extent_meta> to_materialize;
     auto unhydrated_it = unhydrated.begin();
@@ -355,7 +377,7 @@ level_zero_log_reader_impl::materialize_batches(
         auto& local_batch_header = local_batch.header;
         model::record_batch batch = ss::visit(
           local_batch.data,
-          [this, &local_batch_header, &batches_it](
+          [this, &local_batch_header, &batches_it, &tidp](
             const cloud_topics::extent_meta&) {
               model::record_batch batch = apply_placeholder_to_batch(
                 local_batch_header, std::move(*batches_it));
@@ -368,7 +390,7 @@ level_zero_log_reader_impl::materialize_batches(
                     _ctp->ntp(),
                     batch.base_offset(),
                     batch.term());
-                  _ct_api->cache_put(_ctp->ntp(), batch);
+                  _ct_api->cache_put(tidp, batch);
               }
               return batch;
           },
