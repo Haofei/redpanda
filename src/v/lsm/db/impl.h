@@ -12,11 +12,13 @@
 #pragma once
 
 #include "base/seastarx.h"
-#include "container/chunked_hash_map.h"
 #include "lsm/core/internal/iterator.h"
 #include "lsm/core/internal/keys.h"
 #include "lsm/core/internal/options.h"
+#include "lsm/db/compaction_actor.h"
+#include "lsm/db/flush_actor.h"
 #include "lsm/db/gc_actor.h"
+#include "lsm/db/manifest_actor.h"
 #include "lsm/db/memtable.h"
 #include "lsm/db/snapshot.h"
 #include "lsm/db/table_cache.h"
@@ -110,9 +112,7 @@ private:
 
     void maybe_schedule_compaction();
 
-    ss::future<> run_background_compaction();
-
-    ss::future<> flush_memtable();
+    void on_new_manifest();
 
     io::persistence _persistence;
     ss::lw_shared_ptr<internal::options> _opts;
@@ -122,14 +122,14 @@ private:
     ss::optimized_optional<ss::lw_shared_ptr<memtable>> _imm;
     std::unique_ptr<table_cache> _table_cache;
     std::unique_ptr<version_set> _versions;
-    ssx::condition_variable _start_background_work_signal;
     ssx::condition_variable _background_work_finished_signal;
     ss::abort_source _as;
-    bool _background_work_running = false;
-    std::optional<ss::future<>> _background_work;
     snapshot_list _snapshots;
 
     gc_actor _gc_actor;
+    manifest_actor _manifest_actor;
+    flush_actor _flush_actor;
+    compaction_actor _compaction_actor;
 };
 
 } // namespace lsm::db

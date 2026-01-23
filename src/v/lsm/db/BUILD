@@ -10,9 +10,6 @@ redpanda_cc_library(
     hdrs = [
         "table_builder.h",
     ],
-    implementation_deps = [
-        "//src/v/lsm/sst:builder",
-    ],
     deps = [
         "//src/v/base",
         "//src/v/lsm/core/internal:files",
@@ -20,6 +17,7 @@ redpanda_cc_library(
         "//src/v/lsm/core/internal:keys",
         "//src/v/lsm/core/internal:options",
         "//src/v/lsm/io:persistence",
+        "//src/v/lsm/sst:builder",
         "@seastar",
     ],
 )
@@ -62,7 +60,10 @@ redpanda_cc_library(
         "//src/v/lsm/sst:builder",
     ],
     deps = [
+        ":compaction_actor",
+        ":flush_actor",
         ":gc_actor",
+        ":manifest_actor",
         ":memtable",
         ":snapshot",
         ":table_cache",
@@ -246,6 +247,79 @@ redpanda_cc_library(
         ":table_cache",
         "//src/v/base",
         "//src/v/container:chunked_hash_map",
+        "//src/v/lsm/core/internal:files",
+        "//src/v/lsm/core/internal:options",
+        "//src/v/lsm/io:persistence",
+        "//src/v/ssx:actor",
+        "@seastar",
+    ],
+)
+
+redpanda_cc_library(
+    name = "manifest_actor",
+    srcs = [
+        "manifest_actor.cc",
+    ],
+    hdrs = [
+        "manifest_actor.h",
+    ],
+    implementation_deps = [
+        "//src/v/lsm/core/internal:logger",
+    ],
+    deps = [
+        ":gc_actor",
+        ":version_edit",
+        ":version_set",
+        "//src/v/base",
+        "//src/v/lsm/core/internal:options",
+        "//src/v/ssx:actor",
+        "@seastar",
+    ],
+)
+
+redpanda_cc_library(
+    name = "flush_actor",
+    srcs = [
+        "flush_actor.cc",
+    ],
+    hdrs = [
+        "flush_actor.h",
+    ],
+    implementation_deps = [
+        "//src/v/lsm/core/internal:logger",
+    ],
+    deps = [
+        ":manifest_actor",
+        ":memtable",
+        ":table_builder",
+        ":version_set",
+        "//src/v/base",
+        "//src/v/lsm/core/internal:files",
+        "//src/v/lsm/core/internal:options",
+        "//src/v/lsm/io:persistence",
+        "//src/v/ssx:actor",
+        "@seastar",
+    ],
+)
+
+redpanda_cc_library(
+    name = "compaction_actor",
+    srcs = [
+        "compaction_actor.cc",
+    ],
+    hdrs = [
+        "compaction_actor.h",
+    ],
+    implementation_deps = [
+        "//src/v/lsm/core:exceptions",
+        "//src/v/lsm/core/internal:logger",
+        "//src/v/lsm/sst:builder",
+    ],
+    deps = [
+        ":manifest_actor",
+        ":snapshot",
+        ":version_set",
+        "//src/v/base",
         "//src/v/lsm/core/internal:files",
         "//src/v/lsm/core/internal:options",
         "//src/v/lsm/io:persistence",

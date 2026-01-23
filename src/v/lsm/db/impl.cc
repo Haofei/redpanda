@@ -11,7 +11,6 @@
 
 #include "lsm/db/impl.h"
 
-#include "base/vassert.h"
 #include "base/vlog.h"
 #include "lsm/core/exceptions.h"
 #include "lsm/core/internal/files.h"
@@ -20,10 +19,8 @@
 #include "lsm/core/internal/logger.h"
 #include "lsm/core/internal/merging_iterator.h"
 #include "lsm/db/iter.h"
-#include "lsm/db/table_builder.h"
 #include "lsm/io/persistence.h"
 #include "lsm/sst/block_cache.h"
-#include "lsm/sst/builder.h"
 #include "ssx/clock.h"
 
 #include <seastar/core/sleep.hh>
@@ -50,14 +47,22 @@ impl::impl(ctor, io::persistence p, ss::lw_shared_ptr<internal::options> o)
   , _versions(
       std::make_unique<version_set>(
         _persistence.metadata.get(), _table_cache.get(), _opts))
-  , _gc_actor(_persistence.data.get(), _opts, _table_cache.get()) {}
+  , _gc_actor(_persistence.data.get(), _opts, _table_cache.get())
+  , _manifest_actor(_versions.get(), &_gc_actor, [this] { on_new_manifest(); })
+  , _flush_actor(
+      _opts, _persistence.data.get(), _versions.get(), &_manifest_actor)
+  , _compaction_actor(
+      _persistence.data.get(),
+      &_snapshots,
+      &_manifest_actor,
+      _versions.get(),
+      _opts) {}
 
 ss::future<std::unique_ptr<impl>> impl::open(
   ss::lw_shared_ptr<internal::options> opts, io::persistence persistence) {
     vlog(log.trace, "open_start");
     auto db = std::make_unique<impl>(
       ctor{}, std::move(persistence), std::move(opts));
-    co_await db->_gc_actor.start();
     auto fut = co_await ss::coroutine::as_future(db->recover());
     if (fut.failed()) {
         auto ex = fut.get_exception();
@@ -69,50 +74,10 @@ ss::future<std::unique_ptr<impl>> impl::open(
         vlog(log.trace, "open_end readonly=true");
         co_return db;
     }
-    db->_background_work = ss::with_scheduling_group(
-      db->_opts->compaction_scheduling_group, [db = db.get()] {
-          return ss::do_until(
-            [db] { return db->_as.abort_requested(); },
-            [db] {
-                return db->_start_background_work_signal.wait(db->_as)
-                  .then([db] {
-                      db->_background_work_running = true;
-                      vlog(log.trace, "compaction_loop_start");
-                      return db->run_background_compaction();
-                  })
-                  .then_wrapped([db](ss::future<> fut) {
-                      vlog(log.trace, "compaction_loop_end");
-                      db->_background_work_running = false;
-                      db->maybe_schedule_compaction();
-                      db->_background_work_finished_signal.broadcast();
-                      try {
-                          fut.get();
-                          return;
-                      } catch (const abort_requested_exception& ex) {
-                          vlog(
-                            log.debug,
-                            "compaction_loop_error abort=true error=\"{}\"",
-                            ex.what());
-                      } catch (const io_error_exception& ex) {
-                          vlog(
-                            log.warn,
-                            "compaction_loop_error io=true error=\"{}\"",
-                            ex.what());
-                      } catch (...) {
-                          auto ep = std::current_exception();
-                          vlog(
-                            log.error,
-                            "compaction_loop_error unexpected=true "
-                            "error=\"{}\"",
-                            ep);
-                      }
-                      // Signal so that we immediately retry
-                      // TODO(lsm): consider some kind of backoff or
-                      // backpressure?
-                      db->_start_background_work_signal.signal();
-                  });
-            });
-      });
+    co_await db->_gc_actor.start();
+    co_await db->_flush_actor.start();
+    co_await db->_compaction_actor.start();
+    co_await db->_manifest_actor.start();
     vlog(log.trace, "open_end readonly=false");
     co_return db;
 }
@@ -170,7 +135,10 @@ ss::future<> impl::make_room_for_write() {
             continue;
         }
         // We're over our limit, let's make a new memtable
-        vlog(log.trace, "scheduling_memtable_flush");
+        vlog(
+          log.trace,
+          "scheduling_memtable_flush seqno={}",
+          _mem->last_seqno().value());
         _imm = std::exchange(_mem, ss::make_lw_shared<memtable>());
         maybe_schedule_compaction();
     }
@@ -280,18 +248,14 @@ ss::future<> impl::flush() {
 ss::future<> impl::close() {
     vlog(log.trace, "close_start");
     _as.request_abort_ex(abort_requested_exception("database closing"));
-    auto fut = std::exchange(_background_work, std::nullopt);
-    if (fut) {
-        fut = co_await ss::coroutine::as_future(std::move(*fut));
-    }
     co_await _gc_actor.stop();
+    co_await _compaction_actor.stop();
+    co_await _flush_actor.stop();
+    co_await _manifest_actor.stop();
     co_await _table_cache->close();
     co_await _persistence.data->close();
     co_await _persistence.metadata->close();
     vlog(log.trace, "close_end");
-    if (fut && fut->failed()) {
-        std::rethrow_exception(fut->get_exception());
-    }
 }
 
 ss::future<> impl::recover() {
@@ -319,298 +283,34 @@ ss::future<> impl::recover() {
 }
 
 void impl::maybe_schedule_compaction() {
-    if (_background_work && _background_work_running) {
-        return;
+    if (_flush_actor.is_idle() && _imm) {
+        _flush_actor.tell(flush_message{.immutable_memtable = *_imm});
     }
-    if (!_imm && !_versions->needs_compaction()) {
-        return;
+    if (_compaction_actor.is_idle() && _versions->needs_compaction()) {
+        _compaction_actor.tell(_versions->pick_compaction().value());
     }
-    if (_as.abort_requested()) {
-        return;
-    }
-    _start_background_work_signal.signal();
 }
 
-namespace {
-struct compaction_state {
-    struct output {
-        internal::file_handle handle;
-        uint64_t file_size = 0;
-        internal::key smallest, largest;
-        internal::sequence_number oldest, newest;
-    };
-
-    output& current_output() { return outputs.back(); }
-
-    ss::future<> open_current_builder(
-      internal::file_handle h,
-      io::data_persistence* p,
-      sst::builder::options opts) {
-        outputs.emplace_back(h);
-        auto w = co_await p->open_sequential_writer(h);
-        builder.emplace(std::move(w), opts);
-    }
-    ss::future<> finish_current_builder() {
-        auto b = std::exchange(builder, std::nullopt);
-        co_await b->finish().finally([&b] { return b->close(); });
-        uint64_t current_bytes = b->file_size();
-        current_output().file_size = current_bytes;
-        total_bytes += current_bytes;
-    }
-
-    std::exception_ptr err;
-    chunked_vector<output> outputs;
-    // Sequence numbers < smallest_snapshot are not significant since we
-    // will never have to service a snapshot below smallest_snapshot.
-    // Therefore if we have seen a sequence number S <=
-    // smallest_snapshot, we can drop all entries for the same key with
-    // sequence numbers < S.
-    internal::sequence_number smallest_snapshot;
-    std::optional<sst::builder> builder;
-    uint64_t total_bytes = 0;
-};
-} // namespace
-
-ss::future<> impl::run_background_compaction() {
-    if (_as.abort_requested()) {
-        co_return;
-    }
-    if (_imm) {
-        co_return co_await flush_memtable();
-    }
-    auto maybe_compaction = _versions->pick_compaction();
-    if (!maybe_compaction) {
-        co_return;
-    }
-    auto compaction = *std::move(maybe_compaction);
-    auto input_level = compaction.level();
-    auto output_level = input_level + 1_level;
-    auto num_input_files
-      = compaction.num_input_files(compaction::which::input_level)
-        + compaction.num_input_files(compaction::which::output_level);
+void impl::on_new_manifest() {
     vlog(
       log.trace,
-      "compaction_start input_level={} output_level={} input_files={}",
-      input_level,
-      output_level,
-      num_input_files);
-    if (compaction.is_trivial_move()) {
-        auto input_level_files = compaction.num_input_files(
-          compaction::which::input_level);
-        vassert(
-          input_level_files == 1,
-          "trivial compactions should only be for a single input file: {}",
-          input_level_files);
-        auto file = compaction.input(compaction::which::input_level, 0);
-        compaction.edit()->remove_file(compaction.level(), file->handle);
-        compaction.edit()->add_file({
-          .level = compaction.level() + 1_level,
-          .file_handle = file->handle,
-          .file_size = file->file_size,
-          .smallest = file->smallest,
-          .largest = file->largest,
-          .oldest_seqno = file->oldest_seqno,
-          .newest_seqno = file->newest_seqno,
-        });
-        vlog(log.trace, "manifest_write_start");
-        co_await _versions->log_and_apply(std::move(*compaction.edit()));
-        vlog(log.trace, "manifest_write_end");
-        vlog(
-          log.trace,
-          "compaction_end input_level={} output_level={} output_files=1 "
-          "output_bytes={} trivial_move=true",
-          input_level,
-          output_level,
-          file->file_size);
-        co_return;
+      "new_manifest_applied seqno={}",
+      max_persisted_seqno().value());
+    // Wait for the memtable to be applied
+    if (_imm && max_persisted_seqno() >= (*_imm)->last_seqno()) {
+        // Now that the new version has been applied, it's safe to remove the
+        // immutable memtable, as readers will pick up the new file instead.
+        //
+        // Note that it's possible for a reader to pick up both the memtable
+        // and the new version with the file. This is OK because all iterators
+        // deduplicate already.
+        _imm = std::nullopt;
     }
-    compaction_state state{
-      // We need to preserve intermediate data between snapshots so we can
-      // surface the correct snapshot isolation. So we use the oldest snapshot,
-      // otherwise the lastest sequence number because we don't have to preserve
-      // any intermediate versions.
-      // Note we can call `value` on `last_seqno` because we have to have some
-      // data in the database in order to trigger compaction.
-      .smallest_snapshot = _snapshots.oldest_seqno().value_or(
-        _versions->last_seqno().value()),
-    };
-    auto max_file_size = _opts->levels[output_level].max_file_size;
-    sst::builder::options sst_options{
-      .block_size = _opts->sst_block_size,
-      .filter_period = _opts->sst_filter_period,
-      .compression = _opts->levels[output_level].compression,
-    };
-    try {
-        auto input = co_await _versions->make_input_iterator(&compaction);
-        std::optional<internal::key> current_key;
-        internal::sequence_number last_seqno_for_key
-          = internal::sequence_number::max();
-        co_await input->seek_to_first();
-        while (input->valid() && !_as.abort_requested()) {
-            if (_imm) {
-                // Always prioritize memtable flushes
-                co_await flush_memtable();
-                _background_work_finished_signal.signal();
-            }
-            auto key = input->key();
-            if (state.builder && compaction.should_stop_before(key)) {
-                co_await state.finish_current_builder();
-            }
-            bool drop = false;
-            if (!current_key || key.user_key() != current_key->user_key()) {
-                // First occurrence of this user key
-                current_key = internal::key(key);
-                last_seqno_for_key = internal::sequence_number::max();
-            }
-            auto key_seqno = key.seqno();
-            // NOLINTNEXTLINE(*branch-clone*)
-            if (last_seqno_for_key <= state.smallest_snapshot) {
-                // Hidden by a newer entry for the same user key
-                drop = true;
-            } else if (
-              key.is_tombstone() && key_seqno <= state.smallest_snapshot
-              && compaction.is_base_level_for_key(key)) {
-                // For this user key:
-                // (1) there is no data in higher levels
-                // (2) data in lower levels will have larger sequence
-                // numbers (3) data in layers that are being compacted here
-                // and have smaller sequence numbers will be dropped in the
-                // next few iterations of this loop (by rule (A) above).
-                // Therefore this deletion marker is obsolete and can be
-                // dropped.
-                drop = true;
-            }
-            last_seqno_for_key = key_seqno;
-            if (!drop) {
-                if (!state.builder) {
-                    co_await state.open_current_builder(
-                      {
-                        .id = _versions->new_file_id(),
-                        .epoch = _opts->database_epoch,
-                      },
-                      _persistence.data.get(),
-                      sst_options);
-                }
-                auto& current = state.current_output();
-                if (state.builder->num_entries() == 0) {
-                    current.smallest = internal::key(key);
-                    current.oldest = key_seqno;
-                    current.newest = key_seqno;
-                }
-                current.largest = internal::key(key);
-                current.oldest = std::min(key_seqno, current.oldest);
-                current.newest = std::max(key_seqno, current.newest);
-                co_await state.builder->add(internal::key(key), input->value());
-                // Close output file if it is big enough
-                if (state.builder->file_size() >= max_file_size) {
-                    co_await state.finish_current_builder();
-                }
-            }
-            co_await input->next();
-        }
-    } catch (const base_exception& ex) {
-        state.err = std::make_exception_ptr(ex);
-    }
-    if (state.builder) {
-        co_await state.finish_current_builder();
-    }
-    _as.check(); // Do this after we clean up the builder
-    if (state.err) {
-        std::rethrow_exception(state.err);
-    }
-    auto* edit = compaction.edit();
-    compaction.add_input_deletions(edit);
-    for (auto& output : state.outputs) {
-        edit->add_file({
-          .level = compaction.level() + 1_level,
-          .file_handle = output.handle,
-          .file_size = output.file_size,
-          .smallest = std::move(output.smallest),
-          .largest = std::move(output.largest),
-          .oldest_seqno = output.oldest,
-          .newest_seqno = output.newest,
-        });
-    }
-    vlog(log.trace, "manifest_write_start");
-    co_await _versions->log_and_apply(std::move(*edit));
-    vlog(log.trace, "manifest_write_end");
-    // Go and cleanup any obsolete files where both the epoch, and file ID is
-    // less than what we have committed, and is not in our working set.
-    co_await _gc_actor.tell(
-      gc_message{
-        .highest_used_file_id = _versions->highest_used_file_id(),
-        .live_files = _versions->get_live_files(),
-      });
-    vlog(
-      log.trace,
-      "compaction_end input_level={} output_level={} output_files={} "
-      "output_bytes={}",
-      input_level,
-      output_level,
-      state.outputs.size(),
-      state.total_bytes);
-}
-
-ss::future<> impl::flush_memtable() {
-    vassert(_imm, "immutable memtable required in order to flush a memtable");
-    auto v = _versions->current();
-    auto id = _versions->new_file_id();
-    auto& imm = *_imm;
-    auto level = imm->empty()
-                   ? 0_level
-                   : v->pick_level_for_memtable_output(
-                       imm->min_key().user_key(), imm->max_key().user_key());
-    auto mem_bytes = imm->approximate_memory_usage();
-    vlog(
-      log.trace,
-      "flush_memtable_start level={} mem_bytes={}",
-      level,
-      mem_bytes);
-    sst::builder::options sst_options{
-      .block_size = _opts->sst_block_size,
-      .filter_period = _opts->sst_filter_period,
-      .compression = _opts->levels[level].compression,
-    };
-    auto result = co_await build_table(
-      _persistence.data.get(),
-      {.id = id, .epoch = _opts->database_epoch},
-      imm->create_iterator(),
-      sst_options,
-      &_as);
-    if (!result) {
-        _versions->reuse_file_id(id);
-        vlog(
-          log.trace,
-          "flush_memtable_end level={} file_bytes=0 empty=true",
-          level);
-        co_return;
-    }
-    version_edit edit(*_opts);
-    edit.set_last_seqno(result->newest_seqno);
-    edit.add_file({
-      .level = level,
-      .file_handle = {.id = id, .epoch = _opts->database_epoch},
-      .file_size = result->file_size,
-      .smallest = std::move(result->smallest),
-      .largest = std::move(result->largest),
-      .oldest_seqno = result->oldest_seqno,
-      .newest_seqno = result->newest_seqno,
-    });
-    vlog(log.trace, "manifest_write_start");
-    co_await _versions->log_and_apply(std::move(edit));
-    vlog(log.trace, "manifest_write_end");
-    vlog(
-      log.trace,
-      "flush_memtable_end level={} file_bytes={}",
-      level,
-      result->file_size);
-    // Now that the new version has been applied, it's safe to remove the
-    // immutable memtable, as readers will pick up the new file instead.
-    //
-    // Note that due to the above scheduling point, it's possible for a
-    // reader to pick up both the memtable and the new version with the
-    // file. This is OK because all iterators deduplicate already.
-    _imm = std::nullopt;
+    // Notify all waiters that work has been finished.
+    _background_work_finished_signal.broadcast();
+    // Check and see if the new manifest we wrote requires compaction due to
+    // level size limits.
+    maybe_schedule_compaction();
 }
 
 std::optional<internal::sequence_number> impl::max_persisted_seqno() const {
