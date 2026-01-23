@@ -64,8 +64,9 @@ public:
       const cloud_storage_clients::bucket_name& bucket,
       ss::abort_source& as);
 
-    replicated_database(replicated_database&&) = default;
+    replicated_database(replicated_database&&) = delete;
     ~replicated_database() = default;
+    void start();
     ss::future<std::expected<void, error>> close();
     bool needs_reopen() const;
 
@@ -104,6 +105,8 @@ private:
       , db_(std::move(db))
       , as_(as) {}
 
+    ss::future<> apply_loop();
+
     // All replication happens with this term as the invariant.
     const model::term_id term_;
 
@@ -112,12 +115,22 @@ private:
     // usable and callers should open a new one.
     const domain_uuid expected_domain_uuid_;
 
+    std::optional<model::offset> applied_offset_;
+
+    // Indicates that there are rows in the volatile buffer that have yet to be
+    // applied to the database.
+    ssx::condition_variable needs_apply_cv_;
+
+    // Indicates that some rows were just applied to the database.
+    ssx::condition_variable finished_apply_cv_;
+
     // STM for replication and state access.
     stm* stm_;
 
     // The underlying LSM database.
     lsm::database db_;
 
+    ss::gate gate_;
     ss::abort_source& as_;
 };
 

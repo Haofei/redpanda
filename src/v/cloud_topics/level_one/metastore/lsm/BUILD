@@ -173,6 +173,7 @@ redpanda_cc_library(
         "//src/v/lsm/io:persistence",
         "//src/v/lsm/proto:manifest_redpanda_proto",
         "//src/v/model",
+        "//src/v/ssx:future_util",
         "//src/v/utils:detailed_error",
         "@seastar",
     ],

@@ -21,6 +21,7 @@
 #include "model/record.h"
 #include "serde/rw/scalar.h"
 #include "ssx/clock.h"
+#include "ssx/future-util.h"
 
 #include <seastar/core/coroutine.hh>
 
@@ -152,12 +153,21 @@ replicated_database::open(
             }
         }
     }
-    co_return std::unique_ptr<replicated_database>(
+    auto ret = std::unique_ptr<replicated_database>(
       new replicated_database(term, domain_uuid, s, std::move(db), as));
+    ret->start();
+    co_return std::move(ret);
+}
+
+void replicated_database::start() {
+    ssx::spawn_with_gate(gate_, [this] { return apply_loop(); });
 }
 
 ss::future<std::expected<void, replicated_database::error>>
 replicated_database::close() {
+    auto gate_fut = gate_.close();
+    needs_apply_cv_.broken();
+    finished_apply_cv_.broken();
     auto fut = co_await ss::coroutine::as_future(db_.close());
     if (fut.failed()) {
         auto ex = fut.get_exception();
@@ -167,6 +177,7 @@ replicated_database::close() {
         co_return std::unexpected(
           error(errc::io_error, "Error closing database: {}", ex));
     }
+    co_await std::move(gate_fut);
     co_return std::expected<void, error>{};
 }
 
@@ -206,29 +217,22 @@ replicated_database::write(chunked_vector<write_batch_row> rows) {
           map_stm_error(replicate_result.error()),
           "Failed to replicate write batch"));
     }
-
-    auto wb = db_.create_write_batch();
-    const auto seqno_delta = stm_->state().seqno_delta;
-    auto seqno = lsm::sequence_number(replicate_result.value()() + seqno_delta);
-    for (const auto& row : update.value().rows) {
-        vlog(cd_log.trace, "Applying at seqno: {}, key: {}", seqno, row.key);
-        if (row.value.empty()) {
-            wb.remove(row.key, seqno);
-        } else {
-            wb.put(row.key, row.value.copy(), seqno);
+    // NOTE: at this point, since we waited for STM apply after replication,
+    // the write should have been added to the volatile buffer.
+    needs_apply_cv_.signal();
+    auto deadline = ss::lowres_clock::now() + 30s;
+    auto wait_fut = co_await ss::coroutine::as_future(finished_apply_cv_.wait(
+      deadline, as_, [this, o = replicate_result.value()] {
+          return applied_offset_.has_value() && applied_offset_.value() >= o;
+      }));
+    if (wait_fut.failed()) {
+        auto ex = wait_fut.get_exception();
+        if (ssx::is_shutdown_exception(ex)) {
+            co_return std::unexpected(error(errc::shutting_down));
         }
+        co_return std::unexpected(
+          error(errc::replication_error, "Wait for apply timed out {}", ex));
     }
-
-    auto write_fut = co_await ss::coroutine::as_future(
-      db_.apply(std::move(wb)));
-    if (write_fut.failed()) {
-        auto ex = write_fut.get_exception();
-        co_return std::unexpected(error(
-          errc::io_error,
-          "Failed to write to database after replicating: {}",
-          ex));
-    }
-
     co_return std::expected<void, error>{};
 }
 
@@ -300,6 +304,90 @@ replicated_database::flush(std::optional<ss::lowres_clock::duration> timeout) {
           error(errc::io_error, "Failed to flush to database: {}", ex));
     }
     co_return std::expected<void, error>{};
+}
+
+ss::future<> replicated_database::apply_loop() {
+    auto log_exit = ss::defer([this] {
+        vlog(
+          cd_log.debug,
+          "Exiting apply loop of domain UUID {} in term {}",
+          expected_domain_uuid_,
+          term_);
+    });
+    while (!as_.abort_requested() && !gate_.is_closed()) {
+        auto max_applied = db_.max_applied_seqno();
+        auto& state = stm_->state();
+        auto wait_fut = co_await ss::coroutine::as_future(
+          needs_apply_cv_.wait(as_, [&state, max_applied] {
+              return !state.volatile_buffer.empty() &&
+                  (!max_applied.has_value() || state.volatile_buffer.back().seqno > max_applied.value());
+          }));
+        if (wait_fut.failed()) {
+            auto ex = wait_fut.get_exception();
+            vlog(
+              cd_log.debug,
+              "Shutting down apply loop for term {}: {}",
+              term_,
+              ex);
+            co_return;
+        }
+        auto first_to_apply = lsm::sequence_number(0);
+        if (max_applied.has_value()) {
+            first_to_apply = lsm::sequence_number(max_applied.value()() + 1);
+        }
+        auto first_gt_applied_it = std::lower_bound(
+          state.volatile_buffer.begin(),
+          state.volatile_buffer.end(),
+          first_to_apply,
+          [](const volatile_row& r, lsm::sequence_number s) {
+              return r.seqno < s;
+          });
+        if (first_gt_applied_it == state.volatile_buffer.end()) {
+            // Conservative sanity check: the above "needs apply" condition
+            // should ensure that there are rows in the volatile buffer above
+            // max_applied, but there isn't harm in just continuing and
+            // reevaluating.
+            continue;
+        }
+
+        // TODO: apply more than one at a time? Just be careful of reactor
+        // stalls, memory consumed by the write batch, and ensuring that all
+        // rows in a given seqno are applied together.
+        lsm::write_batch wb = db_.create_write_batch();
+        const auto seqno_to_apply = first_gt_applied_it->seqno;
+        auto offset = state.to_offset(seqno_to_apply);
+        for (auto it = first_gt_applied_it; it != state.volatile_buffer.end();
+             ++it) {
+            auto seqno = it->seqno;
+            if (seqno_to_apply != seqno) {
+                // We've finished collecting the rows of seqno_to_apply, go and
+                // apply it.
+                break;
+            }
+            const auto& row = it->row;
+            vlog(
+              cd_log.trace, "Applying at seqno: {}, key: {}", seqno, row.key);
+            if (row.value.empty()) {
+                wb.remove(row.key, seqno);
+            } else {
+                wb.put(row.key, row.value.copy(), seqno);
+            }
+        }
+        auto write_fut = co_await ss::coroutine::as_future(
+          db_.apply(std::move(wb)));
+        if (write_fut.failed()) {
+            auto ex = write_fut.get_exception();
+            vlog(
+              cd_log.error,
+              "Failed to apply batch {} to database: {}",
+              offset,
+              ex);
+            continue;
+        }
+        vlog(cd_log.trace, "Applied write batch at seqno: {}", seqno_to_apply);
+        applied_offset_ = offset;
+        finished_apply_cv_.broadcast();
+    }
 }
 
 } // namespace cloud_topics::l1
