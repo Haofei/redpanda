@@ -95,11 +95,11 @@ TEST(Actor, DropOldestPolicy) {
 
     // With drop_oldest, tell() never blocks, so we can fill the queue
     // and subsequent tells will drop the oldest messages
-    actor.tell(1).get();
-    actor.tell(2).get();
+    actor.tell(1);
+    actor.tell(2);
     // Queue is now full, next tell should drop oldest
-    actor.tell(3).get(); // Drops 1, adds 3
-    actor.tell(4).get(); // Drops 2, adds 4
+    actor.tell(3); // Drops 1, adds 3
+    actor.tell(4); // Drops 2, adds 4
 
     tests::drain_task_queue().get();
 
