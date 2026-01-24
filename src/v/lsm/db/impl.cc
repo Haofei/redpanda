@@ -26,6 +26,7 @@
 #include <seastar/core/sleep.hh>
 #include <seastar/coroutine/as_future.hh>
 
+#include <chrono>
 #include <exception>
 #include <memory>
 #include <utility>
@@ -97,14 +98,15 @@ ss::future<> impl::apply(ss::lw_shared_ptr<memtable> batch) {
 ss::future<> impl::make_room_for_write() {
     bool allow_delay = true;
     while (true) {
+        auto num_l0_files = _versions->current()->num_files(0_level);
         if (
           allow_delay
-          && _versions->current()->num_files(0_level)
-               > _opts->level_zero_slowdown_writes_trigger) {
+          && num_l0_files > _opts->level_zero_slowdown_writes_trigger) {
             // We're in throttling mode
             vlog(log.debug, "throttling_writes reason=l0_file_count");
+            constexpr auto throttle_duration = std::chrono::milliseconds(100);
             try {
-                co_await ss::sleep_abortable(std::chrono::seconds(1), _as);
+                co_await ss::sleep_abortable(throttle_duration, _as);
             } catch (...) {
                 throw abort_requested_exception(
                   "shutdown requested during write throttling");
@@ -126,9 +128,7 @@ ss::future<> impl::make_room_for_write() {
             co_await _background_work_finished_signal.wait(_as);
             continue;
         }
-        if (
-          _versions->current()->num_files(0_level)
-          > _opts->level_zero_stop_writes_trigger) {
+        if (num_l0_files > _opts->level_zero_stop_writes_trigger) {
             vlog(log.warn, "blocking_writes reason=l0_full");
             // We've hit out L0 file limit, wait for compaction to finish.
             co_await _background_work_finished_signal.wait(_as);
