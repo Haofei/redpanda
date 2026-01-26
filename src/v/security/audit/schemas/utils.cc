@@ -180,6 +180,7 @@ user user_from_request_auth_result(const request_auth_result& r) {
       .type_id = r.is_authenticated()
                    ? (r.is_superuser() ? user::type::admin : user::type::user)
                    : user::type::unknown,
+      .groups = acl_principals_to_audit_groups(r.get_groups()),
     };
 }
 
