@@ -40,6 +40,53 @@ void log_manager_probe::setup_metrics() {
           "housekeeping_log_processed",
           [this] { return _housekeeping_log_processed; },
           sm::description("Number of logs processed by housekeeping")),
+        sm::make_counter(
+          "appender_merged_writes",
+          [this] { return _appender_stats->merged_writes; },
+          sm::description(
+            "Number of writes merged into queued writes prior to dispatch.")),
+        sm::make_counter(
+          "appender_bytes_requested",
+          [this] { return _appender_stats->bytes_requested; },
+          sm::description(
+            "Logical bytes appended (the number of bytes appended by the upper "
+            "layers, before alignment.")),
+        sm::make_counter(
+          "appender_bytes_written",
+          [this] { return _appender_stats->bytes_written; },
+          sm::description(
+            "Physical bytes appended (the number of bytes actually written via "
+            "dma_write calls, which is in general higher than logical bytes "
+            "due to alignment).")),
+        sm::make_counter(
+          "appender_appends_requested",
+          [this] { return _appender_stats->appends; },
+          sm::description(
+            "Logical number of append requests to segment appenders.")),
+        sm::make_counter(
+          "appender_flushes",
+          [this] { return _appender_stats->flushes; },
+          sm::description("Number of flush calls to segment appenders.")),
+        sm::make_counter(
+          "appender_fsyncs",
+          [this] { return _appender_stats->fsyncs; },
+          sm::description(
+            "Number of disk fsync calls from segment appenders.")),
+        sm::make_counter(
+          "appender_truncates",
+          [this] { return _appender_stats->truncates; },
+          sm::description(
+            "Number of truncate operations on segment appenders.")),
+        sm::make_counter(
+          "appender_fallocations",
+          [this] { return _appender_stats->fallocations; },
+          sm::description(
+            "Number of fallocate operations on segment appenders.")),
+        sm::make_counter(
+          "appender_last_page_hydrations",
+          [this] { return _appender_stats->last_page_hydrations; },
+          sm::description(
+            "Number of last page hydrations in segment appenders.")),
       },
       {},
       {});
