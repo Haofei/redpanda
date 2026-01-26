@@ -167,23 +167,7 @@ struct context_subject {
 
     /// Parse from qualified subject ":.context:subject" or unqualified
     /// "subject" (which uses the default context)
-    static context_subject from_string(std::string_view input) {
-        // Check for qualified syntax: starts with ":."
-        if (input.starts_with(":.")) {
-            // Find the second colon that separates context from subject
-            auto second_colon = input.find(':', 2);
-
-            if (second_colon != std::string_view::npos) {
-                auto ctx_str = input.substr(1, second_colon - 1);
-                auto sub_str = input.substr(second_colon + 1);
-
-                return context_subject{context{ctx_str}, subject{sub_str}};
-            }
-        }
-
-        // Default case: unqualified subject or invalid qualified syntax
-        return context_subject{default_context, subject{input}};
-    }
+    static context_subject from_string(std::string_view input);
 
     /// Format as qualified subject ":.context:subject" or "subject" if in the
     /// default context
