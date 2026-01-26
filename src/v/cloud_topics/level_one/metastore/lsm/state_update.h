@@ -90,6 +90,16 @@ struct remove_topics_db_update {
     chunked_vector<model::topic_id> topics;
 };
 
+struct remove_objects_db_update {
+    // Removes objects that are no longer referenced by any extents.
+    // An object is considered unreferenced when removed_data_size >=
+    // total_data_size.
+    ss::future<std::expected<void, db_update_error>>
+    build_rows(state_reader&, chunked_vector<write_batch_row>&) const;
+
+    chunked_vector<object_id> objects;
+};
+
 } // namespace cloud_topics::l1
 
 template<>
