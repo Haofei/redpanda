@@ -84,6 +84,11 @@ fmt::iterator schema_metadata::format_to(fmt::iterator it) const {
 }
 
 context_subject context_subject::from_string(std::string_view input) {
+    // If qualified subject parsing is disabled, treat everything as literal
+    if (!enable_qualified_subjects::get()) {
+        return context_subject{default_context, subject{input}};
+    }
+
     // Check for qualified syntax: starts with ":."
     if (input.starts_with(":.")) {
         // Find the second colon that separates context from subject

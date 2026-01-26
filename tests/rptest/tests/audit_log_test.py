@@ -3092,6 +3092,9 @@ class AuditLogTestSchemaRegistryACLs(AuditLogTestSchemaRegistryBase):
         - Context-level (e.g., /config/:.ctx:) uses sr_registry
         - Subject-level (e.g., /config/:.ctx:subject) uses sr_subject
         """
+        self.redpanda.set_cluster_config(
+            {"schema_registry_enable_qualified_subjects": True}, expect_restart=True
+        )
         self.setup_cluster()
 
         context_only = ":.staging:"

@@ -5002,7 +5002,10 @@ class SchemaRegistryContextTest(SchemaRegistryEndpoints):
         schema_registry_config = SchemaRegistryConfig()
         schema_registry_config.mode_mutability = True
         super().__init__(
-            context, schema_registry_config=schema_registry_config, **kwargs
+            context,
+            schema_registry_config=schema_registry_config,
+            extra_rp_conf={"schema_registry_enable_qualified_subjects": True},
+            **kwargs,
         )
 
     @cluster(num_nodes=1)

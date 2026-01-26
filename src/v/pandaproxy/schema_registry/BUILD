@@ -156,6 +156,7 @@ redpanda_cc_library(
         ":types",
         "//src/v/base",
         "//src/v/config",
+        "//src/v/config:startup_config",
         "//src/v/kafka/client",
         "//src/v/kafka/client:config_utils",
         "//src/v/kafka/client:configuration",
@@ -276,6 +277,7 @@ redpanda_cc_library(
     visibility = ["//visibility:public"],
     deps = [
         ":server",
+        "//src/v/config:startup_config",
         "//src/v/pandaproxy:core",
     ],
 )
