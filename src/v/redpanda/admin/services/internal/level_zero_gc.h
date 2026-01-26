@@ -50,6 +50,11 @@ public:
       ss::sharded<cloud_topics::level_zero_gc>* gc,
       ss::sharded<cluster::members_table>* mt);
 
+    seastar::future<proto::admin::level_zero_gc::get_status_response>
+      get_status(
+        serde::pb::rpc::context,
+        proto::admin::level_zero_gc::get_status_request) override;
+
 private:
     using apply_local = ss::bool_class<struct apply_local_tag>;
     using apply_remote = ss::bool_class<struct apply_remote_tag>;
