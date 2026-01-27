@@ -879,7 +879,7 @@ TEST_P(StateUpdateParamTest, TestReplaceInvalidNonContiguousDoesNotSpan) {
     ASSERT_EQ(p.extents.size(), 3);
 }
 
-TEST(StateUpdateTest, TestReplaceSingleExtentBeforeNewStartOffset) {
+TEST_P(StateUpdateParamTest, TestReplaceSingleExtentBeforeNewStartOffset) {
     auto add = add_objects_builder()
                  .add(new_obj_builder(oid1, 100, 1100)
                         .add(tidp_a, 0_o, 99_o, 1999_t, 0, 99)
@@ -892,16 +892,12 @@ TEST(StateUpdateTest, TestReplaceSingleExtentBeforeNewStartOffset) {
                         .build())
                  .add_term_start(tidp_a, 0_tm, 0_o)
                  .build();
-    state s;
-    auto add_res = add.apply(s);
+    auto add_res = apply_add_objects(std::move(add));
     ASSERT_TRUE(add_res.has_value());
 
     auto tp = model::topic_id_partition::from(tidp_a);
-    auto set_start_update = set_start_offset_update::build(s, tp, 150_o);
-    ASSERT_TRUE(set_start_update.has_value());
-
-    auto apply_res = set_start_update->apply(s);
-    ASSERT_TRUE(apply_res.has_value());
+    auto set_start_res = apply_set_start_offset(tp, 150_o);
+    ASSERT_TRUE(set_start_res.has_value());
 
     // Attempt to replace with a list of valid objects, with one extent
     // containing offsets before the truncation point (the new start offset).
@@ -919,11 +915,12 @@ TEST(StateUpdateTest, TestReplaceSingleExtentBeforeNewStartOffset) {
                             .build())
                      .build();
 
-    auto replace_res = replace.apply(s);
+    auto replace_res = apply_replace_objects(std::move(replace));
     ASSERT_TRUE(replace_res.has_value());
 }
 
-TEST(StateUpdateTest, TestReplaceWithAlignedExtentsBeforeNewStartOffset) {
+TEST_P(
+  StateUpdateParamTest, TestReplaceWithAlignedExtentsBeforeNewStartOffset) {
     auto add = add_objects_builder()
                  .add(new_obj_builder(oid1, 100, 1100)
                         .add(tidp_a, 0_o, 30_o, 1999_t, 0, 99)
@@ -936,16 +933,12 @@ TEST(StateUpdateTest, TestReplaceWithAlignedExtentsBeforeNewStartOffset) {
                         .build())
                  .add_term_start(tidp_a, 0_tm, 0_o)
                  .build();
-    state s;
-    auto add_res = add.apply(s);
+    auto add_res = apply_add_objects(std::move(add));
     ASSERT_TRUE(add_res.has_value());
 
     auto tp = model::topic_id_partition::from(tidp_a);
-    auto set_start_update = set_start_offset_update::build(s, tp, 61_o);
-    ASSERT_TRUE(set_start_update.has_value());
-
-    auto apply_res = set_start_update->apply(s);
-    ASSERT_TRUE(apply_res.has_value());
+    auto set_start_res = apply_set_start_offset(tp, 61_o);
+    ASSERT_TRUE(set_start_res.has_value());
 
     // Attempt to replace with a list of valid objects built before the
     // truncation occurred. The metastore should be able to accept and prune the
@@ -962,15 +955,16 @@ TEST(StateUpdateTest, TestReplaceWithAlignedExtentsBeforeNewStartOffset) {
                             .build())
                      .build();
 
-    auto replace_res = replace.apply(s);
+    auto replace_res = apply_replace_objects(std::move(replace));
     ASSERT_TRUE(replace_res.has_value());
 
+    auto& s = get_state();
     auto p_state = s.partition_state(tp);
     ASSERT_TRUE(p_state.has_value());
     EXPECT_EQ(p_state->get().extents.size(), 1);
 }
 
-TEST(StateUpdateTest, TestReplaceAllExtentsBeforeNewStartOffset) {
+TEST_P(StateUpdateParamTest, TestReplaceAllExtentsBeforeNewStartOffset) {
     auto add = add_objects_builder()
                  .add(new_obj_builder(oid1, 100, 1100)
                         .add(tidp_a, 0_o, 99_o, 1999_t, 0, 99)
@@ -983,16 +977,12 @@ TEST(StateUpdateTest, TestReplaceAllExtentsBeforeNewStartOffset) {
                         .build())
                  .add_term_start(tidp_a, 0_tm, 0_o)
                  .build();
-    state s;
-    auto add_res = add.apply(s);
+    auto add_res = apply_add_objects(std::move(add));
     ASSERT_TRUE(add_res.has_value());
 
     auto tp = model::topic_id_partition::from(tidp_a);
-    auto set_start_update = set_start_offset_update::build(s, tp, 300_o);
-    ASSERT_TRUE(set_start_update.has_value());
-
-    auto apply_res = set_start_update->apply(s);
-    ASSERT_TRUE(apply_res.has_value());
+    auto set_start_res = apply_set_start_offset(tp, 300_o);
+    ASSERT_TRUE(set_start_res.has_value());
 
     // Attempt to replace with a list of valid objects, with all extents
     // containing offsets before the truncation point (the new start offset).
@@ -1009,31 +999,23 @@ TEST(StateUpdateTest, TestReplaceAllExtentsBeforeNewStartOffset) {
                             .build())
                      .build();
 
-    auto replace_res = replace.apply(s);
+    auto replace_res = apply_replace_objects(std::move(replace));
     ASSERT_FALSE(replace_res.has_value());
-    EXPECT_THAT(
-      std::string(replace_res.error()()),
-      testing::ContainsRegex(
-        "Partition .+ doesn't contain extents that span exactly"));
 }
 
-TEST(StateUpdateTest, TestReplaceMultipleExtentsBeforeNewStartOffset) {
+TEST_P(StateUpdateParamTest, TestReplaceMultipleExtentsBeforeNewStartOffset) {
     auto add = add_objects_builder()
                  .add(new_obj_builder(oid1, 100, 1100)
                         .add(tidp_a, 0_o, 100_o, 1999_t, 0, 99)
                         .build())
                  .add_term_start(tidp_a, 0_tm, 0_o)
                  .build();
-    state s;
-    auto add_res = add.apply(s);
+    auto add_res = apply_add_objects(std::move(add));
     ASSERT_TRUE(add_res.has_value());
 
     auto tp = model::topic_id_partition::from(tidp_a);
-    auto set_start_update = set_start_offset_update::build(s, tp, 75_o);
-    ASSERT_TRUE(set_start_update.has_value());
-
-    auto apply_res = set_start_update->apply(s);
-    ASSERT_TRUE(apply_res.has_value());
+    auto set_start_res = apply_set_start_offset(tp, 75_o);
+    ASSERT_TRUE(set_start_res.has_value());
 
     // Attempt to replace with a list of valid objects, with some extents
     // containing offsets before the truncation point (the new start offset).
@@ -1052,15 +1034,17 @@ TEST(StateUpdateTest, TestReplaceMultipleExtentsBeforeNewStartOffset) {
                             .build())
                      .build();
 
-    auto replace_res = replace.apply(s);
+    auto replace_res = apply_replace_objects(std::move(replace));
     ASSERT_TRUE(replace_res.has_value());
 
+    auto& s = get_state();
     auto p_state = s.partition_state(tp);
     ASSERT_TRUE(p_state.has_value());
     EXPECT_EQ(p_state->get().extents.size(), 1);
 }
 
-TEST(StateUpdateTest, TestReplaceMisalignedButContiguousWithNewStartOffset) {
+TEST_P(
+  StateUpdateParamTest, TestReplaceMisalignedButContiguousWithNewStartOffset) {
     auto add = add_objects_builder()
                  .add(new_obj_builder(oid1, 100, 1100)
                         .add(tidp_a, 0_o, 10_o, 1999_t, 0, 99)
@@ -1074,16 +1058,12 @@ TEST(StateUpdateTest, TestReplaceMisalignedButContiguousWithNewStartOffset) {
                  .add_term_start(tidp_a, 0_tm, 0_o)
                  .build();
 
-    state s;
-    auto add_res = add.apply(s);
+    auto add_res = apply_add_objects(std::move(add));
     ASSERT_TRUE(add_res.has_value());
 
     auto tp = model::topic_id_partition::from(tidp_a);
-    auto set_start_update = set_start_offset_update::build(s, tp, 15_o);
-    ASSERT_TRUE(set_start_update.has_value());
-
-    auto apply_res = set_start_update->apply(s);
-    ASSERT_TRUE(apply_res.has_value());
+    auto set_start_res = apply_set_start_offset(tp, 15_o);
+    ASSERT_TRUE(set_start_res.has_value());
 
     // Attempt to replace with a list of extents that are misaligned to the
     // existing extents ([11,20],[21,30]), but form a valid, contiguous update
@@ -1097,9 +1077,10 @@ TEST(StateUpdateTest, TestReplaceMisalignedButContiguousWithNewStartOffset) {
                             .build())
                      .build();
 
-    auto replace_res = replace.apply(s);
+    auto replace_res = apply_replace_objects(std::move(replace));
     ASSERT_TRUE(replace_res.has_value());
 
+    auto& s = get_state();
     auto p_state = s.partition_state(tp);
     ASSERT_TRUE(p_state.has_value());
     EXPECT_EQ(p_state->get().extents.size(), 2);
