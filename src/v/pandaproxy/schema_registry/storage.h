@@ -1741,9 +1741,19 @@ struct consume_to_store {
         switch (*key_type) {
         case topic_key_type::noop:
             break;
-        case topic_key_type::context:
-            // TODO: implement in the next commit
+        case topic_key_type::context: {
+            std::optional<context_value> val;
+            if (!record.value().empty()) {
+                val.emplace(
+                  from_json_iobuf<context_value_handler<>>(
+                    record.release_value()));
+            }
+            co_await apply(
+              offset,
+              from_json_iobuf<context_key_handler<>>(std::move(key)),
+              std::move(val));
             break;
+        }
         case topic_key_type::schema: {
             std::optional<schema_value> val;
             if (!record.value().empty()) {
@@ -2023,6 +2033,43 @@ struct consume_to_store {
                 .key_type = seq_marker_key_type::delete_subject},
               key.sub,
               permanent_delete::no);
+        } catch (const exception& e) {
+            vlog(srlog.debug, "Error replaying: {}: {}", key, e);
+        }
+    }
+
+    ss::future<> apply(
+      model::offset offset, context_key key, std::optional<context_value> val) {
+        // Check seq if it was provided, otherwise assume 3rdparty
+        // compatibility, which can't collide.
+        if (val && key.seq.has_value() && offset != key.seq) {
+            vlog(
+              srlog.debug,
+              "Ignoring out of order {} (at offset {})",
+              key,
+              offset);
+            co_return;
+        }
+
+        if (key.magic != 0) {
+            throw exception(
+              error_code::topic_parse_error,
+              fmt::format("Unexpected magic: {}", key));
+        }
+
+        try {
+            vlog(
+              srlog.debug,
+              "Applying: {} tombstone={} (at offset {})",
+              key,
+              !val.has_value(),
+              offset);
+
+            if (val.has_value()) {
+                co_await _store.set_context_materialized(key.ctx, true);
+            } else {
+                co_await _store.set_context_materialized(key.ctx, false);
+            }
         } catch (const exception& e) {
             vlog(srlog.debug, "Error replaying: {}: {}", key, e);
         }
