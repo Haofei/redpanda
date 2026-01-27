@@ -75,10 +75,12 @@ void ctp_stm_state::advance_epoch(cluster_epoch epoch, model::offset offset) {
     // The STM works on both leader and followers, on a leader the
     // max_seen_epoch epoch is updated by the fencing mechanism.
     // On the follower the max_seen_epoch epoch has to follow the max epoch.
-    _max_seen_epoch = std::max(
-      _max_seen_epoch.value_or(cluster_epoch::min()), epoch);
+    if (epoch > _max_seen_epoch) {
+        _previous_seen_epoch = _max_seen_epoch.value_or(epoch);
+        _max_seen_epoch = epoch;
+    }
     // Register new epoch
-    if (_max_applied_epoch.value_or(cluster_epoch::min()) < epoch) {
+    if (epoch > _max_applied_epoch.value_or(cluster_epoch::min())) {
         // A new max epoch requires the sliding window of epoch values in flight
         // to be moved.
         if (!_min_epoch_lower_bound.has_value()) {
