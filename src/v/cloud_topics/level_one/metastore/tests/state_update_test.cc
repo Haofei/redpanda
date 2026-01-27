@@ -227,6 +227,90 @@ protected:
         return std::monostate{};
     }
 
+    std::expected<std::monostate, stm_update_error> apply_set_start_offset(
+      const model::topic_id_partition& tp, kafka::offset new_start_offset) {
+        if (GetParam() == state_backend::simple) {
+            auto update = set_start_offset_update::build(
+              state_, tp, new_start_offset);
+            if (!update.has_value()) {
+                return std::unexpected(
+                  stm_update_error{fmt::format("{}", update.error())});
+            }
+            return update->apply(state_);
+        }
+        set_start_offset_db_update db_update{
+          .tp = tp,
+          .new_start_offset = new_start_offset,
+        };
+        auto reader = state_reader(db_->create_snapshot());
+        chunked_vector<write_batch_row> rows;
+        auto result = db_update.build_rows(reader, rows).get();
+        if (!result.has_value()) {
+            return std::unexpected(
+              stm_update_error{fmt::format("{}", result.error())});
+        }
+        apply_rows_to_db(rows);
+        return std::monostate{};
+    }
+
+    std::expected<std::monostate, stm_update_error>
+    apply_remove_topics(std::initializer_list<model::topic_id> topics_list) {
+        chunked_vector<model::topic_id> topics;
+        for (const auto& t : topics_list) {
+            topics.push_back(t);
+        }
+        if (GetParam() == state_backend::simple) {
+            auto update = remove_topics_update::build(
+              state_, std::move(topics));
+            if (!update.has_value()) {
+                return std::unexpected(
+                  stm_update_error{fmt::format("{}", update.error())});
+            }
+            return update->apply(state_);
+        }
+        remove_topics_db_update db_update{
+          .topics = std::move(topics),
+        };
+        auto reader = state_reader(db_->create_snapshot());
+        chunked_vector<write_batch_row> rows;
+        auto result = db_update.build_rows(reader, rows).get();
+        if (!result.has_value()) {
+            return std::unexpected(
+              stm_update_error{fmt::format("{}", result.error())});
+        }
+        apply_rows_to_db(rows);
+        return std::monostate{};
+    }
+
+    std::expected<std::monostate, stm_update_error>
+    apply_remove_objects(std::initializer_list<object_id> objects_list) {
+        chunked_vector<object_id> objects;
+        for (const auto& o : objects_list) {
+            objects.push_back(o);
+        }
+        if (GetParam() == state_backend::simple) {
+            auto update = remove_objects_update::build(
+              state_, std::move(objects));
+            if (!update.has_value()) {
+                return std::unexpected(
+                  stm_update_error{fmt::format("{}", update.error())});
+            }
+            return update->apply(state_);
+        }
+        remove_objects_db_update db_update{
+          .objects = std::move(objects),
+        };
+        auto reader = state_reader(db_->create_snapshot());
+        chunked_vector<write_batch_row> rows;
+        auto result = db_update.build_rows(reader, rows).get();
+        if (!result.has_value()) {
+            return std::unexpected(
+              stm_update_error{fmt::format("{}", result.error())});
+        }
+        apply_rows_to_db(rows);
+        return std::monostate{};
+    }
+
     state& get_state() {
         if (GetParam() == state_backend::lsm) {
             state_ = snapshot_to_state();
@@ -1597,8 +1681,7 @@ TEST_P(StateUpdateParamTest, TestAddExtentEndsBelowLastTermStart) {
     EXPECT_FALSE(res.has_value());
 }
 
-TEST(StateUpdateTest, TestSetStartOffsetAlignedWithExtent) {
-    state s;
+TEST_P(StateUpdateParamTest, TestSetStartOffsetAlignedWithExtent) {
     // Add some extents
     auto add_update = add_objects_builder()
                         .add(new_obj_builder(oid1, 100, 1100)
@@ -1612,23 +1695,20 @@ TEST(StateUpdateTest, TestSetStartOffsetAlignedWithExtent) {
                                .build())
                         .add_term_start(tidp_a, 0_tm, 0_o)
                         .build();
-    auto res = add_update.apply(s);
+    auto res = apply_add_objects(std::move(add_update));
     ASSERT_TRUE(res.has_value());
 
     auto tp = model::topic_id_partition::from(tidp_a);
-    auto p_state = s.partition_state(tp);
+    auto p_state = get_state().partition_state(tp);
     ASSERT_TRUE(p_state.has_value());
     EXPECT_EQ(3, p_state->get().extents.size());
 
     // Set start offset to be aligned with the second extent (starts at 11)
-    auto set_start_update = set_start_offset_update::build(s, tp, 11_o);
-    ASSERT_TRUE(set_start_update.has_value());
-
-    auto apply_res = set_start_update->apply(s);
+    auto apply_res = apply_set_start_offset(tp, 11_o);
     ASSERT_TRUE(apply_res.has_value());
 
     // Verify that the state has been updated correctly
-    p_state = s.partition_state(tp);
+    p_state = get_state().partition_state(tp);
     ASSERT_TRUE(p_state.has_value());
     EXPECT_EQ(11_o, p_state->get().start_offset);
     EXPECT_EQ(31_o, p_state->get().next_offset);
@@ -1638,8 +1718,7 @@ TEST(StateUpdateTest, TestSetStartOffsetAlignedWithExtent) {
     EXPECT_EQ(2, p_state->get().extents.size());
 }
 
-TEST(StateUpdateTest, TestSetStartOffsetNotAlignedWithExtent) {
-    state s;
+TEST_P(StateUpdateParamTest, TestSetStartOffsetNotAlignedWithExtent) {
     // Add some extents
     auto add_update = add_objects_builder()
                         .add(new_obj_builder(oid1, 100, 1100)
@@ -1653,24 +1732,21 @@ TEST(StateUpdateTest, TestSetStartOffsetNotAlignedWithExtent) {
                                .build())
                         .add_term_start(tidp_a, 0_tm, 0_o)
                         .build();
-    auto res = add_update.apply(s);
+    auto res = apply_add_objects(std::move(add_update));
     ASSERT_TRUE(res.has_value());
 
     auto tp = model::topic_id_partition::from(tidp_a);
-    auto p_state = s.partition_state(tp);
+    auto p_state = get_state().partition_state(tp);
     ASSERT_TRUE(p_state.has_value());
     EXPECT_EQ(3, p_state->get().extents.size());
 
     // Set start offset to be not aligned with any extent (offset 15 is in the
     // middle of second extent)
-    auto set_start_update = set_start_offset_update::build(s, tp, 15_o);
-    ASSERT_TRUE(set_start_update.has_value());
-
-    auto apply_res = set_start_update->apply(s);
+    auto apply_res = apply_set_start_offset(tp, 15_o);
     ASSERT_TRUE(apply_res.has_value());
 
     // Verify that the state has been updated correctly
-    p_state = s.partition_state(tp);
+    p_state = get_state().partition_state(tp);
     ASSERT_TRUE(p_state.has_value());
     EXPECT_EQ(15_o, p_state->get().start_offset);
     EXPECT_EQ(31_o, p_state->get().next_offset);
@@ -1680,8 +1756,7 @@ TEST(StateUpdateTest, TestSetStartOffsetNotAlignedWithExtent) {
     EXPECT_EQ(2, p_state->get().extents.size());
 }
 
-TEST(StateUpdateTest, TestSetStartOffsetEmptyWithTerms) {
-    state s;
+TEST_P(StateUpdateParamTest, TestSetStartOffsetEmptyWithTerms) {
     // Add extents with various terms
     auto add_update = add_objects_builder()
                         .add(new_obj_builder(oid1, 100, 1100)
@@ -1691,23 +1766,20 @@ TEST(StateUpdateTest, TestSetStartOffsetEmptyWithTerms) {
                         .add_term_start(tidp_a, 2_tm, 3_o)
                         .add_term_start(tidp_a, 5_tm, 7_o)
                         .build();
-    auto res = add_update.apply(s);
+    auto res = apply_add_objects(std::move(add_update));
     ASSERT_TRUE(res.has_value());
 
     auto tp = model::topic_id_partition::from(tidp_a);
-    auto p_state = s.partition_state(tp);
+    auto p_state = get_state().partition_state(tp);
     ASSERT_TRUE(p_state.has_value());
     EXPECT_EQ(1, p_state->get().extents.size());
     EXPECT_EQ(3, p_state->get().term_starts.size());
 
     // Set start offset beyond the end of all extents to make log empty.
-    auto set_start_update = set_start_offset_update::build(s, tp, 10_o);
-    ASSERT_TRUE(set_start_update.has_value());
-
-    auto apply_res = set_start_update->apply(s);
+    auto apply_res = apply_set_start_offset(tp, 10_o);
     ASSERT_TRUE(apply_res.has_value());
 
-    p_state = s.partition_state(tp);
+    p_state = get_state().partition_state(tp);
     ASSERT_TRUE(p_state.has_value());
     EXPECT_EQ(10_o, p_state->get().start_offset);
     EXPECT_EQ(10_o, p_state->get().next_offset);
@@ -1720,11 +1792,10 @@ TEST(StateUpdateTest, TestSetStartOffsetEmptyWithTerms) {
     EXPECT_EQ(1, p_state->get().term_starts.size());
 }
 
-TEST(StateUpdateTest, TestSetStartOffsetWithCompactionState) {
+TEST_P(StateUpdateParamTest, TestSetStartOffsetWithCompactionState) {
     using testing::ElementsAre;
     using range = struct compaction_state_update::cleaned_range;
 
-    state s;
     // Add an extent and then compact it
     auto add_update = add_objects_builder()
                         .add(new_obj_builder(oid1, 100, 1100)
@@ -1732,7 +1803,7 @@ TEST(StateUpdateTest, TestSetStartOffsetWithCompactionState) {
                                .build())
                         .add_term_start(tidp_a, 0_tm, 0_o)
                         .build();
-    auto res = add_update.apply(s);
+    auto res = apply_add_objects(std::move(add_update));
     ASSERT_TRUE(res.has_value());
 
     // Compact part of the extent (clean offsets [5, 15])
@@ -1748,11 +1819,11 @@ TEST(StateUpdateTest, TestSetStartOffsetWithCompactionState) {
             3000_t)
           .set_expected_epoch(tidp_a, partition_state::compaction_epoch_t{0})
           .build();
-    auto replace_res = replace_update.apply(s);
+    auto replace_res = apply_replace_objects(std::move(replace_update));
     ASSERT_TRUE(replace_res.has_value());
 
     auto tp = model::topic_id_partition::from(tidp_a);
-    auto p_state = s.partition_state(tp);
+    auto p_state = get_state().partition_state(tp);
     ASSERT_TRUE(p_state.has_value());
     ASSERT_TRUE(p_state->get().compaction_state.has_value());
 
@@ -1767,14 +1838,11 @@ TEST(StateUpdateTest, TestSetStartOffsetWithCompactionState) {
       p_state->get().compaction_epoch, partition_state::compaction_epoch_t{1});
 
     // Set start offset to fall within the cleaned range (offset 10)
-    auto set_start_update = set_start_offset_update::build(s, tp, 10_o);
-    ASSERT_TRUE(set_start_update.has_value());
-
-    auto apply_res = set_start_update->apply(s);
+    auto apply_res = apply_set_start_offset(tp, 10_o);
     ASSERT_TRUE(apply_res.has_value());
 
     // Verify that the state has been updated correctly
-    p_state = s.partition_state(tp);
+    p_state = get_state().partition_state(tp);
     ASSERT_TRUE(p_state.has_value());
     EXPECT_EQ(10_o, p_state->get().start_offset);
     EXPECT_EQ(21_o, p_state->get().next_offset);
@@ -1792,8 +1860,7 @@ TEST(StateUpdateTest, TestSetStartOffsetWithCompactionState) {
       p_state->get().compaction_epoch, partition_state::compaction_epoch_t{1});
 }
 
-TEST(StateUpdateTest, TestRemoveObjectsBasic) {
-    state s;
+TEST_P(StateUpdateParamTest, TestRemoveObjectsBasic) {
     auto add = add_objects_builder()
                  .add(new_obj_builder(oid1, 100, 1100)
                         .add(tidp_a, 0_o, 10_o, 1999_t, 0, 99)
@@ -1804,8 +1871,8 @@ TEST(StateUpdateTest, TestRemoveObjectsBasic) {
                  .add_term_start(tidp_a, 0_tm, 0_o)
                  .add_term_start(tidp_b, 0_tm, 0_o)
                  .build();
-    ASSERT_TRUE(add.apply(s).has_value());
-    EXPECT_EQ(2, s.objects.size());
+    ASSERT_TRUE(apply_add_objects(std::move(add)).has_value());
+    EXPECT_EQ(2, get_state().objects.size());
 
     // Replace objects to mark originals as unreferenced.
     auto replace = replace_objects_builder()
@@ -1816,40 +1883,32 @@ TEST(StateUpdateTest, TestRemoveObjectsBasic) {
                             .add(tidp_b, 0_o, 10_o, 1999_t, 0, 99)
                             .build())
                      .build();
-    ASSERT_TRUE(replace.apply(s).has_value());
-    EXPECT_EQ(4, s.objects.size());
+    ASSERT_TRUE(apply_replace_objects(std::move(replace)).has_value());
+    EXPECT_EQ(4, get_state().objects.size());
 
     // Remove the unreferenced objects.
-    auto remove_res = remove_objects_update::build(s, {oid1, oid2});
-    ASSERT_TRUE(remove_res.has_value());
-    ASSERT_TRUE(remove_res->apply(s).has_value());
+    ASSERT_TRUE(apply_remove_objects({oid1, oid2}).has_value());
 
-    EXPECT_FALSE(s.objects.contains(oid1));
-    EXPECT_FALSE(s.objects.contains(oid2));
-    EXPECT_TRUE(s.objects.contains(oid3));
-    EXPECT_TRUE(s.objects.contains(oid4));
-    EXPECT_EQ(2, s.objects.size());
+    EXPECT_FALSE(get_state().objects.contains(oid1));
+    EXPECT_FALSE(get_state().objects.contains(oid2));
+    EXPECT_TRUE(get_state().objects.contains(oid3));
+    EXPECT_TRUE(get_state().objects.contains(oid4));
+    EXPECT_EQ(2, get_state().objects.size());
 
     // Move the start offset such that one of the partition's objects are fully
     // unreferenced.
     auto tp = model::topic_id_partition::from(tidp_a);
-    auto set_start_update = set_start_offset_update::build(s, tp, 11_o);
-    ASSERT_TRUE(set_start_update.has_value());
-    auto apply_res = set_start_update->apply(s);
-    ASSERT_TRUE(apply_res.has_value());
+    ASSERT_TRUE(apply_set_start_offset(tp, 11_o).has_value());
 
     // Remove the unreferenced objects.
-    remove_res = remove_objects_update::build(s, {oid3});
-    ASSERT_TRUE(remove_res.has_value());
-    ASSERT_TRUE(remove_res->apply(s).has_value());
+    ASSERT_TRUE(apply_remove_objects({oid3}).has_value());
 
-    EXPECT_FALSE(s.objects.contains(oid3));
-    EXPECT_TRUE(s.objects.contains(oid4));
-    EXPECT_EQ(1, s.objects.size());
+    EXPECT_FALSE(get_state().objects.contains(oid3));
+    EXPECT_TRUE(get_state().objects.contains(oid4));
+    EXPECT_EQ(1, get_state().objects.size());
 }
 
-TEST(StateUpdateTest, TestRemoveObjectsWithReferences) {
-    state s;
+TEST_P(StateUpdateParamTest, TestRemoveObjectsWithReferences) {
     auto add = add_objects_builder()
                  .add(new_obj_builder(oid1, 200, 1100)
                         .add(tidp_a, 0_o, 10_o, 1999_t, 0, 99)
@@ -1858,56 +1917,45 @@ TEST(StateUpdateTest, TestRemoveObjectsWithReferences) {
                  .add_term_start(tidp_a, 0_tm, 0_o)
                  .add_term_start(tidp_b, 0_tm, 0_o)
                  .build();
-    ASSERT_TRUE(add.apply(s).has_value());
-    EXPECT_EQ(1, s.objects.size());
+    ASSERT_TRUE(apply_add_objects(std::move(add)).has_value());
+    EXPECT_EQ(1, get_state().objects.size());
 
     // Move the start offset such that one of the partitions is gone, but the
     // object is still referenced by the other.
     auto tp = model::topic_id_partition::from(tidp_a);
-    auto set_start_update = set_start_offset_update::build(s, tp, 11_o);
-    ASSERT_TRUE(set_start_update.has_value());
-    auto apply_res = set_start_update->apply(s);
-    ASSERT_TRUE(apply_res.has_value());
+    ASSERT_TRUE(apply_set_start_offset(tp, 11_o).has_value());
 
-    auto remove_res = remove_objects_update::build(s, {oid1});
+    auto remove_res = apply_remove_objects({oid1});
     ASSERT_FALSE(remove_res.has_value());
     EXPECT_THAT(
       remove_res.error()(), testing::ContainsRegex("is still referenced"));
 
-    EXPECT_EQ(1, s.objects.size());
-    EXPECT_TRUE(s.objects.contains(oid1));
+    EXPECT_EQ(1, get_state().objects.size());
+    EXPECT_TRUE(get_state().objects.contains(oid1));
 }
 
-TEST(StateUpdateTest, TestRemoveMissingObjects) {
-    state s;
+TEST_P(StateUpdateParamTest, TestRemoveMissingObjects) {
     auto add = add_objects_builder()
                  .add(new_obj_builder(oid1, 100, 1100)
                         .add(tidp_a, 0_o, 10_o, 1999_t, 0, 99)
                         .build())
                  .add_term_start(tidp_a, 0_tm, 0_o)
                  .build();
-    ASSERT_TRUE(add.apply(s).has_value());
-    EXPECT_EQ(1, s.objects.size());
+    ASSERT_TRUE(apply_add_objects(std::move(add)).has_value());
+    EXPECT_EQ(1, get_state().objects.size());
 
     // Remove references to oid1.
     auto tp = model::topic_id_partition::from(tidp_a);
-    auto set_start_update = set_start_offset_update::build(s, tp, 11_o);
-    ASSERT_TRUE(set_start_update.has_value());
-    auto apply_res = set_start_update->apply(s);
-    ASSERT_TRUE(apply_res.has_value());
+    ASSERT_TRUE(apply_set_start_offset(tp, 11_o).has_value());
 
     // Remove it, and objects that don't exist.
-    auto remove_res = remove_objects_update::build(s, {oid1, oid2, oid3, oid4});
-    ASSERT_TRUE(remove_res.has_value());
-    apply_res = remove_res->apply(s);
-    EXPECT_TRUE(apply_res.has_value());
+    ASSERT_TRUE(apply_remove_objects({oid1, oid2, oid3, oid4}).has_value());
 
     // The operation should have succeeded.
-    EXPECT_EQ(0, s.objects.size());
+    EXPECT_EQ(0, get_state().objects.size());
 }
 
-TEST(StateUpdateTest, TestRemoveTopicsBasic) {
-    state s;
+TEST_P(StateUpdateParamTest, TestRemoveTopicsBasic) {
     auto add = add_objects_builder()
                  .add(new_obj_builder(oid1, 200, 1100)
                         .add(tidp_a, 0_o, 10_o, 1999_t, 0, 99)
@@ -1916,21 +1964,22 @@ TEST(StateUpdateTest, TestRemoveTopicsBasic) {
                  .add_term_start(tidp_a, 0_tm, 0_o)
                  .add_term_start(tidp_b, 0_tm, 0_o)
                  .build();
-    ASSERT_TRUE(add.apply(s).has_value());
-    EXPECT_EQ(2, s.topic_to_state.size());
-    EXPECT_EQ(1, s.objects.size());
-
-    auto& obj = s.objects.at(oid1);
-    EXPECT_EQ(198, obj.total_data_size);
-    EXPECT_EQ(0, obj.removed_data_size);
+    ASSERT_TRUE(apply_add_objects(std::move(add)).has_value());
+    {
+        auto& s = get_state();
+        EXPECT_EQ(2, s.topic_to_state.size());
+        EXPECT_EQ(1, s.objects.size());
+        auto& obj = s.objects.at(oid1);
+        EXPECT_EQ(198, obj.total_data_size);
+        EXPECT_EQ(0, obj.removed_data_size);
+    }
 
     // Remove just one topic.
     auto tp_a = model::topic_id_partition::from(tidp_a);
-    auto remove_topics_res = remove_topics_update::build(s, {tp_a.topic_id});
-    ASSERT_TRUE(remove_topics_res.has_value());
-    ASSERT_TRUE(remove_topics_res->apply(s).has_value());
+    ASSERT_TRUE(apply_remove_topics({tp_a.topic_id}).has_value());
 
     // Just the other topic should remain in the state.
+    auto& s = get_state();
     EXPECT_EQ(1, s.topic_to_state.size());
     EXPECT_FALSE(s.topic_to_state.contains(tp_a.topic_id));
     auto tp_b = model::topic_id_partition::from(tidp_b);
@@ -1938,29 +1987,24 @@ TEST(StateUpdateTest, TestRemoveTopicsBasic) {
 
     // Validate object accounting.
     EXPECT_EQ(1, s.objects.size());
-    EXPECT_EQ(198, obj.total_data_size);
-    EXPECT_EQ(99, obj.removed_data_size);
+    EXPECT_EQ(198, s.objects.at(oid1).total_data_size);
+    EXPECT_EQ(99, s.objects.at(oid1).removed_data_size);
 
     // We should be unable to remove object until the other topic is removed.
-    auto remove_obj_res = remove_objects_update::build(s, {oid1});
+    auto remove_obj_res = apply_remove_objects({oid1});
     EXPECT_FALSE(remove_obj_res.has_value());
     EXPECT_THAT(
       remove_obj_res.error()(), testing::ContainsRegex("is still referenced"));
-    EXPECT_EQ(1, s.objects.size());
+    EXPECT_EQ(1, get_state().objects.size());
 
     // Now remove the other topic and try again.
-    remove_topics_res = remove_topics_update::build(s, {tp_b.topic_id});
-    ASSERT_TRUE(remove_topics_res.has_value());
-    ASSERT_TRUE(remove_topics_res->apply(s).has_value());
+    ASSERT_TRUE(apply_remove_topics({tp_b.topic_id}).has_value());
 
-    remove_obj_res = remove_objects_update::build(s, {oid1});
-    EXPECT_TRUE(remove_obj_res.has_value());
-    ASSERT_TRUE(remove_obj_res->apply(s).has_value());
-    EXPECT_EQ(0, s.objects.size());
+    ASSERT_TRUE(apply_remove_objects({oid1}).has_value());
+    EXPECT_EQ(0, get_state().objects.size());
 }
 
-TEST(StateUpdateTest, TestRemoveMultipleTopics) {
-    state s;
+TEST_P(StateUpdateParamTest, TestRemoveMultipleTopics) {
     auto add = add_objects_builder()
                  .add(new_obj_builder(oid1, 200, 1100)
                         .add(tidp_a, 0_o, 10_o, 1999_t, 0, 99)
@@ -1980,34 +2024,33 @@ TEST(StateUpdateTest, TestRemoveMultipleTopics) {
                  .add_term_start(tidp_b, 0_tm, 0_o)
                  .add_term_start(tidp_c, 0_tm, 0_o)
                  .build();
-    ASSERT_TRUE(add.apply(s).has_value());
-    EXPECT_EQ(3, s.topic_to_state.size());
-    EXPECT_EQ(4, s.objects.size());
+    ASSERT_TRUE(apply_add_objects(std::move(add)).has_value());
+    {
+        auto& s = get_state();
+        EXPECT_EQ(3, s.topic_to_state.size());
+        EXPECT_EQ(4, s.objects.size());
+    }
 
     // Remove all the topics in a single update.
     auto tp_a = model::topic_id_partition::from(tidp_a);
     auto tp_b = model::topic_id_partition::from(tidp_b);
     auto tp_c = model::topic_id_partition::from(tidp_c);
-    auto remove_topics_res = remove_topics_update::build(
-      s, {tp_a.topic_id, tp_b.topic_id, tp_c.topic_id});
-    ASSERT_TRUE(remove_topics_res.has_value());
-    ASSERT_TRUE(remove_topics_res->apply(s).has_value());
-    EXPECT_EQ(0, s.topic_to_state.size());
+    ASSERT_TRUE(
+      apply_remove_topics({tp_a.topic_id, tp_b.topic_id, tp_c.topic_id})
+        .has_value());
 
     // Sanity check, the objects should still be there -- only the topics are
     // removed.
+    auto& s = get_state();
+    EXPECT_EQ(0, s.topic_to_state.size());
     EXPECT_EQ(4, s.objects.size());
 
     // All the objects should be removable now.
-    auto remove_obj_res = remove_objects_update::build(
-      s, {oid1, oid2, oid3, oid4});
-    ASSERT_TRUE(remove_obj_res.has_value());
-    ASSERT_TRUE(remove_obj_res->apply(s).has_value());
-    EXPECT_EQ(0, s.objects.size());
+    ASSERT_TRUE(apply_remove_objects({oid1, oid2, oid3, oid4}).has_value());
+    EXPECT_EQ(0, get_state().objects.size());
 }
 
-TEST(StateUpdateTest, TestRemoveMissingTopic) {
-    state s;
+TEST_P(StateUpdateParamTest, TestRemoveMissingTopic) {
     // Add just one topic.
     auto add = add_objects_builder()
                  .add(new_obj_builder(oid1, 100, 1100)
@@ -2015,33 +2058,36 @@ TEST(StateUpdateTest, TestRemoveMissingTopic) {
                         .build())
                  .add_term_start(tidp_a, 0_tm, 0_o)
                  .build();
-    ASSERT_TRUE(add.apply(s).has_value());
-    EXPECT_EQ(1, s.topic_to_state.size());
-    EXPECT_EQ(1, s.objects.size());
+    ASSERT_TRUE(apply_add_objects(std::move(add)).has_value());
+    {
+        auto& s = get_state();
+        EXPECT_EQ(1, s.topic_to_state.size());
+        EXPECT_EQ(1, s.objects.size());
+    }
 
     // Remove topics that don't exist (and one that does).
     auto tp_a = model::topic_id_partition::from(tidp_a);
     auto tp_b = model::topic_id_partition::from(tidp_b);
     auto tp_c = model::topic_id_partition::from(tidp_c);
-    auto remove_topics_res = remove_topics_update::build(
-      s, {tp_a.topic_id, tp_b.topic_id, tp_c.topic_id});
-    ASSERT_TRUE(remove_topics_res.has_value());
-    ASSERT_TRUE(remove_topics_res->apply(s).has_value());
+    ASSERT_TRUE(
+      apply_remove_topics({tp_a.topic_id, tp_b.topic_id, tp_c.topic_id})
+        .has_value());
 
     // Should succeed gracefully despite having other topics.
-    EXPECT_EQ(0, s.topic_to_state.size());
-    EXPECT_EQ(1, s.objects.size());
+    {
+        auto& s = get_state();
+        EXPECT_EQ(0, s.topic_to_state.size());
+        EXPECT_EQ(1, s.objects.size());
 
-    // Object accounting should only reflect the removed topic A.
-    auto& obj = s.objects.at(oid1);
-    EXPECT_EQ(99, obj.total_data_size);
-    EXPECT_EQ(99, obj.removed_data_size);
+        // Object accounting should only reflect the removed topic A.
+        EXPECT_EQ(99, s.objects.at(oid1).total_data_size);
+        EXPECT_EQ(99, s.objects.at(oid1).removed_data_size);
+    }
 
     // Do the same with only non-existent topics. This is a no-op.
-    remove_topics_res = remove_topics_update::build(
-      s, {tp_b.topic_id, tp_c.topic_id});
-    ASSERT_TRUE(remove_topics_res.has_value());
-    ASSERT_TRUE(remove_topics_res->apply(s).has_value());
+    ASSERT_TRUE(
+      apply_remove_topics({tp_b.topic_id, tp_c.topic_id}).has_value());
+    auto& s = get_state();
     EXPECT_EQ(0, s.topic_to_state.size());
     EXPECT_EQ(1, s.objects.size());
 }

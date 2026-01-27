@@ -39,7 +39,10 @@ bool check_compatible(
   std::string_view reader,
   std::string_view writer) {
     ppstu::store_fixture store;
-    store.store().set_compatibility(pps::default_context, lvl).get();
+    auto dummy_marker = pps::seq_marker{};
+    store.store()
+      .set_compatibility(dummy_marker, pps::default_context, lvl)
+      .get();
     store.insert(
       pandaproxy::schema_registry::subject_schema{
         pps::subject{"sub"},
@@ -293,6 +296,7 @@ import "google/type/quaternion.proto";
 import "google/type/timeofday.proto";
 import "confluent/meta.proto";
 import "confluent/types/decimal.proto";
+import "buf/validate/validate.proto";
 
 message well_known_types {
   google.protobuf.Any any = 1;
@@ -342,6 +346,15 @@ message well_known_types {
   google.type.TimeOfDay time_of_day = 46;
   confluent.Meta c_meta = 47;
   confluent.type.Decimal c_decimal = 48;
+  buf.validate.FieldRules field_rules = 49;
+  buf.validate.StringRules string_rules = 50;
+  buf.validate.Int32Rules int32_rules = 51;
+  buf.validate.MessageRules message_rules = 52;
+  buf.validate.RepeatedRules repeated_rules = 53;
+  buf.validate.MapRules map_rules = 54;
+  buf.validate.AnyRules any_rules = 55;
+  buf.validate.DurationRules duration_rules = 56;
+  buf.validate.TimestampRules timestamp_rules = 57;
 })",
         pps::schema_type::protobuf}};
     store.insert(schema.share(), pps::schema_version{1});

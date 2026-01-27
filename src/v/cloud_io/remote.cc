@@ -170,7 +170,7 @@ int remote::delete_objects_max_keys() const {
         // https://learn.microsoft.com/en-us/rest/api/storageservices/blob-batch
         return 256;
     case model::cloud_storage_backend::google_s3_compat:
-        [[fallthrough]];
+        return 100;
     case model::cloud_storage_backend::unknown:
         return 1;
     }
@@ -1132,11 +1132,8 @@ ss::future<list_result> remote::list_objects(
             result = cloud_storage_clients::error_outcome::fail;
             break;
         case cloud_storage_clients::error_outcome::key_not_found:
-            vassert(
-              false,
-              "Unexpected key_not_found outcome received when listing bucket "
-              "{}",
-              bucket);
+            result = cloud_storage_clients::error_outcome::fail;
+            break;
         case cloud_storage_clients::error_outcome::authentication_failed:
             result = cloud_storage_clients::error_outcome::fail;
             break;
