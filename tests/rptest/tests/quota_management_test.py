@@ -16,11 +16,18 @@ from ducktape.mark import parametrize
 from ducktape.utils.util import wait_until
 
 from rptest.clients.kafka_cli_tools import KafkaCliTools, KafkaCliToolsError
+from rptest.services.redpanda_installer import (
+    wait_for_num_versions,
+    InstallOptions,
+    RedpandaVersionTriple,
+    RedpandaInstaller,
+)
+from rptest.tests.end_to_end import EndToEndTest
 from rptest.clients.kcl import RawKCL
 from rptest.clients.rpk import RpkException, RpkTool
 from rptest.services.admin import Admin
 from rptest.services.cluster import cluster
-from rptest.services.redpanda import LoggingConfig
+from rptest.services.redpanda import LoggingConfig, RESTART_LOG_ALLOW_LIST, SISettings
 from rptest.tests.redpanda_test import RedpandaTest
 from rptest.util import expect_exception
 
@@ -743,3 +750,81 @@ Quota configs for client-id 'custom-producer' are producer_byte_rate=20480.0"""
             retry_on_exc=True,
             err_msg="Describe did not succeed in time",
         )
+
+
+class QuotaManagementUpgradeTest(EndToEndTest):
+    """
+    Verify that user quota clients work as expected during an upgrade
+    """
+
+    def __init__(self, test_context):
+        super().__init__(test_context=test_context)
+
+    @cluster(num_nodes=2, log_allow_list=RESTART_LOG_ALLOW_LIST)
+    def test_upgrade(self):
+        install_opts = InstallOptions(version=RedpandaVersionTriple((25, 3, 1)))
+        self.start_redpanda(
+            num_nodes=2,
+            si_settings=SISettings(test_context=self.test_context),
+            install_opts=install_opts,
+        )
+
+        self.kcl = RawKCL(self.redpanda)
+
+        first_node = self.redpanda.nodes[0]
+        second_node = self.redpanda.nodes[1]
+
+        alter_user_quota_body = {
+            "Entries": [
+                {
+                    "Entity": [
+                        {
+                            "Type": "user",
+                        }
+                    ],
+                    "Ops": [
+                        {
+                            "Key": "producer_byte_rate",
+                            "Value": 10.0,
+                        }
+                    ],
+                }
+            ],
+        }
+
+        # Sanity check: v25.3 doesn't support user quotas
+        self.redpanda.logger.debug(
+            "Verify that user quotas are not supported in older version"
+        )
+        res = self.kcl.raw_alter_quotas(alter_user_quota_body)
+        assert len(res["Entries"]) == 1, f"Unexpected entries: {res}"
+        entry = res["Entries"][0]
+        assert entry["ErrorCode"] == 35, f"Unexpected entry: {entry}"
+        assert entry["ErrorMessage"] == "Entity type 'user' not yet supported", (
+            f"Unexpected entry: {entry}"
+        )
+
+        # Upgrade one node to the head version.
+        self.redpanda._installer.install(self.redpanda.nodes, RedpandaInstaller.HEAD)
+        self.redpanda.restart_nodes([first_node])
+        wait_for_num_versions(self.redpanda, 2)
+
+        self.redpanda.logger.debug(
+            "Verify that during upgrade user quotas are disabled"
+        )
+        res = self.kcl.raw_alter_quotas(alter_user_quota_body)
+        assert len(res["Entries"]) == 1, f"Unexpected entries: {res}"
+        entry = res["Entries"][0]
+        assert entry["ErrorCode"] == 35, f"Unexpected entry: {entry}"
+        assert (
+            entry["ErrorMessage"] == "user-based client quotas are not yet available"
+        ), f"Unexpected entry: {entry}"
+
+        self.redpanda.restart_nodes([second_node])
+        wait_for_num_versions(self.redpanda, 1)
+
+        self.redpanda.logger.debug("Verify that user quotas are now enabled")
+        res = self.kcl.raw_alter_quotas(alter_user_quota_body, node=second_node)
+        assert len(res["Entries"]) == 1, f"Unexpected entries: {res}"
+        entry = res["Entries"][0]
+        assert entry["ErrorCode"] == 0, f"Unexpected entry: {entry}"

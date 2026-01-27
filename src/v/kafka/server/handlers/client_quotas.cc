@@ -21,6 +21,7 @@
 #include "kafka/server/errors.h"
 #include "kafka/server/handlers/alter_client_quotas.h"
 #include "kafka/server/handlers/describe_client_quotas.h"
+#include "kafka/server/request_context.h"
 
 #include <seastar/core/sstring.hh>
 #include <seastar/util/variant_utils.hh>
@@ -325,6 +326,13 @@ bool valid_key_combination(const entity_key&, entity_value_diff::key) {
     // For now, all combinations we can parse are valid
     return true;
 }
+
+bool has_feature_user_quota(const request_context& ctx) {
+    constexpr auto feature = features::feature::user_based_client_quota;
+    const auto& ft = ctx.feature_table().local();
+    return ft.is_active(feature);
+}
+
 } // namespace
 
 template<>
@@ -480,6 +488,18 @@ ss::future<response_ptr> alter_client_quotas_handler::handle(
 
     for (const auto& [entry, entry_res] :
          boost::combine(request.data.entries, response.data.entries)) {
+        if (!has_feature_user_quota(ctx)) [[unlikely]] {
+            constexpr auto is_entity_type_user = [](const auto& e) {
+                return e.entity_type == "user";
+            };
+            if (std::ranges::any_of(entry.entity, is_entity_type_user)) {
+                entry_res.error_code = error_code::unsupported_version;
+                entry_res.error_message
+                  = "user-based client quotas are not yet available";
+                continue;
+            }
+        }
+
         auto key_or_err = make_key(entry.entity);
         if (key_or_err.has_error()) {
             std::tie(entry_res.error_code, entry_res.error_message)
