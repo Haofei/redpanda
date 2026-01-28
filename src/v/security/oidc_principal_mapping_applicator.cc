@@ -21,7 +21,7 @@
 
 namespace security::oidc {
 
-namespace {
+namespace detail {
 std::expected<chunked_vector<std::string_view>, errc>
 get_group_claim(const json::Pointer& p, const jwt& jwt) {
     if (auto list_claim = jwt.claim<chunked_vector<std::string_view>>(p);
@@ -63,7 +63,7 @@ apply_nested_group_policy(std::string_view user, nested_group_behavior b) {
     }
     }
 }
-} // namespace
+} // namespace detail
 
 result<acl_principal> principal_mapping_rule_apply(
   const principal_mapping_rule& mapping, const jwt& jwt) {
@@ -82,14 +82,14 @@ result<acl_principal> principal_mapping_rule_apply(
 
 std::expected<chunked_vector<acl_principal>, errc>
 group_policy_apply(const group_claim_policy& policy, const jwt& jwt) {
-    auto group_claim = get_group_claim(policy.group_pointer(), jwt);
+    auto group_claim = detail::get_group_claim(policy.group_pointer(), jwt);
     if (group_claim) {
         return chunked_vector<acl_principal>(
           std::from_range,
           std::views::transform(
             *group_claim,
             [behavior = policy.nested_behavior()](std::string_view g) {
-                return apply_nested_group_policy(g, behavior);
+                return detail::apply_nested_group_policy(g, behavior);
             }));
     }
 
