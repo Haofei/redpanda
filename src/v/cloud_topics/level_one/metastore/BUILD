@@ -130,6 +130,7 @@ redpanda_cc_library(
     ],
     visibility = ["//visibility:public"],
     deps = [
+        ":domain_uuid",
         ":offset_interval_set",
         ":state_update",
         "//src/v/cloud_topics/level_one/common:object_id",
