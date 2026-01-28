@@ -170,13 +170,23 @@ public:
         }
         auto reader = std::exchange(it->second->value, {});
         _map.erase(it);
+        vassert(
+          reader.use_count() == 1,
+          "expected only a single reference for {} when evicting, was: {}",
+          h,
+          reader.use_count());
         co_await reader->close();
     }
 
     ss::future<> close() {
-        for (auto& [_, entry] : _map) {
+        for (auto& [h, entry] : _map) {
             _cache.remove(*entry);
             auto reader = std::exchange(entry->value, {});
+            vassert(
+              reader.use_count() == 1,
+              "expected only a single reference for {} when closing, was: {}",
+              h,
+              reader.use_count());
             co_await reader->close();
         }
         _ghost_fifo.clear();
