@@ -97,6 +97,13 @@ public:
         /// to avoid stalling the pipeline.
         void signal_next_stage();
 
+        /// Enqueue a foreign (cross-shard proxied) write request directly to
+        /// the next stage without byte accounting. This is used for requests
+        /// that were accounted for on a different shard.
+        /// \param r Write request to enqueue (must have unassigned stage)
+        /// \param signal If true signal the next stage
+        void enqueue_foreign_request(write_request<Clock>& r, bool signal);
+
         /// Extract write requests out of the pipeline atomically.
         /// The caller is responsible for handling each write request.
         /// The request could be either returned using 'push_next_stage'

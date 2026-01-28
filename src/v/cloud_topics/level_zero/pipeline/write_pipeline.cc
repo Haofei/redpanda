@@ -270,6 +270,20 @@ void write_pipeline<Clock>::stage::signal_next_stage() {
 }
 
 template<class Clock>
+void write_pipeline<Clock>::stage::enqueue_foreign_request(
+  write_request<Clock>& req, bool signal) {
+    // Foreign requests are proxied from another shard where their bytes
+    // were already accounted for. We place them directly at the next stage
+    // without any byte accounting.
+    auto next = _parent->next_stage(_ps);
+    req.stage = next;
+    _parent->get_pending().push_back(req);
+    if (signal) {
+        _parent->signal(next);
+    }
+}
+
+template<class Clock>
 write_pipeline<Clock>::write_requests_list
 write_pipeline<Clock>::stage::pull_write_requests(
   size_t max_bytes, size_t max_requests) {
