@@ -21,6 +21,21 @@ redpanda_cc_library(
 )
 
 redpanda_cc_library(
+    name = "metastore_manifest",
+    hdrs = [
+        "metastore_manifest.h",
+    ],
+    visibility = ["//visibility:public"],
+    deps = [
+        ":domain_uuid",
+        "//src/v/base",
+        "//src/v/container:chunked_vector",
+        "//src/v/serde",
+        "@seastar",
+    ],
+)
+
+redpanda_cc_library(
     name = "garbage_collector",
     srcs = [
         "garbage_collector.cc",
