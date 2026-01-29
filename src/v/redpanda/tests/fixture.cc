@@ -397,7 +397,10 @@ void redpanda_thread_fixture::configure(
               .set_value(std::make_optional(s3_config->server_addr.host()));
             config.get("cloud_storage_url_style")
               .set_value(std::make_optional([&] {
-                  switch (s3_config->url_style) {
+                  if (!s3_config->url_style.has_value()) {
+                      return config::s3_url_style::virtual_host;
+                  }
+                  switch (*s3_config->url_style) {
                   case cloud_storage_clients::s3_url_style::virtual_host:
                       return config::s3_url_style::virtual_host;
                   case cloud_storage_clients::s3_url_style::path:
