@@ -69,7 +69,9 @@ public:
         obsolete,
     };
 
-    enum class remake_partition_state {
+    // unused. This is from a reverted piece of code, retained for serde
+    // compatibility
+    enum class deprecated_remake_partition_state {
         // Default state, no remake necessary.
         none,
         // A request has been made to remake the partition.
@@ -84,19 +86,16 @@ public:
         model::revision_id log_revision;
         hosted_status status;
         model::shard_revision_id shard_revision;
-        remake_partition_state remake_state{remake_partition_state::none};
 
         shard_local_state(
           raft::group_id g,
           model::revision_id lr,
           hosted_status s,
-          model::shard_revision_id sr,
-          remake_partition_state nr = remake_partition_state::none)
+          model::shard_revision_id sr)
           : group(g)
           , log_revision(lr)
           , status(s)
-          , shard_revision(sr)
-          , remake_state(nr) {}
+          , shard_revision(sr) {}
 
         shard_local_state(
           const shard_local_assignment& as, hosted_status status)
@@ -312,8 +311,6 @@ private:
 };
 
 std::ostream& operator<<(std::ostream&, shard_placement_table::hosted_status);
-std::ostream&
-operator<<(std::ostream&, shard_placement_table::remake_partition_state);
 
 /// Enum with all key types in the shard_placement key space. All keys in this
 /// key space must be prefixed with the serialized type. Enum type is
@@ -350,9 +347,6 @@ struct fmt::formatter<cluster::shard_placement_table::reconciliation_action>
             break;
         case create:
             result = "reconciliation_action::create";
-            break;
-        case remake:
-            result = "reconciliation_action::remake";
             break;
         }
         return formatter<std::string_view>::format(result, ctx);
