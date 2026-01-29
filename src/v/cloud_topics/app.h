@@ -38,6 +38,7 @@ class data_plane_api;
 class cloud_topics_manager;
 class level_zero_gc;
 class housekeeper_manager;
+class topic_manifest_upload_manager;
 
 namespace l1 {
 class topic_purger_manager;
@@ -95,6 +96,7 @@ private:
     ss::sharded<cloud_topics_manager> manager;
     ss::sharded<level_zero_gc> l0_gc;
     ss::sharded<housekeeper_manager> housekeeper_manager;
+    ss::sharded<topic_manifest_upload_manager> topic_manifest_upload_mgr;
     std::unique_ptr<l1::compaction_scheduler> compaction_scheduler;
 };
 

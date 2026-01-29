@@ -79,6 +79,7 @@ redpanda_cc_library(
     implementation_deps = [
         ":cluster_services_interface",
         ":data_plane_impl",
+        ":topic_manifest_upload_manager",
         "//src/v/cloud_topics/housekeeper:manager",
         "//src/v/cloud_topics/level_one/metastore:topic_purger",
         "//src/v/cloud_topics/level_zero/gc:level_zero_gc",
@@ -248,6 +249,30 @@ redpanda_cc_library(
         "//src/v/utils:detailed_error",
         "//src/v/utils:retry_chain_node",
         "@fmt",
+        "@seastar",
+    ],
+)
+
+redpanda_cc_library(
+    name = "topic_manifest_upload_manager",
+    srcs = [
+        "topic_manifest_upload_manager.cc",
+    ],
+    hdrs = [
+        "topic_manifest_upload_manager.h",
+    ],
+    implementation_deps = [
+        ":topic_manifest_uploader",
+        "//src/v/cloud_io:remote",
+        "//src/v/cloud_storage:topic_path_provider",
+        "//src/v/cluster",
+        "//src/v/utils:retry_chain_node",
+    ],
+    deps = [
+        ":logger",
+        "//src/v/container:chunked_hash_map",
+        "//src/v/model",
+        "//src/v/ssx:work_queue",
         "@seastar",
     ],
 )
