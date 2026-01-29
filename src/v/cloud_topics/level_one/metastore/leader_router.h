@@ -11,6 +11,7 @@
 #pragma once
 
 #include "base/seastarx.h"
+#include "cloud_storage/remote_label.h"
 #include "cloud_topics/level_one/metastore/rpc_service.h"
 #include "cloud_topics/level_one/metastore/rpc_types.h"
 #include "cluster/fwd.h"
@@ -107,6 +108,10 @@ public:
     std::optional<int> num_metastore_partitions() const;
 
     ss::future<bool> ensure_topic_exists();
+
+    // Indicates the location in object storage that this metastore's manifest
+    // will be stored.
+    std::optional<cloud_storage::remote_label> metastore_restore_label() const;
 
 private:
     using proto_t = cloud_topics::l1::rpc::impl::l1_rpc_client_protocol;

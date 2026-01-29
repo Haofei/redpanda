@@ -399,6 +399,20 @@ ss::future<> leader_router::stop() { return _gate.close(); }
 ss::future<bool> leader_router::ensure_topic_exists() {
     return _domain_supervisor->maybe_create_metastore_topic();
 }
+std::optional<cloud_storage::remote_label>
+leader_router::metastore_restore_label() const {
+    const auto md = _metadata->local().get_topic_metadata_ref(
+      model::l1_metastore_nt);
+    if (!md) {
+        return std::nullopt;
+    }
+    auto& props = md->get().get_configuration().properties;
+    if (!props.remote_label.has_value()) {
+        vlog(cd_log.error, "Expected metastore topic to have a remote label");
+        return std::nullopt;
+    }
+    return *props.remote_label;
+}
 
 std::optional<model::partition_id>
 leader_router::metastore_partition(const model::topic_id_partition& tp) const {

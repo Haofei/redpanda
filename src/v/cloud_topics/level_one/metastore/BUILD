@@ -105,6 +105,7 @@ redpanda_cc_library(
         ":generated_level_one_rpc",
         ":rpc_types",
         "//src/v/base",
+        "//src/v/cloud_storage:remote_label",
         "//src/v/cluster",
         "//src/v/model",
         "//src/v/rpc",
