@@ -52,6 +52,13 @@ service LevelZeroGcService {
             authz: SUPERUSER
         };
     }
+
+    // Query epoch state for one or more cloud topic partitions.
+    rpc GetEpochInfo(GetEpochInfoRequest) returns (GetEpochInfoResponse) {
+        option (pbgen.rpc) = {
+            authz: SUPERUSER
+        };
+    }
 }
 
 // Request to query GC worker status.
@@ -124,6 +131,16 @@ message AdvanceEpochRequest {
 
 // Response containing epoch state after a successful advance.
 message AdvanceEpochResponse {
+    EpochInfo epoch = 1;
+}
+
+// Request epoch info for a single partition.
+message GetEpochInfoRequest {
+    common.v1.TopicPartition partition = 1;
+}
+
+// Response with epoch info for the requested partition.
+message GetEpochInfoResponse {
     EpochInfo epoch = 1;
 }
 
