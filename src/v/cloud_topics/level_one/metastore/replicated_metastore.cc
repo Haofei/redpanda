@@ -301,6 +301,28 @@ replicated_metastore::get_offsets(const model::topic_id_partition& tidp) {
     co_return resp;
 }
 
+ss::future<std::expected<metastore::size_response, metastore::errc>>
+replicated_metastore::get_size(const model::topic_id_partition& tidp) {
+    rpc::get_size_request req;
+    req.tp = tidp;
+
+    auto reply_fut = co_await ss::coroutine::as_future(
+      fe_.get_size(std::move(req)));
+    if (reply_fut.failed()) {
+        auto ex = reply_fut.get_exception();
+        vlog(cd_log.warn, "Error while sending request: {}", ex);
+        co_return std::unexpected(metastore::errc::transport_error);
+    }
+    auto reply = reply_fut.get();
+    if (reply.ec != rpc::errc::ok) {
+        co_return std::unexpected(rpc_to_meta_errc(reply.ec));
+    }
+
+    metastore::size_response resp;
+    resp.size = reply.size;
+    co_return resp;
+}
+
 ss::future<std::expected<metastore::add_response, metastore::errc>>
 replicated_metastore::add_objects(
   const metastore::object_metadata_builder& builder,
