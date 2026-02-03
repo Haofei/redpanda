@@ -843,11 +843,14 @@ db_domain_manager::get_extent_metadata(rpc::get_extent_metadata_request req) {
     }
     if (!extents_result->has_value()) {
         co_return rpc::get_extent_metadata_reply{
-          .ec = rpc::errc::out_of_range,
+          .ec = rpc::errc::ok,
+          .extents = {},
+          .end_of_stream = true,
         };
     }
 
     chunked_vector<rpc::extent_metadata> extents;
+    bool end_of_stream = true;
     auto gen = (*extents_result)->get_rows();
     while (auto row_opt = co_await gen()) {
         const auto& row = row_opt->get();
@@ -866,6 +869,7 @@ db_domain_manager::get_extent_metadata(rpc::get_extent_metadata_request req) {
             .max_timestamp = extent.val.max_timestamp,
           });
         if (extents.size() >= req.max_num_extents) {
+            end_of_stream = false;
             break;
         }
     }
@@ -873,6 +877,7 @@ db_domain_manager::get_extent_metadata(rpc::get_extent_metadata_request req) {
     co_return rpc::get_extent_metadata_reply{
       .ec = rpc::errc::ok,
       .extents = std::move(extents),
+      .end_of_stream = end_of_stream,
     };
 }
 
