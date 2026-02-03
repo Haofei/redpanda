@@ -416,6 +416,26 @@ class LeadershipPinningTest(RedpandaTest):
     def wait_for_racks(
         self, partition_counts, topic2expected_racks, check_balance=True, timeout_sec=60
     ):
+        """
+        wait for leadership balance with rack placement.
+        balance is:
+        1. LEADER COUNT: all partitions in all topics have leaders
+
+        2. RACK PLACEMENT: leadership is on a favored rack
+
+        3. LOAD BALANCE (optional): checked when check_balance is true. once ntp leaders are on their preferred rack, check that it balances the number of leaders per node within the rack
+
+        Args:
+            partition_counts: Dict mapping topic names to expected partition counts
+                             e.g., {"foo": 60, "bar": 20}
+            topic2expected_racks: Dict mapping topic names to sets of expected rack IDs
+                                 e.g., {"foo": {"A"}, "bar": {"C"}}
+            check_balance: If True, also verify even distribution within racks
+            timeout_sec: Maximum time to wait for conditions to be met (default: 60)
+
+        Raises:
+            TimeoutError: If the conditions are not met within timeout_sec
+        """
         def predicate():
             t2n2l = self._get_topic2node2leaders()
 
