@@ -907,6 +907,24 @@ ss::future<> controller::set_ready() {
     return _raft_manager.invoke_on_all(&raft::group_manager::set_ready);
 }
 
+metrics_reporter::metrics_contributor_id
+controller::register_metrics_contributor(
+  metrics_reporter::metrics_contributor_fn fn) {
+    vassert(
+      ss::this_shard_id() == 0,
+      "Only shard 0 can register metrics contributors");
+    return _metrics_reporter.local().register_metrics_contributor(
+      std::move(fn));
+}
+
+void controller::unregister_metrics_contributor(
+  metrics_reporter::metrics_contributor_id id) {
+    vassert(
+      ss::this_shard_id() == 0,
+      "Only shard 0 can unregister metrics contributors");
+    _metrics_reporter.local().unregister_metrics_contributor(id);
+}
+
 ss::future<> controller::shutdown_input() {
     vlog(clusterlog.debug, "Shutting down controller inputs");
     if (_raft0) {

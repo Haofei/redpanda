@@ -205,6 +205,17 @@ public:
         return _cluster_link_frontend;
     }
 
+    /// Register a callback to contribute telemetry data during metrics
+    /// collection. This allows higher-layer subsystems to populate fields
+    /// in the metrics snapshot without creating build cycles.
+    /// Returns an ID that can be used to unregister the contributor.
+    metrics_reporter::metrics_contributor_id
+      register_metrics_contributor(metrics_reporter::metrics_contributor_fn);
+
+    /// Unregister a previously registered metrics contributor.
+    void
+      unregister_metrics_contributor(metrics_reporter::metrics_contributor_id);
+
     bool is_raft0_leader() const {
         vassert(
           ss::this_shard_id() == ss::shard_id(0),
