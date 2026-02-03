@@ -1220,6 +1220,14 @@ class SchemaRegistryRedpandaClient:
             **kwargs,
         )
 
+    def get_contexts(self, headers: Headers = HTTP_GET_HEADERS, **kwargs: Any):
+        return self.request("GET", "contexts", headers=headers, **kwargs)
+
+    def delete_context(
+        self, context: str, headers: Headers = HTTP_DELETE_HEADERS, **kwargs: Any
+    ):
+        return self.request("DELETE", f"contexts/{context}", headers=headers, **kwargs)
+
     def create_acl(
         self,
         principal,
@@ -3777,29 +3785,19 @@ class SchemaRegistryTestMethods(SchemaRegistryEndpoints):
         subjects are treated as if they are in the default context.
         """
 
-        # Register a schema in the default context first
-        result = self.sr_client.post_subjects_subject_versions(
-            subject="normal-subject", data=json.dumps({"schema": schema1_def})
-        )
-        self.assert_equal(result.status_code, requests.codes.ok)
-        self.assert_equal(result.json()["id"], 1)
-
-        # Register a DIFFERENT schema with qualified-looking subject name
-        # Flag OFF: Same context as above, so gets id=2 (shared counter)
-        # Flag ON: Would be in .ctx context with independent counter, gets id=1
-        # TODO: once implemented, we could make this test simpler by just using the `GET /contexts`
-        # API instead of using schema ID allocation behaviour to verify that these subjects land in
-        # different contexts.
+        # Register a schema with qualified-looking subject name
+        # Flag OFF: treated as literal subject name in default context
+        # Flag ON: would create a separate .ctx context
         qualified_subject = ":.ctx:my-subject"
         result = self.sr_client.post_subjects_subject_versions(
-            subject=qualified_subject, data=json.dumps({"schema": schema2_def})
+            subject=qualified_subject, data=json.dumps({"schema": schema1_def})
         )
         self.assert_equal(result.status_code, requests.codes.ok)
-        self.assert_equal(
-            result.json()["id"],
-            2,
-            "Expected id=2 proving shared counter with default context",
-        )
+
+        # Verify only the default context exists (no .ctx context was created)
+        result = self.sr_client.get_contexts()
+        self.assert_equal(result.status_code, requests.codes.ok)
+        self.assert_equal(result.json(), ["."])
 
 
 class SchemaRegistryModeNotMutableTest(SchemaRegistryEndpoints):
@@ -5416,23 +5414,11 @@ class SchemaRegistryContextTest(SchemaRegistryEndpoints):
         )
         self.assert_equal(result.status_code, requests.codes.ok)
 
-        # Verify CONTEXT record was written
-        # TODO: This test can be simplified with GET /contexts support later
-        # instead of relying on log lines.
-        write_pattern = f"Writing CONTEXT record for ctx={ctx}"
-        wait_until(
-            lambda: self.redpanda.search_log_any(write_pattern),
-            timeout_sec=10,
-            err_msg=f"Failed to find write log: {write_pattern}",
-        )
-
-        # Verify CONTEXT record was replayed (key contains "keytype: CONTEXT")
-        replay_pattern = f"keytype: CONTEXT.*context: {ctx}"
-        wait_until(
-            lambda: self.redpanda.search_log_any(replay_pattern),
-            timeout_sec=10,
-            err_msg=f"Failed to find replay log: {replay_pattern}",
-        )
+        # Verify context was persisted (CONTEXT record written and consumed)
+        result = self.sr_client.get_contexts()
+        self.assert_equal(result.status_code, requests.codes.ok)
+        self.assert_in(".", result.json())
+        self.assert_in(ctx, result.json())
 
     @cluster(num_nodes=1)
     def test_context_unqualified_references(self):
@@ -5517,6 +5503,66 @@ class SchemaRegistryContextTest(SchemaRegistryEndpoints):
             ),
         )
         self.assert_equal(result.status_code, 200)
+
+    @cluster(num_nodes=1)
+    def test_context_list_delete(self):
+        """Test GET /contexts and DELETE /contexts/{context} endpoints."""
+
+        # Initially, only the default context should be listed
+        result = self.sr_client.get_contexts()
+        self.assert_equal(result.status_code, requests.codes.ok)
+        self.assert_equal(result.json(), ["."])
+
+        # Register a schema in a custom context
+        ctx = ".test-ctx"
+        ctx_subject = f":{ctx}:test-sub"
+
+        result = self.sr_client.post_subjects_subject_versions(
+            subject=ctx_subject, data=json.dumps({"schema": schema1_def})
+        )
+        self.assert_equal(result.status_code, requests.codes.ok)
+
+        # Now both contexts should be listed
+        result = self.sr_client.get_contexts()
+        self.assert_equal(result.status_code, requests.codes.ok)
+        self.assert_in(".", result.json())
+        self.assert_in(ctx, result.json())
+
+        # Try to delete the custom context (should fail - not empty)
+        result = self.sr_client.delete_context(ctx)
+        self.assert_equal(result.status_code, 422)
+        self.assert_equal(result.json()["error_code"], 42211)
+
+        # Soft-delete the subject
+        result = self.sr_client.delete_subject(subject=ctx_subject)
+        self.assert_equal(result.status_code, requests.codes.ok)
+
+        # Try to delete context again (should still fail - has soft-deleted subjects)
+        result = self.sr_client.delete_context(ctx)
+        self.assert_equal(result.status_code, 422)
+        self.assert_equal(result.json()["error_code"], 42211)
+
+        # Permanently delete the subject
+        result = self.sr_client.delete_subject(subject=ctx_subject, permanent=True)
+        self.assert_equal(result.status_code, requests.codes.ok)
+
+        # Now delete the context (should succeed)
+        result = self.sr_client.delete_context(ctx)
+        self.assert_equal(result.status_code, 204)
+
+        # Only default context should remain
+        result = self.sr_client.get_contexts()
+        self.assert_equal(result.status_code, requests.codes.ok)
+        self.assert_equal(result.json(), ["."])
+
+        # Try to delete the default context (should fail with 422)
+        # Use URL-encoded dot (%2E) since "." has special meaning in URL paths
+        result = self.sr_client.delete_context("%2E")
+        self.assert_equal(result.status_code, 422)
+
+        # Try to delete a non-existent context (should fail with 404)
+        result = self.sr_client.delete_context(".nonexistent")
+        self.assert_equal(result.status_code, 404)
 
 
 class SchemaRegistryBasicAuthTest(SchemaRegistryEndpoints):
