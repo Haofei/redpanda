@@ -2,10 +2,10 @@
 name: claude-code-review
 on:
   pull_request:
-    types: [opened, synchronize, ready_for_review, reopened]
+    types: [opened, synchronize, ready_for_review, reopened, labeled]
 jobs:
   claude-review:
-    if: github.event.label.name == 'claude-review'
+    if: contains(github.event.pull_request.labels.*.name, 'claude-review')
     runs-on: ubuntu-24.04
     permissions:
       contents: read
