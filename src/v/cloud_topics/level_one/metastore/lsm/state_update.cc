@@ -296,7 +296,8 @@ get_metadata_for_update(
     if (!meta_res.value().has_value()) {
         co_return std::unexpected(db_update_error(
           invalid_update,
-          fmt::format("Partition {} not tracked during {}", tidp, context)));
+          fmt::format(
+            "Partition {} not tracked by state during {}", tidp, context)));
     }
 
     auto res = index.insert_or_assign(tidp, meta_res.value().value());
@@ -620,8 +621,6 @@ replace_objects_db_update::build_rows(
       extent_keys_to_delete;
     chunked_hash_map<model::topic_id_partition, kafka::offset>
       start_offsets_by_tp;
-    // Track size deltas per partition: positive for adds, negative for removes.
-    chunked_hash_map<model::topic_id_partition, size_t> removed_sizes_by_tp;
 
     /*
      * The `updated_metadata` map tracks metadata that needs to be updated. Use
@@ -632,17 +631,10 @@ replace_objects_db_update::build_rows(
       updated_metadata;
 
     for (const auto& [tidp, intervals] : contiguous_intervals_by_tp) {
-        auto meta_res = co_await state.get_metadata(tidp);
+        auto meta_res = co_await get_metadata_for_update(
+          state, updated_metadata, tidp, "contiguous interval processing");
         if (!meta_res.has_value()) {
-            co_return std::unexpected(wrap_read_err(
-              std::move(meta_res.error()),
-              "Error getting metadata for {}",
-              tidp));
-        }
-        if (!meta_res.value().has_value()) {
-            co_return std::unexpected(db_update_error(
-              invalid_update,
-              fmt::format("Partition {} not tracked by state", tidp)));
+            co_return std::unexpected(std::move(meta_res.error()));
         }
         start_offsets_by_tp[tidp] = meta_res.value()->start_offset;
         // Track removed sizes for this partition specifically.
@@ -659,13 +651,16 @@ replace_objects_db_update::build_rows(
         }
         // Accumulate total removed size for this partition, and then fold the
         // updates for this partition back into old_extent_sizes_by_oid which
-        // tracks per object instead of per partition.
-        size_t removed_for_tidp = 0;
+        // tracks per object instead of per partition. The total is then
+        // subtracted off of the metadata which will later be updated in the db.
+        ssize_t removed_for_tidp = 0;
         for (const auto& [oid, sz] : tidp_removed_sizes) {
             removed_for_tidp += sz;
             old_extent_sizes_by_oid[oid] += sz;
         }
-        removed_sizes_by_tp[tidp] = removed_for_tidp;
+        auto prev_size = static_cast<ssize_t>(meta_res.value()->size);
+        meta_res.value()->size = std::max(
+          ssize_t(0), prev_size - removed_for_tidp);
     }
 
     // Update existing object entries to indicate the removal of data from
@@ -724,7 +719,6 @@ replace_objects_db_update::build_rows(
 
     // Generate the rows.
     chunked_hash_set<ss::sstring> added_extent_keys;
-    chunked_hash_map<model::topic_id_partition, size_t> added_sizes_by_tp;
     for (const auto& [tidp, extents] : new_extents_by_tp) {
         auto start_it = start_offsets_by_tp.find(tidp);
         auto start_offset = start_it != start_offsets_by_tp.end()
@@ -754,7 +748,13 @@ replace_objects_db_update::build_rows(
                   }),
               });
         }
-        added_sizes_by_tp[tidp] = added_for_tidp;
+
+        auto meta_res = co_await get_metadata_for_update(
+          state, updated_metadata, tidp, "new extents");
+        if (!meta_res.has_value()) {
+            co_return std::unexpected(std::move(meta_res.error()));
+        }
+        meta_res.value()->size += added_for_tidp;
     }
     if (added_extent_keys.empty()) {
         // No extents, e.g. because all replacements are below the current
@@ -797,81 +797,7 @@ replace_objects_db_update::build_rows(
           });
     }
 
-    // helper to update size on meta row
-    auto apply_size_update = [&](const auto& tidp, auto& meta) {
-        size_t removed = 0;
-        if (auto removed_it = removed_sizes_by_tp.find(tidp);
-            removed_it != removed_sizes_by_tp.end()) {
-            removed = removed_it->second;
-        }
-
-        size_t added = 0;
-        if (auto added_it = added_sizes_by_tp.find(tidp);
-            added_it != added_sizes_by_tp.end()) {
-            added = added_it->second;
-        }
-
-        auto size_update = static_cast<ssize_t>(added)
-                           - static_cast<ssize_t>(removed);
-        if (size_update < 0) {
-            // clamp to 0 if we would underflow
-            auto new_size = static_cast<ssize_t>(meta.size) + size_update;
-            meta.size = static_cast<size_t>(std::max(ssize_t(0), new_size));
-        } else {
-            meta.size += size_update;
-        }
-    };
-
-    /*
-     * There are two sources of metadata row updates. The first are those
-     * in `updated_metadata` populated by compaction updates above. These just
-     * need to have their size updated as well.
-     *
-     * There are the partitions not in updated_metadata but which did have size
-     * updates, and for those we do a read-copy-update here.
-     */
     for (auto& [tidp, meta] : updated_metadata) {
-        apply_size_update(tidp, meta);
-        out.emplace_back(
-          write_batch_row{
-            .key = metadata_row_key::encode(tidp),
-            .value = serde::to_iobuf(meta),
-          });
-    }
-
-    // Collect tidp not in updated_metadata that needs size update.
-    chunked_hash_set<model::topic_id_partition> needs_size_update;
-    for (const auto& [tidp, _] : added_sizes_by_tp) {
-        if (updated_metadata.contains(tidp)) {
-            // we already updated size above
-            continue;
-        }
-        needs_size_update.emplace(tidp);
-    }
-
-    for (const auto& [tidp, _] : removed_sizes_by_tp) {
-        if (updated_metadata.contains(tidp)) {
-            // we already updated size above
-            continue;
-        }
-        needs_size_update.emplace(tidp);
-    }
-
-    for (const auto& tidp : needs_size_update) {
-        auto meta_res = co_await state.get_metadata(tidp);
-        if (!meta_res.has_value()) {
-            co_return std::unexpected(wrap_read_err(
-              std::move(meta_res.error()),
-              "Error getting metadata for {}",
-              tidp));
-        }
-        if (!meta_res.value().has_value()) {
-            co_return std::unexpected(db_update_error(
-              invalid_update,
-              fmt::format("Partition {} not tracked by state", tidp)));
-        }
-        auto meta = meta_res.value().value();
-        apply_size_update(tidp, meta);
         out.emplace_back(
           write_batch_row{
             .key = metadata_row_key::encode(tidp),
