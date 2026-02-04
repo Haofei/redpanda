@@ -1039,6 +1039,15 @@ ss::future<std::error_code> frontend::linearizable_barrier() {
     co_return r.error();
 }
 
+ss::future<std::expected<cloud_topics::cluster_epoch, frontend_errc>>
+frontend::get_current_epoch(ss::abort_source& as) noexcept {
+    auto new_epoch = co_await _data_plane->get_current_epoch(&as);
+    if (!new_epoch.has_value()) {
+        co_return std::unexpected{frontend_errc::timeout};
+    }
+    co_return new_epoch.value();
+}
+
 fmt::iterator
 frontend::coarse_grained_timequery_result::format_to(fmt::iterator it) const {
     return fmt::format_to(
