@@ -95,6 +95,10 @@ public:
         virtual size_t estimate_size_between(kafka::offset, kafka::offset) const
           = 0;
         virtual cluster::partition_probe& probe() = 0;
+
+        virtual size_t local_size_bytes() const = 0;
+        virtual std::optional<size_t> cloud_size_bytes() = 0;
+        virtual model::offset offset_lag() const = 0;
     };
 
     explicit partition_proxy(std::unique_ptr<impl> impl) noexcept
@@ -183,6 +187,12 @@ public:
       raft::replicate_options opts) {
         return _impl->replicate(bi, std::move(batch), opts);
     }
+
+    size_t local_size_bytes() const { return _impl->local_size_bytes(); }
+    std::optional<size_t> cloud_size_bytes() const {
+        return _impl->cloud_size_bytes();
+    }
+    model::offset offset_lag() const { return _impl->offset_lag(); }
 
 private:
     std::unique_ptr<impl> _impl;

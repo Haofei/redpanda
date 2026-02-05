@@ -226,4 +226,16 @@ size_t cloud_topic_partition::estimate_size_between(
     return _fe->estimate_size_between(base, last);
 }
 
+size_t cloud_topic_partition::local_size_bytes() const {
+    return _partition->size_bytes();
+}
+
+std::optional<size_t> cloud_topic_partition::cloud_size_bytes() {
+    return _partition->cloud_log_size();
+}
+
+model::offset cloud_topic_partition::offset_lag() const {
+    return _partition->high_watermark() - _partition->dirty_offset();
+}
+
 } // namespace kafka

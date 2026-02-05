@@ -753,4 +753,16 @@ size_t replicated_partition::estimate_size_between(
     return cloud_sz + local_sz;
 }
 
+size_t replicated_partition::local_size_bytes() const {
+    return _partition->size_bytes();
+}
+
+std::optional<size_t> replicated_partition::cloud_size_bytes() {
+    return _partition->cloud_log_size();
+}
+
+model::offset replicated_partition::offset_lag() const {
+    return _partition->high_watermark() - _partition->dirty_offset();
+}
+
 } // namespace kafka
