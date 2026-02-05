@@ -102,7 +102,7 @@ public:
     size_t estimate_size_between(kafka::offset, kafka::offset) const final;
 
     size_t local_size_bytes() const override;
-    std::optional<size_t> cloud_size_bytes() override;
+    ss::future<std::optional<size_t>> cloud_size_bytes() override;
     model::offset offset_lag() const override;
 
 private:

@@ -179,7 +179,7 @@ public:
     size_t local_size_bytes() const override {
         throw std::runtime_error("unimplemented");
     }
-    std::optional<size_t> cloud_size_bytes() override {
+    ss::future<std::optional<size_t>> cloud_size_bytes() override {
         throw std::runtime_error("unimplemented");
     }
     model::offset offset_lag() const override {

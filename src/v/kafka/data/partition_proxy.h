@@ -97,7 +97,7 @@ public:
         virtual cluster::partition_probe& probe() = 0;
 
         virtual size_t local_size_bytes() const = 0;
-        virtual std::optional<size_t> cloud_size_bytes() = 0;
+        virtual ss::future<std::optional<size_t>> cloud_size_bytes() = 0;
         virtual model::offset offset_lag() const = 0;
     };
 
@@ -189,7 +189,7 @@ public:
     }
 
     size_t local_size_bytes() const { return _impl->local_size_bytes(); }
-    std::optional<size_t> cloud_size_bytes() const {
+    ss::future<std::optional<size_t>> cloud_size_bytes() const {
         return _impl->cloud_size_bytes();
     }
     model::offset offset_lag() const { return _impl->offset_lag(); }
