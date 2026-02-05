@@ -20,6 +20,7 @@
 #include "model/tests/randoms.h"
 #include "test_utils/scoped_config.h"
 
+#include <seastar/core/manual_clock.hh>
 #include <seastar/core/scheduling.hh>
 #include <seastar/util/defer.hh>
 
@@ -75,7 +76,7 @@ public:
 protected:
     unreliable_io _io;
     unreliable_metastore _metastore;
-    reconciler::reconciler _reconciler;
+    reconciler::reconciler<ss::manual_clock> _reconciler;
 };
 
 using ::testing::Optional;

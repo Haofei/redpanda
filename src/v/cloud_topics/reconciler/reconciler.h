@@ -86,6 +86,7 @@ struct reconcile_error {
  * the L1 metastore. Finally, it updates the LRO, based on either
  * its own progress, or a corrected LRO returned from the metastore.
  */
+template<class Clock = ss::lowres_clock>
 class reconciler {
 public:
     reconciler(l1::io*, l1::metastore*, ss::scheduling_group);
@@ -270,7 +271,7 @@ private:
     ss::gate _gate;
     ss::abort_source _as;
     reconciler_probe _probe;
-    adaptive_interval _scheduler;
+    adaptive_interval<Clock> _scheduler;
     ss::scheduling_group _reconciler_sg;
 };
 

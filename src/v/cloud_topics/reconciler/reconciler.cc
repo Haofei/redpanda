@@ -28,6 +28,8 @@
 #include "ssx/future-util.h"
 #include "utils/retry_chain_node.h"
 
+#include <seastar/core/lowres_clock.hh>
+#include <seastar/core/manual_clock.hh>
 #include <seastar/core/shared_ptr.hh>
 #include <seastar/util/log.hh>
 
@@ -57,7 +59,8 @@ void log_error(
 
 } // namespace
 
-reconciler::reconciler(
+template<class Clock>
+reconciler<Clock>::reconciler(
   l1::io* l1_io, l1::metastore* metastore, ss::scheduling_group reconciler_sg)
   : _l1_io(l1_io)
   , _metastore(metastore)
@@ -74,7 +77,8 @@ reconciler::reconciler(
         .cloud_topics_reconciliation_max_object_size.bind())
   , _reconciler_sg(reconciler_sg) {}
 
-ss::future<> reconciler::start() {
+template<class Clock>
+ss::future<> reconciler<Clock>::start() {
     _probe.setup_metrics();
     ssx::spawn_with_gate(_gate, [this] {
         return ss::with_scheduling_group(
@@ -83,12 +87,14 @@ ss::future<> reconciler::start() {
     co_return;
 }
 
-ss::future<> reconciler::stop() {
+template<class Clock>
+ss::future<> reconciler<Clock>::stop() {
     _as.request_abort();
     co_await _gate.close();
 }
 
-void reconciler::attach_partition(
+template<class Clock>
+void reconciler<Clock>::attach_partition(
   const model::ntp& ntp,
   model::topic_id_partition tidp,
   data_plane_api* data_plane,
@@ -96,7 +102,8 @@ void reconciler::attach_partition(
     attach_source(make_source(ntp, tidp, data_plane, std::move(partition)));
 }
 
-void reconciler::attach_source(ss::shared_ptr<source> src) {
+template<class Clock>
+void reconciler<Clock>::attach_source(ss::shared_ptr<source> src) {
     if (_sources.contains(src->ntp())) {
         return;
     }
@@ -108,7 +115,8 @@ void reconciler::attach_source(ss::shared_ptr<source> src) {
     _sources.emplace(src->ntp(), src);
 }
 
-void reconciler::detach(const model::ntp& ntp) {
+template<class Clock>
+void reconciler<Clock>::detach(const model::ntp& ntp) {
     if (auto it = _sources.find(ntp); it != _sources.end()) {
         vlog(lg.debug, "Detaching partition {}", ntp);
         /*
@@ -121,7 +129,8 @@ void reconciler::detach(const model::ntp& ntp) {
     }
 }
 
-ss::future<> reconciler::reconciliation_loop() {
+template<class Clock>
+ss::future<> reconciler<Clock>::reconciliation_loop() {
     /*
      * Polling is not particularly efficient, and in practice, we'll probably
      * want to look into receiving upcalls from partitions announcing that new
@@ -131,10 +140,10 @@ ss::future<> reconciler::reconciliation_loop() {
 
     auto deferred = ss::defer(
       [] { vlog(lg.debug, "Reconciliation loop exiting"); });
-    ss::lowres_clock::duration next_wait = _scheduler.current_interval();
+    typename Clock::duration next_wait = _scheduler.current_interval();
     while (!_gate.is_closed()) {
         try {
-            co_await ss::sleep_abortable(next_wait, _as);
+            co_await ss::sleep_abortable<Clock>(next_wait, _as);
         } catch (const ss::sleep_aborted&) {
             // If the sleep was aborted, we can exit our loop
             co_return;
@@ -143,8 +152,9 @@ ss::future<> reconciler::reconciliation_loop() {
         if (config::shard_local_cfg()
               .cloud_topics_disable_reconciliation_loop()) {
             vlog(lg.debug, "Reconciliation loop disabled, skipping iteration");
-            next_wait = config::shard_local_cfg()
-                          .cloud_topics_reconciliation_max_interval.value();
+            next_wait = typename Clock::duration(
+              config::shard_local_cfg()
+                .cloud_topics_reconciliation_max_interval());
             continue;
         }
 
@@ -213,7 +223,8 @@ ss::future<> reconciler::reconciliation_loop() {
     }
 }
 
-ss::future<> reconciler::reconcile() {
+template<class Clock>
+ss::future<> reconciler<Clock>::reconcile() {
     _probe.increment_rounds();
 
     chunked_vector<ss::shared_ptr<source>> sources;
@@ -243,8 +254,9 @@ ss::future<> reconciler::reconcile() {
     _scheduler.adapt(max_bytes_produced);
 }
 
+template<class Clock>
 chunked_vector<chunked_vector<ss::shared_ptr<source>>>
-reconciler::partition_sources_into_sets(
+reconciler<Clock>::partition_sources_into_sets(
   chunked_vector<ss::shared_ptr<source>> sources) {
     chunked_hash_map<model::topic_id, chunked_vector<ss::shared_ptr<source>>>
       topic_id_to_sources;
@@ -266,7 +278,8 @@ reconciler::partition_sources_into_sets(
     return result;
 }
 
-ss::future<size_t> reconciler::reconcile_source_set(
+template<class Clock>
+ss::future<size_t> reconciler<Clock>::reconcile_source_set(
   chunked_vector<ss::shared_ptr<source>> sources) {
     if (sources.empty()) {
         co_return 0;
@@ -405,8 +418,11 @@ ss::future<size_t> reconciler::reconcile_source_set(
     co_return max_bytes_produced;
 }
 
-ss::future<std::expected<reconciler::built_object_metadata, reconcile_error>>
-reconciler::reconcile_sources(
+template<class Clock>
+ss::future<std::expected<
+  typename reconciler<Clock>::built_object_metadata,
+  reconcile_error>>
+reconciler<Clock>::reconcile_sources(
   const l1::object_id& oid,
   const chunked_vector<ss::shared_ptr<source>>& sources) {
     auto ctx_result = co_await make_context();
@@ -462,8 +478,11 @@ reconciler::reconcile_sources(
     co_return result;
 }
 
-ss::future<std::expected<reconciler::built_object_metadata, reconcile_error>>
-reconciler::build_and_put_object(
+template<class Clock>
+ss::future<std::expected<
+  typename reconciler<Clock>::built_object_metadata,
+  reconcile_error>>
+reconciler<Clock>::build_and_put_object(
   const l1::object_id& oid,
   builder_context& ctx,
   const chunked_vector<ss::shared_ptr<source>>& sources) {
@@ -496,8 +515,10 @@ reconciler::build_and_put_object(
     co_return obj_meta;
 }
 
-ss::future<std::expected<reconciler::builder_context, reconcile_error>>
-reconciler::make_context() {
+template<class Clock>
+ss::future<
+  std::expected<typename reconciler<Clock>::builder_context, reconcile_error>>
+reconciler<Clock>::make_context() {
     builder_context ctx;
 
     // Create staging file.
@@ -530,8 +551,11 @@ reconciler::make_context() {
     co_return ctx;
 }
 
-ss::future<std::expected<reconciler::built_object_metadata, reconcile_error>>
-reconciler::build_object(
+template<class Clock>
+ss::future<std::expected<
+  typename reconciler<Clock>::built_object_metadata,
+  reconcile_error>>
+reconciler<Clock>::build_object(
   builder_context& ctx, const chunked_vector<ss::shared_ptr<source>>& sources) {
     const auto max_size = ctx.size_budget;
 
@@ -590,8 +614,9 @@ reconciler::build_object(
     };
 }
 
+template<class Clock>
 ss::future<std::expected<void, reconcile_error>>
-reconciler::put_object(const l1::object_id& oid, builder_context& ctx) {
+reconciler<Clock>::put_object(const l1::object_id& oid, builder_context& ctx) {
     auto metrics_duration = _probe.measure_object_upload_duration();
     auto put_result = co_await _l1_io->put_object(oid, ctx.staging.get(), &_as);
     if (!put_result.has_value()) {
@@ -602,8 +627,9 @@ reconciler::put_object(const l1::object_id& oid, builder_context& ctx) {
     co_return std::expected<void, reconcile_error>{};
 }
 
+template<class Clock>
 ss::future<std::expected<std::optional<consumer_metadata>, reconcile_error>>
-reconciler::add_source_to_object(
+reconciler<Clock>::add_source_to_object(
   builder_context& ctx,
   ss::shared_ptr<source> src,
   kafka::offset start_offset) {
@@ -651,7 +677,8 @@ reconciler::add_source_to_object(
     co_return metadata.value();
 }
 
-std::expected<void, reconcile_error> reconciler::add_object_metadata(
+template<class Clock>
+std::expected<void, reconcile_error> reconciler<Clock>::add_object_metadata(
   const l1::object_id& oid,
   const built_object_metadata& obj_meta,
   l1::metastore::object_metadata_builder* meta_builder) {
@@ -707,7 +734,9 @@ std::expected<void, reconcile_error> reconciler::add_object_metadata(
     return {};
 }
 
-ss::future<std::expected<void, reconcile_error>> reconciler::commit_objects(
+template<class Clock>
+ss::future<std::expected<void, reconcile_error>>
+reconciler<Clock>::commit_objects(
   const chunked_vector<built_object_metadata>& objects,
   std::unique_ptr<l1::metastore::object_metadata_builder> meta_builder) {
     // It's possible to build the terms map as we build the objects, but
@@ -824,5 +853,9 @@ ss::future<std::expected<void, reconcile_error>> reconciler::commit_objects(
         })
       .value_or(std::expected<void, reconcile_error>{});
 }
+
+// Explicit template instantiations.
+template class reconciler<ss::lowres_clock>;
+template class reconciler<ss::manual_clock>;
 
 } // namespace cloud_topics::reconciler
