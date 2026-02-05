@@ -158,6 +158,7 @@ ss::future<std::error_code> partition_balancer_backend::request_rebalance() {
 
     vlog(clusterlog.info, "requesting on demand rebalance");
     _cur_term->_ondemand_rebalance_requested = true;
+    _cur_term->_force_health_report_refresh = true;
     maybe_rearm_timer(/*now=*/true);
     co_return errc::success;
 }
