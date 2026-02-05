@@ -662,6 +662,43 @@ ss::future<server::reply_t> get_schemas_ids_id(
     co_return rp;
 }
 
+ss::future<server::reply_t> get_schemas_ids_id_schema(
+  server::request_t rq,
+  server::reply_t rp,
+  std::optional<request_auth_result> auth_result) {
+    parse_accept_header(rq, rp);
+    auto id = parse::request_param<schema_id>(*rq.req, "id");
+    const auto format = parse_output_format(*rq.req);
+
+    co_await rq.service().writer().read_sync();
+
+    // Parse optional subject query parameter to extract context
+    auto subject_param = parse::query_param<std::optional<ss::sstring>>(
+                           *rq.req, "subject")
+                           .value_or("");
+
+    auto ctx_sub = context_subject::from_string(subject_param);
+
+    auto result = co_await resolve_schema_id(
+      rq.service().schema_store(), id, ctx_sub);
+
+    // Subject-based deferred authz (handles 403 vs 404)
+    enterprise::handle_get_schemas_ids_id_authz(
+      rq, auth_result, result.matched_subjects);
+
+    if (!result.found()) {
+        throw as_exception(not_found(id));
+    }
+
+    auto def = co_await rq.service().schema_store().get_schema_definition(
+      result.ctx_id, format);
+
+    auto [resp, type, refs, meta] = std::move(def).destructure();
+    log_response(*rq.req, resp);
+    rp.rep->write_body("json", ppj::as_body_writer(std::move(resp)()));
+    co_return rp;
+}
+
 ss::future<server::reply_t>
 get_schemas_ids_id_versions(server::request_t rq, server::reply_t rp) {
     parse_accept_header(rq, rp);
