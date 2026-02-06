@@ -686,6 +686,7 @@ struct stored_schema {
     stored_schema share() const {
         return {schema.share(), version, id, deleted};
     }
+    context_schema_id context_id() const { return {schema.sub().ctx, id}; }
 };
 
 ///\brief A mapping of version and schema id for a subject.
