@@ -1013,17 +1013,39 @@ class SchemaRegistryRedpandaClient:
             "GET", f"schemas/ids/{id}{query_string}", headers=headers, **kwargs
         )
 
-    def get_schemas_ids_id_versions(self, id, headers=HTTP_GET_HEADERS, **kwargs):
+    def get_schemas_ids_id_schema(
+        self, id, format=None, subject=None, headers=HTTP_GET_HEADERS, **kwargs
+    ):
+        params = []
+        if format is not None:
+            params.append(f"format={format}")
+        if subject is not None:
+            params.append(f"subject={subject}")
+        query_string = f"?{'&'.join(params)}" if params else ""
         return self.request(
-            "GET", f"schemas/ids/{id}/versions", headers=headers, **kwargs
+            "GET", f"schemas/ids/{id}/schema{query_string}", headers=headers, **kwargs
+        )
+
+    def get_schemas_ids_id_versions(
+        self, id, subject=None, headers=HTTP_GET_HEADERS, **kwargs
+    ):
+        query_string = f"?subject={subject}" if subject is not None else ""
+        return self.request(
+            "GET", f"schemas/ids/{id}/versions{query_string}", headers=headers, **kwargs
         )
 
     def get_schemas_ids_id_subjects(
-        self, id, deleted=False, headers=HTTP_GET_HEADERS, **kwargs
+        self, id, deleted=False, subject=None, headers=HTTP_GET_HEADERS, **kwargs
     ):
+        query_params = []
+        if deleted:
+            query_params.append("deleted=true")
+        if subject is not None:
+            query_params.append(f"subject={subject}")
+        query_string = f"?{'&'.join(query_params)}" if query_params else ""
         return self.request(
             "GET",
-            f"schemas/ids/{id}/subjects{'?deleted=true' if deleted else ''}",
+            f"schemas/ids/{id}/subjects{query_string}",
             headers=headers,
             **kwargs,
         )
@@ -5703,6 +5725,143 @@ class SchemaRegistryContextTest(SchemaRegistryEndpoints):
         # 6b. Schema ID exists only in ctx1, no subject param (looks in default only)
         # ctx1_only_id (ID 3) only exists in ctx1, not in default context (which only has IDs 1-2)
         result = self.sr_client.get_schemas_ids_id(id=ctx1_only_id)
+        self.assert_equal(result.status_code, requests.codes.not_found)
+
+    @cluster(num_nodes=1)
+    def test_get_schema_by_id_schema_endpoint(self):
+        """Test GET /schemas/ids/{id}/schema returns the same schema as GET /schemas/ids/{id}["schema"]."""
+
+        # Register a schema
+        result = self.sr_client.post_subjects_subject_versions(
+            subject="test-sub", data=json.dumps({"schema": schema1_def})
+        )
+        self.assert_equal(result.status_code, requests.codes.ok)
+        schema_id = result.json()["id"]
+
+        # Verify /schema endpoint returns raw schema matching the nested ["schema"] field
+        result_full = self.sr_client.get_schemas_ids_id(id=schema_id)
+        result_schema = self.sr_client.get_schemas_ids_id_schema(id=schema_id)
+
+        self.assert_equal(result_full.status_code, requests.codes.ok)
+        self.assert_equal(result_schema.status_code, requests.codes.ok)
+        self.assert_equal(
+            result_schema.json(), json.loads(result_full.json()["schema"])
+        )
+
+        # Test with subject parameter as well
+        result_full = self.sr_client.get_schemas_ids_id(
+            id=schema_id, subject="test-sub"
+        )
+        result_schema = self.sr_client.get_schemas_ids_id_schema(
+            id=schema_id, subject="test-sub"
+        )
+
+        self.assert_equal(result_full.status_code, requests.codes.ok)
+        self.assert_equal(result_schema.status_code, requests.codes.ok)
+        self.assert_equal(
+            result_schema.json(), json.loads(result_full.json()["schema"])
+        )
+
+        # Test error case - schema not found
+        result_schema = self.sr_client.get_schemas_ids_id_schema(id=99999)
+        self.assert_equal(result_schema.status_code, requests.codes.not_found)
+
+    @cluster(num_nodes=1)
+    def test_get_schema_versions_with_subject(self):
+        """Test GET /schemas/ids/{id}/versions with subject query parameter for context lookup.
+
+        Extended search (resolve_schema_id_extended) is already covered by
+        test_get_schema_by_id_with_subject; here we only verify the param
+        is wired up and the response format is correct.
+        """
+
+        # Register schema1 in default context under sub1 and sub2
+        result = self.sr_client.post_subjects_subject_versions(
+            subject="sub1", data=json.dumps({"schema": schema1_def})
+        )
+        self.assert_equal(result.status_code, requests.codes.ok)
+        default_schema1_id = result.json()["id"]
+
+        result = self.sr_client.post_subjects_subject_versions(
+            subject="sub2", data=json.dumps({"schema": schema1_def})
+        )
+        self.assert_equal(result.status_code, requests.codes.ok)
+
+        # Register schema1 in ctx1 context
+        result = self.sr_client.post_subjects_subject_versions(
+            subject=":.ctx1:sub1", data=json.dumps({"schema": schema1_def})
+        )
+        self.assert_equal(result.status_code, requests.codes.ok)
+        ctx1_schema1_id = result.json()["id"]
+
+        # Without subject param - returns versions from default context
+        result = self.sr_client.get_schemas_ids_id_versions(id=default_schema1_id)
+        self.assert_equal(result.status_code, requests.codes.ok)
+        versions = result.json()
+        self.assert_equal(len(versions), 2)
+        subject_versions = {(v["subject"], v["version"]) for v in versions}
+        self.assert_equal(subject_versions, {("sub1", 1), ("sub2", 1)})
+
+        # With context-only param ":.ctx1:" - returns versions from ctx1
+        result = self.sr_client.get_schemas_ids_id_versions(
+            id=ctx1_schema1_id, subject=":.ctx1:"
+        )
+        self.assert_equal(result.status_code, requests.codes.ok)
+        versions = result.json()
+        self.assert_equal(len(versions), 1)
+        self.assert_equal(versions[0]["subject"], ":.ctx1:sub1")
+        self.assert_equal(versions[0]["version"], 1)
+
+        # Error case - schema ID not found in specified context
+        result = self.sr_client.get_schemas_ids_id_versions(
+            id=ctx1_schema1_id, subject=":.nonexistent:"
+        )
+        self.assert_equal(result.status_code, requests.codes.not_found)
+
+    @cluster(num_nodes=1)
+    def test_get_schema_subjects_with_subject(self):
+        """Test GET /schemas/ids/{id}/subjects with subject query parameter for context lookup.
+
+        Extended search (resolve_schema_id_extended) is already covered by
+        test_get_schema_versions_with_subject; here we only verify the param
+        is wired up and the response format is correct.
+        """
+
+        # Register schema1 in default context under sub1 and sub2
+        result = self.sr_client.post_subjects_subject_versions(
+            subject="sub1", data=json.dumps({"schema": schema1_def})
+        )
+        self.assert_equal(result.status_code, requests.codes.ok)
+        default_schema1_id = result.json()["id"]
+
+        result = self.sr_client.post_subjects_subject_versions(
+            subject="sub2", data=json.dumps({"schema": schema1_def})
+        )
+        self.assert_equal(result.status_code, requests.codes.ok)
+
+        # Register schema1 in ctx1 context
+        result = self.sr_client.post_subjects_subject_versions(
+            subject=":.ctx1:sub1", data=json.dumps({"schema": schema1_def})
+        )
+        self.assert_equal(result.status_code, requests.codes.ok)
+        ctx1_schema1_id = result.json()["id"]
+
+        # Without subject param - returns subjects from default context
+        result = self.sr_client.get_schemas_ids_id_subjects(id=default_schema1_id)
+        self.assert_equal(result.status_code, requests.codes.ok)
+        self.assert_equal(set(result.json()), {"sub1", "sub2"})
+
+        # With context-only param ":.ctx1:" - returns subjects from ctx1
+        result = self.sr_client.get_schemas_ids_id_subjects(
+            id=ctx1_schema1_id, subject=":.ctx1:"
+        )
+        self.assert_equal(result.status_code, requests.codes.ok)
+        self.assert_equal(result.json(), [":.ctx1:sub1"])
+
+        # Error case - schema ID not found in specified context
+        result = self.sr_client.get_schemas_ids_id_subjects(
+            id=ctx1_schema1_id, subject=":.nonexistent:"
+        )
         self.assert_equal(result.status_code, requests.codes.not_found)
 
 

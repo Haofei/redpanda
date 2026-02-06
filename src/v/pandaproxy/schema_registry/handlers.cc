@@ -662,6 +662,43 @@ ss::future<server::reply_t> get_schemas_ids_id(
     co_return rp;
 }
 
+ss::future<server::reply_t> get_schemas_ids_id_schema(
+  server::request_t rq,
+  server::reply_t rp,
+  std::optional<request_auth_result> auth_result) {
+    parse_accept_header(rq, rp);
+    auto id = parse::request_param<schema_id>(*rq.req, "id");
+    const auto format = parse_output_format(*rq.req);
+
+    co_await rq.service().writer().read_sync();
+
+    // Parse optional subject query parameter to extract context
+    auto subject_param = parse::query_param<std::optional<ss::sstring>>(
+                           *rq.req, "subject")
+                           .value_or("");
+
+    auto ctx_sub = context_subject::from_string(subject_param);
+
+    auto result = co_await resolve_schema_id(
+      rq.service().schema_store(), id, ctx_sub);
+
+    // Subject-based deferred authz (handles 403 vs 404)
+    enterprise::handle_get_schemas_ids_id_authz(
+      rq, auth_result, result.matched_subjects);
+
+    if (!result.found()) {
+        throw as_exception(not_found(id));
+    }
+
+    auto def = co_await rq.service().schema_store().get_schema_definition(
+      result.ctx_id, format);
+
+    auto [resp, type, refs, meta] = std::move(def).destructure();
+    log_response(*rq.req, resp);
+    rp.rep->write_body("json", ppj::as_body_writer(std::move(resp)()));
+    co_return rp;
+}
+
 ss::future<server::reply_t>
 get_schemas_ids_id_versions(server::request_t rq, server::reply_t rp) {
     parse_accept_header(rq, rp);
@@ -670,11 +707,22 @@ get_schemas_ids_id_versions(server::request_t rq, server::reply_t rp) {
     // List-type request: must ensure we see latest writes
     co_await rq.service().writer().read_sync();
 
-    // Force early 40403 if the schema id isn't found
-    co_await rq.service().schema_store().get_schema_definition(id);
+    // Parse optional subject query parameter to extract context
+    auto subject_param = parse::query_param<std::optional<ss::sstring>>(
+                           *rq.req, "subject")
+                           .value_or("");
+
+    auto ctx_sub = context_subject::from_string(subject_param);
+
+    auto result = co_await resolve_schema_id(
+      rq.service().schema_store(), id, ctx_sub);
+
+    if (!result.found()) {
+        throw as_exception(not_found(id));
+    }
 
     auto svs = co_await rq.service().schema_store().get_schema_subject_versions(
-      id);
+      result.ctx_id);
 
     auto resp = ppj::rjson_serialize_iobuf(
       get_schemas_ids_id_versions_response{.subject_versions{std::move(svs)}});
@@ -694,11 +742,23 @@ ss::future<ctx_server<service>::reply_t> get_schemas_ids_id_subjects(
     // List-type request: must ensure we see latest writes
     co_await rq.service().writer().read_sync();
 
-    // Force early 40403 if the schema id isn't found
-    co_await rq.service().schema_store().get_schema_definition(id);
+    // Parse optional subject query parameter to extract context
+    auto subject_param = parse::query_param<std::optional<ss::sstring>>(
+                           *rq.req, "subject")
+                           .value_or("");
+
+    auto ctx_sub = context_subject::from_string(subject_param);
+
+    auto result = co_await resolve_schema_id(
+      rq.service().schema_store(), id, ctx_sub);
+
+    if (!result.found()) {
+        throw as_exception(not_found(id));
+    }
 
     auto ctx_subjects
-      = co_await rq.service().schema_store().get_schema_subjects(id, incl_del);
+      = co_await rq.service().schema_store().get_schema_subjects(
+        result.ctx_id, incl_del);
 
     // Convert context_subject to qualified string format for JSON response
     auto subjects_str = std::move(ctx_subjects) | std::views::as_rvalue
