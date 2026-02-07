@@ -289,12 +289,17 @@ ss::future<client_pool::client_lease> client_pool::acquire(
                 };
                 // Use 2-random approach. Pick 2 random shards
                 auto [sid1, sid2] = pick_two_random_shards();
-                auto cnt1 = co_await container().invoke_on(
-                  sid1, clients_in_use);
-                // sid1 == sid2 if we have only two shards
-                auto cnt2 = sid1 == sid2 ? cnt1
-                                         : co_await container().invoke_on(
-                                             sid2, clients_in_use);
+                size_t cnt1 = _capacity;
+                size_t cnt2 = _capacity;
+                try {
+                    cnt1 = co_await container().invoke_on(sid1, clients_in_use);
+                    cnt2 = sid1 == sid2 ? cnt1
+                                        : co_await container().invoke_on(
+                                            sid2, clients_in_use);
+                } catch (const ss::broken_named_semaphore&) {
+                    // Remote shard is shutting down, treat as fully
+                    // utilized so we skip borrowing.
+                }
                 auto [sid, cnt] = cnt1 < cnt2 ? std::tie(sid1, cnt1)
                                               : std::tie(sid2, cnt2);
                 vlog(
