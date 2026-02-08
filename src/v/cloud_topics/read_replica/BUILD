@@ -87,6 +87,39 @@ redpanda_cc_library(
 )
 
 redpanda_cc_library(
+    name = "state_refresh_loop",
+    srcs = [
+        "state_refresh_loop.cc",
+    ],
+    hdrs = [
+        "state_refresh_loop.h",
+    ],
+    implementation_deps = [
+        ":snapshot_metastore",
+        "//src/v/bytes:iobuf",
+        "//src/v/cloud_topics:logger",
+        "//src/v/cloud_topics/level_one/metastore:manifest_io",
+        "//src/v/cloud_topics/level_one/metastore:metastore_manifest",
+        "//src/v/config",
+        "//src/v/hashing:murmur",
+        "//src/v/model",
+        "//src/v/model:batch_builder",
+        "//src/v/serde",
+        "//src/v/ssx:sleep_abortable",
+    ],
+    visibility = ["//visibility:public"],
+    deps = [
+        ":snapshot_manager",
+        ":stm",
+        "//src/v/cloud_storage:remote_label",
+        "//src/v/cloud_storage_clients",
+        "//src/v/utils:detailed_error",
+        "//src/v/utils:prefix_logger",
+        "@seastar",
+    ],
+)
+
+redpanda_cc_library(
     name = "stm",
     srcs = [
         "stm.cc",
