@@ -16,6 +16,56 @@ redpanda_cc_library(
 )
 
 redpanda_cc_library(
+    name = "snapshot_provider",
+    hdrs = [
+        "snapshot_provider.h",
+    ],
+    visibility = ["//visibility:public"],
+    deps = [
+        "//src/v/cloud_topics/level_one/metastore:domain_uuid",
+        "//src/v/lsm",
+        "//src/v/model",
+        "//src/v/utils:detailed_error",
+        "@seastar",
+    ],
+)
+
+redpanda_cc_library(
+    name = "snapshot_manager",
+    srcs = [
+        "snapshot_manager.cc",
+    ],
+    hdrs = [
+        "snapshot_manager.h",
+    ],
+    implementation_deps = [
+        ":snapshot_metastore",
+        "//src/v/base",
+        "//src/v/cloud_io:remote",
+        "//src/v/cloud_topics:logger",
+        "//src/v/cloud_topics/level_one/common:file_io",
+        "//src/v/cloud_topics/level_one/metastore:manifest_io",
+        "//src/v/config",
+        "//src/v/lsm/io:cloud_persistence",
+        "//src/v/ssx:future_util",
+        "//src/v/ssx:sleep_abortable",
+    ],
+    visibility = ["//visibility:public"],
+    deps = [
+        ":snapshot_provider",
+        "//src/v/cloud_storage_clients",
+        "//src/v/cloud_topics/level_one/metastore:domain_uuid",
+        "//src/v/container:chunked_hash_map",
+        "//src/v/lsm",
+        "//src/v/model",
+        "//src/v/ssx:semaphore",
+        "//src/v/utils:detailed_error",
+        "//src/v/utils:prefix_logger",
+        "@seastar",
+    ],
+)
+
+redpanda_cc_library(
     name = "snapshot_metastore",
     srcs = [
         "snapshot_metastore.cc",
