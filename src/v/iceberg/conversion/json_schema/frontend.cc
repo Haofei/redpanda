@@ -300,7 +300,6 @@ constexpr auto banned_keywords = std::to_array({
   "else",
   "allOf",
   "anyOf",
-  "oneOf",
 });
 
 }; // namespace
@@ -526,6 +525,12 @@ public:
         }
 
         if (
+          const auto one_of_node = find_keyword(
+            node, "oneOf", {json_value_type::array})) {
+            compile_one_of(ctx, *sub, *one_of_node);
+        }
+
+        if (
           const auto format_node = find_keyword(
             node, "format", {json_value_type::string})) {
             if (unlikely(ctx.dialect() != dialect::draft7)) {
@@ -656,6 +661,33 @@ public:
             throw std::runtime_error(
               "The items keyword must be an object or an array of objects");
         }
+    }
+
+    void compile_one_of(
+      compile_context& ctx, subschema& sub, const json::Value& node) const {
+        vassert(
+          sub.one_of_.empty(),
+          "oneOf subschema vector should be empty at this point");
+
+        if (!node.IsArray() || node.GetArray().Empty()) {
+            throw std::runtime_error(
+              "The oneOf keyword must be a non-empty array");
+        }
+
+        std::vector<ss::shared_ptr<subschema>> one_of_subschemas;
+        one_of_subschemas.reserve(node.GetArray().Size());
+        for (const auto& item : node.GetArray()) {
+            one_of_subschemas.push_back(compile_subschema(ctx, item));
+        }
+
+        for (size_t i = 0; i < one_of_subschemas.size(); ++i) {
+            auto& one_of_subschema = one_of_subschemas[i];
+            auto [it, inserted] = sub.subschemas_.emplace(
+              fmt::format("oneOf/{}", i), one_of_subschema);
+            vassert(inserted, "unique insertion should have succeeded");
+        }
+
+        sub.one_of_ = std::move(one_of_subschemas);
     }
 };
 
