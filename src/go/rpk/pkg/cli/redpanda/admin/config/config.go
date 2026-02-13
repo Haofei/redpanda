@@ -9,11 +9,13 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"os"
 	"os/exec"
 	"path/filepath"
 	"runtime"
 	"sort"
 	"strings"
+	"sync"
 
 	"github.com/redpanda-data/common-go/rpadmin"
 	"github.com/redpanda-data/redpanda/src/go/rpk/pkg/adminapi"
@@ -23,6 +25,7 @@ import (
 	"github.com/spf13/afero"
 	"github.com/spf13/cobra"
 	"go.uber.org/zap"
+	"golang.org/x/sync/errgroup"
 )
 
 // NewCommand returns the config admin command.
@@ -153,23 +156,41 @@ You can use --help-loggers to display available loggers:
 				}
 			}
 
-			type failure struct {
+			type result struct {
 				logger string
 				err    error
 			}
-			var failures []failure
-			var successes []string
+			g, ctx := errgroup.WithContext(cmd.Context())
+			g.SetLimit(20)
 
+			var (
+				mu      sync.Mutex
+				results []result
+			)
 			for _, logger := range loggers {
-				err := cl.SetLogLevel(cmd.Context(), logger, level, expirySeconds)
-				if err != nil {
-					failures = append(failures, failure{logger, err})
+				g.Go(func() error {
+					err := cl.SetLogLevel(ctx, logger, level, expirySeconds)
+					mu.Lock()
+					results = append(results, result{logger, err})
+					mu.Unlock()
+					return nil
+				})
+			}
+			g.Wait()
+
+			var (
+				failures  []result
+				successes []string
+			)
+			for _, r := range results {
+				if r.err != nil {
+					failures = append(failures, r)
 				} else {
-					successes = append(successes, logger)
+					successes = append(successes, r.logger)
 				}
 			}
-
 			if len(successes) > 0 {
+				sort.Strings(successes)
 				tw := out.NewTable("SUCCESS")
 				for _, success := range successes {
 					tw.Print(success)
@@ -177,12 +198,16 @@ You can use --help-loggers to display available loggers:
 				tw.Flush()
 			}
 			if len(failures) > 0 {
-				fmt.Println()
+				sort.Slice(failures, func(i, j int) bool { return failures[i].logger < failures[j].logger })
+				if len(successes) > 0 {
+					fmt.Println()
+				}
 				tw := out.NewTable("FAILURE", "ERROR")
 				for _, f := range failures {
 					tw.Print(f.logger, f.err)
 				}
 				tw.Flush()
+				os.Exit(1)
 			}
 		},
 	}

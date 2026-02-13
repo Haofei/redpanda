@@ -13,6 +13,7 @@ go_library(
         "@com_github_redpanda_data_common_go_rpadmin//:rpadmin",
         "@com_github_spf13_afero//:afero",
         "@com_github_spf13_cobra//:cobra",
+        "@org_golang_x_sync//errgroup",
         "@org_uber_go_zap//:zap",
     ],
 )
