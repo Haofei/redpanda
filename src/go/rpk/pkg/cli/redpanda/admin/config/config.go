@@ -169,18 +169,19 @@ You can use --help-loggers to display available loggers:
 			}
 
 			if len(successes) > 0 {
-				fmt.Println("SUCCESSES")
+				tw := out.NewTable("SUCCESS")
 				for _, success := range successes {
-					fmt.Println(success)
+					tw.Print(success)
 				}
-				fmt.Println()
+				tw.Flush()
 			}
 			if len(failures) > 0 {
-				fmt.Println("FAILURES")
-				for _, failure := range failures {
-					fmt.Printf("%s: %v\n", failure.logger, failure.err)
-				}
 				fmt.Println()
+				tw := out.NewTable("FAILURE", "ERROR")
+				for _, f := range failures {
+					tw.Print(f.logger, f.err)
+				}
+				tw.Flush()
 			}
 		},
 	}
