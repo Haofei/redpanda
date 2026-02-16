@@ -27,6 +27,7 @@
 
 #include <seastar/core/sleep.hh>
 #include <seastar/coroutine/as_future.hh>
+#include <seastar/coroutine/switch_to.hh>
 
 #include <chrono>
 #include <exception>
@@ -349,6 +350,7 @@ ss::future<> impl::do_flush() {
     if (!_imm) {
         co_return;
     }
+    co_await ss::coroutine::switch_to(_opts->compaction_scheduling_group);
     auto edit = co_await run_flush_task(
       _opts, _persistence.data.get(), _versions.get(), *_imm, &_as);
     if (!edit) {
@@ -370,6 +372,7 @@ ss::future<> impl::do_compaction() {
     if (!compact) {
         co_return;
     }
+    co_await ss::coroutine::switch_to(_opts->compaction_scheduling_group);
     auto edit = co_await run_compaction_task(
       _persistence.data.get(),
       &_snapshots,
