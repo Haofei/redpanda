@@ -6683,6 +6683,71 @@ class SchemaRegistryContextTest(SchemaRegistryEndpoints):
         # The returned schema should be schema1_def (from .ctx1), NOT schema2_def
         self.assert_equal(result.json()["schema"], schema1_def)
 
+    @cluster(num_nodes=1)
+    def test_context_reference_detection_blocks_deletion(self):
+        """
+        Regression test for context-aware reference detection.
+
+        Schema references within a non-default context should be correctly
+        detected by both the referenced_by API and deletion prevention logic.
+        """
+        ctx = "reftest"
+        base_subject = f":.{ctx}:base"
+        dependent_subject = f":.{ctx}:dependent"
+
+        # Register base schema in context
+        base_data = json.dumps({"schema": simple_proto_def, "schemaType": "PROTOBUF"})
+        result = self.sr_client.post_subjects_subject_versions(
+            subject=base_subject, data=base_data
+        )
+        self.assert_equal(result.status_code, requests.codes.ok)
+
+        # Register dependent schema that references base
+        dependent_data = json.dumps(
+            {
+                "schema": imported_proto_def,
+                "schemaType": "PROTOBUF",
+                "references": [
+                    {"name": "simple", "subject": base_subject, "version": 1}
+                ],
+            }
+        )
+        result = self.sr_client.post_subjects_subject_versions(
+            subject=dependent_subject, data=dependent_data
+        )
+        self.assert_equal(result.status_code, requests.codes.ok)
+        dependent_id = result.json()["id"]
+
+        # Part A: referenced_by API should return the dependent schema's ID
+        result = self.sr_client.get_subjects_subject_versions_version_referenced_by(
+            subject=base_subject, version=1
+        )
+        self.assert_equal(result.status_code, requests.codes.ok)
+        referenced_by = result.json()
+        self.assert_equal(
+            len(referenced_by),
+            1,
+            f"Expected 1 reference, got {len(referenced_by)}",
+        )
+        self.assert_equal(referenced_by[0], dependent_id)
+
+        # Part B: Deletion of base should be blocked (schema is referenced)
+        result = self.sr_client.delete_subject(subject=base_subject)
+        self.assert_equal(
+            result.status_code,
+            requests.codes.unprocessable_entity,
+            "Expected deletion to be blocked due to reference",
+        )
+        self.assert_equal(result.json()["error_code"], 42206)
+
+        # Part C: Delete dependent first, then base should succeed
+        result = self.sr_client.delete_subject(subject=dependent_subject)
+        self.assert_equal(result.status_code, requests.codes.ok)
+
+        # Now base can be deleted
+        result = self.sr_client.delete_subject(subject=base_subject)
+        self.assert_equal(result.status_code, requests.codes.ok)
+
 
 class SchemaRegistryBasicAuthTest(SchemaRegistryEndpoints):
     """
