@@ -152,7 +152,9 @@ ss::future<lookup_result> impl::get(internal::key_view key) {
             co_return result;
         }
     }
-    // Lookup in the files
+    // Lookup in the files - it's important that we hold a ref to this version
+    // here so that the version is kept alive and GC doesn't concurrently delete
+    // our file.
     auto current = _versions->current();
     version::get_stats stats{};
     auto result = co_await current->get(key, &stats);
@@ -206,7 +208,8 @@ impl::create_internal_iterator() {
     if (_imm) {
         list.push_back((*_imm)->create_iterator());
     }
-    co_await _versions->current()->add_iterators(&list);
+    auto current = _versions->current();
+    co_await current->add_iterators(&list);
     co_return internal::create_merging_iterator(std::move(list));
 }
 

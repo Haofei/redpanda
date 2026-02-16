@@ -35,7 +35,7 @@ using internal::operator""_level;
 
 // An internal iterator. For a given version/level pair, yields information
 // about the files in the level. For a given entry, key() is the largest key
-// that occurs in teh file, and value()  is an 16-byte value containing the file
+// that occurs in the file, and value()  is an 16-byte value containing the file
 // number and file size, both encoded using 64bit fixed encoding.
 //
 // NOTE: It's up to the user of this class to ensure the files pointer is kept
@@ -109,6 +109,49 @@ private:
     chunked_vector<ss::lw_shared_ptr<file_meta_data>>* _files;
     uint32_t _index;
     iobuf _value_buf;
+};
+
+// An iterator that keeps a `version` pointer reference alive.
+//
+// This is needed because we use versions that are still alive as
+// knowledge of whether a version is safe to GC. Some cases, like L0 iteration,
+// can use file iterators directly, so in those cases we need some kind of
+// reference to keep L0 files alive.
+class version_lifetime_iterator : public internal::iterator {
+public:
+    explicit version_lifetime_iterator(ss::lw_shared_ptr<version> version)
+      : _version(std::move(version)) {}
+
+    bool valid() const override { return false; }
+
+    ss::future<> seek_to_first() override { return ss::now(); }
+
+    ss::future<> seek_to_last() override { return ss::now(); }
+
+    ss::future<> seek(internal::key_view) override { return ss::now(); }
+
+    ss::future<> next() override {
+        throw invalid_argument_exception(
+          "next() called on version lifetime iterator");
+    }
+
+    ss::future<> prev() override {
+        throw invalid_argument_exception(
+          "prev() called on version lifetime iterator");
+    }
+
+    internal::key_view key() override {
+        throw invalid_argument_exception(
+          "key() called on version lifetime iterator");
+    }
+
+    iobuf value() override {
+        throw invalid_argument_exception(
+          "value() called on version lifetime iterator");
+    }
+
+private:
+    ss::lw_shared_ptr<version> _version;
 };
 
 } // namespace
@@ -234,11 +277,20 @@ ss::future<> version::add_iterators(
     // For levels > 0, we can use a concatenating iterator that sequentially
     // walks through the non-overlapping files in the level, opening them
     // lazily.
+    int non_empty_levels = 0;
     for (const auto& level : std::span(_vset->_options->levels).subspan(1)) {
         if (_files[level.number].empty()) {
             continue;
         }
+        ++non_empty_levels;
         iters->push_back(create_concatenating_iterator(level.number));
+    }
+    // If there are no files outside of L0, we need to keep a reference to
+    // this version to prevent GC from running and assuming there are no files
+    // being used in this version anymore.
+    if (non_empty_levels == 0) {
+        iters->push_back(
+          std::make_unique<version_lifetime_iterator>(shared_from_this()));
     }
 }
 
@@ -806,6 +858,9 @@ version_set::make_input_iterator(compaction* c) {
         }
         if (&inputs == &c->_inputs.front() && c->level() == 0_level) {
             for (auto& file : inputs) {
+                // NOTE: in version::add_iterators we have to ensure that L0
+                // only iterators keep a ref to their version, in this case we
+                // rely on compaction for that.
                 list.push_back(
                   co_await _table_cache->create_iterator(
                     file->handle, file->file_size));
