@@ -12,10 +12,12 @@
 #include "lsm/db/version_set.h"
 
 #include "absl/container/btree_set.h"
+#include "base/vlog.h"
 #include "container/chunked_vector.h"
 #include "lsm/core/exceptions.h"
 #include "lsm/core/internal/files.h"
 #include "lsm/core/internal/keys.h"
+#include "lsm/core/internal/logger.h"
 #include "lsm/core/internal/merging_iterator.h"
 #include "lsm/core/internal/two_level_iterator.h"
 #include "lsm/db/file_utils.h"
@@ -26,6 +28,7 @@
 #include <seastar/coroutine/as_future.hh>
 
 #include <exception>
+#include <memory>
 
 namespace lsm::db {
 
@@ -565,6 +568,7 @@ version_set::version_set(
 }
 
 void version_set::set_current(ss::lw_shared_ptr<version> new_version) {
+    vlog(log.trace, "installing_new_version version=\n{}", *new_version);
     weak_intrusive_list<version>::push_front(&_current, std::move(new_version));
 }
 
@@ -840,6 +844,7 @@ std::optional<compaction> version_set::pick_compaction() {
     // key range next time.
     _compact_pointer[level] = largest;
     c->_edit->set_compact_pointer(level, largest);
+    vlog(log.trace, "picked_compaction compaction={}", *c);
     return c;
 }
 
