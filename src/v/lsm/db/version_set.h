@@ -270,7 +270,7 @@ private:
       internal::level level)
       : _level(level)
       , _edit(std::move(edit))
-      , _level_ptrs(options->levels.size()) {}
+      , _level_ptrs(/*n=*/options->levels.size(), /*val=*/0) {}
 
     internal::level _level;
     uint64_t _max_output_file_size = 0;
