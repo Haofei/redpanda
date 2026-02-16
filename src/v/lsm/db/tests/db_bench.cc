@@ -36,6 +36,7 @@
 #include <exception>
 #include <optional>
 #include <string>
+#include <utility>
 #include <vector>
 
 namespace po = boost::program_options;
@@ -229,6 +230,7 @@ public:
     }
 
     ss::future<> teardown() {
+        co_await await_verification();
         if (_db) {
             co_await _db->close();
         }
@@ -301,12 +303,14 @@ private:
             co_await write_key(key, value.copy(), stats);
 
             if (_cfg.verify && (i % _cfg.verify_interval == 0)) {
-                co_await verify_all(stats);
+                co_await maybe_verify(stats);
             }
         }
 
         if (_cfg.verify) {
-            co_await verify_all(stats);
+            co_await await_verification();
+            auto iter = co_await _db->create_iterator({});
+            co_await verify_all(std::move(iter), _shadow.data, stats);
         }
     }
 
@@ -324,12 +328,14 @@ private:
             co_await write_key(key, value.copy(), stats);
 
             if (_cfg.verify && (i % _cfg.verify_interval == 0)) {
-                co_await verify_all(stats);
+                co_await maybe_verify(stats);
             }
         }
 
         if (_cfg.verify) {
-            co_await verify_all(stats);
+            co_await await_verification();
+            auto iter = co_await _db->create_iterator({});
+            co_await verify_all(std::move(iter), _shadow.data, stats);
         }
     }
 
@@ -355,12 +361,14 @@ private:
             co_await write_key(key, std::move(value), stats);
 
             if (_cfg.verify && (i % _cfg.verify_interval == 0)) {
-                co_await verify_all(stats);
+                co_await maybe_verify(stats);
             }
         }
 
         if (_cfg.verify) {
-            co_await verify_all(stats);
+            co_await await_verification();
+            auto iter = co_await _db->create_iterator({});
+            co_await verify_all(std::move(iter), _shadow.data, stats);
         }
     }
 
@@ -384,12 +392,14 @@ private:
             co_await delete_key(key, stats);
 
             if (_cfg.verify && (i % _cfg.verify_interval == 0)) {
-                co_await verify_all(stats);
+                co_await maybe_verify(stats);
             }
         }
 
         if (_cfg.verify) {
-            co_await verify_all(stats);
+            co_await await_verification();
+            auto iter = co_await _db->create_iterator({});
+            co_await verify_all(std::move(iter), _shadow.data, stats);
         }
     }
 
@@ -416,12 +426,14 @@ private:
             co_await delete_key(key, stats);
 
             if (_cfg.verify && (i % _cfg.verify_interval == 0)) {
-                co_await verify_all(stats);
+                co_await maybe_verify(stats);
             }
         }
 
         if (_cfg.verify) {
-            co_await verify_all(stats);
+            co_await await_verification();
+            auto iter = co_await _db->create_iterator({});
+            co_await verify_all(std::move(iter), _shadow.data, stats);
         }
     }
 
@@ -453,12 +465,14 @@ private:
             co_await read_key(key, stats);
 
             if (_cfg.verify && (i % _cfg.verify_interval == 0)) {
-                co_await verify_all(stats);
+                co_await maybe_verify(stats);
             }
         }
 
         if (_cfg.verify) {
-            co_await verify_all(stats);
+            co_await await_verification();
+            auto iter = co_await _db->create_iterator({});
+            co_await verify_all(std::move(iter), _shadow.data, stats);
         }
     }
 
@@ -515,7 +529,9 @@ private:
         }
 
         if (_cfg.verify) {
-            co_await verify_all(stats);
+            co_await await_verification();
+            auto iter = co_await _db->create_iterator({});
+            co_await verify_all(std::move(iter), _shadow.data, stats);
         }
     }
 
@@ -568,12 +584,14 @@ private:
             }
 
             if (_cfg.verify && (i % _cfg.verify_interval == 0)) {
-                co_await verify_all(stats);
+                co_await maybe_verify(stats);
             }
         }
 
         if (_cfg.verify) {
-            co_await verify_all(stats);
+            co_await await_verification();
+            auto iter = co_await _db->create_iterator({});
+            co_await verify_all(std::move(iter), _shadow.data, stats);
         }
     }
 
@@ -664,19 +682,42 @@ private:
         }
     }
 
-    ss::future<> verify_all(benchmark_stats& stats) {
+    ss::future<> maybe_verify(benchmark_stats& stats) {
+        if (!_verify_fut.available()) {
+            co_return;
+        }
+        auto iter = co_await _db->create_iterator({});
+        auto snapshot = _shadow.data;
+        _verify_fut = verify_all(std::move(iter), std::move(snapshot), stats)
+                        .then_wrapped([](ss::future<> f) {
+                            if (f.failed()) {
+                                auto ep = f.get_exception();
+                                bench_log.error(
+                                  "Background verification failed: {}", ep);
+                            }
+                        });
+    }
+
+    ss::future<> await_verification() {
+        return std::exchange(_verify_fut, ss::make_ready_future<>());
+    }
+
+    ss::future<> verify_all(
+      std::unique_ptr<lsm::internal::iterator> iter,
+      shadow_state::tree_type shadow,
+      benchmark_stats& stats) {
         bench_log.debug("Performing full verification scan");
 
-        auto iter = co_await _db->create_iterator({});
         co_await iter->seek_to_first();
 
         // Both the shadow tree and DB iterator produce entries in sorted
         // order. Walk the shadow tree and advance the DB iterator in
         // lockstep so we never need to copy the database into a map.
-        co_await _shadow.data.for_each(
-          [&](this auto,
-              const ss::sstring& shadow_key,
-              const std::optional<iobuf>& shadow_val) -> ss::future<> {
+        co_await shadow.for_each(
+          [&](
+            this auto,
+            const ss::sstring& shadow_key,
+            const std::optional<iobuf>& shadow_val) -> ss::future<> {
               if (_as.abort_requested()) {
                   co_return;
               }
@@ -759,6 +800,7 @@ private:
     std::unique_ptr<lsm::db::impl> _db;
     ss::abort_source _as;
     shadow_state _shadow;
+    ss::future<> _verify_fut = ss::make_ready_future<>();
     lsm::internal::sequence_number _seqno;
 };
 
