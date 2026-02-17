@@ -29,7 +29,11 @@ struct ctp_stm_api_accessor {
     ss::future<std::expected<model::offset, ct::ctp_stm_api_errc>>
     replicated_apply(model::record_batch rb, ss::abort_source& as) {
         // This function is used to access the private method of ctp_stm_api
-        return api.replicated_apply(std::move(rb), model::no_timeout, as);
+        return api.replicated_apply(
+          std::move(rb),
+          std::nullopt /* expected_term */,
+          model::no_timeout,
+          as);
     }
     ct::ctp_stm_api api;
 };

@@ -111,6 +111,7 @@ private:
     /// Returns the offset at which the batch was applied.
     ss::future<std::expected<model::offset, ctp_stm_api_errc>> replicated_apply(
       model::record_batch&& batch,
+      std::optional<model::term_id> expected_term,
       model::timeout_clock::time_point deadline,
       ss::abort_source&);
 

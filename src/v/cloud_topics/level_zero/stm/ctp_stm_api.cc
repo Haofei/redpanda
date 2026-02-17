@@ -45,9 +45,10 @@ ctp_stm_api::ctp_stm_api(ss::shared_ptr<ctp_stm> stm)
 ss::future<std::expected<model::offset, ctp_stm_api_errc>>
 ctp_stm_api::replicated_apply(
   model::record_batch&& batch,
+  std::optional<model::term_id> expected_term,
   model::timeout_clock::time_point deadline,
   ss::abort_source& as) {
-    model::term_id term = _stm->_raft->term();
+    model::term_id term = expected_term.value_or(_stm->_raft->term());
 
     vlog(_log.debug, "Replicating batch {} in term {}", batch.header(), term);
 
@@ -100,7 +101,7 @@ ctp_stm_api::advance_reconciled_offset(
 
     auto batch = std::move(builder).build();
     auto apply_result = co_await replicated_apply(
-      std::move(batch), deadline, as);
+      std::move(batch), std::nullopt /* expected_term */, deadline, as);
 
     if (!apply_result.has_value()) {
         co_return std::unexpected(apply_result.error());
@@ -132,7 +133,7 @@ ctp_stm_api::set_start_offset(
 
     auto batch = std::move(builder).build();
     auto apply_result = co_await replicated_apply(
-      std::move(batch), deadline, as);
+      std::move(batch), std::nullopt /* expected_term */, deadline, as);
 
     if (!apply_result.has_value()) {
         co_return std::unexpected(apply_result.error());
