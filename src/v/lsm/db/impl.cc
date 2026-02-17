@@ -294,7 +294,17 @@ void impl::maybe_schedule_compaction() {
         auto task = do_flush().then_wrapped([this](ss::future<> f) {
             if (f.failed()) {
                 auto ex = f.get_exception();
-                vlog(log.warn, "flush_task_end error=\"{}\"", ex);
+                bool is_abort = is_abort_exception(ex);
+                vlog(
+                  log.warn,
+                  "flush_task_end is_abort={} error=\"{}\"",
+                  is_abort,
+                  ex);
+                if (is_abort) {
+                    _flush_task = std::nullopt;
+                    _background_work_finished_signal.broken(ex);
+                    return;
+                }
             } else {
                 // Notify all waiters that work has been finished.
                 _background_work_finished_signal.broadcast();
@@ -318,7 +328,17 @@ void impl::maybe_schedule_compaction() {
         auto task = do_compaction().then_wrapped([this](ss::future<> f) {
             if (f.failed()) {
                 auto ex = f.get_exception();
-                vlog(log.warn, "compaction_task_end error=\"{}\"", ex);
+                bool is_abort = is_abort_exception(ex);
+                vlog(
+                  log.warn,
+                  "compaction_task_end is_abort={} error=\"{}\"",
+                  is_abort,
+                  ex);
+                if (is_abort) {
+                    _compaction_task = std::nullopt;
+                    _background_work_finished_signal.broken(ex);
+                    return;
+                }
             } else {
                 // Notify all waiters that work has been finished.
                 _background_work_finished_signal.broadcast();
