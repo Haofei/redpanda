@@ -1588,6 +1588,21 @@ auto gcs_client::do_delete_objects(
         if (!boundary.has_value()) {
             throw std::runtime_error(boundary.error());
         }
+        if (s3_log.is_enabled(ss::log_level::trace)) {
+            auto preview_bytes
+              = iobuf_const_parser(response_buf)
+                  .peek_bytes(
+                    std::min(response_buf.size_bytes(), size_t{1024}));
+            vlog(
+              s3_log.trace,
+              "GCS batch delete response: boundary='{}', body_size={}, "
+              "first_bytes='{}'",
+              boundary.value(),
+              response_buf.size_bytes(),
+              std::string_view(
+                reinterpret_cast<const char*>(preview_bytes.data()),
+                preview_bytes.size()));
+        }
         result = parse_gcs_batch_delete_response(
           std::move(response_buf), boundary.value(), keys);
     } catch (...) {

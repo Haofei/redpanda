@@ -1120,6 +1120,25 @@ abs_client::do_batch_delete_objects(
         if (!boundary.has_value()) {
             throw std::runtime_error(boundary.error());
         }
+        if (abs_log.is_enabled(ss::log_level::trace)) {
+            // Log up to 1024 bytes of the response to aid debugging
+            // without dumping the entire (potentially large) multipart
+            // body.
+            auto preview_bytes
+              = iobuf_const_parser(response_buf)
+                  .peek_bytes(
+                    std::min(response_buf.size_bytes(), size_t{1024}));
+            vlog(
+              abs_log.trace,
+              "batch delete response: boundary='{}', body_size={}, "
+              "first_bytes='{}'",
+              boundary.value(),
+              response_buf.size_bytes(),
+              std::string_view(
+                reinterpret_cast<const char*>(preview_bytes.data()),
+                preview_bytes.size()));
+        }
+
         result = parse_batch_delete_response(
           std::move(response_buf), boundary.value(), keys);
     } catch (...) {
