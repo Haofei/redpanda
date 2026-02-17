@@ -1502,7 +1502,7 @@ class DataMigrationsApiTest(DataMigrationTestMixin):
             topic_name,
             partitions=3,
             replicas=3,
-            config={"redpanda.cloud_topic.enabled": "true"},
+            config={TopicSpec.PROPERTY_STORAGE_MODE: TopicSpec.STORAGE_MODE_CLOUD},
         )
 
         # Verify the topic was created

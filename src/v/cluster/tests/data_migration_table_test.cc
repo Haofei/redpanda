@@ -119,10 +119,17 @@ struct data_migration_table_fixture : public seastar_test {
             topic_configuration cfg(tp_ns.ns, tp_ns.tp, p_cnt, 3);
             // Cloud topics don't use tiered storage, but regular topics need it
             // enabled for unmount to work.
-            cfg.properties.shadow_indexing
-              = cloud_topic_enabled ? model::shadow_indexing_mode::disabled
-                                    : model::shadow_indexing_mode::full;
-            cfg.properties.cloud_topic_enabled = cloud_topic_enabled;
+            if (cloud_topic_enabled) {
+                cfg.properties.shadow_indexing
+                  = model::shadow_indexing_mode::disabled;
+                cfg.properties.storage_mode
+                  = model::redpanda_storage_mode::cloud;
+            } else {
+                cfg.properties.shadow_indexing
+                  = model::shadow_indexing_mode::full;
+                cfg.properties.storage_mode
+                  = model::redpanda_storage_mode::tiered;
+            }
             ss::chunked_fifo<partition_assignment> assignments;
             for (auto i = 0; i < p_cnt; ++i) {
                 assignments.push_back(

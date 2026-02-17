@@ -302,9 +302,7 @@ migrations_table::validate_migrated_resources(
                  t)}};
         }
 
-        if (!model::is_archival_enabled(
-              maybe_topic_cfg->properties.shadow_indexing.value_or(
-                model::shadow_indexing_mode::disabled))) {
+        if (!maybe_topic_cfg->properties.is_archival_enabled()) {
             return {
               {errc::data_migration_invalid_resources,
                ssx::sformat(
