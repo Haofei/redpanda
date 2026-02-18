@@ -48,7 +48,8 @@ ss::future<> app::construct(
   ss::sharded<rpc::connection_cache>* connection_cache,
   cloud_storage_clients::bucket_name bucket,
   ss::sharded<storage::api>* storage,
-  bool skip_flush_loop) {
+  bool skip_flush_loop,
+  bool skip_level_zero_gc) {
     data_plane = co_await make_data_plane(
       ssx::sformat("{}::data_plane", _logger_name),
       remote,
@@ -122,15 +123,17 @@ ss::future<> app::construct(
       ss::sharded_parameter([this] { return &replicated_metastore.local(); }),
       scheduling_groups::instance().cloud_topics_reconciler_sg());
 
-    co_await construct_service(
-      l0_gc,
-      self,
-      ss::sharded_parameter([&] { return &remote->local(); }),
-      bucket,
-      &controller->get_health_monitor(),
-      &controller->get_controller_stm(),
-      &controller->get_topics_state(),
-      &controller->get_members_table());
+    if (!skip_level_zero_gc) {
+        co_await construct_service(
+          l0_gc,
+          self,
+          ss::sharded_parameter([&] { return &remote->local(); }),
+          bucket,
+          &controller->get_health_monitor(),
+          &controller->get_controller_stm(),
+          &controller->get_topics_state(),
+          &controller->get_members_table());
+    }
 
     co_await construct_service(housekeeper_manager, ss::sharded_parameter([&] {
                                    return &replicated_metastore.local();
@@ -174,7 +177,9 @@ ss::future<> app::start() {
     co_await topic_manifest_upload_mgr.invoke_on_all(
       &topic_manifest_upload_manager::start);
     co_await compaction_scheduler->start();
-    co_await l0_gc.invoke_on_all(&level_zero_gc::start);
+    if (l0_gc.local_is_initialized()) {
+        co_await l0_gc.invoke_on_all(&level_zero_gc::start);
+    }
     if (flush_loop_manager.local_is_initialized()) {
         co_await flush_loop_manager.invoke_on_all(
           &l1::flush_loop_manager::start);
