@@ -525,8 +525,8 @@ reconciler::make_context() {
     ctx.builder = l1::object_builder::create(
       std::move(output_stream),
       l1::object_builder::options{
-        .indexing_frequency
-        = config::shard_local_cfg().cloud_topics_l1_indexing_frequency(),
+        .indexing_interval
+        = config::shard_local_cfg().cloud_topics_l1_indexing_interval(),
       });
     ctx.size_budget
       = config::shard_local_cfg().cloud_topics_reconciliation_max_object_size();

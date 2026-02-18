@@ -4576,14 +4576,14 @@ configuration::configuration()
       "compaction.",
       {.needs_restart = needs_restart::no, .visibility = visibility::tunable},
       128_MiB)
-  , cloud_topics_l1_indexing_frequency(
+  , cloud_topics_l1_indexing_interval(
       *this,
-      "cloud_topics_indexing_frequency",
-      "The byte interval at which index entries are created within L1 "
-      "objects. Index entries are stored in the metadata and enable "
-      "efficient seeking by offset or timestamp within a partition. "
-      "Lower values produce more index entries (better seek granularity) "
-      "at the cost of more metadata.",
+      "cloud_topics_indexing_interval",
+      "The byte interval at which index entries are created within long term"
+      " storage objects for cloud topics. Index entries are stored in the "
+      "object metadata and enable efficient seeking by offset or timestamp "
+      "within a partition. Lower values produce more index entries (better "
+      "seek granularity) at the cost of a larger footer.",
       {.needs_restart = needs_restart::no, .visibility = visibility::tunable},
       4_MiB)
   , cloud_topics_compaction_interval_ms(
