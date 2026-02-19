@@ -89,6 +89,9 @@ public:
 private:
     ss::future<> wire_up_notifications();
 
+    // Cleans up the temporary files in the L1 staging directory.
+    ss::future<> cleanup_tmp_files();
+
     ss::sstring _logger_name;
     ss::sharded<level_one_reader_probe> _l1_reader_probe;
     std::unique_ptr<data_plane_api> data_plane;

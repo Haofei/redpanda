@@ -18,6 +18,7 @@
 #include "cloud_topics/level_one/metastore/flush_loop.h"
 #include "cloud_topics/level_one/metastore/topic_purger.h"
 #include "cloud_topics/level_zero/gc/level_zero_gc.h"
+#include "cloud_topics/logger.h"
 #include "cloud_topics/manager/manager.h"
 #include "cloud_topics/reconciler/reconciler.h"
 #include "cloud_topics/topic_manifest_upload_manager.h"
@@ -25,9 +26,14 @@
 #include "cluster/controller.h"
 #include "config/node_config.h"
 #include "resource_mgmt/cpu_scheduling.h"
+#include "ssx/future-util.h"
 #include "ssx/sharded_service_container.h"
+#include "utils/directory_walker.h"
 
 #include <seastar/core/coroutine.hh>
+
+#include <deque>
+#include <filesystem>
 
 namespace cloud_topics {
 
@@ -166,6 +172,8 @@ ss::future<> app::construct(
 }
 
 ss::future<> app::start() {
+    co_await cleanup_tmp_files();
+
     co_await data_plane->start();
     co_await reconciler.invoke_on_all(&reconciler::reconciler<>::start);
     co_await domain_supervisor.invoke_on_all(
@@ -265,6 +273,76 @@ ss::future<> app::wire_up_notifications() {
                 tidp, std::move(partition));
           });
     });
+}
+
+ss::future<> app::cleanup_tmp_files() {
+    auto staging_dir = config::node().l1_staging_path();
+    std::deque<std::filesystem::path> dirs_to_process;
+    dirs_to_process.push_back(staging_dir);
+
+    // TODO: maybe we should parallelize this.
+    size_t deleted_count = 0;
+    while (!dirs_to_process.empty()) {
+        auto current_dir = std::move(dirs_to_process.front());
+        dirs_to_process.pop_front();
+        auto walk_fut = co_await ss::coroutine::as_future(
+          directory_walker::walk(
+            current_dir.string(),
+            [&current_dir, &dirs_to_process, &deleted_count](
+              this auto, ss::directory_entry entry) -> ss::future<> {
+                auto entry_path = current_dir / entry.name.c_str();
+                if (!entry.type.has_value()) {
+                    vlog(
+                      cd_log.info,
+                      "Skipping cleanup of unknown file type file: {}",
+                      entry_path.string());
+                    co_return;
+                }
+                if (entry.type == ss::directory_entry_type::directory) {
+                    dirs_to_process.push_back(entry_path);
+                    co_return;
+                }
+                if (entry.type == ss::directory_entry_type::regular) {
+                    if (std::string_view(entry.name).contains(".tmp")) {
+                        auto entry_path_str = entry_path.string();
+                        auto rm_fut = co_await ss::coroutine::as_future(
+                          ss::remove_file(entry_path_str));
+                        if (rm_fut.failed()) {
+                            auto ex = rm_fut.get_exception();
+                            auto lvl = ssx::is_shutdown_exception(ex)
+                                         ? ss::log_level::debug
+                                         : ss::log_level::warn;
+                            vlogl(
+                              cd_log,
+                              lvl,
+                              "Failed to delete tmp file {}: {}",
+                              entry_path_str,
+                              ex);
+                            co_return;
+                        }
+                        deleted_count++;
+                    }
+                }
+            }));
+
+        if (walk_fut.failed()) {
+            auto ex = walk_fut.get_exception();
+            auto lvl = ssx::is_shutdown_exception(ex) ? ss::log_level::debug
+                                                      : ss::log_level::warn;
+            vlogl(
+              cd_log, lvl, "Failed to walk directory {}: {}", staging_dir, ex);
+        }
+    }
+
+    if (deleted_count > 0) {
+        vlog(
+          cd_log.info,
+          "Cleanup deleted {} tmp file(s) from {}",
+          deleted_count,
+          staging_dir);
+    } else {
+        vlog(cd_log.debug, "No tmp files found to cleanup in {}", staging_dir);
+    }
 }
 
 ss::future<> app::stop() {
