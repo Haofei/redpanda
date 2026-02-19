@@ -71,6 +71,17 @@ redpanda_cc_library(
 )
 
 redpanda_cc_library(
+    name = "size_estimator",
+    srcs = ["size_estimator.cc"],
+    hdrs = ["size_estimator.h"],
+    deps = [
+        "//src/v/base",
+        "//src/v/model",
+        "@fmt",
+    ],
+)
+
+redpanda_cc_library(
     name = "ctp_stm_commands",
     hdrs = ["ctp_stm_commands.h"],
     deps = [
