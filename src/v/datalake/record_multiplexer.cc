@@ -129,11 +129,12 @@ ss::future<ss::stop_iteration> record_multiplexer::do_multiplex(
       raw_size_bytes,
       decompressed_size_bytes);
 
-    auto timestamp_type = batch.header().attrs.timestamp_type();
+    auto batch_header = batch.header();
+    auto timestamp_type = batch_header.attrs.timestamp_type();
     auto is_broker_time = timestamp_type == model::timestamp_type::append_time;
-    auto first_timestamp = batch.header().first_timestamp.value();
-    auto max_timestamp = batch.header().max_timestamp;
-    auto it = model::record_batch_copy_iterator::create(batch);
+    auto first_timestamp = batch_header.first_timestamp.value();
+    auto max_timestamp = batch_header.max_timestamp;
+    auto it = model::record_batch_iterator::create(std::move(batch));
     while (it.has_next()) {
         if (as.abort_requested()) {
             vlog(_log.debug, "Abort requested, stopping translation");
@@ -146,7 +147,8 @@ ss::future<ss::stop_iteration> record_multiplexer::do_multiplex(
                            ? max_timestamp
                            : model::timestamp{
                                first_timestamp + record.timestamp_delta()};
-        kafka::offset offset{batch.base_offset()() + record.offset_delta()};
+        kafka::offset offset{
+          batch_header.base_offset() + record.offset_delta()};
         if (offset < start_offset) {
             continue;
         }
@@ -166,7 +168,7 @@ ss::future<ss::stop_iteration> record_multiplexer::do_multiplex(
               _log.warn,
               "Error resolving type for record at offset {}, batch: {}: {}",
               offset,
-              batch.header(),
+              batch_header,
               err);
             switch (err) {
             case type_resolver::errc::registry_error:
@@ -208,7 +210,7 @@ ss::future<ss::stop_iteration> record_multiplexer::do_multiplex(
               _log.warn,
               "Error translating data for record at offset {}, batch: {}: {}",
               offset,
-              batch.header(),
+              batch_header,
               err);
             switch (err) {
             case record_translator::errc::unexpected_schema:
