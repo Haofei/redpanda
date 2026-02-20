@@ -117,7 +117,7 @@ ss::future<> multipart_upload::put(iobuf data) {
 
 ss::future<> multipart_upload::complete() {
     if (_finalized) {
-        throw std::logic_error("Multipart upload already finalized");
+        co_return;
     }
 
     _finalized = true;
