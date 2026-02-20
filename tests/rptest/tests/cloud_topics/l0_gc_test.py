@@ -14,6 +14,10 @@ from typing import TypeAlias, cast
 from rptest.clients.admin.v2 import Admin, l0_gc_pb, ntp_pb
 from rptest.context.cloud_storage import CloudStorageType
 from rptest.services.kgo_repeater_service import repeater_traffic
+from rptest.services.kgo_verifier_services import (
+    KgoVerifierProducer,
+    KgoVerifierSeqConsumer,
+)
 from ducktape.mark import matrix
 from ducktape.utils.util import wait_until
 
@@ -743,3 +747,91 @@ class CloudTopicsL0GCMetricsTest(CloudTopicsL0GCTestBase):
             f"Expected batching: {total_deleted=} should be greater than "
             f"{total_delete_requests=}"
         )
+
+
+class CloudTopicsL0GCDataIntegrityTest(CloudTopicsL0GCTestBase):
+    """
+    Integration: Verify GC does not cause data loss.
+
+    Produces a known number of records, waits for GC to delete L0 objects
+    (confirming reconciliation has moved data to L1), then consumes and
+    verifies every record is intact.
+    """
+
+    MSG_COUNT = 5000
+    MSG_SIZE = 1024
+
+    @cluster(num_nodes=4)
+    @matrix(cloud_storage_type=get_cloud_storage_type())
+    def test_no_data_loss_under_gc(self, cloud_storage_type: CloudStorageType):
+        """
+        Produce records, let GC delete L0 objects, then consume and verify
+        that every record is still readable.
+        """
+        topic = TopicSpec(partition_count=2)
+        self.topics = [topic]
+        self.create_topics(self.topics)
+
+        producer = KgoVerifierProducer(
+            self.test_context,
+            self.redpanda,
+            topic.name,
+            msg_size=self.MSG_SIZE,
+            msg_count=self.MSG_COUNT,
+        )
+        producer.start()
+        producer.wait(timeout_sec=120)
+
+        pstatus = producer.produce_status
+        self.logger.info(
+            f"Produced {pstatus.acked} records, bad_offsets={pstatus.bad_offsets}"
+        )
+        assert pstatus.acked == self.MSG_COUNT, (
+            f"Producer did not ack all messages: {pstatus.acked} != {self.MSG_COUNT}"
+        )
+        assert pstatus.bad_offsets == 0, (
+            f"Producer saw {pstatus.bad_offsets} bad offsets"
+        )
+
+        self.logger.info("Waiting for GC to delete L0 objects")
+        wait_until(
+            lambda: self.get_num_objects_deleted() > 0,
+            timeout_sec=60,
+            backoff_sec=5,
+            retry_on_exc=True,
+        )
+        objects_deleted = self.get_num_objects_deleted()
+        self.logger.info(f"GC has deleted {objects_deleted} L0 objects, consuming now")
+
+        consumer = KgoVerifierSeqConsumer(
+            self.test_context,
+            self.redpanda,
+            topic.name,
+            msg_size=self.MSG_SIZE,
+            loop=False,
+            nodes=[producer.nodes[0]],
+        )
+        consumer.start(clean=False)
+        consumer.wait(timeout_sec=120)
+
+        cstatus = consumer.consumer_status
+        self.logger.info(
+            f"Consumer: valid_reads={cstatus.validator.valid_reads}, "
+            f"invalid_reads={cstatus.validator.invalid_reads}, "
+            f"offset_gaps={cstatus.validator.offset_gaps}, "
+            f"out_of_scope_invalid_reads={cstatus.validator.out_of_scope_invalid_reads}"
+        )
+
+        assert cstatus.validator.invalid_reads == 0, (
+            f"Data corruption: {cstatus.validator.invalid_reads} invalid reads"
+        )
+        assert cstatus.validator.out_of_scope_invalid_reads == 0, (
+            f"Out-of-scope reads: {cstatus.validator.out_of_scope_invalid_reads}"
+        )
+        assert cstatus.validator.valid_reads == self.MSG_COUNT, (
+            f"Data loss: expected {self.MSG_COUNT} reads, "
+            f"got {cstatus.validator.valid_reads}"
+        )
+
+        producer.stop()
+        consumer.stop()
