@@ -39,7 +39,10 @@ from rptest.util import expect_exception
 
 class CloudTopicsL0GCTestBase(RedpandaTest):
     def __init__(
-        self, test_context: TestContext, housekeeping_interval_ms: int | None = None
+        self,
+        test_context: TestContext,
+        housekeeping_interval_ms: int | None = None,
+        extra_rp_conf_overrides: dict[str, int | bool] | None = None,
     ):
         self.test_context = test_context
         si_settings = SISettings(
@@ -62,6 +65,8 @@ class CloudTopicsL0GCTestBase(RedpandaTest):
             "cloud_topics_short_term_gc_interval": 2000,
             "cloud_topics_short_term_gc_backoff_interval": 10000,
         }
+        if extra_rp_conf_overrides:
+            extra_rp_conf.update(extra_rp_conf_overrides)
         super().__init__(
             test_context=test_context,
             extra_rp_conf=extra_rp_conf,
@@ -835,3 +840,81 @@ class CloudTopicsL0GCDataIntegrityTest(CloudTopicsL0GCTestBase):
 
         producer.stop()
         consumer.stop()
+
+
+class CloudTopicsL0GCGracePeriodTest(CloudTopicsL0GCTestBase):
+    """
+    Integration: Verify the deletion grace period is enforced.
+
+    Objects that are epoch-eligible but younger than the configured
+    minimum age must not be deleted. Once they age past the grace
+    period they should be collected.
+    """
+
+    GRACE_PERIOD_S = 30
+
+    def __init__(self, test_context: TestContext):
+        super().__init__(
+            test_context=test_context,
+            extra_rp_conf_overrides={
+                "cloud_topics_short_term_gc_minimum_object_age": self.GRACE_PERIOD_S
+                * 1000,
+                # Keep GC polling frequently so we observe skips quickly.
+                "cloud_topics_short_term_gc_interval": 1000,
+                "cloud_topics_short_term_gc_backoff_interval": 2000,
+            },
+        )
+
+    @cluster(num_nodes=4)
+    @matrix(
+        cloud_storage_type=get_cloud_storage_type(applies_only_on=[CloudStorageType.S3])
+    )
+    def test_grace_period_enforcement(self, cloud_storage_type: CloudStorageType):
+        """
+        Produce a burst of records as fast as possible so all L0 objects
+        have similar creation times. With a 30s grace period, GC should
+        list and skip them as 'too young' for a long window after epochs
+        advance, then delete them once they age out.
+        """
+        topic = TopicSpec(partition_count=1)
+        self.topics = [topic]
+        self.create_topics(self.topics)
+
+        # Use KgoVerifierProducer for a fast, synchronous burst so that
+        # all L0 objects are created in a narrow time window.
+        producer = KgoVerifierProducer(
+            self.test_context,
+            self.redpanda,
+            topic.name,
+            msg_size=1024,
+            msg_count=500,
+        )
+        producer.start()
+        producer.wait(timeout_sec=60)
+        self.logger.info(f"Produced {producer.produce_status.acked} records")
+        producer.stop()
+
+        skipped_metric = "vectorized_cloud_topics_l0_gc_objects_skipped_too_young_total"
+
+        self.logger.info(
+            "Waiting for GC to skip epoch-eligible objects as too young "
+            "while no objects have been deleted yet"
+        )
+        wait_until(
+            lambda: self._get_metric_total(skipped_metric) > 0,
+            timeout_sec=30,
+            backoff_sec=1,
+            retry_on_exc=True,
+        )
+
+        assert self.get_num_objects_deleted() == 0, (
+            f"Expected objects_delete=0, got {self.get_num_objects_deleted()=}"
+        )
+
+        self.logger.info(f"Waiting for grace period ({self.GRACE_PERIOD_S}s) to expire")
+        wait_until(
+            lambda: self.get_num_objects_deleted() > 0,
+            timeout_sec=self.GRACE_PERIOD_S + 10,
+            backoff_sec=3,
+            retry_on_exc=True,
+        )
