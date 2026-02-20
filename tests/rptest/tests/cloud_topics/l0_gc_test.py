@@ -918,3 +918,69 @@ class CloudTopicsL0GCGracePeriodTest(CloudTopicsL0GCTestBase):
             backoff_sec=3,
             retry_on_exc=True,
         )
+
+
+class CloudTopicsL0GCNodeFailureTest(CloudTopicsL0GCTestBase):
+    """
+    Integration: Verify GC survives a node failure mid-collection and
+    resumes cluster-wide progress after the node restarts.
+    """
+
+    @cluster(num_nodes=4)
+    @matrix(cloud_storage_type=get_cloud_storage_type())
+    def test_node_failure_mid_gc(self, cloud_storage_type: CloudStorageType):
+        """
+        Produce data, let GC make progress, kill a node, verify surviving
+        nodes continue collecting, then restart and confirm cluster-wide
+        GC resumes.
+        """
+        topic = TopicSpec(partition_count=3)
+        self.topics = [topic]
+        self.create_topics(self.topics)
+
+        self.produce_some(topics=[topic.name], n=500)
+
+        self.logger.info("Waiting for GC to make meaningful progress")
+        wait_until(
+            lambda: self.get_num_objects_deleted() > 0,
+            timeout_sec=30,
+            backoff_sec=3,
+            retry_on_exc=True,
+        )
+
+        # Pick the node to kill. Use the last node so that the admin API
+        # (which targets the first node by default) stays available.
+        kill_node = self.redpanda.nodes[-1]
+        kill_node_id = self.redpanda.node_id(kill_node)
+        surviving_nodes = [n for n in self.redpanda.nodes if n != kill_node]
+
+        deleted_on_survivors_before = self.get_num_objects_deleted(
+            nodes=surviving_nodes
+        )
+
+        self.logger.info(f"Killing node {kill_node.name} (id={kill_node_id})")
+        self.redpanda.stop_node(kill_node, timeout=30)
+
+        self.logger.info("Verifying surviving nodes continue GC")
+        wait_until(
+            lambda: self.get_num_objects_deleted(nodes=surviving_nodes)
+            > deleted_on_survivors_before,
+            timeout_sec=30,
+            backoff_sec=3,
+            retry_on_exc=True,
+        )
+
+        self.logger.info(f"Restarting node {kill_node.name} (id={kill_node_id})")
+        self.redpanda.start_node(kill_node, timeout=30, node_id_override=kill_node_id)
+
+        deleted_after_restart = self.get_num_objects_deleted(nodes=[kill_node])
+        self.logger.info(
+            f"Waiting for restarted node GC to resume (currently {deleted_after_restart})"
+        )
+        wait_until(
+            lambda: self.get_num_objects_deleted(nodes=[kill_node])
+            > deleted_after_restart,
+            timeout_sec=30,
+            backoff_sec=3,
+            retry_on_exc=True,
+        )
