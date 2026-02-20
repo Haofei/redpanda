@@ -655,6 +655,91 @@ class CloudTopicsL0GCAdminTest(CloudTopicsL0GCTestBase):
         )
         self.logger.debug("After unstick: min_partition_gc_epoch > 0")
 
+    @cluster(num_nodes=4)
+    @matrix(
+        cloud_storage_type=get_cloud_storage_type(applies_only_on=[CloudStorageType.S3])
+    )
+    def test_concurrent_pause_start(self, cloud_storage_type: CloudStorageType):
+        """
+        Integration: Rapidly toggle pause/start while GC is running.
+        Verify no crashes, no stuck state, and that the last command wins.
+        """
+        topic = TopicSpec(partition_count=2, replication_factor=3)
+        self.topics = [topic]
+        self.create_topics(self.topics)
+
+        self.produce_some(topics=[topic.name], n=300)
+
+        self.logger.info("Waiting for GC to start deleting")
+        wait_until(
+            lambda: self.get_num_objects_deleted() > 0,
+            timeout_sec=30,
+            backoff_sec=3,
+            retry_on_exc=True,
+        )
+
+        # Rapidly toggle pause/start.
+        self.logger.info("Starting rapid pause/start toggling (50 rounds)")
+        for _ in range(50):
+            self.gc_pause()
+            self.gc_start()
+        self.logger.info("Toggling complete")
+
+        # End with start — verify GC reaches RUNNING and keeps working.
+        self.gc_start()
+        wait_until(
+            lambda: self._all_running(),
+            timeout_sec=15,
+            backoff_sec=2,
+            retry_on_exc=True,
+        )
+        deleted_after_toggle = self.get_num_objects_deleted()
+        self.logger.info(
+            f"After toggling (running): objects_deleted={deleted_after_toggle}"
+        )
+
+        # Verify GC continues to make progress.
+        wait_until(
+            lambda: self.get_num_objects_deleted() > deleted_after_toggle,
+            timeout_sec=30,
+            backoff_sec=3,
+            retry_on_exc=True,
+        )
+        deleted_running = self.get_num_objects_deleted()
+        self.logger.info(f"GC still progressing: objects_deleted={deleted_running}")
+
+        # End with pause — verify GC reaches PAUSED and stops.
+        self.gc_pause()
+        wait_until(
+            lambda: self._all_paused(),
+            timeout_sec=15,
+            backoff_sec=2,
+            retry_on_exc=True,
+        )
+        deleted_at_pause = self.get_num_objects_deleted()
+
+        # Verify objects_deleted does not advance while paused.
+        with expect_exception(TimeoutError, lambda _: True):
+            wait_until(
+                lambda: self.get_num_objects_deleted() > deleted_at_pause,
+                timeout_sec=10,
+                backoff_sec=2,
+                retry_on_exc=True,
+            )
+
+    def _all_in_state(self, expected: GcStatus.ValueType) -> bool:
+        try:
+            self.check_statuses(self.gc_get_status(), status=expected)
+            return True
+        except AssertionError:
+            return False
+
+    def _all_running(self) -> bool:
+        return self._all_in_state(GcStatus.L0_GC_STATUS_RUNNING)
+
+    def _all_paused(self) -> bool:
+        return self._all_in_state(GcStatus.L0_GC_STATUS_PAUSED)
+
 
 class CloudTopicsL0GCMetricsTest(CloudTopicsL0GCTestBase):
     """
