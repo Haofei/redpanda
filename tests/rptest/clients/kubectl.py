@@ -549,9 +549,6 @@ class KubeNodeShell:
         if not self._is_shell_running():
             # Init node shell
             overrides = self._build_overrides()
-            # We do not require timeout option to fail
-            # if pod is not running at this point
-            # Feel free to uncomment
             _out = self.kubectl.cmd(
                 [
                     f"--context={self.current_context}",
@@ -560,7 +557,8 @@ class KubeNodeShell:
                     "--image docker.io/library/alpine",
                     "--restart=Never",
                     f"--overrides='{json.dumps(overrides)}'",
-                    # "--pod-running-timeout=1m",
+                    # Ensure the pod is running before this method returns.
+                    "--pod-running-timeout=1m",
                     f"{self.pod_name}",
                 ]
             )
