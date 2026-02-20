@@ -22,6 +22,7 @@ from rptest.services.kgo_verifier_services import (
     KgoVerifierParams,
     KgoVerifierMultiConsumerGroupConsumer,
 )
+from rptest.services.failure_injector import FailureInjector, FailureSpec
 from rptest.services.redpanda import CHAOS_LOG_ALLOW_LIST
 from rptest.tests.prealloc_nodes import PreallocNodesTest
 
@@ -271,6 +272,32 @@ class AutoDecommissionTestBase(PreallocNodesTest):
 
         self.redpanda.logger.info(f"Node {node_id} was successfully removed")
 
+    def _wait_for_no_controller_leader(self, node: ClusterNode):
+        """
+        Wait until the given node reports no controller leader.
+
+        :param node: The node to query for controller leader status
+        """
+
+        def no_controller_leader():
+            try:
+                leader = self.admin.get_partition_leader(
+                    namespace="redpanda",
+                    topic="controller",
+                    partition=0,
+                    node=node,
+                )
+                return leader == -1
+            except Exception:
+                return True
+
+        wait_until(
+            no_controller_leader,
+            timeout_sec=30,
+            backoff_sec=1,
+            err_msg=f"Node {node.account.hostname} still sees a controller leader",
+        )
+
 
 class AutoDecommissionTest_5(AutoDecommissionTestBase):
     """
@@ -512,5 +539,82 @@ class AutoDecommissionTest_5(AutoDecommissionTestBase):
         self._wait_for_node_removal(
             node_id, survivor_node, autodecommission_timeout_s * 2
         )
+
+        self.verify()
+
+
+class AutoDecommissionTest_3(AutoDecommissionTestBase):
+    """
+    Auto-decommission tests on a 3-node cluster.
+    """
+
+    def __init__(self, test_context: TestContext):
+        super(AutoDecommissionTest_3, self).__init__(
+            test_context=test_context,
+            num_brokers=3,
+        )
+
+    @cluster(num_nodes=5, log_allow_list=CHAOS_LOG_ALLOW_LIST)
+    def test_asymmetric_partition_insufficient_votes(self):
+        """
+        Demonstrates that a single node's decommission vote is
+        insufficient to trigger auto-decommission
+
+        Sequence (T = auto-decom timeout):
+        1. Isolate Node A for 0.75T. During this time Node A cannot see
+           Node B, so its "last seen B" duration grows to .75T.
+        2. Isolate Node B and un-isolate Node A.
+        3. Wait an additional 0.5T (total elapsed: 1.25T).
+           - Node A hasn't seen B for 1.25T > T (yes vote)
+           - Node C's vote for B: 0.5T < T      (no vote)
+           - 1 vote vs quorum of 2, no decom
+        4. Verify Node B has NOT been decommissioned
+        """
+        autodecommission_timeout_s = 30
+
+        self._configure_auto_decommission(
+            autodecommission_timeout_s=autodecommission_timeout_s,
+        )
+        self._setup_test_environment(replication_factors=[3])
+
+        # first isolated
+        node_a = self.redpanda.nodes[0]
+        # second isolated
+        node_b = self.redpanda.nodes[1]
+        # never explicitly isolated
+        node_c = self.redpanda.nodes[2]
+        node_a_id = self.redpanda.node_id(node_a)
+        node_b_id = self.redpanda.node_id(node_b)
+
+        with FailureInjector(self.redpanda) as fi:
+            # Phase 1: Isolate Node A for 75% of the timeout.
+            phase1 = autodecommission_timeout_s * 0.75
+            self.redpanda.logger.info(
+                f"Phase 1: Isolating node {node_a_id} for {phase1}s"
+            )
+            fi.inject_failure(FailureSpec(FailureSpec.FAILURE_ISOLATE, node_a))
+            time.sleep(phase1)
+
+            # Phase 2: Swap isolation — heal A, isolate B.
+            self.redpanda.logger.info(
+                f"Phase 2: Healing node {node_a_id}, isolating node {node_b_id}"
+            )
+            fi.inject_failure(FailureSpec(FailureSpec.FAILURE_ISOLATE, node_b))
+            self.redpanda.logger.info("waiting for leaderless controller")
+            self._wait_for_no_controller_leader(node_c)
+            fi._heal(node_a)
+
+            # Phase 3: Wait 50% of the timeout
+            phase3 = autodecommission_timeout_s * 0.5
+            self.redpanda.logger.info(
+                f"Phase 3: Waiting {phase3}s — expecting node {node_b_id} "
+                f"to NOT be decommissioned (1 vote < quorum of 2)"
+            )
+            time.sleep(phase3)
+
+            assert not self._check_node_is_removed(node_b_id, node_c), (
+                f"Node {node_b_id} should NOT be auto-decommissioned: "
+                f"only 1 of 2 peers has exceeded the timeout (quorum = 2)"
+            )
 
         self.verify()
