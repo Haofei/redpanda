@@ -151,39 +151,30 @@ class KubectlTool:
             cmd (list[str]): kubectl commands to run
 
         Raises:
-            RuntimeError: when return code is present
+            CalledProcessError: when return code is non-zero
 
         Yields:
-            Generator[str]: Generator of output line by line
+            Generator[bytes]: Generator of output line by line
         """
         self._redpanda.logger.info(cmd)
         process = subprocess.Popen(
             cmd, stdout=subprocess.PIPE, stderr=subprocess.STDOUT
         )
-        if process.returncode:
-            if process.stdout is not None:
-                s_out = process.stdout.read()
-            else:
-                s_out = "stdout empty"
-            raise subprocess.CalledProcessError(
-                process.returncode, cmd, s_out, "stderr piped"
-            )
 
         for line in process.stdout:  # type: ignore
             yield line
 
-        return
+        process.wait()
+        if process.returncode:
+            raise subprocess.CalledProcessError(
+                process.returncode, cmd, None, "stderr piped to stdout"
+            )
 
-    def _local_cmd(self, cmd: list[str], timeout=900):
-        """Run the given command locally and return the stdout as bytes.
-        Logs stdout and stderr on failure.
-
-        cmd: list[str]: command to run
+    def _local_cmd(self, cmd: list[str], timeout: int = 900) -> str:
+        """Run the given command locally and return stdout.
 
         throws CalledProcessError on non-zero exit code
-        thwows TimeoutExpired on timeout
-
-        returns: stdout as string if not empty, else stderr
+        throws TimeoutExpired on timeout
         """
 
         def _prepare_output(sout: str, serr: str) -> str:
@@ -193,43 +184,19 @@ class KubectlTool:
             )
 
         self._redpanda.logger.info(cmd)
-
-        # Using text mode to get strings, not binary
-        # Following code will capture all output to log and work
-        # significantly faster than 'check_output'
-        process = subprocess.Popen(
-            cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True
-        )
         try:
-            s_out, s_err = process.communicate(timeout=timeout)
-            # safety check for process termination
-            if process.poll() is None:
-                # Should never happen (c)
-                process.kill()
-        except subprocess.TimeoutExpired:
-            process.kill()
-            s_out, s_err = process.communicate()
-            raise subprocess.TimeoutExpired(cmd, timeout, s_out, s_err)
-
-        # TODO: Handle s_err output
-        # It will be hard to detect errors as a lot of apps and utils
-        # just uses stderr as normal output. For example, tsh (teleport tunnel)
-
-        if process.returncode != 0:
-            self.logger.info(
-                f"Command failed (rc={process.returncode}): "
-                f"'{' '.join(cmd)}'\n"
-                f"{_prepare_output(s_out, s_err)}"
+            res = subprocess.run(
+                cmd, capture_output=True, text=True, timeout=timeout, check=True
             )
-            raise subprocess.CalledProcessError(process.returncode, cmd, s_out, s_err)
-        else:
-            # Log all collected strings, including JSONs collected
-            self.logger.debug(_prepare_output(s_out, s_err))
-
-        # Most of the time stdout will hold valuable data
-        # In rare occasions when return code is 0, and and stderr is not empty
-        # return that instead.
-        return s_out if len(s_out) > 0 else s_err
+        except subprocess.CalledProcessError as e:
+            self.logger.info(
+                f"Command failed (rc={e.returncode}): "
+                f"'{' '.join(cmd)}'\n"
+                f"{_prepare_output(e.stdout, e.stderr)}"
+            )
+            raise
+        self.logger.debug(_prepare_output(res.stdout, res.stderr))
+        return res.stdout
 
     @property
     def _redpanda_operator_v2(self) -> bool:
