@@ -139,6 +139,50 @@ class KubectlTool:
             breakglass_cmd = p + breakglass_cmd
         self._ssh_cmd(breakglass_cmd)
 
+        # Install EKS token caching wrapper for AWS to avoid calling
+        # 'aws eks get-token' on every kubectl invocation
+        if self._provider == "aws":
+            self._install_eks_token_cache_wrapper()
+
+    def _install_eks_token_cache_wrapper(self):
+        """Install a caching wrapper for aws eks get-token on the remote host.
+
+        This wrapper caches tokens to avoid repeated AWS API calls on every
+        kubectl invocation. Tokens are cached until 10 seconds before expiry.
+        """
+        wrapper_remote_path = "~/.kube/aws-eks-token-cache.sh"
+        wrapper_local_path = os.path.join(
+            os.path.dirname(__file__),
+            "..",
+            "remote_scripts",
+            "cloud",
+            "aws_eks_token_cache.sh",
+        )
+
+        try:
+            scp_cmd = self._scp_cmd(
+                wrapper_local_path, f"{self._remote_uri}:{wrapper_remote_path}"
+            )
+            self._redpanda.logger.debug(f"Copying EKS cache wrapper: {scp_cmd}")
+            subprocess.check_output(scp_cmd)
+
+            self._ssh_cmd(["chmod", "+x", wrapper_remote_path])
+
+            # Update kubeconfig to use the wrapper instead of aws
+            update_cmd = [
+                "sed",
+                "-i",
+                f"'s#command: aws$#command: {wrapper_remote_path}#'",
+                "~/.kube/config",
+            ]
+            self._ssh_cmd(update_cmd)
+
+            self._redpanda.logger.info("Installed EKS token caching wrapper")
+        except subprocess.CalledProcessError as e:
+            self._redpanda.logger.warning(
+                f"Failed to install EKS token caching wrapper: {e}"
+            )
+
     @property
     def logger(self) -> Logger:
         return self._redpanda.logger
