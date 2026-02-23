@@ -265,16 +265,20 @@ std::unique_ptr<struct_value> data_file_to_value(const data_file& file) {
     ret->fields.emplace_back(file.key_metadata.transform(
       [](const iobuf& b) -> value { return binary_value{b.copy()}; }));
     ret->fields.emplace_back(
-      file.sort_order_id
-        ? std::make_optional<value>(int_value{*file.sort_order_id})
-        : std::nullopt);
+      file.split_offsets.transform(list_to_value<long_value>));
+    ret->fields.emplace_back(
+      file.equality_ids.transform(list_to_value<int_value>));
+    ret->fields.emplace_back(file.sort_order_id.transform(
+      [](int32_t v) -> value { return int_value{v}; }));
+    ret->fields.emplace_back(file.referenced_data_file.transform(
+      [](const uri& u) -> value { return string_value{iobuf::from(u())}; }));
     return ret;
 }
 
 data_file data_file_from_value(struct_value v) {
     data_file file;
     auto& fs = v.fields;
-    if (fs.size() < 16) {
+    if (fs.size() < 17) {
         throw std::invalid_argument("Expected more values");
     }
     file.content_type = content_from_int(
@@ -306,6 +310,11 @@ data_file data_file_from_value(struct_value v) {
       std::move(fs[14]), "equality_ids");
     file.sort_order_id = get_optional_primitive<int32_t, int_value>(
       std::move(fs[15]), "sort_order_id");
+    file.referenced_data_file = get_optional_primitive<iobuf, string_value>(
+                                  std::move(fs[16]), "referenced_data_file")
+                                  .transform([](iobuf b) {
+                                      return uri(from_iobuf(std::move(b)));
+                                  });
     return file;
 }
 

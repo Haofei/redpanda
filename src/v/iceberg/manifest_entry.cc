@@ -46,6 +46,7 @@ data_file data_file::copy() const {
       .equality_ids = equality_ids.transform(
         &chunked_vector<nested_field::id_t>::copy),
       .sort_order_id = sort_order_id,
+      .referenced_data_file = referenced_data_file,
     };
 }
 

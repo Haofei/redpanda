@@ -118,4 +118,76 @@ TEST(AvroComparatorTest, FailsOnLogicalTypeMismatch) {
       res.message());
 }
 
+TEST(AvroComparatorTest, SubsetMatchAllowsExtraNullFields) {
+    auto expected_schema = compile_schema(R"({
+      "type":"record","name":"r1",
+      "fields":[{"name":"f","type":"int"}]
+    })");
+    auto actual_schema = compile_schema(R"({
+      "type":"record","name":"r1",
+      "fields":[
+        {"name":"f","type":"int"},
+        {"name":"g","type":["null","string"],"default":null}
+      ]
+    })");
+    avro::GenericDatum expected(expected_schema.root());
+    avro::GenericDatum actual(actual_schema.root());
+    expected.value<avro::GenericRecord>().fieldAt(0).value<int32_t>() = 42;
+    actual.value<avro::GenericRecord>().fieldAt(0).value<int32_t>() = 42;
+
+    auto res = serde::avro::testing::generic_datum_eq(
+      expected, actual, "root", serde::avro::testing::extra_fields::allow_null);
+    ASSERT_TRUE(res);
+}
+
+TEST(AvroComparatorTest, SubsetMatchRejectsExtraNonNullField) {
+    auto expected_schema = compile_schema(R"({
+      "type":"record","name":"r1",
+      "fields":[{"name":"f","type":"int"}]
+    })");
+    auto actual_schema = compile_schema(R"({
+      "type":"record","name":"r1",
+      "fields":[
+        {"name":"f","type":"int"},
+        {"name":"g","type":["null","string"],"default":null}
+      ]
+    })");
+    avro::GenericDatum expected(expected_schema.root());
+    avro::GenericDatum actual(actual_schema.root());
+    expected.value<avro::GenericRecord>().fieldAt(0).value<int32_t>() = 42;
+    actual.value<avro::GenericRecord>().fieldAt(0).value<int32_t>() = 42;
+    auto& g = actual.value<avro::GenericRecord>().fieldAt(1);
+    g.selectBranch(1);
+    g.value<std::string>() = "not null";
+
+    auto res = serde::avro::testing::generic_datum_eq(
+      expected, actual, "root", serde::avro::testing::extra_fields::allow_null);
+    ASSERT_FALSE(res);
+    ASSERT_STREQ("root.g: extra field is not null", res.message());
+}
+
+TEST(AvroComparatorTest, StrictMatchRejectsExtraNullFields) {
+    auto expected_schema = compile_schema(R"({
+      "type":"record","name":"r1",
+      "fields":[{"name":"f","type":"int"}]
+    })");
+    auto actual_schema = compile_schema(R"({
+      "type":"record","name":"r1",
+      "fields":[
+        {"name":"f","type":"int"},
+        {"name":"g","type":["null","string"],"default":null}
+      ]
+    })");
+    avro::GenericDatum expected(expected_schema.root());
+    avro::GenericDatum actual(actual_schema.root());
+    expected.value<avro::GenericRecord>().fieldAt(0).value<int32_t>() = 42;
+    actual.value<avro::GenericRecord>().fieldAt(0).value<int32_t>() = 42;
+
+    auto res = serde::avro::testing::generic_datum_eq(expected, actual, "root");
+    ASSERT_FALSE(res);
+    ASSERT_STREQ(
+      "root: record field count mismatch (expected 1, actual 2)",
+      res.message());
+}
+
 } // anonymous namespace

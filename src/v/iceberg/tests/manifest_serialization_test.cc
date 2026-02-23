@@ -54,8 +54,11 @@ bool trivial_fields_eq(
                 == rhs.data_file.file_size_in_bytes;
 }
 
-::testing::AssertionResult
-manifest_avro_equal(iobuf expected_buf, iobuf actual_buf) {
+::testing::AssertionResult manifest_avro_equal(
+  iobuf expected_buf,
+  iobuf actual_buf,
+  serde::avro::testing::extra_fields ef
+  = serde::avro::testing::extra_fields::reject) {
     auto expected_in = std::make_unique<avro_iobuf_istream>(
       std::move(expected_buf));
     auto actual_in = std::make_unique<avro_iobuf_istream>(
@@ -79,7 +82,7 @@ manifest_avro_equal(iobuf expected_buf, iobuf actual_buf) {
             break;
         }
         auto res = serde::avro::testing::generic_datum_eq(
-          expected_entry, actual_entry, "entry");
+          expected_entry, actual_entry, "entry", ef);
         if (!res) {
             return ::testing::AssertionFailure()
                    << "entry[" << i << "] mismatch: " << res.message();
@@ -402,9 +405,28 @@ TEST(ManifestSerializationTest, TestSerializeManifestData) {
           m_roundtrip.metadata.schema.schema_struct,
           std::get<struct_type>(test_nested_schema_type()));
 
-        ASSERT_TRUE(
-          manifest_avro_equal(orig_buf.copy(), std::move(serialized_buf)));
+        // The test data was generated with pyiceberg 0.9 which has fewer
+        // data_file fields than our writer schema. Allow the extra fields
+        // as long as they are null.
+        ASSERT_TRUE(manifest_avro_equal(
+          orig_buf.copy(),
+          std::move(serialized_buf),
+          serde::avro::testing::extra_fields::allow_null));
 
         serialized_buf = serialize_avro(m_roundtrip);
     }
+}
+
+TEST(ManifestSerializationTest, TestSparkManifestRoundtrip) {
+    ss::engine().set_strict_dma(false);
+    auto manifest_path = test_utils::get_runfile_path(
+      "src/v/iceberg/tests/testdata/"
+      "spark_3.5.5_iceberg_1.8.1_manifest.avro");
+    auto orig_buf = iobuf{ss::util::read_entire_file(manifest_path).get()};
+    auto m = parse_manifest(orig_buf.copy());
+    ASSERT_GT(m.entries.size(), 0);
+
+    auto serialized_buf = serialize_avro(m);
+    ASSERT_TRUE(
+      manifest_avro_equal(orig_buf.copy(), std::move(serialized_buf)));
 }

@@ -181,6 +181,7 @@ redpanda_cc_gtest(
     ],
     data = [
         "testdata/nested_manifest.avro",
+        "testdata/spark_3.5.5_iceberg_1.8.1_manifest.avro",
     ],
     deps = [
         ":test_schemas",

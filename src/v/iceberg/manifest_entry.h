@@ -52,6 +52,7 @@ struct data_file {
     std::optional<chunked_vector<int64_t>> split_offsets;
     std::optional<chunked_vector<nested_field::id_t>> equality_ids;
     std::optional<int32_t> sort_order_id;
+    std::optional<uri> referenced_data_file;
 
     friend bool operator==(const data_file&, const data_file&) = default;
     data_file copy() const;

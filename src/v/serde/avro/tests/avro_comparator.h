@@ -15,13 +15,20 @@
 
 #include <avro/GenericDatum.hh>
 #include <avro/LogicalType.hh>
-#include <fmt/format.h>
+#include <fmt/core.h>
 #include <gtest/gtest.h>
 
 #include <string>
 #include <string_view>
 
 namespace serde::avro::testing {
+
+/// Controls how extra record fields in `actual` are handled during comparison.
+///
+/// reject     — records must have identical field counts.
+/// allow_null — `actual` may have additional trailing fields (the normal
+///              result of Avro schema evolution) provided each is null.
+enum class extra_fields { reject, allow_null };
 
 namespace detail {
 
@@ -73,7 +80,8 @@ inline ::testing::AssertionResult check_primitive(
 inline ::testing::AssertionResult compare_impl(
   const ::avro::GenericDatum& expected,
   const ::avro::GenericDatum& actual,
-  std::string_view path) {
+  std::string_view path,
+  extra_fields ef) {
     if (expected.isUnion() != actual.isUnion()) {
         return ::testing::AssertionFailure() << path << ": union mismatch";
     }
@@ -145,19 +153,33 @@ inline ::testing::AssertionResult compare_impl(
     case ::avro::AVRO_RECORD: {
         const auto& expected_record = expected.value<::avro::GenericRecord>();
         const auto& actual_record = actual.value<::avro::GenericRecord>();
-        if (expected_record.fieldCount() != actual_record.fieldCount()) {
+        auto expected_count = expected_record.fieldCount();
+        auto actual_count = actual_record.fieldCount();
+        if (actual_count < expected_count) {
             return ::testing::AssertionFailure()
                    << path << ": record field count mismatch (expected "
-                   << expected_record.fieldCount() << ", actual "
-                   << actual_record.fieldCount() << ")";
+                   << expected_count << ", actual " << actual_count << ")";
         }
-        for (size_t i = 0; i < expected_record.fieldCount(); ++i) {
+        if (actual_count != expected_count && ef == extra_fields::reject) {
+            return ::testing::AssertionFailure()
+                   << path << ": record field count mismatch (expected "
+                   << expected_count << ", actual " << actual_count << ")";
+        }
+        for (size_t i = 0; i < expected_count; ++i) {
             auto p = fmt::format(
               "{}.{}", path, expected_record.schema()->nameAt(i));
             auto res = compare_impl(
-              expected_record.fieldAt(i), actual_record.fieldAt(i), p);
+              expected_record.fieldAt(i), actual_record.fieldAt(i), p, ef);
             if (!res) {
                 return res;
+            }
+        }
+        for (size_t i = expected_count; i < actual_count; ++i) {
+            const auto& field = actual_record.fieldAt(i);
+            if (!field.isUnion() || field.type() != ::avro::AVRO_NULL) {
+                return ::testing::AssertionFailure()
+                       << path << "." << actual_record.schema()->nameAt(i)
+                       << ": extra field is not null";
             }
         }
         return ::testing::AssertionSuccess();
@@ -174,7 +196,7 @@ inline ::testing::AssertionResult compare_impl(
         }
         for (size_t i = 0; i < expected_array.size(); ++i) {
             auto p = fmt::format("{}[{}]", path, i);
-            auto res = compare_impl(expected_array[i], actual_array[i], p);
+            auto res = compare_impl(expected_array[i], actual_array[i], p, ef);
             if (!res) {
                 return res;
             }
@@ -201,7 +223,7 @@ inline ::testing::AssertionResult compare_impl(
             }
             auto p = fmt::format("{}[\"{}\"]", path, expected_map[i].first);
             auto res = compare_impl(
-              expected_map[i].second, actual_map[i].second, p);
+              expected_map[i].second, actual_map[i].second, p, ef);
             if (!res) {
                 return res;
             }
@@ -223,11 +245,19 @@ inline ::testing::AssertionResult compare_impl(
 
 } // namespace detail
 
+/// Deep-compare two Avro GenericDatum trees, returning a gtest
+/// AssertionResult with a dotted path to the first mismatch.
+///
+/// \param expected  The reference datum tree.
+/// \param actual    The datum tree under test.
+/// \param path      Dotted path prefix used in mismatch messages.
+/// \param ef        How extra fields in \p actual records are handled.
 inline ::testing::AssertionResult generic_datum_eq(
   const ::avro::GenericDatum& expected,
   const ::avro::GenericDatum& actual,
-  std::string_view path = "root") {
-    return detail::compare_impl(expected, actual, path);
+  std::string_view path = "root",
+  extra_fields ef = extra_fields::reject) {
+    return detail::compare_impl(expected, actual, path, ef);
 }
 
 } // namespace serde::avro::testing
