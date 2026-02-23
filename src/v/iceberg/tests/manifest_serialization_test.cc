@@ -367,10 +367,24 @@ TEST(ManifestSerializationTest, TestSerializeManifestData) {
     ASSERT_EQ(first_entry.file_sequence_number, file_sequence_number{0});
     ASSERT_EQ(first_entry.data_file.file_path, "data/path/file-0.parquet");
     ASSERT_EQ(first_entry.data_file.file_format, data_file_format::parquet);
-    ASSERT_EQ(first_entry.data_file.column_sizes.size(), 0);
-    ASSERT_EQ(first_entry.data_file.value_counts.size(), 0);
-    ASSERT_EQ(first_entry.data_file.null_value_counts.size(), 0);
-    ASSERT_EQ(first_entry.data_file.nan_value_counts.size(), 0);
+    ASSERT_TRUE(first_entry.data_file.column_sizes.has_value());
+    ASSERT_EQ(first_entry.data_file.column_sizes->size(), 2);
+    ASSERT_EQ(
+      first_entry.data_file.column_sizes->at(nested_field::id_t{1}), 100);
+    ASSERT_EQ(
+      first_entry.data_file.column_sizes->at(nested_field::id_t{2}), 200);
+    ASSERT_TRUE(first_entry.data_file.value_counts.has_value());
+    ASSERT_EQ(first_entry.data_file.value_counts->size(), 2);
+    ASSERT_TRUE(first_entry.data_file.null_value_counts.has_value());
+    ASSERT_EQ(first_entry.data_file.null_value_counts->size(), 2);
+    ASSERT_TRUE(first_entry.data_file.nan_value_counts.has_value());
+    ASSERT_EQ(first_entry.data_file.nan_value_counts->size(), 2);
+
+    const auto& second_entry = m.entries[1];
+    ASSERT_FALSE(second_entry.data_file.column_sizes.has_value());
+    ASSERT_FALSE(second_entry.data_file.value_counts.has_value());
+    ASSERT_FALSE(second_entry.data_file.null_value_counts.has_value());
+    ASSERT_FALSE(second_entry.data_file.nan_value_counts.has_value());
 
     auto serialized_buf = serialize_avro(m);
 
@@ -388,15 +402,8 @@ TEST(ManifestSerializationTest, TestSerializeManifestData) {
           m_roundtrip.metadata.schema.schema_struct,
           std::get<struct_type>(test_nested_schema_type()));
 
-        // Added later: compare serialized GenericDatum rows directly, so we
-        // catch field loss even when parse->serialize roundtrips still pass.
-        //
-        // This is currently failing because we don't handle all fields.
-        auto eq_assertion(
+        ASSERT_TRUE(
           manifest_avro_equal(orig_buf.copy(), std::move(serialized_buf)));
-        ASSERT_FALSE(eq_assertion);
-        fmt::print(
-          stderr, "manifest_avro_equal failure: {}\n", eq_assertion.message());
 
         serialized_buf = serialize_avro(m_roundtrip);
     }
