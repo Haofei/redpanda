@@ -2000,6 +2000,14 @@ configuration::configuration()
       "produce audit log messages using a Kafka client instead.",
       {.needs_restart = needs_restart::yes, .visibility = visibility::tunable},
       true)
+  , schema_registry_use_rpc(
+      *this,
+      "schema_registry_use_rpc",
+      "Use internal Redpanda RPCs for schema registry internal topic I/O. "
+      "When disabled, use a Kafka client for schema registry internal topic "
+      "I/O instead.",
+      {.needs_restart = needs_restart::yes, .visibility = visibility::tunable},
+      true)
   , cloud_storage_enabled(
       *this,
       true,
