@@ -201,17 +201,18 @@ ss::future<> api::start() {
         return config::shard_local_cfg()
           .kafka_schema_id_validation_cache_capacity.bind();
     }));
-    co_await _transport.start(
-      std::ref(_client_cfg),
-      std::ref(*_controller),
-      ss::sharded_parameter([this]() {
-          return kafka::data::rpc::topic_creator::make_default(
-            _controller.get());
-      }));
+    // Build the transport locally and only install it into _transport
+    // on successful start. If start() throws, the local impl unwinds and
+    // the partially-initialized sharded<> goes with it.
+    auto impl = std::make_unique<transport_impl>(
+      _rpc_client, _client_cfg, *_controller);
+    co_await impl->start();
+    _transport = std::move(impl);
+
     co_await _sequencer.start(
       _node_id,
       _sg,
-      ss::sharded_parameter([this] { return std::ref(_transport.local()); }),
+      ss::sharded_parameter([this] { return std::ref(_transport->local()); }),
       std::ref(*_store),
       ss::sharded_parameter([this] {
           return std::make_unique<sequence_state_checker_impl>(_controller);
@@ -220,7 +221,7 @@ ss::future<> api::start() {
       config::to_yaml(_cfg, config::redact_secrets::no),
       _sg,
       _max_memory,
-      ss::sharded_parameter([this] { return std::ref(_transport.local()); }),
+      ss::sharded_parameter([this] { return std::ref(_transport->local()); }),
       std::ref(*_store),
       std::ref(_sequencer),
       ss::sharded_parameter([this]() {
@@ -230,7 +231,7 @@ ss::future<> api::start() {
       std::ref(_controller),
       std::ref(_audit_mgr));
 
-    co_await _transport.invoke_on_all(&kafka_client_transport::configure);
+    co_await _transport->configure();
     co_await _service.invoke_on_all(&service::start);
 
     if (ss::this_shard_id() == 0) {
@@ -259,10 +260,16 @@ ss::future<> api::stop() {
         // Reset gate to support api restart
         _metrics_gate = ss::gate{};
     }
-    co_await _transport.invoke_on_all(&kafka_client_transport::stop);
+    if (_transport) {
+        co_await _transport->invoke_stop_on_all();
+    }
     co_await _service.stop();
     co_await _sequencer.stop();
-    co_await _transport.stop();
+    if (_transport) {
+        co_await _transport->stop();
+        _transport.reset();
+    }
+
     co_await _schema_id_cache.stop();
     co_await _schema_id_validation_probe.stop();
     if (_store) {
@@ -284,7 +291,7 @@ const kafka::client::configuration& api::get_client_config() const {
 }
 
 bool api::has_ephemeral_credentials() const {
-    return _transport.local().has_ephemeral_credentials();
+    return _transport && _transport->has_ephemeral_credentials();
 }
 
 ss::future<> api::contribute_metrics(

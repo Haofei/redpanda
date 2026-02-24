@@ -21,6 +21,8 @@
 #include <seastar/core/gate.hh>
 #include <seastar/core/sharded.hh>
 
+#include <memory>
+
 namespace YAML {
 class Node;
 }
@@ -80,7 +82,7 @@ private:
     ss::sharded<cluster::metadata_cache>* _metadata_cache;
     std::unique_ptr<cluster::controller>& _controller;
 
-    ss::sharded<kafka_client_transport> _transport;
+    std::unique_ptr<transport_impl> _transport;
     std::unique_ptr<pandaproxy::schema_registry::sharded_store> _store;
     ss::sharded<schema_id_validation_probe> _schema_id_validation_probe;
     ss::sharded<schema_id_cache> _schema_id_cache;
