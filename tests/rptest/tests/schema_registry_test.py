@@ -5181,20 +5181,27 @@ class SchemaRegistryModeMutableTest(SchemaRegistryEndpoints):
         self.assert_equal(result_raw.json()["id"], 2)
 
 
-class SchemaRegistryContextTest(SchemaRegistryEndpoints):
+class SchemaRegistryContextTestBase(SchemaRegistryEndpoints):
     """
     Tests for context-qualified subject functionality.
 
     These tests verify that Schema Registry correctly handles context-qualified
     subjects (e.g., ":.ctx:subject") for isolation, references, config, and mode.
+
+    Base class. Use SchemaRegistryContextTest (kafka client)
+    or SchemaRegistryContextRpcTransportTest (RPC).
     """
 
     def __init__(self, context: TestContext, **kwargs: Any):
         schema_registry_config = SchemaRegistryConfig()
         schema_registry_config.mode_mutability = True
+        extra_rp_conf = {}
+        if "extra_rp_conf" in kwargs:
+            extra_rp_conf.update(kwargs.pop("extra_rp_conf"))
         super().__init__(
             context,
             schema_registry_config=schema_registry_config,
+            extra_rp_conf=extra_rp_conf,
             **kwargs,
         )
 
@@ -7320,12 +7327,37 @@ class SchemaRegistryContextTest(SchemaRegistryEndpoints):
         )
 
 
-class SchemaRegistryBasicAuthTest(SchemaRegistryEndpoints):
+class SchemaRegistryContextTest(SchemaRegistryContextTestBase):
+    """Kafka client transport variant of the context tests."""
+
+    def __init__(self, context: TestContext, **kwargs: Any):
+        super().__init__(
+            context,
+            extra_rp_conf={"schema_registry_use_rpc": False},
+            **kwargs,
+        )
+
+
+class SchemaRegistryContextRpcTransportTest(SchemaRegistryContextTestBase):
+    """RPC transport variant of the context tests."""
+
+    def __init__(self, context: TestContext, **kwargs: Any):
+        super().__init__(
+            context,
+            extra_rp_conf={"schema_registry_use_rpc": True},
+            **kwargs,
+        )
+
+
+class SchemaRegistryBasicAuthTestBase(SchemaRegistryEndpoints):
     """
     Test schema registry against a redpanda cluster with HTTP Basic Auth enabled.
+
+    Base class. Use SchemaRegistryBasicAuthTest (kafka client)
+    or SchemaRegistryBasicAuthRpcTransportTest (RPC).
     """
 
-    def __init__(self, context):
+    def __init__(self, context, **kwargs):
         security = SecurityConfig()
         security.enable_sasl = True
         security.endpoint_authn_method = "sasl"
@@ -7334,8 +7366,16 @@ class SchemaRegistryBasicAuthTest(SchemaRegistryEndpoints):
         schema_registry_config.authn_method = "http_basic"
         schema_registry_config.mode_mutability = True
 
-        super(SchemaRegistryBasicAuthTest, self).__init__(
-            context, security=security, schema_registry_config=schema_registry_config
+        extra_rp_conf = {}
+        if "extra_rp_conf" in kwargs:
+            extra_rp_conf.update(kwargs.pop("extra_rp_conf"))
+
+        super(SchemaRegistryBasicAuthTestBase, self).__init__(
+            context,
+            security=security,
+            schema_registry_config=schema_registry_config,
+            extra_rp_conf=extra_rp_conf,
+            **kwargs,
         )
 
         superuser = self.redpanda.SUPERUSER_CREDENTIALS
@@ -8115,15 +8155,40 @@ class SchemaRegistryBasicAuthTest(SchemaRegistryEndpoints):
         )
 
 
+class SchemaRegistryBasicAuthTest(SchemaRegistryBasicAuthTestBase):
+    """Kafka client transport variant of the basic auth tests."""
+
+    def __init__(self, context, **kwargs):
+        super().__init__(
+            context,
+            extra_rp_conf={"schema_registry_use_rpc": False},
+            **kwargs,
+        )
+
+
+class SchemaRegistryBasicAuthRpcTransportTest(SchemaRegistryBasicAuthTestBase):
+    """RPC transport variant of the basic auth tests."""
+
+    def __init__(self, context, **kwargs):
+        super().__init__(
+            context,
+            extra_rp_conf={"schema_registry_use_rpc": True},
+            **kwargs,
+        )
+
+
 class SchemaRegistryTest(SchemaRegistryTestMethods):
     """
     Test schema registry against a redpanda cluster without auth.
 
-    This derived class inherits all the tests from SchemaRegistryTestMethods.
+    Uses the Kafka client transport. The RPC transport variant is
+    SchemaRegistryRpcTransportTest.
     """
 
     def __init__(self, context):
-        super(SchemaRegistryTest, self).__init__(context)
+        super(SchemaRegistryTest, self).__init__(
+            context, extra_rp_conf={"schema_registry_use_rpc": False}
+        )
 
     @cluster(num_nodes=3)
     def test_nodejs_serde_client(self):
@@ -8136,6 +8201,20 @@ class SchemaRegistryTest(SchemaRegistryTestMethods):
         exit_code = self.redpanda.nodes[0].account.ssh(cmd)
         assert exit_code == 0, (
             "expected exit code 0 from nodejs serde client, got {exit_code}"
+        )
+
+
+class SchemaRegistryRpcTransportTest(SchemaRegistryTestMethods):
+    """
+    Test schema registry using the internal RPC transport instead of the
+    Kafka client transport.
+
+    This derived class inherits all the tests from SchemaRegistryTestMethods.
+    """
+
+    def __init__(self, context):
+        super(SchemaRegistryRpcTransportTest, self).__init__(
+            context, extra_rp_conf={"schema_registry_use_rpc": True}
         )
 
 
@@ -10921,17 +11000,24 @@ class SchemaRegistryAclAuthzTest(SchemaRegistryAclAuthzTestBase):
             )
 
 
-class SchemaRegistryContextAuthzTest(SchemaRegistryAclAuthzTestBase):
+class SchemaRegistryContextAuthzTestBase(SchemaRegistryAclAuthzTestBase):
     """
     Authorization tests for context-qualified subject functionality.
 
     These tests verify that Schema Registry correctly enforces ACL authorization
     when using context-qualified subjects and the subject query parameter.
+
+    Base class. Use SchemaRegistryContextAuthzTest (kafka client)
+    or SchemaRegistryContextAuthzRpcTransportTest (RPC).
     """
 
     def __init__(self, context: TestContext, **kwargs: Any):
+        extra_rp_conf = {}
+        if "extra_rp_conf" in kwargs:
+            extra_rp_conf.update(kwargs.pop("extra_rp_conf"))
         super().__init__(
             context,
+            extra_rp_conf=extra_rp_conf,
             **kwargs,
         )
 
@@ -11282,4 +11368,26 @@ class SchemaRegistryContextAuthzTest(SchemaRegistryAclAuthzTestBase):
             result.status_code,
             403,
             f"GET schemas/ids/{sid}/schema should be 403, got {result.status_code}",
+        )
+
+
+class SchemaRegistryContextAuthzTest(SchemaRegistryContextAuthzTestBase):
+    """Kafka client transport variant of the context authz tests."""
+
+    def __init__(self, context: TestContext, **kwargs: Any):
+        super().__init__(
+            context,
+            extra_rp_conf={"schema_registry_use_rpc": False},
+            **kwargs,
+        )
+
+
+class SchemaRegistryContextAuthzRpcTransportTest(SchemaRegistryContextAuthzTestBase):
+    """RPC transport variant of the context authz tests."""
+
+    def __init__(self, context: TestContext, **kwargs: Any):
+        super().__init__(
+            context,
+            extra_rp_conf={"schema_registry_use_rpc": True},
+            **kwargs,
         )
