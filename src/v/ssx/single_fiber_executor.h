@@ -234,7 +234,7 @@ public:
         if (_running) {
             vassert(
               _running->handle == std::nullopt,
-              "abort_running() should have aborted it");
+              "abort_unfulfilled() should have aborted it");
             _pending.emplace(std::forward<Func>(func));
             f.emplace(_pending->promise.get_future());
         } else {
