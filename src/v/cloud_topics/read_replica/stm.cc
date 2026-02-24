@@ -80,8 +80,11 @@ bool update_metadata_update::can_apply(const state& s) const {
         }
     }
     if (s.seqno == seqno) {
-        // If the seqnos are the same (maybe null), we can only apply if we're
-        // first setting the domain.
+        // If the seqnos are the same (maybe null), this implies that the LSM
+        // database snapshot used to build this update is identical to the one
+        // last used to update this state. Presumably that means this is a
+        // no-op and we can skip this update, unless we need to set the domain
+        // UUID.
         return s.domain == l1::domain_uuid{};
     }
     return true;
