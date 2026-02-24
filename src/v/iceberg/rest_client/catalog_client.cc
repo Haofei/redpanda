@@ -142,26 +142,7 @@ catalog_client::maybe_configure(retry_chain_node& rtc) {
         co_return std::monostate{};
     }
     vlog(log.debug, "Configuring Iceberg REST catalog client");
-    auto http_request = http::request_builder{}
-                          .method(boost::beast::http::verb::get)
-                          .path(_path_components.config_api_path())
-                          .with_content_type(json_content_type);
-    if (_warehouse.has_value()) {
-        http_request.query_param_kv("warehouse", _warehouse.value()());
-    }
-    auto auth_result = co_await maybe_add_bearer_auth(http_request, rtc);
-    if (!auth_result.has_value()) {
-        co_return tl::unexpected(auth_result.error());
-    }
-    auto config = (co_await perform_request(
-                     rtc,
-                     http_request,
-                     _endpoint,
-                     client_probe::endpoint::create_namespace,
-                     std::nullopt))
-                    .and_then(parse_json)
-                    .and_then(
-                      parse_as_expected("get_config", parse_catalog_config));
+    auto config = co_await get_config(rtc);
     if (!config.has_value()) {
         co_return tl::unexpected(config.error());
     }
@@ -416,6 +397,38 @@ ss::future<expected<iobuf>> catalog_client::perform_request(
             co_return tl::unexpected(aborted_error{msg});
         }
     }
+}
+
+ss::future<expected<catalog_config>>
+catalog_client::get_config(retry_chain_node& rtc) {
+    auto gh = maybe_gate();
+    if (!gh.has_value()) {
+        co_return tl::unexpected(gh.error());
+    }
+    auto http_request = http::request_builder{}
+                          .method(boost::beast::http::verb::get)
+                          .path(_path_components.config_api_path())
+                          .with_content_type(json_content_type);
+    if (_warehouse.has_value()) {
+        http_request.query_param_kv("warehouse", _warehouse.value()());
+    }
+    auto auth_result = co_await maybe_add_bearer_auth(http_request, rtc);
+    if (!auth_result.has_value()) {
+        co_return tl::unexpected(auth_result.error());
+    }
+    auto req_res = co_await perform_request(
+      rtc,
+      http_request,
+      _endpoint,
+      client_probe::endpoint::get_config,
+      std::nullopt);
+    if (!req_res.has_value()) {
+        vlog(log.trace, "Failed to perform get_config request");
+        co_return tl::unexpected(req_res.error());
+    }
+    co_return std::move(req_res)
+      .and_then(parse_json)
+      .and_then(parse_as_expected("get_config", parse_catalog_config));
 }
 
 ss::future<expected<create_namespace_response>>
