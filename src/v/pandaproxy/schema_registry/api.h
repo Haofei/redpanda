@@ -13,6 +13,7 @@
 
 #include "base/seastarx.h"
 #include "cluster/metrics_reporter.h"
+#include "kafka/data/rpc/fwd.h"
 #include "model/metadata.h"
 #include "pandaproxy/schema_registry/fwd.h"
 #include "security/fwd.h"
@@ -49,7 +50,8 @@ public:
       configuration& cfg,
       ss::sharded<cluster::metadata_cache>* metadata_cache,
       std::unique_ptr<cluster::controller>&,
-      ss::sharded<security::audit::audit_log_manager>&) noexcept;
+      ss::sharded<security::audit::audit_log_manager>&,
+      ss::sharded<kafka::data::rpc::client>* rpc_client) noexcept;
     ~api() noexcept;
 
     ss::future<> start();
@@ -83,6 +85,7 @@ private:
     ss::sharded<pandaproxy::schema_registry::service> _service;
     ss::sharded<pandaproxy::schema_registry::seq_writer> _sequencer;
     ss::sharded<security::audit::audit_log_manager>& _audit_mgr;
+    ss::sharded<kafka::data::rpc::client>* _rpc_client;
 
     // Metrics telemetry support - only used on shard 0
     ss::gate _metrics_gate{};
