@@ -306,8 +306,6 @@ ss::future<> reconciler<Clock>::reconciliation_loop() {
 
 template<class Clock>
 ss::future<> reconciler<Clock>::reconcile() {
-    _probe.increment_rounds();
-
     chunked_vector<ss::shared_ptr<source>> sources;
     // Make a copy of the sources to not worry about concurrent modification.
     for (auto& [_, src] : _sources) {
@@ -418,7 +416,6 @@ ss::future<size_t> reconciler<Clock>::reconcile_source_set(
           lg.warn,
           "Could not create object metadata builder: {}",
           metadata_builder_res.error());
-        _probe.increment_rounds_failed();
         co_return 0;
     }
     auto& metadata_builder = metadata_builder_res.value();
@@ -429,7 +426,6 @@ ss::future<size_t> reconciler<Clock>::reconcile_source_set(
           src->topic_id_partition());
         if (!oid.has_value()) {
             vlog(lg.warn, "Could not get object: {}", oid.error());
-            _probe.increment_rounds_failed();
             co_return 0;
         }
         oid_to_sources[oid.value()].push_back(src);
@@ -521,7 +517,6 @@ ss::future<size_t> reconciler<Clock>::reconcile_source_set(
         log_error(commit_result.error().with_context(
           "Abandoning reconciliation run because the L1 metastore operation "
           "failed"));
-        _probe.increment_rounds_failed();
         co_return 0;
     }
 
@@ -601,13 +596,11 @@ reconciler<Clock>::build_and_put_object(
     // upload.
     auto build_result = co_await build_object(ctx, sources);
     if (!build_result.has_value()) {
-        _probe.increment_object_build_failed();
         co_return std::unexpected(build_result.error());
     }
 
     auto obj_meta = std::move(build_result.value());
     if (obj_meta.commits.empty()) {
-        _probe.increment_empty_objects_skipped();
         co_return std::unexpected(
           reconcile_error("Skipping put for object {}: no data", oid));
     }
@@ -615,8 +608,6 @@ reconciler<Clock>::build_and_put_object(
     _probe.increment_objects_uploaded();
     _probe.add_bytes_reconciled(obj_meta.object_info.size_bytes);
     _probe.record_object_size_bytes(obj_meta.object_info.size_bytes);
-    _probe.record_sources_per_object(obj_meta.commits.size());
-
     co_return obj_meta;
 }
 
