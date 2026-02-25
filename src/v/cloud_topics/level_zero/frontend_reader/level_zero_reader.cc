@@ -30,6 +30,14 @@
 namespace cloud_topics {
 namespace {
 
+/// Thrown when the topic config is no longer available, e.g. because the
+/// topic has been deleted from the topic_table but the partition has not
+/// yet been shut down. Caught in do_load_slice to end the stream
+/// gracefully instead of propagating as a hard error.
+struct topic_config_not_found final : std::runtime_error {
+    using std::runtime_error::runtime_error;
+};
+
 model::topic_id_partition
 get_topic_id_partition(const ss::lw_shared_ptr<cluster::partition>& partition) {
     const auto& ntp = partition->ntp();
@@ -38,7 +46,7 @@ get_topic_id_partition(const ss::lw_shared_ptr<cluster::partition>& partition) {
     auto topic_cfg = metadata_cache->get_topic_cfg(
       model::topic_namespace_view(ntp));
     if (!topic_cfg) {
-        throw std::runtime_error(
+        throw topic_config_not_found(
           fmt::format("no config found for cloud topic {}", ntp));
     }
     return model::topic_id_partition{
@@ -67,6 +75,10 @@ level_zero_log_reader_impl::do_load_slice(
   model::timeout_clock::time_point deadline) {
     try {
         return read_some(deadline);
+    } catch (const topic_config_not_found& e) {
+        vlog(_log.debug, "Reader ending stream: {}", e.what());
+        set_end_of_stream();
+        return ss::make_ready_future<model::record_batch_reader::storage_t>();
     } catch (...) {
         vlog(
           _log.error, "Reader caught exception: {}", std::current_exception());
