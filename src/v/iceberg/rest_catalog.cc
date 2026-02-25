@@ -18,8 +18,8 @@ namespace iceberg {
 namespace {
 
 using http_status = enum boost::beast::http::status;
-using errc = enum iceberg::catalog::errc;
-using enum errc;
+using errc = iceberg::catalog::errc;
+using enum iceberg::catalog_errc;
 
 struct http_error_mapping_visitor {
     errc map_http_status(http_status status) const {
