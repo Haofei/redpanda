@@ -168,15 +168,21 @@ private:
     model::offset _last_truncation_point;
 };
 
-/// Create a bootstrap snapshot for ctp_stm with the given start offset.
+/// Offsets used to seed the re-created ctp_stm_state
+struct ctp_stm_seed_offsets {
+    kafka::offset start_offset;
+    kafka::offset next_offset;
+};
+
+/// Create a bootstrap snapshot for ctp_stm with the given state.
 /// This is used when bootstrapping a partition with a custom start offset
-/// during cluster recovery. The snapshot contains an empty state with
-/// the correct start_offset set.
+/// during cluster recovery. The caller is responsible for seeding the
+/// initial state correctly.
 ///
 /// \param work_directory The partition's work directory
-/// \param start_offset The kafka offset to set as the start offset
+/// \param offsets The initial STM state
 /// \return A future that completes when the snapshot is persisted
 ss::future<> create_ctp_stm_bootstrap_snapshot(
-  const std::filesystem::path& work_directory, kafka::offset start_offset);
+  const std::filesystem::path& work_directory, ctp_stm_seed_offsets offsets);
 
 } // namespace cloud_topics

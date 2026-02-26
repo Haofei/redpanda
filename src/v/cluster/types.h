@@ -447,6 +447,8 @@ struct configuration_update_reply
 
 /// Parameters for bootstrapping a partition with custom initial state.
 /// Used for programmatic partition creation with specific offset/term.
+/// The struct also contains a next_offset which is used to initialize
+/// ctp_stm
 struct partition_bootstrap_params
   : serde::envelope<
       partition_bootstrap_params,
@@ -455,17 +457,23 @@ struct partition_bootstrap_params
     partition_bootstrap_params() noexcept = default;
 
     partition_bootstrap_params(
-      model::offset start_offset, model::term_id initial_term)
+      model::offset start_offset,
+      model::offset next_offset,
+      model::term_id initial_term)
       : start_offset(start_offset)
+      , next_offset(next_offset)
       , initial_term(initial_term) {}
 
     /// The starting offset for this partition (min offset of the log)
     model::offset start_offset{0};
+    model::offset next_offset{0};
 
     /// The initial term for Raft consensus
     model::term_id initial_term{0};
 
-    auto serde_fields() { return std::tie(start_offset, initial_term); }
+    auto serde_fields() {
+        return std::tie(start_offset, next_offset, initial_term);
+    }
 
     friend bool operator==(
       const partition_bootstrap_params&, const partition_bootstrap_params&)

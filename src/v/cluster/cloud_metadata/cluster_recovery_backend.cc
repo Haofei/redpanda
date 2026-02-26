@@ -413,7 +413,8 @@ ss::future<cluster::errc> cluster_recovery_backend::do_action(
 
                         // Start offset for a CTP is a next_offset that
                         // the metastore expects to reconcile.
-                        auto start_offset = offsets_res->next_offset;
+                        auto start_offset = offsets_res->start_offset;
+                        auto next_offset = offsets_res->next_offset;
 
                         // Get term for start offset.
                         // missing_ntp and out_of_range are acceptable
@@ -449,7 +450,9 @@ ss::future<cluster::errc> cluster_recovery_backend::do_action(
                         }
 
                         partition_params[pid] = partition_bootstrap_params{
-                          kafka::offset_cast(start_offset), initial_term};
+                          kafka::offset_cast(start_offset),
+                          kafka::offset_cast(next_offset),
+                          initial_term};
 
                         vlog(
                           clusterlog.debug,

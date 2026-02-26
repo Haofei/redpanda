@@ -515,10 +515,17 @@ fmt::iterator epoch_window_checker::format_to(fmt::iterator it) const {
 }
 
 ss::future<> create_ctp_stm_bootstrap_snapshot(
-  const std::filesystem::path& work_directory, kafka::offset start_offset) {
-    // Create empty state with the correct start_offset
+  const std::filesystem::path& work_directory, ctp_stm_seed_offsets offsets) {
+    // The starting CTP STM state includes start offset
+    // and LRO. The LRO has two components, log offset and kafka offset.
+    // The assumption here is that the partition is re-created and the
+    // offset translator state is empty. Because of that log offset is
+    // equal to kafka offset.
     ctp_stm_state state;
-    state.set_start_offset(start_offset);
+    state.set_start_offset(offsets.start_offset);
+    auto k_lro = kafka::prev_offset(offsets.next_offset);
+    auto l_lro = kafka::offset_cast(k_lro);
+    state.advance_last_reconciled_offset(k_lro, l_lro);
 
     // Create empty epoch checker
     epoch_window_checker checker;
@@ -527,13 +534,9 @@ ss::future<> create_ctp_stm_bootstrap_snapshot(
     ctp_stm_snapshot snap{.state = state, .checker = checker};
     auto data = serde::to_iobuf(snap);
 
-    // The snapshot offset should be one before the start_offset since
-    // the snapshot represents state "up to and including" this offset.
-    // For a partition starting at start_offset, the snapshot should be
-    // at prev_offset(start_offset) (converted to model::offset).
-    auto snapshot_offset = model::prev_offset(model::offset(start_offset()));
-    auto stm_snap = raft::stm_snapshot::create(
-      0, snapshot_offset, std::move(data));
+    // The snapshot offset should be equal to l_lro since the partition is
+    // empty and starting offset is equal to LRO + 1.
+    auto stm_snap = raft::stm_snapshot::create(0, l_lro, std::move(data));
 
     // Persist using the file-backed snapshot manager
     storage::simple_snapshot_manager snapshot_mgr(

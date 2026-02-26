@@ -95,13 +95,16 @@ FIXTURE_TEST(
     model::ntp ntp(tp_ns.ns, tp_ns.tp, pid);
 
     // Set bootstrap params BEFORE creating the topic
+    // The metastore provides [start_offset, next_offset) range.
+    // The recovered partition should start from next_offset.
     model::offset expected_start_offset(1000);
+    model::offset expected_next_offset(2000);
     model::term_id expected_term(5);
 
     absl::btree_map<model::partition_id, cluster::partition_bootstrap_params>
       params;
     params[pid] = cluster::partition_bootstrap_params{
-      expected_start_offset, expected_term};
+      expected_start_offset, expected_next_offset, expected_term};
 
     auto ec = recovery_manager
                 .set_bootstrap_params(
@@ -114,6 +117,7 @@ FIXTURE_TEST(
     auto stored_params = recovery_table.get_partition_bootstrap_params(ntp);
     BOOST_REQUIRE(stored_params.has_value());
     BOOST_REQUIRE_EQUAL(stored_params->start_offset, expected_start_offset);
+    BOOST_REQUIRE_EQUAL(stored_params->next_offset, expected_next_offset);
     BOOST_REQUIRE_EQUAL(stored_params->initial_term, expected_term);
 
     // Now create the topic (1 partition, replication factor 1)
@@ -156,7 +160,9 @@ FIXTURE_TEST(
       })
       .get();
 
-    // The raft start offset should be the bootstrap start_offset
+    // The raft start offset should be the bootstrap next_offset since the
+    // recovered partition starts from next_offset (empty, first batch will
+    // have offset equal to next_offset).
     auto actual_start_offset = partition_manager
                                  .invoke_on(
                                    partition_shard.value(),
@@ -167,5 +173,5 @@ FIXTURE_TEST(
                                    })
                                  .get();
 
-    BOOST_CHECK_EQUAL(actual_start_offset, expected_start_offset);
+    BOOST_CHECK_EQUAL(actual_start_offset, expected_next_offset);
 }

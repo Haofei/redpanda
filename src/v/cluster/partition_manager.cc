@@ -158,8 +158,8 @@ ss::future<consensus_ptr> partition_manager::manage(
 
     if (bootstrap_params.has_value()) {
         // Programmatic bootstrap with custom offset/term.
-        // This is used for creating partitions with arbitrary start offset
-        // without requiring cloud storage.
+        // This is used for creating partitions with arbitrary start
+        // offset during cluster recovery.
         vlog(
           clusterlog.info,
           "Bootstrapping partition {} with start offset: {}, term: {}",
@@ -173,16 +173,18 @@ ss::future<consensus_ptr> partition_manager::manage(
           _storage,
           ntp_cfg,
           group,
-          bootstrap_params->start_offset,
+          bootstrap_params->next_offset,
           bootstrap_params->initial_term,
           initial_nodes);
 
-        // For cloud topics, also create the ctp_stm bootstrap snapshot
-        // with the correct start_offset
         if (ntp_cfg.cloud_topic_enabled()) {
             co_await cloud_topics::create_ctp_stm_bootstrap_snapshot(
               std::filesystem::path(ntp_cfg.work_directory()),
-              kafka::offset(bootstrap_params->start_offset()));
+              cloud_topics::ctp_stm_seed_offsets{
+                .start_offset = model::offset_cast(
+                  bootstrap_params->start_offset),
+                .next_offset = model::offset_cast(
+                  bootstrap_params->next_offset)});
         }
     } else {
         // NOTE: while the source cluster UUIDs of the path providers will
