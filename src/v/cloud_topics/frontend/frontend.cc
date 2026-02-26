@@ -283,7 +283,7 @@ frontend::make_reader(cloud_topic_log_reader_config cfg) {
         // this roundabout way of doing it.
         auto tidp = topic_id_partition();
         if (!tidp) {
-            throw ss::abort_requested_exception();
+            throw topic_config_not_found_exception(ntp());
         }
         co_return storage::translating_reader{
           model::record_batch_reader(make_l1_reader(cfg, *tidp))};
@@ -416,7 +416,7 @@ frontend::l1_timequery(storage::timequery_config cfg) {
     auto l1_metastore = ct_state->local().get_l1_metastore();
     auto tidp = topic_id_partition();
     if (!tidp) {
-        throw ss::abort_requested_exception();
+        throw topic_config_not_found_exception(ntp());
     }
     // I don't love this, but we clamp min/max offsets by the kafka start offset
     // and the LSO/HWM, but we can ignore the max offset for L1 because we never

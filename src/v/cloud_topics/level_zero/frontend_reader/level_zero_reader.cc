@@ -462,7 +462,7 @@ model::topic_id_partition
 level_zero_log_reader_impl::require_topic_id_partition() const {
     auto tidp = get_topic_id_partition(_ctp);
     if (!tidp) {
-        throw ss::abort_requested_exception();
+        throw topic_config_not_found_exception(_ctp->ntp());
     }
     return *tidp;
 }

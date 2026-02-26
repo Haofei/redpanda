@@ -14,9 +14,28 @@
 #include "cluster/partition.h"
 #include "model/fundamental.h"
 
+#include <seastar/core/abort_source.hh>
+#include <seastar/core/sstring.hh>
+
+#include <fmt/format.h>
+
 #include <optional>
 
 namespace cloud_topics {
+
+/// Thrown when the topic config lookup fails, which can occur when the topic
+/// config has been removed from the topic_table but a partition operation is
+/// still in flight.
+struct topic_config_not_found_exception final : ss::abort_requested_exception {
+    explicit topic_config_not_found_exception(const model::ntp& ntp)
+      : _msg(
+          fmt::format(
+            "topic config not found for {} (topic likely deleted)", ntp)) {}
+    const char* what() const noexcept override { return _msg.c_str(); }
+
+private:
+    ss::sstring _msg;
+};
 
 /// Look up the topic_id_partition for a cloud-topics partition.
 /// Returns nullopt when the topic config has been removed from the
