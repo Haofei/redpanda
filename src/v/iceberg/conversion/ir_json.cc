@@ -24,6 +24,7 @@
 #include <map>
 #include <optional>
 #include <utility>
+#include <variant>
 
 namespace iceberg {
 namespace {
@@ -31,6 +32,23 @@ constexpr iceberg::nested_field::id_t placeholder_field_id{0};
 
 using json_type = conversion::json_schema::json_value_type;
 using json_format = conversion::json_schema::format;
+
+struct allow_additional_properties_t {};
+constexpr allow_additional_properties_t allow_additional_properties{};
+
+struct forbid_additional_properties_t {};
+constexpr forbid_additional_properties_t forbid_additional_properties{};
+
+using additional_properties_policy
+  = std::variant<allow_additional_properties_t, forbid_additional_properties_t>;
+
+bool is_additional_properties_forbidden(
+  const additional_properties_policy& policy) {
+    return ss::visit(
+      policy,
+      [](allow_additional_properties_t) { return false; },
+      [](forbid_additional_properties_t) { return true; });
+}
 
 /// Set of JSON value types for constraint tracking.
 ///
@@ -118,7 +136,8 @@ struct constraint {
 
     // Object properties, keyed by name.
     std::map<std::string, constraint> properties = {};
-    bool additional_properties_allowed = true;
+    additional_properties_policy additional_properties
+      = allow_additional_properties;
 
     // Array item constraints.
     // - nullopt: no "items" keyword
@@ -143,20 +162,27 @@ struct constraint {
               "Intersecting constraints with properties on both sides "
               "is not supported");
         } else if (!other.properties.empty()) {
-            if (!additional_properties_allowed) {
+            if (is_additional_properties_forbidden(additional_properties)) {
                 return conversion_exception(
                   "additionalProperties: false conflicts with properties "
                   "defined in another branch");
             }
             properties = other.properties;
         } else if (
-          !properties.empty() && !other.additional_properties_allowed) {
+          !properties.empty()
+          && is_additional_properties_forbidden(other.additional_properties)) {
             return conversion_exception(
               "additionalProperties: false conflicts with properties "
               "defined in another branch");
         }
-        additional_properties_allowed = additional_properties_allowed
-                                        && other.additional_properties_allowed;
+
+        if (
+          is_additional_properties_forbidden(additional_properties)
+          || is_additional_properties_forbidden(other.additional_properties)) {
+            additional_properties = forbid_additional_properties;
+        } else {
+            additional_properties = allow_additional_properties;
+        }
 
         if (items.has_value() && other.items.has_value()) {
             return conversion_exception(
@@ -325,7 +351,7 @@ collect(collect_context& ctx, const conversion::json_schema::subschema& s) {
 
         if (s.additional_properties()) {
             if (s.additional_properties()->get().boolean_subschema() == false) {
-                c.additional_properties_allowed = false;
+                c.additional_properties = forbid_additional_properties;
             } else {
                 return conversion_exception(
                   "Only 'false' subschema is supported "
