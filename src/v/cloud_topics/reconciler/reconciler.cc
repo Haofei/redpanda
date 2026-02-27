@@ -482,7 +482,7 @@ ss::future<size_t> reconciler<Clock>::reconcile_source_set(
             const auto is_shutdown = ssx::is_shutdown_exception(ex);
             vlogl(
               lg,
-              is_shutdown ? ss::log_level::debug : ss::log_level::error,
+              is_shutdown ? ss::log_level::debug : ss::log_level::warn,
               "Exception reconciling object {}: {}",
               oid,
               ex);
