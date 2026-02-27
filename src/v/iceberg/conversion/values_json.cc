@@ -208,7 +208,7 @@ ss::future<> decode_struct(
     while (true) {
         if (!co_await p.next()) {
             throw value_conversion_exception(
-              "Failed to read next JSON token after start object");
+              "Expected key or end of JSON object but got end of input");
         }
 
         if (p.token() == serde::json::token::end_object) {
