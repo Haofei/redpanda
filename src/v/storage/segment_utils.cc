@@ -682,8 +682,10 @@ ss::future<> build_compaction_index(
         .finally([&w] { return w->close(); }));
     if (index_builder.failed()) {
         auto exception = index_builder.get_exception();
-        vlog(
-          gclog.error,
+        vlogl(
+          gclog,
+          ssx::is_shutdown_exception(exception) ? ss::log_level::debug
+                                                : ss::log_level::error,
           "Error rebuilding index: {}, {}",
           w->filename(),
           exception);
