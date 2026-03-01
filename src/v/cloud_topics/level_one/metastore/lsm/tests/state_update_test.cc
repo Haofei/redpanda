@@ -480,6 +480,55 @@ protected:
         EXPECT_FALSE(res->has_value());
     }
 
+    void apply_preregister_update(preregister_objects_db_update& update) {
+        auto reader = make_reader();
+        chunked_vector<write_batch_row> rows;
+        auto result = update.build_rows(reader, rows).get();
+        ASSERT_TRUE(result.has_value());
+
+        auto seqno = next_seqno();
+        auto wb = db_->create_write_batch();
+        for (const auto& row : rows) {
+            wb.put(row.key, row.value.copy(), seqno);
+        }
+        db_->apply(std::move(wb)).get();
+    }
+
+    void apply_expire_preregistered_update(
+      expire_preregistered_objects_db_update& update) {
+        auto reader = make_reader();
+        chunked_vector<write_batch_row> rows;
+        auto result = update.build_rows(reader, rows).get();
+        ASSERT_TRUE(result.has_value());
+
+        auto seqno = next_seqno();
+        auto wb = db_->create_write_batch();
+        for (const auto& row : rows) {
+            if (row.value.empty()) {
+                wb.remove(row.key, seqno);
+            } else {
+                wb.put(row.key, row.value.copy(), seqno);
+            }
+        }
+        db_->apply(std::move(wb)).get();
+    }
+
+    void verify_object_preregistered(object_id oid) {
+        auto reader = make_reader();
+        auto res = reader.get_object(oid).get();
+        ASSERT_TRUE(res.has_value());
+        ASSERT_TRUE(res.value().has_value());
+        EXPECT_TRUE(res.value()->is_preregistration);
+    }
+
+    void verify_object_not_preregistered(object_id oid) {
+        auto reader = make_reader();
+        auto res = reader.get_object(oid).get();
+        ASSERT_TRUE(res.has_value());
+        ASSERT_TRUE(res.value().has_value());
+        EXPECT_FALSE(res.value()->is_preregistration);
+    }
+
     std::optional<lsm::database> db_;
 };
 
@@ -1465,4 +1514,62 @@ TEST_F(StateUpdateTest, TestRemoveTopicsZerosSize) {
 
     // Metadata should be removed entirely.
     verify_metadata_missing(tidp0);
+}
+
+TEST_F(StateUpdateTest, TestPreregisterObjectsBasic) {
+    auto oid1 = make_oid();
+    auto oid2 = make_oid();
+
+    preregister_objects_db_update update;
+    update.object_ids.push_back(oid1);
+    update.object_ids.push_back(oid2);
+    update.registered_at = model::timestamp::now();
+
+    auto reader = make_reader();
+    auto can_apply_res = update.can_apply(reader).get();
+    ASSERT_TRUE(can_apply_res.has_value());
+
+    apply_preregister_update(update);
+
+    verify_object_preregistered(oid1);
+    verify_object_preregistered(oid2);
+}
+
+TEST_F(StateUpdateTest, TestPreregisterObjectsRejectsDuplicate) {
+    auto oid1 = make_oid();
+
+    preregister_objects_db_update update1;
+    update1.object_ids.push_back(oid1);
+    update1.registered_at = model::timestamp::now();
+    apply_preregister_update(update1);
+
+    preregister_objects_db_update update2;
+    update2.object_ids.push_back(oid1);
+    update2.registered_at = model::timestamp::now();
+    auto reader = make_reader();
+    auto can_apply_res = update2.can_apply(reader).get();
+    EXPECT_FALSE(can_apply_res.has_value());
+}
+
+TEST_F(StateUpdateTest, TestExpirePreregisteredObjectsClearsFlag) {
+    auto oid1 = make_oid();
+    auto oid2 = make_oid();
+
+    preregister_objects_db_update prereg;
+    prereg.object_ids.push_back(oid1);
+    prereg.object_ids.push_back(oid2);
+    prereg.registered_at = model::timestamp::now();
+    apply_preregister_update(prereg);
+
+    verify_object_preregistered(oid1);
+    verify_object_preregistered(oid2);
+
+    expire_preregistered_objects_db_update expire;
+    expire.object_ids.push_back(oid1);
+    apply_expire_preregistered_update(expire);
+
+    // oid1 should have is_preregistration cleared.
+    verify_object_not_preregistered(oid1);
+    // oid2 should be unchanged.
+    verify_object_preregistered(oid2);
 }

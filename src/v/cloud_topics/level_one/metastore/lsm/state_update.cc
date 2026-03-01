@@ -63,6 +63,8 @@ ss::future<std::expected<void, db_update_error>> validate_new_objects_missing(
             .removed_data_size = 0,
             .footer_pos = o.footer_pos,
             .object_size = o.object_size,
+            .last_updated = model::timestamp::now(),
+            .is_preregistration = false,
           });
     }
     co_return std::expected<void, db_update_error>{};
@@ -597,7 +599,6 @@ replace_objects_db_update::build_rows(
     if (!validate_res.has_value()) {
         co_return std::unexpected(std::move(validate_res.error()));
     }
-
     // Verify new objects don't exist.
     sorted_extents_by_tidp_t new_extents_by_tp;
     chunked_hash_map<object_id, object_entry> new_objects_map;
@@ -1125,6 +1126,68 @@ remove_objects_db_update::build_rows(
             .key = object_row_key::encode(oid), .value = iobuf{}});
     }
 
+    co_return std::expected<void, db_update_error>{};
+}
+
+ss::future<std::expected<void, db_update_error>>
+preregister_objects_db_update::can_apply(state_reader& reader) const {
+    for (const auto& oid : object_ids) {
+        auto obj_res = co_await reader.get_object(oid);
+        if (!obj_res.has_value()) {
+            co_return std::unexpected(wrap_read_err(
+              std::move(obj_res.error()), "Error getting object {}", oid));
+        }
+        if (obj_res->has_value()) {
+            co_return std::unexpected(db_update_error(
+              invalid_update, fmt::format("object {} already exists", oid)));
+        }
+    }
+    co_return std::expected<void, db_update_error>{};
+}
+
+ss::future<std::expected<void, db_update_error>>
+preregister_objects_db_update::build_rows(
+  state_reader& reader, chunked_vector<write_batch_row>& out) const {
+    auto allowed = co_await can_apply(reader);
+    if (!allowed.has_value()) {
+        co_return std::unexpected(std::move(allowed.error()));
+    }
+    for (const auto& oid : object_ids) {
+        out.emplace_back(
+          write_batch_row{
+            .key = object_row_key::encode(oid),
+            .value = serde::to_iobuf(
+              object_row_value{
+                .object = object_entry{
+                  .last_updated = registered_at,
+                  .is_preregistration = true,
+                },
+              }),
+          });
+    }
+    co_return std::expected<void, db_update_error>{};
+}
+
+ss::future<std::expected<void, db_update_error>>
+expire_preregistered_objects_db_update::build_rows(
+  state_reader& reader, chunked_vector<write_batch_row>& out) const {
+    for (const auto& oid : object_ids) {
+        auto obj_res = co_await reader.get_object(oid);
+        if (!obj_res.has_value()) {
+            co_return std::unexpected(wrap_read_err(
+              std::move(obj_res.error()), "Error getting object {}", oid));
+        }
+        if (!obj_res->has_value() || !obj_res->value().is_preregistration) {
+            continue;
+        }
+        auto entry = obj_res->value();
+        entry.is_preregistration = false;
+        out.emplace_back(
+          write_batch_row{
+            .key = object_row_key::encode(oid),
+            .value = serde::to_iobuf(object_row_value{.object = entry}),
+          });
+    }
     co_return std::expected<void, db_update_error>{};
 }
 
