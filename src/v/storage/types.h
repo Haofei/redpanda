@@ -172,11 +172,18 @@ public:
         return f;
     }
 
-    void make_snapshot_in_background() {
-        check_status("make_snapshot_in_background");
+    bool request_make_snapshot_in_background() {
+        if (_status != status::running) {
+            vlog(
+              stlog.warn,
+              "request to make snapshot in background is ignored because stm "
+              "manager is not running");
+            return false;
+        }
         for (auto& stm : _stms) {
             stm->write_local_snapshot_in_background();
         }
+        return true;
     }
 
     model::offset max_removable_local_log_offset();

@@ -2088,7 +2088,7 @@ ss::future<> disk_log_impl::new_segment(model::offset o, model::term_id t) {
                 }
                 _segs.add(std::move(h));
                 _probe->segment_created();
-                _stm_manager->make_snapshot_in_background();
+                _stm_manager->request_make_snapshot_in_background();
                 _stm_dirty_bytes_units.return_all();
             });
       });
@@ -3794,8 +3794,9 @@ void disk_log_impl::wrote_stm_bytes(size_t byte_size) {
     auto checkpoint_hint = _manager.resources().stm_take_bytes(
       byte_size, _stm_dirty_bytes_units);
     if (checkpoint_hint) {
-        _stm_manager->make_snapshot_in_background();
-        _stm_dirty_bytes_units.return_all();
+        if (_stm_manager->request_make_snapshot_in_background()) [[likely]] {
+            _stm_dirty_bytes_units.return_all();
+        }
     }
 }
 
