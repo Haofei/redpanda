@@ -293,3 +293,56 @@ class CompactionStressKeyCardinalityTest(CompactionStressBase):
             topic=self.TOPIC_NAME,
             producer=producer,
         )
+
+
+class CompactionStressExtremeDedupTest(CompactionStressBase):
+    """
+    Produce massive record counts for very few keys, verifying
+    correctness under extreme deduplication ratios (100,000:1).
+    """
+
+    TOPIC_NAME = "extreme_dedup_stress"
+    KEY_SET_CARDINALITY = 10
+    MSG_SIZE = 256
+
+    if is_debug_mode():
+        msg_count = 50_000
+    else:
+        msg_count = 1_000_000
+
+    def __init__(self, test_context: TestContext):
+        super().__init__(test_context)
+
+    def setUp(self):
+        assert self.redpanda
+        self.redpanda.start()
+        self.rpk.create_topic(
+            topic=self.TOPIC_NAME,
+            partitions=1,
+            replicas=3,
+            config={
+                TopicSpec.PROPERTY_STORAGE_MODE: TopicSpec.STORAGE_MODE_CLOUD,
+                "cleanup.policy": TopicSpec.CLEANUP_COMPACT,
+                "min.cleanable.dirty.ratio": "0.0",
+            },
+        )
+
+    @cluster(num_nodes=4)
+    def test_extreme_dedup_ratio(self):
+        self.wait_for_managed_logs()
+
+        producer = self.produce_and_wait(
+            topic=self.TOPIC_NAME,
+            msg_size=self.MSG_SIZE,
+            msg_count=self.msg_count,
+            key_set_cardinality=self.KEY_SET_CARDINALITY,
+        )
+
+        # With only 10 keys, compaction should converge quickly.
+        # Wait for records_removed to stabilize before consuming.
+        self.wait_for_compaction_quiesce()
+
+        self.consume_and_verify(
+            topic=self.TOPIC_NAME,
+            producer=producer,
+        )
