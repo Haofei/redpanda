@@ -56,7 +56,6 @@ var tableHeaders = []string{
 	"REQS/MIN",
 }
 
-
 func getConnectionDuration(conn *adminv2.KafkaConnection) string {
 	opened := conn.OpenTime.AsTime()
 	closed := conn.CloseTime.AsTime()

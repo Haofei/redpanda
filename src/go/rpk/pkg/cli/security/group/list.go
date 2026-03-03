@@ -10,7 +10,8 @@
 package group
 
 import (
-	"sort"
+	"maps"
+	"slices"
 
 	adminv2 "buf.build/gen/go/redpandadata/core/protocolbuffers/go/redpanda/core/admin/v2"
 	"connectrpc.com/connect"
@@ -84,5 +85,5 @@ func collectGroupsFromAdminRoles(roles []*adminv2.Role) []string {
 			}
 		}
 	}
-    return slices.Sorted(maps.Keys(groupSet))
+	return slices.Sorted(maps.Keys(groupSet))
 }

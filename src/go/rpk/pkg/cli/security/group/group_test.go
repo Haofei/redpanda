@@ -23,8 +23,9 @@ func TestGroupMember(t *testing.T) {
 	require.Nil(t, m.GetUser())
 }
 
-
 func TestCollectGroupsFromAdminRoles(t *testing.T) {
+	var uninit []string
+
 	for _, tc := range []struct {
 		name  string
 		roles []*adminv2.Role
@@ -33,14 +34,14 @@ func TestCollectGroupsFromAdminRoles(t *testing.T) {
 		{
 			name:  "no roles",
 			roles: nil,
-			want:  []string{},
+			want:  uninit,
 		},
 		{
 			name: "roles with no members",
 			roles: []*adminv2.Role{
 				{Name: "admin"},
 			},
-			want: []string{},
+			want: uninit,
 		},
 		{
 			name: "role with user member only",
@@ -52,7 +53,7 @@ func TestCollectGroupsFromAdminRoles(t *testing.T) {
 					},
 				},
 			},
-			want: []string{},
+			want: uninit,
 		},
 		{
 			name: "role with group member",
