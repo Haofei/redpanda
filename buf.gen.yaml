@@ -2,7 +2,7 @@ version: v2
 managed:
   enabled: false
 inputs:
-  - module: buf.build/redpandadata/core:92d267893f89
+  - module: buf.build/redpandadata/core:15c53cee9ebf
     paths:
       - redpanda/core/admin/v2/shadow_link.proto
       - redpanda/core/common/v1/acl.proto
