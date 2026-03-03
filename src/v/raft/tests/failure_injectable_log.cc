@@ -286,4 +286,8 @@ bool failure_injectable_log::needs_compaction() const {
     return _underlying_log->needs_compaction();
 }
 
+ss::lw_shared_ptr<storage::stm_manager> failure_injectable_log::stm_manager() {
+    return _underlying_log->stm_manager();
+}
+
 } // namespace raft

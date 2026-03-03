@@ -182,6 +182,7 @@ disk_log_impl::disk_log_impl(
   ss::sharded<features::feature_table>& feature_table,
   std::vector<model::record_batch_type> translator_batch_types)
   : log(std::move(cfg))
+  , _stm_manager(ss::make_lw_shared<storage::stm_manager>())
   , _manager(manager)
   , _segment_size_jitter(
       internal::random_jitter(_manager.config().segment_size_jitter))
