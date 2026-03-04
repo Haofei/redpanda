@@ -4,6 +4,7 @@ gcp:
     - tests
     - transactions
     - tuner_integration_tests/net_tuner_test.py::GcpNetTunerTest
+    - scale_tests/cloud_topics_compaction_scale_test.py
 
   excluded:
     - tests/librdkafka_test.py # normally disabled
