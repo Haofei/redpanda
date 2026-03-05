@@ -207,39 +207,19 @@ level_one_log_reader_impl::read_some(
     }
 }
 
-std::optional<l1::metastore::object_response>
-level_one_log_reader_impl::consume_lookahead_buffer(kafka::offset offset) {
-    // Discard stale entries whose data is entirely before the requested
-    // offset.
-    while (!_lookahead_buffer.empty()
-           && _lookahead_buffer.front().last_offset < offset) {
-        _lookahead_buffer.pop_front();
-    }
-    if (_lookahead_buffer.empty()) {
-        return std::nullopt;
-    }
-    auto entry = std::move(_lookahead_buffer.front());
-    _lookahead_buffer.pop_front();
-    return entry;
-}
-
-ss::future<> level_one_log_reader_impl::fill_lookahead_buffer(
-  kafka::offset offset, size_t num_objects) {
+ss::future<std::optional<level_one_log_reader_impl::object_info>>
+level_one_log_reader_impl::lookup_object_for_offset(
+  kafka::offset offset, model::timeout_clock::time_point /*deadline*/) {
     ss::abort_source default_abort_source;
     auto* abort_source = _config.abort_source
                            ? &_config.abort_source.value().get()
                            : &default_abort_source;
     retry_chain_node rtc = l1::make_default_metastore_rtc(*abort_source);
     auto response = co_await l1::retry_metastore_op(
-      [this, offset, num_objects] -> ss::future<std::expected<
-                                    l1::metastore::extent_metadata_response,
-                                    l1::metastore::errc>> {
-          return _metastore->get_extent_metadata_forwards(
-            _tidp,
-            offset,
-            kafka::offset::max(),
-            num_objects,
-            l1::metastore::include_object_metadata::yes);
+      [this, offset]
+      -> ss::future<
+        std::expected<l1::metastore::object_response, l1::metastore::errc>> {
+          return _metastore->get_first_ge(_tidp, offset);
       },
       rtc);
     if (!response.has_value()) {
@@ -247,10 +227,12 @@ ss::future<> level_one_log_reader_impl::fill_lookahead_buffer(
         case l1::metastore::errc::out_of_range:
             vlog(
               _log.debug, "No L1 objects found at offset {} or later", offset);
-            co_return;
+            co_return std::nullopt;
+
         case l1::metastore::errc::missing_ntp:
             vlog(_log.debug, "Partition not tracked in metastore");
-            co_return;
+            co_return std::nullopt;
+
         default:
             throw std::runtime_error(_log.format(
               "Metastore query failed offset {}: {}",
@@ -259,36 +241,7 @@ ss::future<> level_one_log_reader_impl::fill_lookahead_buffer(
         }
     }
 
-    for (auto& em : response.value().extents) {
-        vassert(
-          em.object_info.has_value(),
-          "extent metadata missing object_info for offsets ({}~{})",
-          em.base_offset,
-          em.last_offset);
-        _lookahead_buffer.push_back(
-          l1::metastore::object_response{
-            .oid = em.object_info->oid,
-            .footer_pos = em.object_info->footer_pos,
-            .object_size = em.object_info->object_size,
-            .first_offset = em.base_offset,
-            .last_offset = em.last_offset,
-          });
-    }
-}
-
-ss::future<std::optional<level_one_log_reader_impl::object_info>>
-level_one_log_reader_impl::lookup_object_for_offset(
-  kafka::offset offset, model::timeout_clock::time_point /*deadline*/) {
-    if (_lookahead_buffer.empty()) {
-        auto num_objects = std::max<size_t>(1, _config.lookahead_objects);
-        co_await fill_lookahead_buffer(offset, num_objects);
-    }
-    auto obj_resp = consume_lookahead_buffer(offset);
-    if (!obj_resp.has_value()) {
-        co_return std::nullopt;
-    }
-
-    auto& obj = obj_resp.value();
+    auto& obj = response.value();
     vlog(_log.debug, "Found L1 object {} at offset {}", obj.oid, offset);
 
     auto footer = co_await read_footer(

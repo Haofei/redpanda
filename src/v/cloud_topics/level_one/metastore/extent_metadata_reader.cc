@@ -50,11 +50,7 @@ extent_metadata_reader::forward_generator() {
         auto extent_md_res = co_await retry_metastore_op_with_default_rtc(
           [this, next_offset] {
               return _metastore->get_extent_metadata_forwards(
-                _tp,
-                next_offset,
-                _max_offset,
-                _num_extents_per_request,
-                metastore::include_object_metadata::no);
+                _tp, next_offset, _max_offset, _num_extents_per_request);
           },
           _as);
 

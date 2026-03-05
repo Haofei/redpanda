@@ -2021,11 +2021,7 @@ TEST(SimpleMetastoreTest, TestGetExtentMetadataForwards) {
         auto min_offset = kafka::offset{0};
         auto max_offset = kafka::offset{9};
         auto extent_metadata_res = m.get_extent_metadata_forwards(
-                                      tp,
-                                      min_offset,
-                                      max_offset,
-                                      10,
-                                      metastore::include_object_metadata::no)
+                                      tp, min_offset, max_offset, 10)
                                      .get();
         ASSERT_TRUE(extent_metadata_res.has_value());
         EXPECT_THAT(
@@ -2037,11 +2033,7 @@ TEST(SimpleMetastoreTest, TestGetExtentMetadataForwards) {
         auto min_offset = kafka::offset{0};
         auto max_offset = kafka::offset{15};
         auto extent_metadata_res = m.get_extent_metadata_forwards(
-                                      tp,
-                                      min_offset,
-                                      max_offset,
-                                      10,
-                                      metastore::include_object_metadata::no)
+                                      tp, min_offset, max_offset, 10)
                                      .get();
         ASSERT_TRUE(extent_metadata_res.has_value());
         EXPECT_THAT(
@@ -2054,11 +2046,7 @@ TEST(SimpleMetastoreTest, TestGetExtentMetadataForwards) {
         auto min_offset = kafka::offset{0};
         auto max_offset = kafka::offset{19};
         auto extent_metadata_res = m.get_extent_metadata_forwards(
-                                      tp,
-                                      min_offset,
-                                      max_offset,
-                                      10,
-                                      metastore::include_object_metadata::no)
+                                      tp, min_offset, max_offset, 10)
                                      .get();
         ASSERT_TRUE(extent_metadata_res.has_value());
         EXPECT_THAT(
@@ -2071,11 +2059,7 @@ TEST(SimpleMetastoreTest, TestGetExtentMetadataForwards) {
         auto min_offset = kafka::offset{0};
         auto max_offset = kafka::offset{20};
         auto extent_metadata_res = m.get_extent_metadata_forwards(
-                                      tp,
-                                      min_offset,
-                                      max_offset,
-                                      10,
-                                      metastore::include_object_metadata::no)
+                                      tp, min_offset, max_offset, 10)
                                      .get();
         ASSERT_TRUE(extent_metadata_res.has_value());
         EXPECT_THAT(
@@ -2090,11 +2074,7 @@ TEST(SimpleMetastoreTest, TestGetExtentMetadataForwards) {
         auto min_offset = kafka::offset{0};
         auto max_offset = kafka::offset{100};
         auto extent_metadata_res = m.get_extent_metadata_forwards(
-                                      tp,
-                                      min_offset,
-                                      max_offset,
-                                      10,
-                                      metastore::include_object_metadata::no)
+                                      tp, min_offset, max_offset, 10)
                                      .get();
         ASSERT_TRUE(extent_metadata_res.has_value());
         EXPECT_THAT(
@@ -2110,13 +2090,8 @@ TEST(SimpleMetastoreTest, TestGetExtentMetadataForwards) {
     {
         auto min_offset = kafka::offset{0};
         auto max_offset = kafka::offset{9};
-        auto extent_metadata_res = m.get_extent_metadata_forwards(
-                                      tp,
-                                      min_offset,
-                                      max_offset,
-                                      0,
-                                      metastore::include_object_metadata::no)
-                                     .get();
+        auto extent_metadata_res
+          = m.get_extent_metadata_forwards(tp, min_offset, max_offset, 0).get();
         // Requesting 0 extents still results in a single extent being returned.
         ASSERT_TRUE(extent_metadata_res.has_value());
         ASSERT_EQ(extent_metadata_res->extents.size(), 1);
@@ -2125,13 +2100,8 @@ TEST(SimpleMetastoreTest, TestGetExtentMetadataForwards) {
     {
         auto min_offset = kafka::offset{0};
         auto max_offset = kafka::offset{15};
-        auto extent_metadata_res = m.get_extent_metadata_forwards(
-                                      tp,
-                                      min_offset,
-                                      max_offset,
-                                      1,
-                                      metastore::include_object_metadata::no)
-                                     .get();
+        auto extent_metadata_res
+          = m.get_extent_metadata_forwards(tp, min_offset, max_offset, 1).get();
         ASSERT_TRUE(extent_metadata_res.has_value());
         EXPECT_THAT(
           extent_metadata_res->extents,
@@ -2141,13 +2111,8 @@ TEST(SimpleMetastoreTest, TestGetExtentMetadataForwards) {
     {
         auto min_offset = kafka::offset{0};
         auto max_offset = kafka::offset{20};
-        auto extent_metadata_res = m.get_extent_metadata_forwards(
-                                      tp,
-                                      min_offset,
-                                      max_offset,
-                                      2,
-                                      metastore::include_object_metadata::no)
-                                     .get();
+        auto extent_metadata_res
+          = m.get_extent_metadata_forwards(tp, min_offset, max_offset, 2).get();
         ASSERT_TRUE(extent_metadata_res.has_value());
         EXPECT_THAT(
           extent_metadata_res->extents,
@@ -2161,11 +2126,7 @@ TEST(SimpleMetastoreTest, TestGetExtentMetadataForwards) {
         auto min_offset = kafka::offset{5};
         auto max_offset = kafka::offset{9};
         auto extent_metadata_res = m.get_extent_metadata_forwards(
-                                      tp,
-                                      min_offset,
-                                      max_offset,
-                                      10,
-                                      metastore::include_object_metadata::no)
+                                      tp, min_offset, max_offset, 10)
                                      .get();
         ASSERT_TRUE(extent_metadata_res.has_value());
         EXPECT_THAT(
@@ -2177,11 +2138,7 @@ TEST(SimpleMetastoreTest, TestGetExtentMetadataForwards) {
         auto min_offset = kafka::offset{9};
         auto max_offset = kafka::offset{29};
         auto extent_metadata_res = m.get_extent_metadata_forwards(
-                                      tp,
-                                      min_offset,
-                                      max_offset,
-                                      10,
-                                      metastore::include_object_metadata::no)
+                                      tp, min_offset, max_offset, 10)
                                      .get();
         ASSERT_TRUE(extent_metadata_res.has_value());
         EXPECT_THAT(
@@ -2403,11 +2360,7 @@ TEST(SimpleMetastoreTest, TestGetExtentMetadataEmpty) {
         auto min_offset = kafka::offset{0};
         auto max_offset = kafka::offset{100};
         auto extent_metadata_ge_res = m.get_extent_metadata_forwards(
-                                         tp,
-                                         min_offset,
-                                         max_offset,
-                                         10,
-                                         metastore::include_object_metadata::no)
+                                         tp, min_offset, max_offset, 10)
                                         .get();
         ASSERT_TRUE(extent_metadata_ge_res.has_value());
         ASSERT_TRUE(extent_metadata_ge_res->extents.empty());
@@ -2555,84 +2508,4 @@ TEST(SimpleMetastoreTest, TestGetSizeMultiplePartitions) {
     auto size_res_b = m.get_size(tp_b).get();
     ASSERT_TRUE(size_res_b.has_value());
     ASSERT_EQ(data_size_b, size_res_b->size);
-}
-
-TEST(SimpleMetastoreTest, TestGetExtentMetadataForwardsWithObjectMetadata) {
-    simple_metastore m;
-    om_list_t os;
-    os.emplace_back(
-      om_builder(oid1, 100, 1100).add(tid_a, 0_o, 9_o, 2000_t, 0, 500).build());
-    os.emplace_back(om_builder(oid2, 200, 2200)
-                      .add(tid_a, 10_o, 19_o, 3000_t, 0, 500)
-                      .build());
-    os.emplace_back(om_builder(oid3, 300, 3300)
-                      .add(tid_a, 20_o, 29_o, 4000_t, 0, 500)
-                      .build());
-    auto add_res
-      = m.add_objects(os, terms_builder().add(tid_a, 0_tm, 0_o).build()).get();
-    ASSERT_TRUE(add_res.has_value());
-
-    auto tp = model::topic_id_partition::from(tid_a);
-
-    // Without include_object_metadata, object_info should be nullopt.
-    {
-        auto res
-          = m.get_extent_metadata_forwards(
-               tp, 0_o, 100_o, 10, metastore::include_object_metadata::no)
-              .get();
-        ASSERT_TRUE(res.has_value());
-        ASSERT_EQ(res->extents.size(), 3);
-        EXPECT_FALSE(res->extents[0].object_info.has_value());
-        EXPECT_FALSE(res->extents[1].object_info.has_value());
-        EXPECT_FALSE(res->extents[2].object_info.has_value());
-    }
-
-    // With include_object_metadata, object_info should be populated from
-    // the object store.
-    {
-        auto res
-          = m.get_extent_metadata_forwards(
-               tp, 0_o, 100_o, 10, metastore::include_object_metadata::yes)
-              .get();
-        ASSERT_TRUE(res.has_value());
-        ASSERT_EQ(res->extents.size(), 3);
-
-        EXPECT_EQ(res->extents[0].base_offset, 0_o);
-        EXPECT_EQ(res->extents[0].last_offset, 9_o);
-        ASSERT_TRUE(res->extents[0].object_info.has_value());
-        EXPECT_EQ(res->extents[0].object_info->oid, oid1);
-        EXPECT_EQ(res->extents[0].object_info->footer_pos, 100);
-        EXPECT_EQ(res->extents[0].object_info->object_size, 1100);
-
-        EXPECT_EQ(res->extents[1].base_offset, 10_o);
-        EXPECT_EQ(res->extents[1].last_offset, 19_o);
-        ASSERT_TRUE(res->extents[1].object_info.has_value());
-        EXPECT_EQ(res->extents[1].object_info->oid, oid2);
-        EXPECT_EQ(res->extents[1].object_info->footer_pos, 200);
-        EXPECT_EQ(res->extents[1].object_info->object_size, 2200);
-
-        EXPECT_EQ(res->extents[2].base_offset, 20_o);
-        EXPECT_EQ(res->extents[2].last_offset, 29_o);
-        ASSERT_TRUE(res->extents[2].object_info.has_value());
-        EXPECT_EQ(res->extents[2].object_info->oid, oid3);
-        EXPECT_EQ(res->extents[2].object_info->footer_pos, 300);
-        EXPECT_EQ(res->extents[2].object_info->object_size, 3300);
-
-        EXPECT_TRUE(res->end_of_stream);
-    }
-
-    // With max_num_extents limit.
-    {
-        auto res
-          = m.get_extent_metadata_forwards(
-               tp, 0_o, 100_o, 2, metastore::include_object_metadata::yes)
-              .get();
-        ASSERT_TRUE(res.has_value());
-        ASSERT_EQ(res->extents.size(), 2);
-        ASSERT_TRUE(res->extents[0].object_info.has_value());
-        EXPECT_EQ(res->extents[0].object_info->oid, oid1);
-        ASSERT_TRUE(res->extents[1].object_info.has_value());
-        EXPECT_EQ(res->extents[1].object_info->oid, oid2);
-        EXPECT_FALSE(res->end_of_stream);
-    }
 }

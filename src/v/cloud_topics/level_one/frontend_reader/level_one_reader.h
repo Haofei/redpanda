@@ -18,7 +18,6 @@
 #include "model/record_batch_reader.h"
 #include "utils/prefix_logger.h"
 
-#include <deque>
 #include <expected>
 
 namespace cloud_topics {
@@ -98,27 +97,10 @@ private:
 
     /*
      * Contacts the L1 metastore to retrieve metadata for an L1 object that
-     * contains the target offset. Uses a lookahead buffer populated via
-     * get_extent_metadata_forwards — when lookahead_objects > 1, multiple
-     * objects are fetched at once; otherwise exactly one is fetched.
+     * contains the target offset.
      */
     ss::future<std::optional<object_info>> lookup_object_for_offset(
       kafka::offset, model::timeout_clock::time_point deadline);
-
-    /*
-     * Fills the lookahead buffer by fetching up to num_objects extents
-     * from the metastore starting at the given offset.
-     */
-    ss::future<>
-    fill_lookahead_buffer(kafka::offset offset, size_t num_objects);
-
-    /*
-     * Consumes the front entry of the lookahead buffer that covers the
-     * given offset, discarding any stale entries. Returns nullopt if the
-     * buffer is empty or has no applicable entry.
-     */
-    std::optional<l1::metastore::object_response>
-    consume_lookahead_buffer(kafka::offset offset);
 
     /*
      * Materialize batches from the L1 object starting from the given offset.
@@ -179,11 +161,6 @@ private:
     l1_reader_cache* _cache;
     prefix_logger _log;
     size_t _bytes_consumed{0};
-
-    // Lookahead buffer of object metadata, ordered by ascending offset.
-    // Consumed front-to-back as the reader advances through objects.
-    // Populated with 1 entry (no prefetch) or N entries (prefetch).
-    std::deque<l1::metastore::object_response> _lookahead_buffer;
 };
 
 } // namespace cloud_topics

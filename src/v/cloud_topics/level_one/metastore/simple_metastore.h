@@ -119,8 +119,7 @@ public:
       const model::topic_id_partition&,
       kafka::offset,
       kafka::offset,
-      size_t,
-      include_object_metadata) override;
+      size_t) override;
 
     ss::future<std::expected<extent_metadata_response, errc>>
     get_extent_metadata_backwards(
@@ -174,8 +173,7 @@ private:
       const model::topic_id_partition&,
       kafka::offset,
       kafka::offset,
-      size_t,
-      include_object_metadata);
+      size_t);
     static std::expected<extent_metadata_response, errc>
     get_extent_metadata_backwards(
       const state&,
