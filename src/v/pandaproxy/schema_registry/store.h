@@ -613,11 +613,20 @@ public:
             return it->second._mode.value();
         }
 
-        // Default contexts always return a value, never
+        // Default and global contexts always return a value, never
         // an error. Other contexts enter this block only when
         // fallback is enabled; otherwise they reach the
-        // error return below.
-        if (fallback || ctx == default_context) {
+        // error return below. Within this block, non-global contexts
+        // consult global_context first, and if that has no value,
+        // return the hard-coded default.
+        if (fallback || ctx == default_context || ctx == global_context) {
+            if (fallback && ctx != global_context) {
+                if (auto global_it = _context_stores.find(global_context);
+                    global_it != _context_stores.end()
+                    && global_it->second._mode.has_value()) {
+                    return *global_it->second._mode;
+                }
+            }
             return default_top_level_mode;
         }
 
@@ -630,7 +639,11 @@ public:
         auto sub_it = get_subject_iter(sub, include_deleted::yes);
         if (sub_it && (sub_it.assume_value())->second.mode.has_value()) {
             return (sub_it.assume_value())->second.mode.value();
-        } else if (fallback) {
+        }
+        // Fall through to context-level mode.
+        // global_context subjects always fall through; other contexts only fall
+        // through when fallback is set.
+        if (sub.ctx == global_context || fallback) {
             return get_mode(sub.ctx, fallback);
         }
         return mode_not_found(sub);
