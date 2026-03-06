@@ -28,6 +28,12 @@ void compaction_worker_probe::setup_metrics() {
     _metrics.add_group(
       prometheus_sanitize::metrics_name("cloud_topics:compaction_worker"),
       {
+        sm::make_counter(
+          "batches_processed_total",
+          [this] { return _batches_processed; },
+          sm::description(
+            "Number of batches processed across all cloud topic partitions on "
+            "this shard")),
         sm::make_gauge(
           "batches_removed",
           [this] { return _batches_removed; },
