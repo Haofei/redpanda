@@ -30,9 +30,17 @@
 
 #include <memory>
 
+namespace {
+constexpr ss::lowres_clock::duration control_timeout = 5s;
+}
+
 namespace cloud_topics {
 
 class level_zero_gc::list_delete_worker {
+    static constexpr auto handle_worker_exc = [](std::exception_ptr eptr) {
+        vlog(cd_log.warn, "Exception from delete worker: {}", eptr);
+    };
+
 public:
     explicit list_delete_worker(
       std::unique_ptr<object_storage> storage,
@@ -41,9 +49,7 @@ public:
       : storage_(std::move(storage))
       , node_info_(std::move(node_info))
       , probe_(&probe)
-      , worker_(std::make_unique<ssx::work_queue>([](std::exception_ptr eptr) {
-          vlog(cd_log.warn, "Exception from delete worker: {}", eptr);
-      })) {}
+      , worker_(std::make_unique<ssx::work_queue>(handle_worker_exc)) {}
     void start() {
         vlog(cd_log.info, "Starting cloud topics list/delete worker");
         if (as_.abort_requested()) {
@@ -68,6 +74,35 @@ public:
         co_await worker_->shutdown();
         co_await gate_.close();
         vlog(cd_log.info, "Stopped cloud topics list/delete worker");
+    }
+
+    seastar::future<> reset() {
+        if (gate_.is_closed()) {
+            co_return;
+        }
+        vlog(cd_log.info, "Resetting cloud topics list/delete worker");
+
+        // Abort in-flight list/delete operations
+        as_.request_abort();
+
+        // Drain pending delete tasks
+        co_await worker_->shutdown();
+
+        // Wait for spawned delete fibers to complete
+        if (!gate_.is_closed()) {
+            co_await gate_.close();
+        }
+
+        continuation_token_.reset();
+        curr_prefix_.reset();
+        key_prefixes_.set_range(std::nullopt);
+
+        as_ = {};
+        gate_ = {};
+
+        worker_ = std::make_unique<ssx::work_queue>(handle_worker_exc);
+
+        vlog(cd_log.info, "Reset cloud topics list/delete worker");
     }
 
     bool has_capacity() const { return page_sem_.available_units() > 0; }
@@ -623,14 +658,22 @@ level_zero_gc::level_zero_gc(
 
 level_zero_gc::~level_zero_gc() = default;
 
-void level_zero_gc::start() {
+seastar::future<> level_zero_gc::start() {
+    while (resetting_) {
+        co_await reset_cv_.wait(
+          control_timeout, [this] { return !resetting_; });
+    }
     vlog(cd_log.info, "Starting cloud topics L0 GC worker");
     delete_worker_->start();
     should_run_ = true;
     worker_cv_.signal();
 }
 
-void level_zero_gc::pause() {
+seastar::future<> level_zero_gc::pause() {
+    while (resetting_) {
+        co_await reset_cv_.wait(
+          control_timeout, [this] { return !resetting_; });
+    }
     vlog(cd_log.info, "Pausing cloud topics L0 GC worker");
     should_run_ = false;
     asrc_.request_abort();
@@ -647,6 +690,35 @@ seastar::future<> level_zero_gc::stop() {
     vlog(cd_log.info, "Stopped cloud_topics L0 GC worker");
 }
 
+seastar::future<> level_zero_gc::reset() {
+    if (should_shutdown_ || resetting_) {
+        co_return;
+    }
+    vlog(cd_log.info, "Resetting cloud topics L0 GC worker state");
+
+    resetting_ = true;
+    const bool was_running = should_run_;
+
+    auto done = ss::defer([this] {
+        resetting_ = false;
+        reset_cv_.broadcast();
+    });
+
+    // Pause the outer worker loop so it blocks on the CV
+    should_run_ = false;
+    asrc_.request_abort();
+
+    co_await delete_worker_->reset();
+
+    // Resume if was running, then clear the flag so that start()/pause()
+    // waiting on reset_cv_ don't race with the resume.
+    if (was_running && !should_shutdown_) {
+        delete_worker_->start();
+        should_run_ = true;
+        worker_cv_.signal();
+    }
+}
+
 std::string_view to_string_view(level_zero_gc::state s) {
     switch (s) {
         using enum level_zero_gc::state;
@@ -654,6 +726,8 @@ std::string_view to_string_view(level_zero_gc::state s) {
         return "level_zero_gc::state::paused";
     case running:
         return "level_zero_gc::state::running";
+    case resetting:
+        return "level_zero_gc::state::resetting";
     case stopping:
         return "level_zero_gc::state::stopping";
     case stopped:
@@ -668,6 +742,9 @@ auto level_zero_gc::get_state() const -> state {
     auto st = [this] {
         if (should_shutdown_) {
             return worker_.available() ? state::stopped : state::stopping;
+        }
+        if (resetting_) {
+            return state::resetting;
         }
         return should_run_ ? state::running : state::paused;
     }();
