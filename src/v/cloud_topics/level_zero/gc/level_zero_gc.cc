@@ -28,6 +28,8 @@
 #include <seastar/core/sleep.hh>
 #include <seastar/coroutine/as_future.hh>
 
+#include <memory>
+
 namespace cloud_topics {
 
 class level_zero_gc::list_delete_worker {
@@ -39,9 +41,9 @@ public:
       : storage_(std::move(storage))
       , node_info_(std::move(node_info))
       , probe_(&probe)
-      , worker_([](std::exception_ptr eptr) {
+      , worker_(std::make_unique<ssx::work_queue>([](std::exception_ptr eptr) {
           vlog(cd_log.warn, "Exception from delete worker: {}", eptr);
-      }) {}
+      })) {}
     void start() {
         vlog(cd_log.info, "Starting cloud topics list/delete worker");
         if (as_.abort_requested()) {
@@ -63,7 +65,7 @@ public:
         as_.request_abort();
         delete_sem_.broken();
         page_sem_.broken();
-        co_await worker_.shutdown();
+        co_await worker_->shutdown();
         co_await gate_.close();
         vlog(cd_log.info, "Stopped cloud topics list/delete worker");
     }
@@ -110,9 +112,9 @@ public:
                 // unbounded.
                 u.emplace(seastar::consume_units(page_sem_, keys_total_bytes));
             }
-            worker_.submit([this,
-                            o = std::move(objects),
-                            u = std::move(u).value()]() mutable {
+            worker_->submit([this,
+                             o = std::move(objects),
+                             u = std::move(u).value()]() mutable {
                 return do_delete_objects(std::move(o), std::move(u));
             });
         }
@@ -222,7 +224,7 @@ private:
     std::unique_ptr<object_storage> storage_;
     std::unique_ptr<node_info> node_info_;
     level_zero_gc_probe* probe_;
-    ssx::work_queue worker_;
+    std::unique_ptr<ssx::work_queue> worker_;
     // TODO: configurable limits?
     // max number of in-flight delete ops
     ssx::semaphore delete_sem_{5, "ct/gc/delete"};
