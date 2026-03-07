@@ -223,29 +223,20 @@ class CloudTopicsL0GCAdminTest(CloudTopicsL0GCTestBase):
             for n in response.nodes
         }
 
-    def gc_pause(self, node: int | None = None) -> dict[int, str]:
-        self.logger.debug(
-            f"Pause L0 Garbage Collection {'clusterwide' if node is None else f'Node {node}'}"
-        )
-        response = self.l0_client.pause(l0_pb.PauseRequest(node_id=node))
-        assert response is not None, "PauseResponse should not be None"
-        expected_nodes = len(self.redpanda.nodes) if node is None else 1
-        assert len(response.results) == expected_nodes, (
-            f"{len(response.results)=} != {expected_nodes=}"
-        )
-        return {r.node_id: r.error for r in response.results if r.error}
+    def _gc_node_ids(self, node: int | None) -> list[int]:
+        if node is not None:
+            return [node]
+        return [self.redpanda.node_id(n) for n in self.redpanda.nodes]
 
-    def gc_start(self, node: int | None = None) -> dict[int, str]:
-        self.logger.debug(
-            f"Start L0 Garbage Collection {'clusterwide' if node is None else f'Node {node}'}"
-        )
-        response = self.l0_client.start(l0_pb.StartRequest(node_id=node))
-        assert response is not None, "StartResponse should not be None"
-        expected_nodes = len(self.redpanda.nodes) if node is None else 1
-        assert len(response.results) == expected_nodes, (
-            f"{len(response.results)=} != {expected_nodes=}"
-        )
-        return {r.node_id: r.error for r in response.results if r.error}
+    def gc_pause(self, node: int | None = None):
+        for nid in self._gc_node_ids(node):
+            self.logger.debug(f"Pause L0 GC on node {nid}")
+            self.l0_client.pause_gc(l0_pb.PauseGcRequest(node_id=nid))
+
+    def gc_start(self, node: int | None = None):
+        for nid in self._gc_node_ids(node):
+            self.logger.debug(f"Start L0 GC on node {nid}")
+            self.l0_client.start_gc(l0_pb.StartGcRequest(node_id=nid))
 
     def gc_advance_epoch(self, topic: str, partition: int, new_epoch: int) -> EpochInfo:
         self.logger.debug(f"Advance epoch for '{topic}/{partition}'")
@@ -380,8 +371,7 @@ class CloudTopicsL0GCAdminTest(CloudTopicsL0GCTestBase):
             retry_on_exc=True,
         )
 
-        errs = self.gc_pause()
-        assert len(errs) == 0, f"Unexpected errors pausing GC: {errs=}"
+        self.gc_pause()
         self.check_statuses(self.gc_get_status(), status=GcStatus.L0_GC_STATUS_PAUSED)
 
         n_deleted = self.get_num_objects_deleted()
@@ -397,8 +387,7 @@ class CloudTopicsL0GCAdminTest(CloudTopicsL0GCTestBase):
         self.logger.debug(
             "Re-start garbage collection. We should see the deleted object count ticking up."
         )
-        errs = self.gc_start()
-        assert len(errs) == 0, f"Unexpected errors restarting GC: {errs=}"
+        self.gc_start()
         self.check_statuses(self.gc_get_status(), status=GcStatus.L0_GC_STATUS_RUNNING)
 
         wait_until(
@@ -420,10 +409,7 @@ class CloudTopicsL0GCAdminTest(CloudTopicsL0GCTestBase):
         pause_node_id = self.redpanda.node_id(pause_node)
 
         self.logger.debug(f"Pause GC on {pause_node.name} and produce some records")
-        errs = self.gc_pause(pause_node_id)
-        assert len(errs) == 0, (
-            f"Unexpected error pausing GC on {pause_node.name}: {errs=}"
-        )
+        self.gc_pause(pause_node_id)
         self.check_statuses(
             self.gc_get_status(node=pause_node_id),
             nodes=[pause_node_id],
@@ -458,10 +444,7 @@ class CloudTopicsL0GCAdminTest(CloudTopicsL0GCTestBase):
             )
 
         self.logger.debug(f"Now unpause {pause_node.name} and wait for some deletes")
-        errs = self.gc_start(pause_node_id)
-        assert len(errs) == 0, (
-            f"Unexpected error re-starting GC on {pause_node.name}: {errs=}"
-        )
+        self.gc_start(pause_node_id)
         self.check_statuses(self.gc_get_status(), status=GcStatus.L0_GC_STATUS_RUNNING)
 
         wait_until(
@@ -491,27 +474,20 @@ class CloudTopicsL0GCAdminTest(CloudTopicsL0GCTestBase):
         node_to_kill_id = self.redpanda.node_id(node_to_kill)
 
         self.logger.debug(f"Check that GC admin API is up and stop {node_to_kill.name}")
-        errs = self.gc_start()
-        assert len(errs) == 0, f"{errs=}"
+        self.gc_start()
         self.redpanda.stop_node(node_to_kill, timeout=30)
 
         self.logger.debug(
-            f"Try to pause GC clusterwide. Only {node_to_kill.name} ({node_to_kill_id})"
-            "should report an error."
+            f"Pause on dead node {node_to_kill.name} ({node_to_kill_id}) should fail"
         )
-        errs = self.gc_pause()
-        assert len(errs) == 1, f"Expected 1 error, got {errs=}"
-        assert node_to_kill_id in errs, f"Unexpected error {errs=}"
-        assert "(Service unavailable)" in errs[node_to_kill_id], (
-            f"Unexpected error {errs=}"
-        )
+        with expect_exception(ConnectError, lambda e: "unavailable" in str(e).lower()):
+            self.gc_pause(node_to_kill_id)
 
         self.logger.debug(f"Restart {node_to_kill.name} and pause GC there")
         self.redpanda.start_node(
             node_to_kill, timeout=30, node_id_override=node_to_kill_id
         )
-        errs = self.gc_pause(node_to_kill_id)
-        assert len(errs) == 0, "Unexpected errors: {errs=}"
+        self.gc_pause(node_to_kill_id)
 
     def _epoch_report_to_str(self, epochs: EpochReport, indent: int = 1) -> str:
         def epoch_info_to_dict(info: l0_pb.EpochInfo) -> dict[str, int]:
