@@ -221,7 +221,8 @@ write_pipeline<Clock>::get_write_requests(
         }
         result.requests.push_back(el);
     }
-    result.complete = pending.empty();
+    result.complete = std::none_of(
+      it, pending.end(), [stage](const auto& r) { return r.stage == stage; });
     vlog(
       cd_log.trace,
       "get_write_requests returned {} elements, containing {} ({}B)",
