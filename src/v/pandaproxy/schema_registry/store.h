@@ -667,9 +667,11 @@ public:
     result<chunked_vector<seq_marker>>
     get_context_mode_written_at(const context& ctx) const {
         auto it = _context_stores.find(ctx);
-        if (it == _context_stores.end()) {
-            return chunked_vector<seq_marker>{};
+        if (
+          it == _context_stores.end() || it->second._mode_written_at.empty()) {
+            return not_found({ctx, subject{""}});
         }
+
         return it->second._mode_written_at.copy();
     }
 
@@ -747,9 +749,12 @@ public:
     result<chunked_vector<seq_marker>>
     get_context_config_written_at(const context& ctx) const {
         auto it = _context_stores.find(ctx);
-        if (it == _context_stores.end()) {
-            return chunked_vector<seq_marker>{};
+        if (
+          it == _context_stores.end()
+          || it->second._config_written_at.empty()) {
+            return not_found({ctx, subject{""}});
         }
+
         return it->second._config_written_at.copy();
     }
 

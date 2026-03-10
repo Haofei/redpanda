@@ -1058,11 +1058,10 @@ BOOST_AUTO_TEST_CASE(test_store_context_mode_written_at) {
     auto test_ctx = pps::context{".test"};
     auto s = pps::store{pps::is_mutable::yes};
 
-    // Initially no write markers
-    auto markers = s.get_context_mode_written_at(test_ctx).value();
-    BOOST_REQUIRE(markers.empty());
-    markers = s.get_context_mode_written_at(pps::default_context).value();
-    BOOST_REQUIRE(markers.empty());
+    // Initially context doesn't exist
+    BOOST_REQUIRE(s.get_context_mode_written_at(test_ctx).has_error());
+    BOOST_REQUIRE(
+      s.get_context_mode_written_at(pps::default_context).has_error());
 
     // Create distinct markers
     auto marker1 = pps::seq_marker{
@@ -1080,7 +1079,7 @@ BOOST_AUTO_TEST_CASE(test_store_context_mode_written_at) {
     BOOST_REQUIRE(
       s.set_mode(marker1, test_ctx, pps::mode::read_only, pps::force::no)
         .value());
-    markers = s.get_context_mode_written_at(test_ctx).value();
+    auto markers = s.get_context_mode_written_at(test_ctx).value();
     BOOST_REQUIRE_EQUAL(markers.size(), 1);
     BOOST_REQUIRE_EQUAL(markers[0], marker1);
 
@@ -1092,14 +1091,13 @@ BOOST_AUTO_TEST_CASE(test_store_context_mode_written_at) {
     BOOST_REQUIRE_EQUAL(markers[0], marker1);
     BOOST_REQUIRE_EQUAL(markers[1], marker2);
 
-    // Default context should still have no markers
-    markers = s.get_context_mode_written_at(pps::default_context).value();
-    BOOST_REQUIRE(markers.empty());
+    // Default context should still not exist
+    BOOST_REQUIRE(
+      s.get_context_mode_written_at(pps::default_context).has_error());
 
     // Clear mode clears all markers
     BOOST_REQUIRE(s.clear_mode(test_ctx, pps::force::no).value());
-    markers = s.get_context_mode_written_at(test_ctx).value();
-    BOOST_REQUIRE(markers.empty());
+    BOOST_REQUIRE(s.get_context_mode_written_at(test_ctx).has_error());
 }
 
 BOOST_AUTO_TEST_CASE(test_store_context_config) {
@@ -1150,9 +1148,8 @@ BOOST_AUTO_TEST_CASE(test_store_context_config_written_at) {
     auto test_ctx = pps::context{".test"};
     pps::store s;
 
-    // Initially no write markers
-    auto markers = s.get_context_config_written_at(test_ctx).value();
-    BOOST_REQUIRE(markers.empty());
+    // Initially context doesn't exist
+    BOOST_REQUIRE(s.get_context_config_written_at(test_ctx).has_error());
 
     // Create distinct markers
     auto marker1 = pps::seq_marker{
@@ -1170,7 +1167,7 @@ BOOST_AUTO_TEST_CASE(test_store_context_config_written_at) {
     BOOST_REQUIRE(
       s.set_compatibility(marker1, test_ctx, pps::compatibility_level::full)
         .value());
-    markers = s.get_context_config_written_at(test_ctx).value();
+    auto markers = s.get_context_config_written_at(test_ctx).value();
     BOOST_REQUIRE_EQUAL(markers.size(), 1);
     BOOST_REQUIRE_EQUAL(markers[0], marker1);
 
@@ -1183,14 +1180,13 @@ BOOST_AUTO_TEST_CASE(test_store_context_config_written_at) {
     BOOST_REQUIRE_EQUAL(markers[0], marker1);
     BOOST_REQUIRE_EQUAL(markers[1], marker2);
 
-    // Default context should still have no markers
-    markers = s.get_context_config_written_at(pps::default_context).value();
-    BOOST_REQUIRE(markers.empty());
+    // Default context should still not exist
+    BOOST_REQUIRE(
+      s.get_context_config_written_at(pps::default_context).has_error());
 
     // Clear compatibility clears all markers
     BOOST_REQUIRE(s.clear_compatibility(test_ctx).value());
-    markers = s.get_context_config_written_at(test_ctx).value();
-    BOOST_REQUIRE(markers.empty());
+    BOOST_REQUIRE(s.get_context_config_written_at(test_ctx).has_error());
 }
 
 BOOST_AUTO_TEST_CASE(test_store_context_materialized) {

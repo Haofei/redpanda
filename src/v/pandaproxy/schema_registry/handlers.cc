@@ -476,7 +476,10 @@ ss::future<server::reply_t> delete_config_subject(
         }
     }
 
-    co_await rq.service().writer().delete_config(ctx_sub);
+    auto deleted = co_await rq.service().writer().delete_config(ctx_sub);
+    if (!deleted) {
+        throw as_exception(not_found(ctx_sub));
+    }
 
     auto resp = ppj::rjson_serialize_iobuf(get_config_req_rep{.compat = lvl});
     log_response(*rq.req, resp);
@@ -615,7 +618,10 @@ ss::future<server::reply_t> delete_mode_subject(
         throw;
     }
 
-    co_await rq.service().writer().delete_mode(ctx_sub);
+    auto deleted = co_await rq.service().writer().delete_mode(ctx_sub);
+    if (!deleted) {
+        throw as_exception(not_found(ctx_sub));
+    }
 
     auto resp = ppj::rjson_serialize_iobuf(mode_req_rep{.mode = m});
     log_response(*rq.req, resp);
