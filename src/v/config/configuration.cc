@@ -4723,6 +4723,13 @@ configuration::configuration()
       "when no progress is being made or errors are occurring.",
       {.needs_restart = needs_restart::no, .visibility = visibility::tunable},
       1min)
+  , cloud_topics_gc_health_check_interval(
+      *this,
+      "cloud_topics_gc_health_check_interval",
+      "The interval at which the L0 garbage collector checks cluster health. "
+      "GC will not proceed while the cluster is unhealthy.",
+      {.needs_restart = needs_restart::no, .visibility = visibility::tunable},
+      10s)
   , cloud_topics_parallel_fetch_enabled(
       *this,
       "cloud_topics_parallel_fetch_enabled",

@@ -812,6 +812,7 @@ public:
     property<std::chrono::milliseconds> cloud_topics_short_term_gc_interval;
     property<std::chrono::milliseconds>
       cloud_topics_short_term_gc_backoff_interval;
+    property<std::chrono::milliseconds> cloud_topics_gc_health_check_interval;
 
     property<bool> cloud_topics_parallel_fetch_enabled;
 
