@@ -536,6 +536,12 @@ async def main() -> None:
     parser.add_argument(
         "-d", "--directory", type=Path, help="data directory", default=None
     )
+    parser.add_argument(
+        "--delete-data-dir",
+        action=argparse.BooleanOptionalAction,
+        help="delete the data directory before starting",
+        default=False,
+    )
     parser.add_argument("--base-rpc-port", type=int, help="rpc port", default=33145)
     parser.add_argument("--base-kafka-port", type=int, help="kafka port", default=9092)
     parser.add_argument("--base-admin-port", type=int, help="admin port", default=9644)
@@ -622,6 +628,15 @@ async def main() -> None:
 
     if args.directory is None:
         args.directory = Path(os.environ.get("BUILD_WORKSPACE_DIRECTORY", ".")) / "data"
+
+    if (
+        args.delete_data_dir
+        and args.directory.exists()
+        # safety check that we are dealing with a dev cluster data dir
+        and (args.directory / "node0/config.yaml").exists()
+    ):
+        print(f"Deleting existing data directory: {args.directory}")
+        shutil.rmtree(args.directory)
 
     # Apply port offset to all base ports
     if args.port_offset:
