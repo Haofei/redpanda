@@ -6056,6 +6056,10 @@ class RedpandaService(Service, RedpandaServiceABC):
             manifest_not_uploaded: list[Partition] = []
             for p in self.partitions():
                 try:
+                    if p.topic == "__consumer_offsets":
+                        # We don't tier this topic, so skip it
+                        continue
+
                     status = self._admin.get_partition_cloud_storage_status(
                         p.topic, p.index, node=p.leader
                     )
