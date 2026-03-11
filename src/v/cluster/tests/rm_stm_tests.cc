@@ -653,13 +653,15 @@ void async_ser_verify(T type) {
 }
 
 cluster::tx::tx_snapshot_v4 make_tx_snapshot_v4() {
+    auto offset = model::random_offset_above(model::offset(1));
     return {
       .fenced = tests::random_frag_vector(model::random_producer_identity),
-      .ongoing = tests::random_frag_vector(model::random_tx_range),
+      .ongoing = tests::random_frag_vector(
+        model::random_tx_range_below, 20, offset),
       .prepared = tests::random_frag_vector(cluster::random_prepare_marker),
       .aborted = tests::random_frag_vector(model::random_tx_range),
       .abort_indexes = tests::random_frag_vector(cluster::random_abort_index),
-      .offset = model::random_offset(),
+      .offset = offset,
       .seqs = tests::random_frag_vector(cluster::random_seq_entry),
       .tx_data = tests::random_frag_vector(cluster::random_tx_data_snapshot),
       .expiration = tests::random_frag_vector(
@@ -685,14 +687,15 @@ cluster::tx::tx_snapshot_v5 make_tx_snapshot_v5() {
         snapshots.push_back(std::move(old_snapshot));
     }
     cluster::tx::tx_snapshot_v5 snap;
-    snap.offset = model::random_offset();
-    snap.producers = std::move(snapshots),
-    snap.fenced = tests::random_frag_vector(model::random_producer_identity),
-    snap.ongoing = tests::random_frag_vector(model::random_tx_range),
-    snap.prepared = tests::random_frag_vector(cluster::random_prepare_marker),
-    snap.aborted = tests::random_frag_vector(model::random_tx_range),
-    snap.abort_indexes = tests::random_frag_vector(cluster::random_abort_index),
-    snap.tx_data = tests::random_frag_vector(cluster::random_tx_data_snapshot),
+    snap.offset = model::random_offset_above(model::offset(1));
+    snap.producers = std::move(snapshots);
+    snap.fenced = tests::random_frag_vector(model::random_producer_identity);
+    snap.ongoing = tests::random_frag_vector(
+      model::random_tx_range_below, 20, snap.offset);
+    snap.prepared = tests::random_frag_vector(cluster::random_prepare_marker);
+    snap.aborted = tests::random_frag_vector(model::random_tx_range);
+    snap.abort_indexes = tests::random_frag_vector(cluster::random_abort_index);
+    snap.tx_data = tests::random_frag_vector(cluster::random_tx_data_snapshot);
     snap.expiration = tests::random_frag_vector(
       cluster::random_expiration_snapshot);
     snap.highest_producer_id = model::random_producer_identity().get_id();
