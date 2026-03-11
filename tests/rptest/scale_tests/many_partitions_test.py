@@ -9,7 +9,6 @@
 
 import concurrent.futures
 import math
-import re
 import time
 from collections import Counter
 from typing import Any, Callable
@@ -74,15 +73,6 @@ STRESS_DATA_SIZE = 1024 * 1024 * 1024 * 100
 # counts.
 STOP_TIMEOUT = 60 * 5
 CLOUD_TOPICS_STOP_TIMEOUT = 60 * 10
-
-# TODO: these transient S3/metastore errors should not be logged at ERROR
-RECONCILER_TRANSIENT_ERROR_LOG_ALLOW_LIST = [
-    re.compile(r"reconciler - .*std::runtime_error .*metastore::errc::transport_error"),
-    re.compile(r"reconciler - .*cloud_storage_clients::rest_error_response"),
-    re.compile(
-        r"cloud_io - .*Multipart upload.*cloud_storage_clients::rest_error_response"
-    ),
-]
 
 
 class ManyPartitionsTest(PreallocNodesTest):
@@ -861,8 +851,7 @@ class ManyPartitionsTest(PreallocNodesTest):
 
     @cluster(
         num_nodes=12,
-        log_allow_list=RESTART_LOG_ALLOW_LIST
-        + RECONCILER_TRANSIENT_ERROR_LOG_ALLOW_LIST,
+        log_allow_list=RESTART_LOG_ALLOW_LIST,
     )
     @parametrize(
         mib_per_partition=DEFAULT_MIB_PER_PARTITION,
@@ -880,8 +869,7 @@ class ManyPartitionsTest(PreallocNodesTest):
 
     @cluster(
         num_nodes=12,
-        log_allow_list=RESTART_LOG_ALLOW_LIST
-        + RECONCILER_TRANSIENT_ERROR_LOG_ALLOW_LIST,
+        log_allow_list=RESTART_LOG_ALLOW_LIST,
     )
     @parametrize(
         mib_per_partition=DEFAULT_MIB_PER_PARTITION,
