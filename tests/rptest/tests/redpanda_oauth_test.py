@@ -1752,6 +1752,232 @@ class RedpandaOIDCTestMethods(RedpandaOIDCTestBase):
         )
         self.logger.info("Fetch from allowed topic succeeded")
 
+    @cluster(num_nodes=4)
+    def test_group_schema_registry_api_coverage(self):
+        """
+        Test group-based access control through the Schema Registry HTTP API.
+
+        Covers:
+        - Register schema on allowed subject -> succeeds (200, schema ID)
+        - Register schema on denied subject -> denied (403)
+        - Read schema on allowed subject -> succeeds (200, versions returned)
+        - Read schema on denied subject -> denied (403)
+
+        Setup:
+        - Two subjects: allowed-subject (group has WRITE+READ) and
+          denied-subject (group has explicit deny WRITE+READ)
+        - Service user is a member of sr-api-group
+        - ACLs are managed via SR /security/acls endpoint
+        """
+        allowed_subject = "allowed-subject"
+        denied_subject = "denied-subject"
+        group_name = "sr-api-group"
+
+        cfg = self._setup_gbac_group(group_name)
+        token = self.get_client_credentials_token(cfg)
+
+        scheme, cert, ca_cert = self._tls_config()
+
+        hostname = self.redpanda.nodes[0].account.hostname
+        base_url = f"{scheme}://{hostname}:8081"
+
+        super_auth = (self.su_username, self.su_password)
+
+        # Enable Schema Registry authorization so ACLs are enforced
+        self.redpanda.set_cluster_config(
+            {"schema_registry_enable_authorization": "True"}
+        )
+
+        # --- Create SR ACLs via /security/acls ---
+
+        group_principal = f"Group:{group_name}"
+
+        acls = [
+            # Allow write+read on allowed-subject
+            {
+                "principal": group_principal,
+                "resource": allowed_subject,
+                "resource_type": "SUBJECT",
+                "pattern_type": "LITERAL",
+                "host": "*",
+                "operation": "WRITE",
+                "permission": "ALLOW",
+            },
+            {
+                "principal": group_principal,
+                "resource": allowed_subject,
+                "resource_type": "SUBJECT",
+                "pattern_type": "LITERAL",
+                "host": "*",
+                "operation": "READ",
+                "permission": "ALLOW",
+            },
+            # Deny write+read on denied-subject
+            {
+                "principal": group_principal,
+                "resource": denied_subject,
+                "resource_type": "SUBJECT",
+                "pattern_type": "LITERAL",
+                "host": "*",
+                "operation": "WRITE",
+                "permission": "DENY",
+            },
+            {
+                "principal": group_principal,
+                "resource": denied_subject,
+                "resource_type": "SUBJECT",
+                "pattern_type": "LITERAL",
+                "host": "*",
+                "operation": "READ",
+                "permission": "DENY",
+            },
+        ]
+
+        res = requests.post(
+            f"{base_url}/security/acls",
+            json=acls,
+            headers={"Content-Type": "application/json"},
+            auth=super_auth,
+            timeout=10,
+            cert=cert,
+            verify=ca_cert,
+        )
+        assert res.status_code == 201, (
+            f"Failed to create SR ACLs: {res.status_code} {res.text}"
+        )
+        self.logger.info(f"Created SR ACLs: {res.text}")
+
+        # Wait for ACLs to propagate to all nodes
+        def acls_propagated():
+            for node in self.redpanda.nodes:
+                node_url = f"{scheme}://{node.account.hostname}:8081"
+                resp = requests.get(
+                    f"{node_url}/security/acls",
+                    auth=super_auth,
+                    timeout=10,
+                    cert=cert,
+                    verify=ca_cert,
+                )
+                if resp.status_code != 200:
+                    return False
+                node_acls = resp.json()
+                for acl in acls:
+                    if acl not in node_acls:
+                        return False
+            return True
+
+        wait_until(
+            acls_propagated,
+            timeout_sec=30,
+            backoff_sec=1,
+            retry_on_exc=True,
+            err_msg="SR ACLs did not propagate to all nodes",
+        )
+        self.logger.info("SR ACLs propagated to all nodes")
+
+        auth_header = {"Authorization": f"Bearer {token['access_token']}"}
+
+        sr_headers = {
+            "Accept": "application/vnd.schemaregistry.v1+json",
+            "Content-Type": "application/vnd.schemaregistry.v1+json",
+            **auth_header,
+        }
+
+        sr_read_headers = {
+            "Accept": "application/vnd.schemaregistry.v1+json",
+            **auth_header,
+        }
+
+        schema_data = json.dumps(
+            {
+                "schema": '{"type":"record","name":"Test","fields":[{"name":"f","type":"string"}]}',
+                "schemaType": "AVRO",
+            }
+        )
+
+        self.logger.info("Phase 1: Register schema (authorized group)")
+
+        def register_allowed():
+            res = requests.post(
+                f"{base_url}/subjects/{allowed_subject}/versions",
+                data=schema_data,
+                headers=sr_headers,
+                timeout=10,
+                cert=cert,
+                verify=ca_cert,
+            )
+            if res.status_code != 200:
+                self.logger.debug(f"Register allowed: {res.status_code} {res.text}")
+                return False
+            body = res.json()
+            return "id" in body and body["id"] > 0
+
+        wait_until(
+            register_allowed,
+            timeout_sec=10,
+            backoff_sec=1,
+            err_msg="Failed to register schema on allowed subject",
+        )
+        self.logger.info("Register schema on allowed subject succeeded")
+
+        self.logger.info("Phase 2: Register schema (unauthorized group)")
+
+        res = requests.post(
+            f"{base_url}/subjects/{denied_subject}/versions",
+            data=schema_data,
+            headers=sr_headers,
+            timeout=10,
+            cert=cert,
+            verify=ca_cert,
+        )
+        assert res.status_code == 403, (
+            f"Expected 403 for denied subject register, got {res.status_code}: {res.text}"
+        )
+        self.logger.info(
+            f"Register on denied subject denied: {res.status_code} {res.text}"
+        )
+
+        self.logger.info("Phase 3: Read schema (authorized group)")
+
+        def read_allowed():
+            res = requests.get(
+                f"{base_url}/subjects/{allowed_subject}/versions",
+                headers=sr_read_headers,
+                timeout=10,
+                cert=cert,
+                verify=ca_cert,
+            )
+            if res.status_code != 200:
+                self.logger.debug(f"Read allowed: {res.status_code} {res.text}")
+                return False
+            versions = res.json()
+            return isinstance(versions, list) and len(versions) > 0
+
+        wait_until(
+            read_allowed,
+            timeout_sec=10,
+            backoff_sec=1,
+            err_msg="Failed to read schema from allowed subject",
+        )
+        self.logger.info("Read schema from allowed subject succeeded")
+
+        self.logger.info("Phase 4: Read schema (unauthorized group)")
+
+        res = requests.get(
+            f"{base_url}/subjects/{denied_subject}/versions",
+            headers=sr_read_headers,
+            timeout=10,
+            cert=cert,
+            verify=ca_cert,
+        )
+        assert res.status_code == 403, (
+            f"Expected 403 for denied subject read, got {res.status_code}: {res.text}"
+        )
+        self.logger.info(
+            f"Read from denied subject denied: {res.status_code} {res.text}"
+        )
+
+
 class RedpandaOIDCTest(RedpandaOIDCTestMethods):
     def __init__(self, test_context, **kwargs):
         super(RedpandaOIDCTest, self).__init__(test_context, **kwargs)
