@@ -594,6 +594,28 @@ public:
         co_return true;
     }
 
+    // Preregisters objects and adds them via add_objects.
+    void add_preregistered_objects(
+      const model::topic_id_partition& tp,
+      kafka::offset start_offset,
+      size_t count,
+      size_t offsets_per_object,
+      model::term_id term) {
+        auto prereg_reply = initial_manager
+                              ->preregister_objects({
+                                .metastore_partition = model::partition_id(0),
+                                .count = static_cast<uint32_t>(count),
+                              })
+                              .get();
+        ASSERT_EQ(prereg_reply.ec, l1_rpc::errc::ok);
+        l1_rpc::add_objects_request req;
+        req.new_objects = make_new_objects_with_ids(
+          tp, start_offset, offsets_per_object, prereg_reply.object_ids);
+        req.new_terms = make_terms(tp, start_offset, term);
+        auto reply = initial_manager->add_objects(std::move(req)).get();
+        ASSERT_EQ(reply.ec, l1_rpc::errc::ok);
+    }
+
     std::array<std::unique_ptr<domain_manager_node>, num_nodes> dm_nodes;
     scoped_config cfg;
     std::unique_ptr<cloud_io::scoped_remote> sr;
@@ -1126,4 +1148,112 @@ TEST_F(DbDomainManagerTest, TestPreregisteredObjectExpiry) {
 
         co_return co_await all_objects_missing(object_ids);
     });
+}
+
+TEST_F(DbDomainManagerTest, TestSetStartOffsetBatchedExtentRemoval) {
+    auto tp = make_tp();
+
+    // Add 2500 extents (note, internally we remove 1000 at a time).
+    ASSERT_NO_FATAL_FAILURE(add_preregistered_objects(
+      tp, kafka::offset(0), 2500, 1, model::term_id(1)));
+
+    // Truncate everything in one call.
+    l1_rpc::set_start_offset_request set_req{
+      .tp = tp,
+      .start_offset = kafka::offset(2500),
+    };
+    auto set_reply
+      = initial_manager->set_start_offset(std::move(set_req)).get();
+    ASSERT_EQ(set_reply.ec, l1_rpc::errc::ok);
+
+    l1_rpc::get_offsets_request verify_req{.tp = tp};
+    auto verify_reply
+      = initial_manager->get_offsets(std::move(verify_req)).get();
+    ASSERT_EQ(verify_reply.ec, l1_rpc::errc::ok);
+    ASSERT_EQ(verify_reply.start_offset, kafka::offset(2500));
+    ASSERT_EQ(verify_reply.next_offset, kafka::offset(2500));
+
+    l1_rpc::get_size_request size_req{.tp = tp};
+    auto size_reply = initial_manager->get_size(std::move(size_req)).get();
+    ASSERT_EQ(size_reply.ec, l1_rpc::errc::ok);
+    ASSERT_EQ(size_reply.size, 0);
+
+    // Sanity check: the term for the next offset should still be valid.
+    l1_rpc::get_term_for_offset_request term_req{
+      .tp = tp,
+      .offset = kafka::offset(2500),
+    };
+    auto term_reply
+      = initial_manager->get_term_for_offset(std::move(term_req)).get();
+    ASSERT_EQ(term_reply.ec, l1_rpc::errc::ok);
+    ASSERT_EQ(term_reply.term, model::term_id(1));
+}
+
+// Regression test: when the batch boundary falls in the middle of an extent,
+// set_start_offset must not delete that extent.
+TEST_F(DbDomainManagerTest, TestSetStartOffsetMidExtent) {
+    auto tp = make_tp();
+
+    // 1001 extents of 10 offsets each: [0,9], [10,19], ..., [10000,10009].
+    // Enough to exceed the 1000-extent batch limit.
+    ASSERT_NO_FATAL_FAILURE(add_preregistered_objects(
+      tp, kafka::offset(0), 1001, 10, model::term_id(1)));
+
+    // Target offset 9995 lands in the middle of extent [9990, 9999].
+    // The batch scans 1000 extents, ending at [9990,9999]. Without
+    // clamping, the intermediate offset would be next_offset(9999)=10000,
+    // which would incorrectly delete extent [9990,9999].
+    l1_rpc::set_start_offset_request set_req{
+      .tp = tp,
+      .start_offset = kafka::offset(9995),
+    };
+    auto set_reply
+      = initial_manager->set_start_offset(std::move(set_req)).get();
+    ASSERT_EQ(set_reply.ec, l1_rpc::errc::ok);
+
+    l1_rpc::get_offsets_request verify_req{.tp = tp};
+    auto verify_reply
+      = initial_manager->get_offsets(std::move(verify_req)).get();
+    ASSERT_EQ(verify_reply.ec, l1_rpc::errc::ok);
+    ASSERT_EQ(verify_reply.start_offset, kafka::offset(9995));
+    ASSERT_EQ(verify_reply.next_offset, kafka::offset(10010));
+}
+
+TEST_F(DbDomainManagerTest, TestRemoveTopicsBatchedExtentRemoval) {
+    auto small_tp = make_tp();
+    auto large_tp = make_tp();
+
+    // Add small partition.
+    ASSERT_NO_FATAL_FAILURE(add_preregistered_objects(
+      small_tp, kafka::offset(0), 50, 1, model::term_id(1)));
+
+    // Add large partition.
+    ASSERT_NO_FATAL_FAILURE(add_preregistered_objects(
+      large_tp, kafka::offset(0), 2500, 1, model::term_id(1)));
+
+    // Remove both topics, retrying as needed since batching may return
+    // not_removed topics when extent counts exceed the batch limit.
+    chunked_vector<model::topic_id> remaining;
+    remaining.push_back(small_tp.topic_id);
+    remaining.push_back(large_tp.topic_id);
+    while (!remaining.empty()) {
+        l1_rpc::remove_topics_request remove_req;
+        remove_req.topics = std::move(remaining);
+        auto remove_reply
+          = initial_manager->remove_topics(std::move(remove_req)).get();
+        ASSERT_EQ(remove_reply.ec, l1_rpc::errc::ok);
+        remaining = std::move(remove_reply.not_removed);
+    }
+
+    // Verify both partitions no longer exist.
+    {
+        l1_rpc::get_offsets_request req{.tp = small_tp};
+        auto reply = initial_manager->get_offsets(std::move(req)).get();
+        ASSERT_EQ(reply.ec, l1_rpc::errc::missing_ntp);
+    }
+    {
+        l1_rpc::get_offsets_request req{.tp = large_tp};
+        auto reply = initial_manager->get_offsets(std::move(req)).get();
+        ASSERT_EQ(reply.ec, l1_rpc::errc::missing_ntp);
+    }
 }
