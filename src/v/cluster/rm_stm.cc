@@ -2332,6 +2332,7 @@ rm_stm::take_raft_snapshot(model::offset last_included_offset) {
 }
 
 ss::future<> rm_stm::apply_raft_snapshot(const iobuf& buf) {
+    auto holder = _gate.hold();
     auto local_buf = buf.copy();
     auto units = co_await _state_lock.hold_write_lock();
     vlog(
