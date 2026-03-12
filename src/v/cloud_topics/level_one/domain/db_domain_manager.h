@@ -141,6 +141,9 @@ private:
     ss::future<std::expected<void, rpc::errc>>
     write_rows(const gate_writer_locks&, chunked_vector<write_batch_row>);
 
+    ss::future<std::expected<void, rpc::errc>>
+      write_rows_no_lock(chunked_vector<write_batch_row>);
+
     ss::future<rpc::get_compaction_info_reply> do_get_compaction_info(
       const gate_read_lock&, state_reader&, rpc::get_compaction_info_request);
 
