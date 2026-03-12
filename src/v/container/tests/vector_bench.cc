@@ -71,19 +71,6 @@ struct VectorBenchTest {
     }
 
     [[gnu::noinline]]
-    size_t run_fifo_test() {
-        for (size_t iter = 0; iter < inner_iters; ++iter) {
-            Vector v;
-            for (size_t i = 0; i < Size; ++i) {
-                // NOLINTNEXTLINE(performance-inefficient-vector-operation)
-                v.push_back(val);
-            }
-            perf_tests::do_not_optimize(v);
-        }
-        return inner_iters;
-    }
-
-    [[gnu::noinline]]
     size_t run_lifo_test() {
         for (size_t iter = 0; iter < inner_iters; ++iter) {
             Vector v;
@@ -123,9 +110,6 @@ struct VectorBenchTest {
       : public VectorBenchTest<container<element>, size> {};                   \
     PERF_TEST_F(VectorBenchTest_##container##_##element##_##size, Sort) {      \
         return run_sort_test();                                                \
-    }                                                                          \
-    PERF_TEST_F(VectorBenchTest_##container##_##element##_##size, Fifo) {      \
-        return run_fifo_test();                                                \
     }                                                                          \
     PERF_TEST_F(VectorBenchTest_##container##_##element##_##size, Lifo) {      \
         return run_lifo_test();                                                \
