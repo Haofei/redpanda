@@ -432,6 +432,10 @@ private:
     ss::gate _gate;
     // Highest producer ID applied to this stm.
     model::producer_id _highest_producer_id;
+    // Tracks the last offset of the batch/snapshot being applied. Updated
+    // inside do_apply/apply_raft_snapshot before set_next runs, so it is
+    // always >= last_applied_offset() during the apply window.
+    model::offset _apply_watermark;
     // for monotonicity of computed LSO.
     model::offset _last_known_lso{model::invalid_lso};
     /**

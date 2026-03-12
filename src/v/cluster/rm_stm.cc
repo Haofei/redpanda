@@ -1777,6 +1777,7 @@ void rm_stm::apply_fence(model::producer_identity pid, model::record_batch b) {
 
 ss::future<> rm_stm::do_apply(const model::record_batch& b) {
     auto holder = _gate.hold();
+    _apply_watermark = b.last_offset();
     const auto& hdr = b.header();
     const auto bid = model::batch_identity::from(hdr);
 
@@ -2335,6 +2336,7 @@ ss::future<> rm_stm::apply_raft_snapshot(const iobuf& buf) {
     auto holder = _gate.hold();
     auto local_buf = buf.copy();
     auto units = co_await _state_lock.hold_write_lock();
+    _apply_watermark = model::prev_offset(_raft->start_offset());
     vlog(
       _ctx_log.info,
       "Resetting all state, reason: log eviction, offset: {}",
