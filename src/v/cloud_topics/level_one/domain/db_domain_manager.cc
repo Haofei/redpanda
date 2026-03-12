@@ -1200,7 +1200,7 @@ db_domain_manager::get_extent_metadata(rpc::get_extent_metadata_request req) {
 
 ss::future<rpc::preregister_objects_reply>
 db_domain_manager::preregister_objects(rpc::preregister_objects_request req) {
-    auto gl_res = co_await gate_and_open_writes();
+    auto gl_res = co_await gate_and_open_reads();
     if (!gl_res.has_value()) {
         co_return rpc::preregister_objects_reply{
           .ec = gl_res.error(),
@@ -1224,7 +1224,11 @@ db_domain_manager::preregister_objects(rpc::preregister_objects_request req) {
         };
     }
 
-    auto apply_res = co_await write_rows(gl_res.value(), std::move(rows));
+    // NOTE: we aren't holding the write lock, and we're not using
+    // db_domain_manager::write() to avoid some locking here. This is only safe
+    // because if this fails, these preregistrations won't be touched by
+    // anything else anyway.
+    auto apply_res = co_await write_rows_no_lock(std::move(rows));
     if (!apply_res.has_value()) {
         co_return rpc::preregister_objects_reply{
           .ec = apply_res.error(),
@@ -1298,6 +1302,11 @@ db_domain_manager::gate_and_open_writes() {
 
 ss::future<std::expected<void, rpc::errc>> db_domain_manager::write_rows(
   const gate_writer_locks&, chunked_vector<write_batch_row> rows) {
+    co_return co_await write_rows_no_lock(std::move(rows));
+}
+
+ss::future<std::expected<void, rpc::errc>>
+db_domain_manager::write_rows_no_lock(chunked_vector<write_batch_row> rows) {
     // TODO: it's probably worth pushing some retries into replicated_database
     // while locks are still held, rather than stepping down immediately.
     auto apply_res = co_await db_->write(std::move(rows));
