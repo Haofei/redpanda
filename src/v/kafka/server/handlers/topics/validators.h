@@ -542,11 +542,13 @@ struct min_max_compaction_lag_ms_validator {
  */
 struct storage_mode_config_validator {
     static constexpr const char* error_message
-      = "Invalid storage mode: 'cloud' requires cloud topics to be enabled, "
+      = "Invalid storage mode: 'cloud' requires cloud topics to be enabled and "
+        "the cluster to be fully upgraded to at least v26.1.1, "
         "'tiered' requires cloud storage to be enabled.";
     static constexpr error_code ec = error_code::invalid_config;
 
-    static bool is_valid(const creatable_topic& c, features::feature_table*) {
+    static bool
+    is_valid(const creatable_topic& c, features::feature_table* ft) {
         auto it = std::find_if(
           c.configs.begin(),
           c.configs.end(),
@@ -566,6 +568,11 @@ struct storage_mode_config_validator {
         case model::redpanda_storage_mode::tiered:
             return config::shard_local_cfg().cloud_storage_enabled();
         case model::redpanda_storage_mode::cloud:
+            if (
+              ft == nullptr
+              || !ft->is_active(features::feature::cloud_topics)) {
+                return false;
+            }
             return config::shard_local_cfg().cloud_topics_enabled();
         case model::redpanda_storage_mode::unset:
             // unset is always valid - actual behavior depends on
