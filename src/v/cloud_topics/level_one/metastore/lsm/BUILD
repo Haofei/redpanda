@@ -25,6 +25,30 @@ redpanda_cc_library(
 )
 
 redpanda_cc_library(
+    name = "debug_reader",
+    srcs = [
+        "debug_reader.cc",
+    ],
+    hdrs = [
+        "debug_reader.h",
+    ],
+    implementation_deps = [
+        ":values",
+        "//src/v/cloud_topics/level_one/metastore:state",
+        "//src/v/serde",
+        "//src/v/strings:string_switch",
+        "//src/v/utils:uuid",
+    ],
+    visibility = ["//visibility:public"],
+    deps = [
+        ":debug_serde",
+        ":keys",
+        ":write_batch_row",
+        "//src/v/container:chunked_vector",
+    ],
+)
+
+redpanda_cc_library(
     name = "debug_writer",
     srcs = [
         "debug_writer.cc",
