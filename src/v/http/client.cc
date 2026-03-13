@@ -46,15 +46,18 @@ namespace http {
 
 namespace {
 
-ss::sstring port_display_string(uint16_t port, bool has_tls) {
+bool is_default_port(uint16_t port, bool has_tls) {
     static constexpr uint16_t https_default_port = 443;
     static constexpr uint16_t http_default_port = 80;
-
     return (has_tls && port == https_default_port)
-               || (!has_tls && port == http_default_port)
+           || (!has_tls && port == http_default_port);
+}
+
+ss::sstring port_display_string(uint16_t port, bool has_tls) {
+    return is_default_port(port, has_tls)
              ? ss::sstring{}
              : ss::sstring{fmt::format(":{}", port)};
-};
+}
 
 } // namespace
 
