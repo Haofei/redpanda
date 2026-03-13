@@ -1661,4 +1661,65 @@ db_domain_manager::expire_preregistered_objects(chunked_vector<object_id> ids) {
     }
 }
 
+ss::future<std::expected<void, rpc::errc>>
+db_domain_manager::write_debug_rows(chunked_vector<write_batch_row> rows) {
+    auto gl_res = co_await gate_and_open_writes();
+    if (!gl_res.has_value()) {
+        co_return std::unexpected(gl_res.error());
+    }
+    co_return co_await write_rows(gl_res.value(), std::move(rows));
+}
+
+ss::future<std::expected<domain_manager::read_debug_rows_result, rpc::errc>>
+db_domain_manager::read_debug_rows(
+  std::optional<ss::sstring> seek_key,
+  std::optional<ss::sstring> last_key,
+  uint32_t max_rows) {
+    auto gl_res = co_await gate_and_open_reads();
+    if (!gl_res.has_value()) {
+        co_return std::unexpected(gl_res.error());
+    }
+    try {
+        auto iter = co_await db_->db().create_iterator();
+        if (seek_key.has_value()) {
+            co_await iter.seek(*seek_key);
+        } else {
+            co_await iter.seek_to_first();
+        }
+
+        chunked_vector<write_batch_row> rows;
+        uint32_t count = 0;
+        while (iter.valid() && count <= max_rows) {
+            auto key = ss::sstring(iter.key());
+            if (last_key.has_value() && key > *last_key) {
+                break;
+            }
+            if (count == max_rows) {
+                co_return read_debug_rows_result{
+                  .rows = std::move(rows),
+                  .next_key = std::move(key),
+                };
+            }
+            rows.push_back(
+              write_batch_row{
+                .key = std::move(key),
+                .value = iter.value(),
+              });
+            ++count;
+            co_await iter.next();
+        }
+        co_return read_debug_rows_result{
+          .rows = std::move(rows),
+          .next_key = std::nullopt,
+        };
+    } catch (...) {
+        auto ex = std::current_exception();
+        if (ssx::is_shutdown_exception(ex)) {
+            co_return std::unexpected(rpc::errc::not_leader);
+        }
+        vlog(cd_log.warn, "read_debug_rows exception: {}", ex);
+        co_return std::unexpected(rpc::errc::timed_out);
+    }
+}
+
 } // namespace cloud_topics::l1

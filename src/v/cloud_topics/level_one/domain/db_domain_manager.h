@@ -92,6 +92,15 @@ public:
     ss::future<rpc::preregister_objects_reply>
       preregister_objects(rpc::preregister_objects_request) override;
 
+    ss::future<std::expected<void, rpc::errc>>
+      write_debug_rows(chunked_vector<write_batch_row>) override;
+
+    ss::future<std::expected<read_debug_rows_result, rpc::errc>>
+    read_debug_rows(
+      std::optional<ss::sstring> seek_key,
+      std::optional<ss::sstring> last_key,
+      uint32_t max_rows) override;
+
 private:
     // Initializes the underlying database for the current term, potentially
     // reopening it if needed (e.g. the underlying Raft term has changed since
