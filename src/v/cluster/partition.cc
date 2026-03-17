@@ -474,11 +474,6 @@ ss::future<> partition::start(
     _partition_properties_stm
       = _raft->stm_manager()->get<cluster::partition_properties_stm>();
 
-    // the cloud topics stm provides access to garbage collection metadata. this
-    // metadata is collected into cluster health reports as a way to disseminate
-    // this information to the garbage collection process.
-    _ctp_stm = _raft->stm_manager()->get<cloud_topics::ctp_stm>();
-
     // Start the probe after the partition is fully initialised
     _probe.setup_metrics(ntp);
 
@@ -1844,13 +1839,6 @@ ss::future<result<ss::rwlock::holder>> partition::hold_writes_enabled() {
     }
 
     co_return *std::move(maybe_units);
-}
-
-std::optional<int64_t> partition::cloud_topic_max_gc_eligible_epoch() const {
-    if (_ctp_stm) {
-        return _ctp_stm->estimate_inactive_epoch();
-    }
-    return std::nullopt;
 }
 
 ss::sharded<cloud_topics::state_accessors>*
