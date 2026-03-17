@@ -409,7 +409,7 @@ def redpanda_cc_bench(
       data: any data files available to the benchmark as runfiles
       tags: custom tags for the test
       timeout: the timeout for smoke testing the benchmark
-      redirect_stderr: if True, redirects stdout (seastar logging, mostly) to a file
+      redirect_stderr: if True, redirects stderr (seastar logging, mostly) to a file
                        so that it does not overwhelm the result output
       test_regex: optional regex passed as `-t <regex>` to the smoke test to select
                   a subset of benchmarks to run
