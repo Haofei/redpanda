@@ -639,8 +639,15 @@ ss::future<result<raft::replicate_result>> do_upload_and_replicate(
     }
     auto fence = std::move(fence_fut.get());
     if (!fence.has_value()) {
-        vlog(
-          cd_log.warn,
+        auto no_window = fence.error().window_min == fence.error().window_max;
+        // NOTE: we might see the error when the partition is just created
+        // or right after the leadership transfer. This is transient state
+        // and is expected so we're logging this on DEBUG level. If the
+        // fence is not acquired during the steady state operation the log
+        // message is more useful and is logged on WARN level.
+        vlogl(
+          cd_log,
+          no_window ? ss::log_level::debug : ss::log_level::warn,
           "Failed to fence epoch {} for ntp {}, ctp window is [{}, {}]",
           upload_res.value().front().id.epoch,
           ntp,
