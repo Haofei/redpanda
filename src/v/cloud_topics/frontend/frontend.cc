@@ -626,15 +626,24 @@ ss::future<result<raft::replicate_result>> do_upload_and_replicate(
     auto fence_fut = co_await ss::coroutine::as_future(
       ctp_stm_api->fence_epoch(upload_res.value().front().id.epoch));
     if (fence_fut.failed()) {
+        auto not_leader = !partition->is_leader();
         auto e = fence_fut.get_exception();
-        vlogl(
-          cd_log,
-          ssx::is_shutdown_exception(e) ? ss::log_level::debug
-                                        : ss::log_level::warn,
-          "Failed to fence epoch {} for ntp {}, error: {}",
-          upload_res.value().front().id.epoch,
-          ntp,
-          e);
+        if (not_leader) {
+            vlog(
+              cd_log.debug,
+              "Failed to fence epoch {} for ntp {}, not a leader",
+              upload_res.value().front().id.epoch,
+              ntp);
+        } else {
+            vlogl(
+              cd_log,
+              ssx::is_shutdown_exception(e) ? ss::log_level::debug
+                                            : ss::log_level::warn,
+              "Failed to fence epoch {} for ntp {}, error: {}",
+              upload_res.value().front().id.epoch,
+              ntp,
+              e);
+        }
         co_return default_errc;
     }
     auto fence = std::move(fence_fut.get());
@@ -760,15 +769,24 @@ ss::future<std::expected<kafka::offset, std::error_code>> frontend::replicate(
     auto fence_fut = co_await ss::coroutine::as_future(
       _ctp_stm_api->fence_epoch(res.value().front().id.epoch));
     if (fence_fut.failed()) {
+        auto not_leader = !_partition->is_leader();
         auto e = fence_fut.get_exception();
-        vlogl(
-          cd_log,
-          ssx::is_shutdown_exception(e) ? ss::log_level::debug
-                                        : ss::log_level::warn,
-          "Failed to fence epoch {} for ntp {}, error: {}",
-          res.value().front().id.epoch,
-          ntp(),
-          fence_fut.get_exception());
+        if (not_leader) {
+            vlog(
+              cd_log.debug,
+              "Failed to fence epoch {} for ntp {}, not a leader",
+              res.value().front().id.epoch,
+              ntp());
+        } else {
+            vlogl(
+              cd_log,
+              ssx::is_shutdown_exception(e) ? ss::log_level::debug
+                                            : ss::log_level::warn,
+              "Failed to fence epoch {} for ntp {}, error: {}",
+              res.value().front().id.epoch,
+              ntp(),
+              e);
+        }
         std::rethrow_exception(e);
     }
     auto fence = std::move(fence_fut.get());
