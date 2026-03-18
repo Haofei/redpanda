@@ -159,12 +159,17 @@ get_aborted_transactions_local(
     auto source = co_await p.aborted_transactions(
       offsets.begin_rp, offsets.end_rp);
 
+    // We trim beginning of aborted ranges to raft_start_offset because we
+    // don't have offset translation info for earlier offsets. This mirrors
+    // the logic in replicated_partition::aborted_transactions_local().
+    auto trim_at = p.raft_start_offset();
+
     std::vector<cluster::tx::tx_range> target;
     target.reserve(source.size());
     for (const auto& range : source) {
         target.emplace_back(
           range.pid,
-          ot_state->from_log_offset(range.first),
+          ot_state->from_log_offset(std::max(trim_at, range.first)),
           ot_state->from_log_offset(range.last));
     }
 
