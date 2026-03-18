@@ -40,7 +40,8 @@ namespace {
 class ReconcilerTest : public testing::Test {
 public:
     ReconcilerTest()
-      : _reconciler(&_io, &_metastore, ss::default_scheduling_group()) {}
+      : _reconciler(
+          &_io, &_metastore, nullptr, ss::default_scheduling_group()) {}
 
     ss::shared_ptr<fake_source> add_source(
       std::optional<model::topic> tp = std::nullopt,
