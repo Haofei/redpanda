@@ -6242,7 +6242,12 @@ class RedpandaService(Service, RedpandaServiceABC):
 
         n_partitions = len(cloud_storage_partitions)
         timeout = (n_partitions // 100) * 60 + 120
-        wait_until(all_partitions_scrubbed, timeout_sec=timeout, backoff_sec=5)
+        wait_until(
+            all_partitions_scrubbed,
+            timeout_sec=timeout,
+            backoff_sec=5,
+            retry_on_exc=True,
+        )
 
         return all_anomalies
 
