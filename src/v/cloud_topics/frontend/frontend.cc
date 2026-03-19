@@ -338,13 +338,11 @@ frontend::make_l0_reader(const cloud_topic_log_reader_config& cfg) const {
       cfg, _partition, _data_plane);
 }
 
-ss::future<size_t> frontend::size_bytes() {
-    auto l0_size = _ctp_stm_api->estimated_data_size();
-
+ss::future<std::optional<l1::metastore::size_response>> frontend::l1_size() {
     // If we have never reconciled there is no L1 data to query.
     auto lro = _ctp_stm_api->get_last_reconciled_offset();
     if (lro < kafka::offset{0}) {
-        co_return l0_size;
+        co_return std::nullopt;
     }
 
     auto ct_state = _partition->get_cloud_topics_state();
@@ -352,7 +350,7 @@ ss::future<size_t> frontend::size_bytes() {
 
     auto tidp = topic_id_partition();
     if (!tidp) {
-        co_return 0;
+        co_return std::nullopt;
     }
     auto size_res = co_await l1_metastore->get_size(*tidp);
     if (!size_res.has_value()) {
@@ -361,6 +359,23 @@ ss::future<size_t> frontend::size_bytes() {
           "Could not fetch L1 partition size for {}: {}",
           tidp,
           size_res.error());
+        co_return std::nullopt;
+    }
+
+    co_return size_res.value();
+}
+
+ss::future<size_t> frontend::size_bytes() {
+    auto l0_size = get_l0_size_estimate();
+
+    // If we have never reconciled there is no L1 data to query.
+    auto lro = _ctp_stm_api->get_last_reconciled_offset();
+    if (lro < kafka::offset{0}) {
+        co_return l0_size;
+    }
+
+    auto l1_size_res = co_await l1_size();
+    if (!l1_size_res) {
         /*
          * If we can't get an estimate of L1 we return 0 without reporting L0.
          * The rationale here is that if we are going to have size estimates
@@ -370,7 +385,7 @@ ss::future<size_t> frontend::size_bytes() {
         co_return 0;
     }
 
-    co_return size_res.value().size + l0_size;
+    co_return l0_size + l1_size_res.value().size;
 }
 
 std::unique_ptr<model::record_batch_reader::impl> frontend::make_l1_reader(
