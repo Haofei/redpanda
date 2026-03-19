@@ -11,6 +11,7 @@
 #pragma once
 
 #include "cloud_topics/types.h"
+#include "container/intrusive_list_helpers.h"
 #include "model/fundamental.h"
 
 #include <seastar/core/rwlock.hh>
@@ -37,6 +38,15 @@ struct [[nodiscard]] stale_cluster_epoch {
     cluster_epoch window_min;
     // The highest epoch we accept
     cluster_epoch window_max;
+};
+
+// The state captured when an l0 reader was started.
+struct active_reader_state {
+    intrusive_list_hook hook;
+    // The epoch that this reader could read.
+    std::optional<cluster_epoch> inactive_epoch;
+    // The last reconciled log offset when the reader runs.
+    model::offset lrlo;
 };
 
 } // namespace cloud_topics

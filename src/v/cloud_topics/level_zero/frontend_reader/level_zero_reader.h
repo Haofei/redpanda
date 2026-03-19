@@ -11,6 +11,7 @@
 
 #include "cloud_topics/errc.h"
 #include "cloud_topics/level_zero/common/extent_meta.h"
+#include "cloud_topics/level_zero/stm/ctp_stm_api.h"
 #include "cloud_topics/log_reader_config.h"
 #include "model/record_batch_reader.h"
 #include "utils/prefix_logger.h"
@@ -81,6 +82,10 @@ public:
       do_load_slice(model::timeout_clock::time_point) final;
 
     void print(std::ostream& o) final;
+
+    // Register this reader with the STM - this is needed so that L0 doesn't GC
+    // any active data during reads.
+    void register_with_stm(ctp_stm_api*);
 
 private:
     // A batch read from the local log, these can be either placeholder batches
@@ -155,6 +160,8 @@ private:
     data_plane_api* _ct_api;
     prefix_logger _log;
     size_t _bytes_consumed{0};
+    // state that the STM tracks as to hold back prefix truncation and GC
+    active_reader_state _state;
 };
 
 } // namespace cloud_topics

@@ -14,6 +14,7 @@
 #include "cloud_topics/level_zero/stm/ctp_stm_commands.h"
 #include "cloud_topics/level_zero/stm/ctp_stm_state.h"
 #include "cloud_topics/level_zero/stm/placeholder.h"
+#include "cloud_topics/level_zero/stm/types.h"
 #include "cloud_topics/types.h"
 #include "raft/consensus.h"
 #include "raft/persisted_stm.h"
@@ -115,12 +116,14 @@ ss::future<> ctp_stm::prefix_truncate_below_lro() {
         vlog(
           _log.trace,
           "Waiting for LRO to advance past {}, current snapshot index: {}",
-          _state.get_max_collectible_offset(),
+          max_removable_local_log_offset(),
           _raft->last_snapshot_index());
         try {
             if (
-              _raft->last_snapshot_index()
-              >= _state.get_max_collectible_offset()) {
+              _raft->last_snapshot_index() >= max_removable_local_log_offset()
+              && _active_readers.empty()) {
+                // Only wait without a timeout if there are no active readers
+                // that could be holding us back.
                 co_await _lro_advanced.wait();
             } else {
                 co_await _lro_advanced.wait(retry_backoff_time);
@@ -137,12 +140,12 @@ ss::future<> ctp_stm::prefix_truncate_below_lro() {
               "error waiting for LRO to advance in ctp stm background loop: {}",
               std::current_exception());
         }
-        auto lro = _state.get_max_collectible_offset();
+        auto lro = max_removable_local_log_offset();
         auto snapshot_index = _raft->last_snapshot_index();
         vlog(
           _log.trace,
           "Attempting to snapshot ctp at {}, last snapshot at {}",
-          _state.get_max_collectible_offset(),
+          max_removable_local_log_offset(),
           _raft->last_snapshot_index());
         try {
             co_await _raft->snapshot_and_truncate_log(lro);
@@ -202,6 +205,10 @@ ss::future<bool> ctp_stm::sync_in_term(
 }
 
 std::optional<cluster_epoch> ctp_stm::estimate_inactive_epoch() const noexcept {
+    // If there is an active reader, it holds back the inactive_epoch.
+    if (!_active_readers.empty()) {
+        return _active_readers.front().inactive_epoch;
+    }
     return _state.estimate_inactive_epoch();
 }
 
@@ -488,10 +495,20 @@ ctp_stm::fence_epoch(cluster_epoch e) {
 }
 
 model::offset ctp_stm::max_removable_local_log_offset() {
+    // If there is an active reader, it holds back prefix truncation.
+    if (!_active_readers.empty()) {
+        return _active_readers.front().lrlo;
+    }
     return _state.get_max_collectible_offset();
 }
 
 l0::producer_queue& ctp_stm::producer_queue() { return _producer_queue; }
+
+void ctp_stm::register_reader(active_reader_state* state) {
+    state->inactive_epoch = _state.estimate_inactive_epoch();
+    state->lrlo = _state.get_max_collectible_offset();
+    _active_readers.push_back(*state);
+}
 
 void epoch_window_checker::check_epoch(
   const model::ntp& ntp, cluster_epoch epoch, model::offset offset) {

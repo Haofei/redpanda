@@ -519,6 +519,10 @@ void level_zero_log_reader_impl::print(std::ostream& o) {
     o << "cloud_topics_reader";
 }
 
+void level_zero_log_reader_impl::register_with_stm(ctp_stm_api* api) {
+    api->register_reader(&_state);
+}
+
 void level_zero_log_reader_impl::set_end_of_stream() { _end_of_stream = true; }
 
 bool level_zero_log_reader_impl::is_end_of_stream() const {
