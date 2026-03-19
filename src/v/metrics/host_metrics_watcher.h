@@ -120,6 +120,11 @@ private:
     resolved_devices resolve_monitored_devices(
       const ss::sstring& data_directory, const ss::sstring& cache_directory);
 
+    // Export Seastar IO queue config (iotune rates) as metrics, one series
+    // per unique IO queue deduped across partition entries.
+    void setup_io_queue_config_metrics(
+      const std::vector<diskstats_entry>& partition_entries);
+
     ss::logger& _logger;
 
     // All device names to include when parsing /proc/diskstats.

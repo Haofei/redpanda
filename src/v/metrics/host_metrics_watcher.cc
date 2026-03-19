@@ -4,11 +4,17 @@
 #include "config/configuration.h"
 #include "utils/device_utils.h"
 
+#include <seastar/core/io_queue.hh>
 #include <seastar/core/lowres_clock.hh>
 #include <seastar/core/posix.hh>
+#include <seastar/core/reactor.hh>
 
+#include <sys/stat.h>
+
+#include <cerrno>
 #include <exception>
 #include <ranges>
+#include <system_error>
 #include <unordered_map>
 
 // Device label conventions used for diskstats metrics:
@@ -153,6 +159,8 @@ host_metrics_watcher::host_metrics_watcher(
       "/proc/net/snmp",
       [this]() { maybe_refresh_snmp(); },
       [this]() { setup_snmp_metrics(); });
+
+    setup_io_queue_config_metrics(devices.partitions);
 }
 
 void host_metrics_watcher::setup_diskstats_metrics(
@@ -548,4 +556,129 @@ resolved_devices host_metrics_watcher::resolve_monitored_devices(
 
     return result;
 }
+
+// SPLIT_MARKER_IOQUEUE_START
+void host_metrics_watcher::setup_io_queue_config_metrics(
+  const std::vector<diskstats_entry>& partition_entries) {
+    // Export Seastar IO queue configuration (iotune bandwidth/IOPS) as metrics.
+    // Deduplicates by queue identity: multiple partition entries may share one
+    // Seastar IO queue (e.g. when no io-properties is configured), so we emit
+    // one metric series per queue with merged data_disk/cache_disk flags.
+    if (partition_entries.empty()) {
+        return;
+    }
+    struct queue_info {
+        ss::io_queue* queue;
+        ss::sstring device;
+        ss::sstring disk;
+        bool is_data{false};
+        bool is_cache{false};
+    };
+
+    std::vector<queue_info> queues;
+
+    for (const auto& entry : partition_entries) {
+        try {
+            auto dev_path = std::filesystem::path("/dev") / entry.name.c_str();
+
+            struct stat st{};
+            if (stat(dev_path.c_str(), &st) != 0) {
+                vlog(
+                  _logger.warn,
+                  "Could not stat device {} for IO queue metrics: {}",
+                  dev_path.string(),
+                  std::system_category().message(errno));
+                continue;
+            }
+
+            auto& queue = ss::engine().get_io_queue(st.st_rdev);
+
+            // Check if we already have this queue
+            auto it = std::ranges::find_if(
+              queues, [&](const auto& q) { return q.queue == &queue; });
+            if (it != queues.end()) {
+                it->is_data |= entry.is_data;
+                it->is_cache |= entry.is_cache;
+            } else {
+                queues.emplace_back(
+                  &queue,
+                  entry.name,
+                  utils::device_resolver::get_base_device(entry.name),
+                  entry.is_data,
+                  entry.is_cache);
+            }
+        } catch (...) {
+            vlog(
+              _logger.warn,
+              "Failed to lookup IO queue for device {}: {}",
+              entry.name,
+              std::current_exception());
+        }
+    }
+
+    for (const auto& qi : queues) {
+        auto cfg = qi.queue->get_config();
+
+        vlog(
+          _logger.info,
+          "Setting up IO queue config metrics for device '{}' "
+          "(disk='{}', mountpoint='{}', id={}, data_disk={}, "
+          "cache_disk={})",
+          qi.device,
+          qi.disk,
+          qi.queue->mountpoint(),
+          cfg.id,
+          qi.is_data ? 1 : 0,
+          qi.is_cache ? 1 : 0);
+
+        auto disk_label = seastar::metrics::label("disk");
+        auto device_label = seastar::metrics::label("device");
+        auto mountpoint_label = seastar::metrics::label("mountpoint");
+        auto data_disk_label = seastar::metrics::label("data_disk");
+        auto cache_disk_label = seastar::metrics::label("cache_disk");
+        auto id_label = seastar::metrics::label("id");
+
+        const std::vector<seastar::metrics::label_instance> labels = {
+          disk_label(qi.disk),
+          device_label(qi.device),
+          mountpoint_label(qi.queue->mountpoint()),
+          data_disk_label(qi.is_data ? "1" : "0"),
+          cache_disk_label(qi.is_cache ? "1" : "0"),
+          id_label(fmt::format("{}", cfg.id)),
+        };
+
+        _metrics.add_group(
+          "io_queue_config",
+          {
+            seastar::metrics::make_gauge(
+              "read_bytes_rate",
+              [v = cfg.read_bytes_rate] { return v; },
+              seastar::metrics::description(
+                "Configured read bandwidth from io-properties (bytes/sec)"),
+              labels),
+
+            seastar::metrics::make_gauge(
+              "write_bytes_rate",
+              [v = cfg.write_bytes_rate] { return v; },
+              seastar::metrics::description(
+                "Configured write bandwidth from io-properties (bytes/sec)"),
+              labels),
+
+            seastar::metrics::make_gauge(
+              "read_req_rate",
+              [v = cfg.read_req_rate] { return v; },
+              seastar::metrics::description(
+                "Configured read IOPS from io-properties"),
+              labels),
+
+            seastar::metrics::make_gauge(
+              "write_req_rate",
+              [v = cfg.write_req_rate] { return v; },
+              seastar::metrics::description(
+                "Configured write IOPS from io-properties"),
+              labels),
+          });
+    }
+}
+
 } // namespace metrics
