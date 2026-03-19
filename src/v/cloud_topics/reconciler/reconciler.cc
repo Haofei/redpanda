@@ -23,9 +23,11 @@
 #include "cloud_topics/reconciler/reconciliation_consumer.h"
 #include "cloud_topics/reconciler/reconciliation_source.h"
 #include "cloud_topics/types.h"
+#include "cluster/metadata_cache.h"
 #include "cluster/partition.h"
 #include "config/configuration.h"
 #include "model/fundamental.h"
+#include "model/namespace.h"
 #include "ssx/future-util.h"
 #include "utils/retry_chain_node.h"
 
@@ -63,9 +65,13 @@ void log_error(
 
 template<class Clock>
 reconciler<Clock>::reconciler(
-  l1::io* l1_io, l1::metastore* metastore, ss::scheduling_group reconciler_sg)
+  l1::io* l1_io,
+  l1::metastore* metastore,
+  cluster::metadata_cache* metadata_cache,
+  ss::scheduling_group reconciler_sg)
   : _l1_io(l1_io)
   , _metastore(metastore)
+  , _metadata_cache(metadata_cache)
   , _reconciler_sg(reconciler_sg)
   , _upload_part_size(config::shard_local_cfg().cloud_topics_upload_part_size())
   , _reconciliation_sem(
@@ -370,8 +376,16 @@ ss::future<> reconciler<Clock>::reconcile() {
     // due topic.
     auto parallelism
       = config::shard_local_cfg().cloud_topics_reconciliation_parallelism();
-    auto max_concurrent_topics = (parallelism + default_num_l1_domains - 1)
-                                 / default_num_l1_domains;
+    size_t num_domains
+      = config::shard_local_cfg().cloud_topics_num_metastore_partitions();
+    if (_metadata_cache) {
+        auto md = _metadata_cache->get_topic_metadata_ref(
+          model::l1_metastore_nt);
+        if (md) {
+            num_domains = md->get().get_configuration().partition_count;
+        }
+    }
+    auto max_concurrent_topics = (parallelism + num_domains - 1) / num_domains;
     co_await ss::max_concurrent_for_each(
       std::make_move_iterator(due_topics.begin()),
       std::make_move_iterator(due_topics.end()),
