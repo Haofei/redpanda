@@ -228,7 +228,8 @@ def resolve_and_query_targets(
         ]
 
         env: dict[str, str] = {}
-        for pair in rule.find("dict[@name='env']") or []:
+        env_elem = rule.find("dict[@name='env']")
+        for pair in env_elem if env_elem is not None else []:
             strings = pair.findall("string")
             if len(strings) == 2 and strings[0].get("value"):
                 env[strings[0].get("value", "")] = strings[1].get("value", "")
