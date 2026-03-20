@@ -471,6 +471,11 @@ void refresh_stats(StatsWrapper& stats, ss::logger& logger, ParseF parsef) {
 
 void host_metrics_watcher::maybe_refresh_diskstats() {
     refresh_stats(_diskstats, _logger, [this](const auto& stat_lines) {
+        vlog(
+          _logger.trace,
+          "Refreshing diskstats, read {} bytes, monitored_devices: [{}]",
+          stat_lines.size(),
+          fmt::join(_monitored_devices, ", "));
         parse_diskstats(stat_lines, _diskstats.stats, _monitored_devices);
     });
 }
