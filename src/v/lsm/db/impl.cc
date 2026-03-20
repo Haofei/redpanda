@@ -72,6 +72,7 @@ ss::future<std::unique_ptr<impl>> impl::open(
         co_return db;
     }
     co_await db->_gc_actor.start();
+    db->maybe_schedule_compaction();
     vlog(log.trace, "open_end readonly=false");
     co_return db;
 }

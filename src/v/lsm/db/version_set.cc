@@ -667,17 +667,23 @@ void version_set::finalize(version* v) {
     internal::level best_level = 0_level;
     double best_score = static_cast<double>(v->_files[0_level].size())
                         / static_cast<double>(
-                          _options->default_level_one_compaction_trigger);
-    // While level 0 compaction score is based on number of files, other levels
-    // are based on number of bytes in the level.
-    for (auto level = 1_level; level < _options->max_level(); ++level) {
-        size_t level_bytes = total_file_size(v->_files[level]);
-        double score = static_cast<double>(level_bytes)
-                       / static_cast<double>(
-                         _options->levels[level].max_total_bytes);
-        if (score > best_score) {
-            best_level = level;
-            best_score = score;
+                          _options->level_one_compaction_trigger);
+    // If L0 is at or above the slowdown threshold, prioritize it
+    // unconditionally so that lower-level compactions cannot starve L0.
+    bool l0_urgent = v->_files[0_level].size()
+                     >= _options->level_zero_slowdown_writes_trigger;
+    if (!l0_urgent) {
+        // While level 0 compaction score is based on number of files, other
+        // levels are based on number of bytes in the level.
+        for (auto level = 1_level; level < _options->max_level(); ++level) {
+            size_t level_bytes = total_file_size(v->_files[level]);
+            double score = static_cast<double>(level_bytes)
+                           / static_cast<double>(
+                             _options->levels[level].max_total_bytes);
+            if (score > best_score) {
+                best_level = level;
+                best_score = score;
+            }
         }
     }
     v->_compaction_level = best_level;
