@@ -688,6 +688,10 @@ TEST_P(DbDomainManagerTestWithParams, TestConcurrentUpdates) {
 }
 
 TEST_P(DbDomainManagerTestWithParams, TestUpdatesWithDroppedAppends) {
+    cfg.get("cloud_topics_metastore_replication_timeout_ms")
+      .set_value(std::chrono::milliseconds(10s));
+    cfg.get("cloud_topics_metastore_lsm_apply_timeout_ms")
+      .set_value(std::chrono::milliseconds(30s));
     auto args = params();
     auto tp = make_tp();
     bool done = false;
