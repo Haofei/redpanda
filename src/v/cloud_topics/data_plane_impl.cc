@@ -237,6 +237,10 @@ public:
         co_return epoch_fut.get();
     }
 
+    ss::future<> invalidate_epoch_below(cluster_epoch epoch) noexcept final {
+        co_await _cluster_services.local().invalidate_epoch_below(epoch);
+    }
+
 private:
     ss::sharded<l0::cluster_services> _cluster_services;
     // Write path

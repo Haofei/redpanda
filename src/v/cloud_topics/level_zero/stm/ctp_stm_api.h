@@ -116,6 +116,9 @@ public:
 
     std::optional<cluster_epoch> get_max_seen_epoch() const;
 
+    // Get the minimum epoch that would be current accepted by `fence_epoch`.
+    std::optional<cluster_epoch> get_min_accepted_epoch() const;
+
     l0::producer_queue& producer_queue();
 
     // Register this reader with the STM so that it's state isn't GC'd.

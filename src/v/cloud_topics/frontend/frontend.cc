@@ -601,6 +601,10 @@ ss::future<result<raft::replicate_result>> do_upload_and_replicate(
       min_epoch,
       ntp);
 
+    if (auto current_min_epoch = ctp_stm_api->get_min_accepted_epoch()) {
+        co_await api->invalidate_epoch_below(current_min_epoch.value());
+    }
+
     auto timeout = opts.timeout.value_or(0ms);
     if (timeout == 0ms) {
         timeout = L0_upload_default_timeout;

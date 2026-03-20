@@ -91,6 +91,11 @@ public:
     current_epoch(seastar::abort_source*) override {
         return seastar::make_ready_future<cloud_topics::cluster_epoch>(0);
     }
+
+    seastar::future<>
+    invalidate_epoch_below(cloud_topics::cluster_epoch) override {
+        return ss::now();
+    }
 };
 
 namespace cloud_topics::l0 {
