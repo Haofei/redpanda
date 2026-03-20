@@ -1509,3 +1509,111 @@ class ShadowLinkingValidateAclsMTls(ShadowLinkingValidateAclsBase):
                 common_name=self.redpanda.SUPERUSER_CREDENTIALS.username,
             ),
         )
+
+
+class ClusterLinkingStorageModeSync(ClusterLinkingTopicSyncingTestBase):
+    """
+    Tests for syncing redpanda.storage.mode via cluster linking.
+    """
+
+    @cluster(num_nodes=6)
+    @matrix(storage_mode=["unset", "local"])
+    def test_storage_mode_sync(self, storage_mode):
+        """
+        Verifies that redpanda.storage.mode is synced from source to target
+        when creating mirror topics via cluster linking.
+        """
+        topic_name = "test-storage-mode-topic"
+
+        topic = TopicSpec(name=topic_name, partition_count=3, replication_factor=1)
+
+        self.get_source_cluster_rpk().create_topic(
+            topic=topic.name,
+            partitions=topic.partition_count,
+            replicas=topic.replication_factor,
+            config={"redpanda.storage.mode": storage_mode},
+        )
+
+        # Verify source topic has the expected storage mode
+        source_configs = self.get_source_cluster_rpk().describe_topic_configs(
+            topic.name
+        )
+        assert source_configs["redpanda.storage.mode"][0] == storage_mode, (
+            f"Source topic storage mode: expected {storage_mode}, "
+            f"got {source_configs['redpanda.storage.mode'][0]}"
+        )
+
+        created_link = self.create_link("test-link")
+        self.validate_created_link(created_link)
+
+        wait_until(
+            lambda: self._topics_are_present(
+                self.get_target_cluster_rpk(), [topic], True
+            ),
+            timeout_sec=30,
+            backoff_sec=1,
+            err_msg="Topic not created on target cluster",
+        )
+
+        # Verify target topic has the same storage mode
+        target_configs = self.get_target_cluster_rpk().describe_topic_configs(
+            topic.name
+        )
+        assert target_configs["redpanda.storage.mode"][0] == storage_mode, (
+            f"Target topic storage mode: expected {storage_mode}, "
+            f"got {target_configs['redpanda.storage.mode'][0]}"
+        )
+
+    @cluster(num_nodes=6)
+    def test_storage_mode_change_sync(self):
+        """
+        Verifies that changes to redpanda.storage.mode on the source topic
+        are synced to the mirror topic via cluster linking.
+        """
+        topic_name = "test-storage-mode-change"
+
+        topic = TopicSpec(name=topic_name, partition_count=3, replication_factor=1)
+
+        self.get_source_cluster_rpk().create_topic(
+            topic=topic.name,
+            partitions=topic.partition_count,
+            replicas=topic.replication_factor,
+            config={"redpanda.storage.mode": "unset"},
+        )
+
+        created_link = self.create_link("test-link")
+        self.validate_created_link(created_link)
+
+        wait_until(
+            lambda: self._topics_are_present(
+                self.get_target_cluster_rpk(), [topic], True
+            ),
+            timeout_sec=30,
+            backoff_sec=1,
+            err_msg="Topic not created on target cluster",
+        )
+
+        # Verify initial storage mode
+        target_configs = self.get_target_cluster_rpk().describe_topic_configs(
+            topic.name
+        )
+        assert target_configs["redpanda.storage.mode"][0] == "unset", (
+            f"Expected unset, got {target_configs['redpanda.storage.mode'][0]}"
+        )
+
+        # Change storage mode on source from unset to local
+        self.get_source_cluster_rpk().alter_topic_config(
+            topic_name, "redpanda.storage.mode", "local"
+        )
+
+        # Wait for the change to sync
+        def storage_mode_synced():
+            configs = self.get_target_cluster_rpk().describe_topic_configs(topic.name)
+            return configs["redpanda.storage.mode"][0] == "local"
+
+        wait_until(
+            storage_mode_synced,
+            timeout_sec=30,
+            backoff_sec=1,
+            err_msg="Storage mode change not synced to target cluster",
+        )
