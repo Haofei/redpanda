@@ -7,7 +7,10 @@
 # the Business Source License, use of this software will be governed
 # by the Apache License, Version 2.0
 
+import yaml
+
 from rptest.services.cluster import cluster
+from rptest.services.redpanda import RedpandaService
 from rptest.tests.redpanda_test import RedpandaTest
 
 
@@ -117,15 +120,6 @@ class HostMetricsTest(RedpandaTest):
             if family.name in expected_gauges:
                 found[family.name] = family.samples
 
-        if not self.redpanda.dedicated_nodes:
-            # In docker there are no real block devices, so IO queue config
-            # metrics are not emitted.
-            assert len(found) == 0, (
-                f"Expected no io_queue_config metrics in docker, got: "
-                f"{list(found.keys())}"
-            )
-            return
-
         assert found.keys() == expected_gauges, (
             f"Missing io_queue_config metrics: {expected_gauges - found.keys()}"
         )
@@ -144,3 +138,110 @@ class HostMetricsTest(RedpandaTest):
             assert len(data_samples) >= 1, (
                 f"Expected at least one {name} sample with data_disk=1"
             )
+
+        if not self.redpanda.dedicated_nodes:
+            # In docker, device resolution fails so the fallback path
+            # looks up IO queues by directory stat. Data and cache share
+            # one overlay device, so we expect exactly 1 sample per gauge
+            # with empty device/disk labels.
+            def check_label(name, sample, label, expected):
+                actual = sample.labels[label]
+                assert actual == expected, (
+                    f"{name} expected {label}={expected!r} in docker, got {actual!r}"
+                )
+
+            for name, samples in found.items():
+                assert len(samples) == 1, (
+                    f"{name} expected exactly 1 sample in docker, got {len(samples)}"
+                )
+                for label, expected in [
+                    ("device", ""),
+                    ("disk", ""),
+                    ("mountpoint", ""),
+                    ("id", "0"),
+                ]:
+                    check_label(name, samples[0], label, expected)
+
+    @cluster(num_nodes=1)
+    def test_io_queue_config_with_io_properties(self):
+        """
+        Restart Redpanda with a custom io-properties file pointing at the
+        data directory. This creates a dedicated Seastar IO queue (id > 0)
+        for the data dir mountpoint. We verify the configured rates appear
+        in the metrics.
+
+        On dedicated nodes with real block devices, we also expect a
+        default queue (id=0) series. In docker, device resolution falls
+        back to directory stat, and get_io_queue returns the configured
+        queue directly, so only 1 series is emitted.
+        """
+        node = self.redpanda.nodes[0]
+
+        io_props = {
+            "disks": [
+                {
+                    "mountpoint": RedpandaService.DATA_DIR,
+                    "read_iops": 10000,
+                    "read_bandwidth": 1000000000,
+                    "write_iops": 1000,
+                    "write_bandwidth": 100000000,
+                }
+            ]
+        }
+
+        io_props_path = "/tmp/test-io-properties.yaml"
+        node.account.create_file(io_props_path, yaml.dump(io_props))
+
+        self.redpanda.restart_nodes(
+            [node],
+            extra_cli=[f"--io-properties-file={io_props_path}"],
+        )
+
+        metrics = list(self.redpanda.metrics(node))
+
+        expected_gauges = {
+            "vectorized_io_queue_config_read_bytes_rate",
+            "vectorized_io_queue_config_write_bytes_rate",
+            "vectorized_io_queue_config_read_req_rate",
+            "vectorized_io_queue_config_write_req_rate",
+            "vectorized_io_queue_config_max_cost_function",
+            "vectorized_io_queue_config_duplex",
+        }
+
+        found = {}
+        for family in metrics:
+            if family.name in expected_gauges:
+                found[family.name] = family.samples
+
+        assert found.keys() == expected_gauges, (
+            f"Missing io_queue_config metrics: {expected_gauges - found.keys()}"
+        )
+
+        # Every gauge should have at least 1 sample with the configured
+        # mountpoint and the expected rate values.
+        for name, samples in found.items():
+            configured = [
+                s for s in samples if s.labels["mountpoint"] == RedpandaService.DATA_DIR
+            ]
+            assert len(configured) == 1, (
+                f"{name} expected 1 sample with mountpoint="
+                f"{RedpandaService.DATA_DIR}, got {len(configured)}"
+            )
+            assert int(configured[0].labels["id"]) > 0
+
+        def gauge_value(metric_name):
+            samples = found[f"vectorized_io_queue_config_{metric_name}"]
+            return [
+                s for s in samples if s.labels["mountpoint"] == RedpandaService.DATA_DIR
+            ][0].value
+
+        assert gauge_value("read_bytes_rate") == 1000000000
+        assert gauge_value("write_bytes_rate") == 100000000
+        assert gauge_value("read_req_rate") == 10000
+        assert gauge_value("write_req_rate") == 1000
+
+        # When io-properties points at the data dir, get_io_queue for that
+        # device returns the configured queue. Since data and cache share
+        # the same device, they deduplicate to 1 series.
+        for name, samples in found.items():
+            assert len(samples) == 1, f"{name} expected 1 sample, got {len(samples)}"
