@@ -72,16 +72,17 @@ device_resolver::get_base_device(const ss::sstring& device) noexcept {
     // MMC/SD: mmcblk0p1 -> mmcblk0 (capture: mmcblk<number>)
     static const std::regex mmc_pattern(R"(^(mmcblk\d+)p\d+$)");
 
+    // MD RAID: md0p1 -> md0, md127p3 -> md127 (capture: md<number>)
+    static const std::regex md_pattern(R"(^(md\d+)p\d+$)");
+
     // PMEM: pmem0p1 -> pmem0 (capture: pmem<number>)
     static const std::regex pmem_pattern(R"(^(pmem\d+)p\d+$)");
 
-    // Traditional: sda1 -> sda, vda3 -> vda
-    // Excludes: nvme*, mmcblk*, pmem*, dm-*,
-    // which are handled by other patterns or for dm we don't want
-    // to strip the number since it's part of the base name (e.g. dm-0, dm-1)
-    // Use negative lookahead to exclude specific prefixes
+    // Traditional: sda1 -> sda, vda3 -> vda, xvda2 -> xvda, hdb5 -> hdb
+    // Only match known partitioned device prefixes to avoid stripping
+    // digits from non-partition base devices like md0, loop0, or dm-0.
     static const std::regex traditional_pattern(
-      R"(^(?!nvme|mmcblk|pmem|dm)([a-z]+)\d+$)");
+      R"(^((sd|vd|xvd|hd)[a-z]+)\d+$)");
 
     std::string device_str{device};
     std::smatch match;
@@ -89,6 +90,7 @@ device_resolver::get_base_device(const ss::sstring& device) noexcept {
     // Try each pattern and return the captured base device name
     if (
       std::regex_match(device_str, match, nvme_pattern)
+      || std::regex_match(device_str, match, md_pattern)
       || std::regex_match(device_str, match, mmc_pattern)
       || std::regex_match(device_str, match, pmem_pattern)
       || std::regex_match(device_str, match, traditional_pattern)) {

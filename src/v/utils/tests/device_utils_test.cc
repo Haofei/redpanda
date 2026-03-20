@@ -56,6 +56,17 @@ TEST(DeviceUtils, GetBaseDeviceEdgeCases) {
     // dm devices, shouldn't strip
     EXPECT_EQ(device_resolver::get_base_device("dm-0"), "dm-0");
     EXPECT_EQ(device_resolver::get_base_device("dm-10"), "dm-10");
+    EXPECT_EQ(device_resolver::get_base_device("dm0"), "dm0");
+
+    // MD RAID partitions: md0p17 -> md0
+    EXPECT_EQ(device_resolver::get_base_device("md0p1"), "md0");
+    EXPECT_EQ(device_resolver::get_base_device("md0p17"), "md0");
+    EXPECT_EQ(device_resolver::get_base_device("md127p3"), "md127");
+
+    // MD RAID base devices, shouldn't strip
+    EXPECT_EQ(device_resolver::get_base_device("md0"), "md0");
+    EXPECT_EQ(device_resolver::get_base_device("loop0"), "loop0");
+    EXPECT_EQ(device_resolver::get_base_device("sr0"), "sr0");
 
     // no match, pass unchanged
     EXPECT_EQ(device_resolver::get_base_device("foobar"), "foobar");
