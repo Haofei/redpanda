@@ -43,6 +43,7 @@ namespace metrics {
 struct diskstats_entry {
     ss::sstring name;       // device name as it appears in /proc/diskstats
     ss::sstring underlying; // best-guess underlying disk, empty if unknown
+    dev_t dev_id{0};        // device ID from stat(), 0 if unresolved
     bool is_data;
     bool is_cache;
 };
@@ -169,7 +170,8 @@ host_metrics_watcher::host_metrics_watcher(
       [this]() { maybe_refresh_snmp(); },
       [this]() { setup_snmp_metrics(); });
 
-    setup_io_queue_config_metrics(devices.partitions);
+    setup_io_queue_config_metrics(
+      devices.partitions, data_directory, cache_directory);
     setup_info_metric(devices);
 }
 
@@ -493,22 +495,26 @@ resolved_devices host_metrics_watcher::resolve_monitored_devices(
     struct resolved {
         ss::sstring partition;
         ss::sstring disk;
+        dev_t dev_id;
     };
 
     auto resolve_one = [this](
                          std::string_view label,
                          const ss::sstring& dir) -> std::optional<resolved> {
         try {
-            auto partition = utils::device_resolver::device_for_path(dir);
-            auto disk = utils::device_resolver::get_base_device(partition);
+            auto device = utils::device_resolver::device_for_path(dir);
+            auto disk = utils::device_resolver::get_base_device(device.name);
             vlog(
               _logger.info,
               "Resolved {} '{}' to device '{}' (underlying disk '{}')",
               label,
               dir,
-              partition,
+              device.name,
               disk);
-            return resolved{std::move(partition), std::move(disk)};
+            return resolved{
+              .partition = std::move(device.name),
+              .disk = std::move(disk),
+              .dev_id = device.dev_id};
         } catch (const std::exception& e) {
             vlog(
               _logger.warn,
@@ -529,6 +535,7 @@ resolved_devices host_metrics_watcher::resolve_monitored_devices(
                        std::vector<diskstats_entry>& entries,
                        const ss::sstring& name,
                        const ss::sstring& underlying,
+                       dev_t dev_id,
                        bool is_data,
                        bool is_cache) {
         for (auto& e : entries) {
@@ -542,6 +549,7 @@ resolved_devices host_metrics_watcher::resolve_monitored_devices(
           diskstats_entry{
             .name = name,
             .underlying = underlying,
+            .dev_id = dev_id,
             .is_data = is_data,
             .is_cache = is_cache});
         result.filter.insert(name);
@@ -549,15 +557,27 @@ resolved_devices host_metrics_watcher::resolve_monitored_devices(
 
     if (data) {
         result.data_device = data->partition;
-        add_entry(result.partitions, data->partition, data->disk, true, false);
-        add_entry(result.disks, data->disk, {}, true, false);
+        result.data_dev_id = data->dev_id;
+        add_entry(
+          result.partitions,
+          data->partition,
+          data->disk,
+          data->dev_id,
+          true,
+          false);
+        add_entry(result.disks, data->disk, {}, 0, true, false);
     }
     if (cache) {
         result.cache_device = cache->partition;
         result.cache_dev_id = cache->dev_id;
         add_entry(
-          result.partitions, cache->partition, cache->disk, false, true);
-        add_entry(result.disks, cache->disk, {}, false, true);
+          result.partitions,
+          cache->partition,
+          cache->disk,
+          cache->dev_id,
+          false,
+          true);
+        add_entry(result.disks, cache->disk, {}, 0, false, true);
     }
 
     if (!result.filter.empty()) {
@@ -572,14 +592,64 @@ resolved_devices host_metrics_watcher::resolve_monitored_devices(
 
 // SPLIT_MARKER_IOQUEUE_START
 void host_metrics_watcher::setup_io_queue_config_metrics(
-  const std::vector<diskstats_entry>& partition_entries) {
+  const std::vector<diskstats_entry>& partition_entries,
+  const ss::sstring& data_directory,
+  const ss::sstring& cache_directory) {
     // Export Seastar IO queue configuration (iotune bandwidth/IOPS) as metrics.
     // Deduplicates by queue identity: multiple partition entries may share one
     // Seastar IO queue (e.g. when no io-properties is configured), so we emit
     // one metric series per queue with merged data_disk/cache_disk flags.
-    if (partition_entries.empty()) {
-        return;
+    // Build a unified list of (dev_id, device label, disk label, role flags)
+    // for IO queue lookup. When partition entries are available, dev_id was
+    // resolved at startup. Otherwise fall back to stat'ing the directory paths.
+    struct lookup_entry {
+        dev_t dev_id;
+        ss::sstring name;   // human-readable name for logging
+        ss::sstring device; // device label (empty in fallback)
+        ss::sstring disk;   // disk label (empty in fallback)
+        bool is_data;
+        bool is_cache;
+    };
+
+    std::vector<lookup_entry> lookups;
+
+    if (!partition_entries.empty()) {
+        for (const auto& entry : partition_entries) {
+            lookups.push_back({
+              .dev_id = entry.dev_id,
+              .name = entry.name,
+              .device = entry.name,
+              .disk = entry.underlying,
+              .is_data = entry.is_data,
+              .is_cache = entry.is_cache,
+            });
+        }
+    } else {
+        // Device resolution failed — fall back to looking up IO queues
+        // directly from the data/cache directory paths. We won't have
+        // device or disk labels, but can still export the queue config.
+        auto try_stat_dir =
+          [&](const ss::sstring& dir, bool is_data, bool is_cache) {
+              struct stat st{};
+              if (stat(dir.c_str(), &st) != 0) {
+                  vlog(
+                    _logger.warn,
+                    "Could not stat directory {} for IO queue metrics: {}",
+                    dir,
+                    std::system_category().message(errno));
+                  return;
+              }
+              lookups.push_back({
+                .dev_id = st.st_dev,
+                .name = dir,
+                .is_data = is_data,
+                .is_cache = is_cache,
+              });
+          };
+        try_stat_dir(data_directory, true, false);
+        try_stat_dir(cache_directory, false, true);
     }
+
     struct queue_info {
         ss::io_queue* queue;
         ss::sstring device;
@@ -590,23 +660,10 @@ void host_metrics_watcher::setup_io_queue_config_metrics(
 
     std::vector<queue_info> queues;
 
-    for (const auto& entry : partition_entries) {
+    for (const auto& entry : lookups) {
         try {
-            auto dev_path = std::filesystem::path("/dev") / entry.name.c_str();
+            auto& queue = ss::engine().get_io_queue(entry.dev_id);
 
-            struct stat st{};
-            if (stat(dev_path.c_str(), &st) != 0) {
-                vlog(
-                  _logger.warn,
-                  "Could not stat device {} for IO queue metrics: {}",
-                  dev_path.string(),
-                  std::system_category().message(errno));
-                continue;
-            }
-
-            auto& queue = ss::engine().get_io_queue(st.st_rdev);
-
-            // Check if we already have this queue
             auto it = std::ranges::find_if(
               queues, [&](const auto& q) { return q.queue == &queue; });
             if (it != queues.end()) {
@@ -615,15 +672,15 @@ void host_metrics_watcher::setup_io_queue_config_metrics(
             } else {
                 queues.emplace_back(
                   &queue,
-                  entry.name,
-                  utils::device_resolver::get_base_device(entry.name),
+                  entry.device,
+                  entry.disk,
                   entry.is_data,
                   entry.is_cache);
             }
         } catch (...) {
             vlog(
               _logger.warn,
-              "Failed to lookup IO queue for device {}: {}",
+              "Failed to lookup IO queue for {}: {}",
               entry.name,
               std::current_exception());
         }

@@ -123,7 +123,9 @@ private:
     // Export Seastar IO queue config (iotune rates) as metrics, one series
     // per unique IO queue deduped across partition entries.
     void setup_io_queue_config_metrics(
-      const std::vector<diskstats_entry>& partition_entries);
+      const std::vector<diskstats_entry>& partition_entries,
+      const ss::sstring& data_directory,
+      const ss::sstring& cache_directory);
 
     // Register a constant gauge (value 1) with labels describing the
     // host metrics configuration: resolved device names, whether resolution
