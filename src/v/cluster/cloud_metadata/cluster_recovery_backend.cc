@@ -391,8 +391,13 @@ ss::future<cluster::errc> cluster_recovery_backend::do_action(
                         // missing_ntp is expected for new partitions
                         // that haven't been flushed to the metastore
                         // yet - treat as empty partition.
-                        auto offsets_res = co_await metastore->get_offsets(
-                          tidp);
+                        retry_chain_node offsets_retry(60s, 1s, &parent_retry);
+                        auto offsets_res
+                          = co_await cloud_topics::l1::retry_metastore_op(
+                            [metastore, &tidp] {
+                                return metastore->get_offsets(tidp);
+                            },
+                            offsets_retry);
                         if (!offsets_res.has_value()) {
                             if (
                               offsets_res.error()
@@ -422,8 +427,14 @@ ss::future<cluster::errc> cluster_recovery_backend::do_action(
                         // missing_ntp and out_of_range are acceptable
                         // - use term 0. Other errors are transient and
                         // worth retrying.
-                        auto term_res = co_await metastore->get_term_for_offset(
-                          tidp, start_offset);
+                        retry_chain_node term_retry(60s, 1s, &parent_retry);
+                        auto term_res
+                          = co_await cloud_topics::l1::retry_metastore_op(
+                            [metastore, &tidp, start_offset] {
+                                return metastore->get_term_for_offset(
+                                  tidp, start_offset);
+                            },
+                            term_retry);
                         model::term_id initial_term{0};
                         if (term_res.has_value()) {
                             initial_term = term_res.value();
