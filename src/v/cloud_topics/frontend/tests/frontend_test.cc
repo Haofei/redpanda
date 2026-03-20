@@ -48,7 +48,7 @@ public:
       (override));
 
     MOCK_METHOD(
-      (ss::future<std::expected<chunked_vector<extent_meta>, std::error_code>>),
+      (ss::future<std::expected<upload_meta, std::error_code>>),
       execute_write,
       (model::ntp,
        cluster_epoch,
@@ -124,9 +124,8 @@ auto make_extent_fut(model::offset o, cluster_epoch epoch) {
 
     chunked_vector<extent_meta> vec;
     vec.push_back(std::move(m));
-    return ss::make_ready_future<
-      std::expected<chunked_vector<extent_meta>, std::error_code>>(
-      std::move(vec));
+    return ss::make_ready_future<std::expected<upload_meta, std::error_code>>(
+      upload_meta{.shard = ss::this_shard_id(), .extents = std::move(vec)});
 }
 
 class frontend_fixture

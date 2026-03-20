@@ -320,8 +320,11 @@ template<typename Clock>
 ss::future<> cluster_epoch_service<Clock>::invalidate_epoch_cache(
   int64_t epoch_causing_monotonicity_violation) {
     auto holder = _gate.hold();
-    // Don't do the cross shard calls if our local shard is up to date.
-    if (_cached_epoch > epoch_causing_monotonicity_violation) {
+    // Don't do the cross shard calls if our local shard is up to date or we
+    // already are going to get a new epoch from another invalidation.
+    if (
+      _cached_epoch > epoch_causing_monotonicity_violation
+      || _cached_epoch_time == Clock::time_point::min()) {
         co_return;
     }
     co_await this->container().invoke_on_all(

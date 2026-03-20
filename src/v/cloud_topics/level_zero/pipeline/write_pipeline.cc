@@ -66,7 +66,7 @@ template<class Clock>
 write_pipeline<Clock>::~write_pipeline() = default;
 
 template<class Clock>
-ss::future<std::expected<chunked_vector<extent_meta>, std::error_code>>
+ss::future<std::expected<upload_meta, std::error_code>>
 write_pipeline<Clock>::write_and_debounce(
   model::ntp ntp,
   cluster_epoch min_epoch,
@@ -103,7 +103,7 @@ auto write_pipeline<Clock>::prepare_write(
 }
 
 template<class Clock>
-ss::future<std::expected<chunked_vector<extent_meta>, std::error_code>>
+ss::future<std::expected<upload_meta, std::error_code>>
 write_pipeline<Clock>::execute_write(
   model::ntp ntp,
   cluster_epoch min_epoch,

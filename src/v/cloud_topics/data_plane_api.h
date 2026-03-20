@@ -63,8 +63,7 @@ public:
     stage_write(chunked_vector<model::record_batch> batches) = 0;
 
     // Execute this write using the reservation.
-    virtual ss::future<
-      std::expected<chunked_vector<extent_meta>, std::error_code>>
+    virtual ss::future<std::expected<upload_meta, std::error_code>>
     execute_write(
       model::ntp ntp,
       cluster_epoch min_epoch,
