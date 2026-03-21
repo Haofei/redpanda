@@ -330,7 +330,10 @@ partition_proxy::get_metastore_size() const {
 
 ss::future<std::optional<size_t>> partition_proxy::cloud_size_bytes() const {
     auto size_res = co_await get_metastore_size();
-    co_return size_res.value().size;
+    if (!size_res) {
+        co_return std::nullopt;
+    }
+    co_return size_res->size;
 }
 
 model::offset partition_proxy::offset_lag() const { return model::offset(0); }
