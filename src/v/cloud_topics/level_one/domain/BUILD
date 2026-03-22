@@ -73,6 +73,21 @@ redpanda_cc_library(
 )
 
 redpanda_cc_library(
+    name = "domain_manager_probe",
+    srcs = [
+        "domain_manager_probe.cc",
+    ],
+    hdrs = [
+        "domain_manager_probe.h",
+    ],
+    deps = [
+        "//src/v/config",
+        "//src/v/metrics",
+        "@seastar",
+    ],
+)
+
+redpanda_cc_library(
     name = "db_domain_manager",
     srcs = [
         "db_domain_manager.cc",
