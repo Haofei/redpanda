@@ -4807,6 +4807,24 @@ configuration::configuration()
       {.needs_restart = needs_restart::yes, .visibility = visibility::tunable},
       3,
       {.min = 1})
+  , cloud_topics_produce_write_inflight_limit(
+      *this,
+      "cloud_topics_produce_write_inflight_limit",
+      "Maximum number of in-flight write requests per shard in the cloud "
+      "topics write pipeline. Requests that exceed this limit are queued "
+      "until a slot becomes available.",
+      {.needs_restart = needs_restart::yes, .visibility = visibility::tunable},
+      1024,
+      {.min = 1})
+  , cloud_topics_produce_no_pid_concurrency(
+      *this,
+      "cloud_topics_produce_no_pid_concurrency",
+      "Maximum number of concurrent raft replication requests for producers "
+      "without a producer ID (idempotency disabled). Limits how many no-PID "
+      "writes can proceed past the producer queue into raft simultaneously.",
+      {.needs_restart = needs_restart::yes, .visibility = visibility::tunable},
+      32,
+      {.min = 1})
   , development_feature_property_testing_only(
       *this,
       "development_feature_property_testing_only",
