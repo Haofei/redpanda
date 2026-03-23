@@ -309,15 +309,9 @@ std::optional<cluster_epoch> ctp_stm_api::get_max_epoch() const {
     return _stm->state().get_max_applied_epoch();
 }
 
-std::optional<cluster_epoch> ctp_stm_api::get_max_seen_epoch() const {
-    return _stm->state().get_max_seen_epoch();
-}
-
-std::optional<cluster_epoch> ctp_stm_api::get_min_accepted_epoch() const {
-    if (auto e = _stm->state().get_previous_seen_epoch()) {
-        return e;
-    }
-    return _stm->state().get_previous_applied_epoch();
+std::optional<cluster_epoch>
+ctp_stm_api::get_max_seen_epoch(model::term_id term) const {
+    return _stm->state().get_max_seen_epoch(term);
 }
 
 l0::producer_queue& ctp_stm_api::producer_queue() {

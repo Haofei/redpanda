@@ -587,6 +587,10 @@ ss::future<result<raft::replicate_result>> do_upload_and_replicate(
     const auto& ntp = partition->ntp();
     // The default errc that will cause the client to retry the operation
     constexpr auto default_errc = raft::errc::timeout;
+    auto timeout = opts.timeout.value_or(0ms);
+    if (timeout == 0ms) {
+        timeout = L0_upload_default_timeout;
+    }
     /*
      * L0 GC relies on a minimum epoch associated with each NTP for calculating
      * the name of an L0 object. The minimum is based on the topic revision, but
@@ -595,20 +599,42 @@ ss::future<result<raft::replicate_result>> do_upload_and_replicate(
      * the rest of its journey.
      */
     auto min_epoch = cluster_epoch(partition->get_topic_revision_id());
+
+    /*
+     * Sync the STM so that our min_accepted epoch is not stale.
+     */
+    if (opts.as) {
+        co_await ctp_stm_api->sync_in_term(
+          model::time_from_now(timeout), opts.as->get());
+    } else {
+        ss::abort_source as;
+        co_await ctp_stm_api->sync_in_term(model::time_from_now(timeout), as);
+    }
+
+    /*
+     * We want to prevent from uploading data we know is going to get rejected,
+     * so we want to upload and ensure the epoch doesn't get fenced. So we
+     * have two options here we can enforce either bound of our window. We
+     * choose to use the max epoch here so that if something else in-flight
+     * pushes the window we have buffer to still accept this batch.
+     */
+    auto accepted_min = ctp_stm_api->get_max_seen_epoch(partition->term());
+    if (!accepted_min) {
+        accepted_min = ctp_stm_api->get_max_epoch();
+    }
+    if (accepted_min) {
+        min_epoch = std::max(min_epoch, *accepted_min);
+    }
+
     vassert(
       min_epoch() > 0L,
       "Unexpected invalid min epoch {} for {}",
       min_epoch,
       ntp);
 
-    if (auto current_min_epoch = ctp_stm_api->get_min_accepted_epoch()) {
-        co_await api->invalidate_epoch_below(current_min_epoch.value());
-    }
+    // Invalidate the epoch if it's below some threshold.
+    co_await api->invalidate_epoch_below(min_epoch);
 
-    auto timeout = opts.timeout.value_or(0ms);
-    if (timeout == 0ms) {
-        timeout = L0_upload_default_timeout;
-    }
     auto upload_fut = co_await ss::coroutine::as_future(api->execute_write(
       ntp,
       min_epoch,

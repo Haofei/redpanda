@@ -249,7 +249,7 @@ TEST_F(frontend_fixture, test_replicate_invalidates_epoch_cache) {
       .WillOnce(Return(ss::as_ready_future(stage_result{})));
     EXPECT_CALL(*_data_plane, execute_write(_, _, _, _))
       .WillOnce(Return(make_extent_fut(model::offset(0), cluster_epoch(7))));
-    EXPECT_CALL(*_data_plane, invalidate_epoch_below(cluster_epoch(5)))
+    EXPECT_CALL(*_data_plane, invalidate_epoch_below(cluster_epoch(10)))
       .WillOnce(Return(ss::now()));
     ON_CALL(*_data_plane, cache_put_ordered(_, _))
       .WillByDefault([](const auto&, auto) {});
