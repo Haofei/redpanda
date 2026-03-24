@@ -3390,6 +3390,7 @@ configuration::configuration()
       {
         model::leader_balancer_mode::calibrated,
         model::leader_balancer_mode::random,
+        model::leader_balancer_mode::greedy,
       })
   , leader_balancer_idle_timeout(
       *this,
