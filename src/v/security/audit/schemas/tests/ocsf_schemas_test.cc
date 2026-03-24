@@ -338,39 +338,38 @@ BOOST_AUTO_TEST_CASE(validate_api_activity) {
 
     auto ser = sa::rjson_serialize(api_act);
 
-    ss::sstring expected{
-      R"(
-{
-    "category_uid": 6,
-    "class_uid": 6003,
-    "metadata": )"
-      + metadata_cloud_profile_ser + R"(,
-    "severity_id": 1,
-    "time": )"
-      + ss::to_sstring(now) + R"(,
-    "type_uid": 600301,
-    "activity_id": 1,
-    "actor": {
-        "authorizations": [)"
-      + authz_success_ser + R"(],
-        "user": )"
-      + default_user_with_role_ser + R"(
-    },
-    "api": )"
-      + api_create_topic_ser + R"(,
-    "cloud": { "provider": "" },
-    "dst_endpoint": )"
-      + rp_kafka_endpoint_ser + R"(,
-    "http_request": )"
-      + test_http_request_ser + R"(,
-    "resources": [)"
-      + resource_detail_ser + R"(],
-    "src_endpoint": )"
-      + client_kafka_endpoint_ser + R"(,
-    "status_id": 1,
-    "unmapped": )"
-      + unmapped_ser + R"(
-})"};
+    auto expected = fmt::format(
+      R"({{
+          "category_uid": 6,
+          "class_uid": 6003,
+          "metadata": {metadata},
+          "severity_id": 1,
+          "time": {time},
+          "type_uid": 600301,
+          "activity_id": 1,
+          "actor": {{
+              "authorizations": [{authorizations}],
+              "user": {user}
+          }},
+          "api": {api},
+          "cloud": {{ "provider": "" }},
+          "dst_endpoint": {dst_endpoint},
+          "http_request": {http_request},
+          "resources": [{resources}],
+          "src_endpoint": {src_endpoint},
+          "status_id": 1,
+          "unmapped": {unmapped}
+      }})",
+      fmt::arg("metadata", metadata_cloud_profile_ser),
+      fmt::arg("time", now()),
+      fmt::arg("authorizations", authz_success_ser),
+      fmt::arg("user", default_user_with_role_ser),
+      fmt::arg("api", api_create_topic_ser),
+      fmt::arg("dst_endpoint", rp_kafka_endpoint_ser),
+      fmt::arg("http_request", test_http_request_ser),
+      fmt::arg("resources", resource_detail_ser),
+      fmt::arg("src_endpoint", client_kafka_endpoint_ser),
+      fmt::arg("unmapped", unmapped_ser));
 
     BOOST_REQUIRE_EQUAL(ser, ::json::minify(expected));
 }
@@ -458,33 +457,31 @@ BOOST_AUTO_TEST_CASE(validate_authentication_sasl_scram) {
 
     auto ser = sa::rjson_serialize(authn);
 
-    const ss::sstring expected{
-      R"(
-{
-"category_uid": 3,
-"class_uid": 3002,
-"metadata": )"
-      + metadata_ser + R"(,
-"severity_id": 1,
-"time": )"
-      + ss::to_sstring(now) + R"(,
-"type_uid": 300201,
-"activity_id": 1,
-"auth_protocol": "SCRAM-SHA256",
-"auth_protocol_id": 99,
-"dst_endpoint": )"
-      + rp_kafka_endpoint_ser + R"(,
-"is_cleartext": false,
-"is_mfa": true,
-"service": )"
-      + test_service_ser + R"(,
-"src_endpoint": )"
-      + client_kafka_endpoint_ser + R"(,
-"status_id": 1,
-"user": )"
-      + default_user_ser + R"(
-}
-)"};
+    auto expected = fmt::format(
+      R"({{
+          "category_uid": 3,
+          "class_uid": 3002,
+          "metadata": {metadata},
+          "severity_id": 1,
+          "time": {time},
+          "type_uid": 300201,
+          "activity_id": 1,
+          "auth_protocol": "SCRAM-SHA256",
+          "auth_protocol_id": 99,
+          "dst_endpoint": {dst_endpoint},
+          "is_cleartext": false,
+          "is_mfa": true,
+          "service": {service},
+          "src_endpoint": {src_endpoint},
+          "status_id": 1,
+          "user": {user}
+      }})",
+      fmt::arg("metadata", metadata_ser),
+      fmt::arg("time", now()),
+      fmt::arg("dst_endpoint", rp_kafka_endpoint_ser),
+      fmt::arg("service", test_service_ser),
+      fmt::arg("src_endpoint", client_kafka_endpoint_ser),
+      fmt::arg("user", default_user_ser));
 
     BOOST_REQUIRE_EQUAL(ser, ::json::minify(expected));
 }
@@ -512,33 +509,31 @@ BOOST_AUTO_TEST_CASE(validate_authentication_kerberos) {
 
     auto ser = sa::rjson_serialize(authn);
 
-    const ss::sstring expected{
-      R"(
-{
-"category_uid": 3,
-"class_uid": 3002,
-"metadata": )"
-      + metadata_ser + R"(,
-"severity_id": 1,
-"time": )"
-      + ss::to_sstring(now) + R"(,
-"type_uid": 300201,
-"activity_id": 1,
-"auth_protocol_id": 2,
-"dst_endpoint": )"
-      + rp_kafka_endpoint_ser + R"(,
-"is_cleartext": true,
-"is_mfa": false,
-"service": )"
-      + test_service_ser + R"(,
-"src_endpoint": )"
-      + client_kafka_endpoint_ser + R"(,
-"status_id": 2,
-"status_detail": "Failure",
-"user": )"
-      + default_user_ser + R"(
-}
-)"};
+    auto expected = fmt::format(
+      R"({{
+          "category_uid": 3,
+          "class_uid": 3002,
+          "metadata": {metadata},
+          "severity_id": 1,
+          "time": {time},
+          "type_uid": 300201,
+          "activity_id": 1,
+          "auth_protocol_id": 2,
+          "dst_endpoint": {dst_endpoint},
+          "is_cleartext": true,
+          "is_mfa": false,
+          "service": {service},
+          "src_endpoint": {src_endpoint},
+          "status_id": 2,
+          "status_detail": "Failure",
+          "user": {user}
+      }})",
+      fmt::arg("metadata", metadata_ser),
+      fmt::arg("time", now()),
+      fmt::arg("dst_endpoint", rp_kafka_endpoint_ser),
+      fmt::arg("service", test_service_ser),
+      fmt::arg("src_endpoint", client_kafka_endpoint_ser),
+      fmt::arg("user", default_user_ser));
 
     BOOST_REQUIRE_EQUAL(ser, ::json::minify(expected));
 }
@@ -594,27 +589,25 @@ BOOST_AUTO_TEST_CASE(validate_increment) {
 
     auto ser = sa::rjson_serialize(app_lifecycle);
 
-    const ss::sstring expected{
-      R"(
-{
-  "category_uid": 6,
-  "class_uid": 6002,
-  "count": 3,
-  "end_time": )"
-      + ss::to_sstring(increment_time2) + R"(,
-  "metadata": )"
-      + metadata_ser + R"(,
-  "severity_id": 1,
-  "start_time": )"
-      + ss::to_sstring(now) + R"(,
-  "time": )"
-      + ss::to_sstring(now) + R"(,
-  "type_uid": 600203,
-  "activity_id": 3,
-  "app": )"
-      + test_product_ser + R"(
-}
-)"};
+    auto expected = fmt::format(
+      R"({{
+          "category_uid": 6,
+          "class_uid": 6002,
+          "count": 3,
+          "end_time": {end_time},
+          "metadata": {metadata},
+          "severity_id": 1,
+          "start_time": {start_time},
+          "time": {time},
+          "type_uid": 600203,
+          "activity_id": 3,
+          "app": {app}
+      }})",
+      fmt::arg("end_time", increment_time2()),
+      fmt::arg("metadata", metadata_ser),
+      fmt::arg("start_time", now()),
+      fmt::arg("time", now()),
+      fmt::arg("app", test_product_ser));
 
     BOOST_REQUIRE_EQUAL(ser, ::json::minify(expected));
 }
