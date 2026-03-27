@@ -20,7 +20,6 @@ from ducktape.utils.util import wait_until
 
 from rptest.cfr_tests.cfr_test_base import (
     MEDIUM_TIMEOUT,
-    NO_LEADER,
     REALLY_LONG_TIMEOUT,
     ControllerForcedReconfigurationTestBase,
     SimpleTLSProvider,
@@ -35,8 +34,9 @@ from rptest.tests.redpanda_test import RedpandaTest
 CFR_SCRIPT = "invoke_controller_reconfiguration"
 
 # Substring from the script's --help output used to verify correct packaging.
-CFR_HELP_DESCRIPTION = \
+CFR_HELP_DESCRIPTION = (
     "Helper script to orchestrate invoking Controller Forced Reconfiguration"
+)
 
 # Interactive confirmation the script expects on stdin before proceeding.
 CFR_CONFIRMATION_INPUT = "yes\n"
@@ -54,6 +54,7 @@ CFR_SUBCMD_BAREMETAL = "baremetal"
 CFR_FLAG_NODES = "--nodes"
 CFR_FLAG_DEAD_NODES = "--dead-nodes"
 CFR_FLAG_SURVIVING_COUNT = "--surviving-count"
+CFR_FLAG_CHECK_LIVENESS = "--check-liveness"
 CFR_FLAG_PORT = "--port"
 CFR_FLAG_USERNAME = "--username"
 CFR_FLAG_PASSWORD = "--password"
@@ -77,17 +78,21 @@ class ControllerForcedReconfigurationScriptTest(RedpandaTest):
             capture_output=True,
             text=True,
         )
-        assert result.returncode == 0, \
+        assert result.returncode == 0, (
             f"Script exited with {result.returncode}: {result.stderr}"
+        )
 
-        assert CFR_HELP_DESCRIPTION in result.stdout, \
+        assert CFR_HELP_DESCRIPTION in result.stdout, (
             f"Expected description not found in help output:\n{result.stdout}"
+        )
 
-        assert "baremetal" in result.stdout, \
+        assert "baremetal" in result.stdout, (
             f"Expected 'baremetal' subcommand not found in help output:\n{result.stdout}"
+        )
 
-        assert "kubernetes" in result.stdout, \
+        assert "kubernetes" in result.stdout, (
             f"Expected 'kubernetes' subcommand not found in help output:\n{result.stdout}"
+        )
 
 
 class ControllerForcedReconfigurationBasicTest(
@@ -146,7 +151,8 @@ class ControllerForcedReconfigurationBasicTest(
             is_tls_enabled: enable TLS on the alternate admin API listener.
         """
         self.redpanda.add_extra_rp_conf(
-            {"internal_topic_replication_factor": self.cluster_size})
+            {"internal_topic_replication_factor": self.cluster_size}
+        )
 
         if is_tls_enabled:
             # sets up tls on all nodes, we need init_tls because
@@ -155,33 +161,28 @@ class ControllerForcedReconfigurationBasicTest(
             self.redpanda._init_tls()
             for node in self.redpanda.nodes:
                 self.redpanda.set_extra_node_conf(
-                    node, dict(admin_api_tls=self.ADMIN_TLS_CONFIG))
+                    node, dict(admin_api_tls=self.ADMIN_TLS_CONFIG)
+                )
 
         self.redpanda.start()
 
         if is_auth_enabled:
-            self.redpanda.set_cluster_config(
-                {"admin_api_require_auth": True})
+            self.redpanda.set_cluster_config({"admin_api_require_auth": True})
 
-    def _controller_recovered(self, killed_ids: list[int]) -> bool:
-        """True when a controller leader exists that is NOT one of the
-        killed nodes.  Uses the authenticated admin client so the check
-        works even when admin_api_require_auth is set."""
+    def _dead_nodes_detected(
+        self,
+        survivor: ClusterNode,
+        expected_dead_count: int,
+    ) -> bool:
+        """True once the survivor's /v1/brokers reports at least
+        ``expected_dead_count`` brokers as not alive."""
         admin = self.redpanda._admin
-        for node in self.redpanda.started_nodes():
-            try:
-                info = admin.get_partitions(
-                    namespace="redpanda",
-                    topic="controller",
-                    partition=0,
-                    node=node,
-                )
-                leader_id = info.get("leader_id", NO_LEADER)
-                if leader_id != NO_LEADER and leader_id not in killed_ids:
-                    return True
-            except Exception:
-                continue
-        return False
+        try:
+            brokers = admin.get_brokers(node=survivor)
+            dead = [b for b in brokers if not b.get("is_alive", True)]
+            return len(dead) >= expected_dead_count
+        except Exception:
+            return False
 
     def _common_auth_tls_args(
         self,
@@ -193,14 +194,18 @@ class ControllerForcedReconfigurationBasicTest(
         args: list[str] = []
         if is_auth_enabled:
             args += [
-                CFR_FLAG_USERNAME, self._superuser.username,
-                CFR_FLAG_PASSWORD, self._superuser.password,
+                CFR_FLAG_USERNAME,
+                self._superuser.username,
+                CFR_FLAG_PASSWORD,
+                self._superuser.password,
             ]
         if is_tls_enabled:
             # TLS is on the alternate admin listener, not port 9644.
             args += [
-                CFR_FLAG_PORT, str(RedpandaService.ADMIN_ALTERNATE_PORT),
-                CFR_FLAG_TLS_CA_CERT, self._tls_manager.ca.crt,
+                CFR_FLAG_PORT,
+                str(RedpandaService.ADMIN_ALTERNATE_PORT),
+                CFR_FLAG_TLS_CA_CERT,
+                self._tls_manager.ca.crt,
             ]
         return args
 
@@ -214,13 +219,12 @@ class ControllerForcedReconfigurationBasicTest(
             (killed_ids, survivors): the node-ids that were killed and the
             ClusterNode handles of the survivors now in recovery mode.
         """
-        nodes_to_kill = self.redpanda.nodes[:self.majority_to_kill]
-        survivors = self.redpanda.nodes[self.majority_to_kill:]
+        nodes_to_kill = self.redpanda.nodes[: self.majority_to_kill]
+        survivors = self.redpanda.nodes[self.majority_to_kill :]
 
         killed_ids = [self.redpanda.node_id(n) for n in nodes_to_kill]
         survivor_ids = [self.redpanda.node_id(n) for n in survivors]
-        self.logger.info(
-            f"Killing nodes {killed_ids}, survivors: {survivor_ids}")
+        self.logger.info(f"Killing nodes {killed_ids}, survivors: {survivor_ids}")
 
         for node in nodes_to_kill:
             self.redpanda.stop_node(node)
@@ -248,8 +252,9 @@ class ControllerForcedReconfigurationBasicTest(
         if result.stderr:
             self.logger.info(f"CFR stderr:\n{result.stderr}")
 
-        assert result.returncode == 0, \
+        assert result.returncode == 0, (
             f"CFR script failed (rc={result.returncode}):\n{result.stdout}\n{result.stderr}"
+        )
 
     def _verify_recovery(
         self,
@@ -325,10 +330,66 @@ class ControllerForcedReconfigurationBasicTest(
         surviving_count = len(survivors)
 
         cmd = [
-            CFR_SCRIPT, CFR_SUBCMD_BAREMETAL,
-            CFR_FLAG_NODES, *surviving_ips,
-            CFR_FLAG_DEAD_NODES, *[str(i) for i in killed_ids],
-            CFR_FLAG_SURVIVING_COUNT, str(surviving_count),
+            CFR_SCRIPT,
+            CFR_SUBCMD_BAREMETAL,
+            CFR_FLAG_NODES,
+            *surviving_ips,
+            CFR_FLAG_DEAD_NODES,
+            *[str(i) for i in killed_ids],
+            CFR_FLAG_SURVIVING_COUNT,
+            str(surviving_count),
+            *self._common_auth_tls_args(
+                is_auth_enabled=is_auth_enabled,
+                is_tls_enabled=is_tls_enabled,
+            ),
+        ]
+
+        self._run_cfr_script(cmd)
+        self._verify_recovery(killed_ids, survivors)
+
+    @cluster(num_nodes=CLUSTER_SIZE)
+    @matrix(authn=[False, True], tls=[False, True])
+    def test_cfr_script_liveness_check(self, authn: bool, tls: bool) -> None:
+        """Run the CFR script with --check-liveness.  The script queries
+        /v1/brokers on every supplied IP to auto-detect which nodes are
+        dead and derives the CFR parameters on its own.
+
+        Args:
+            authn: whether admin API basic-auth is required.
+            tls: whether admin API TLS is enabled on the alternate listener.
+        """
+        is_auth_enabled = authn
+        is_tls_enabled = tls
+
+        self._start_redpanda(
+            is_auth_enabled=is_auth_enabled,
+            is_tls_enabled=is_tls_enabled,
+        )
+        killed_ids, survivors = self._kill_majority_and_enter_recovery()
+
+        # The liveness check queries /v1/brokers to classify nodes.
+        # Wait until every survivor agrees the killed nodes are dead.
+        for survivor in survivors:
+            wait_until(
+                lambda: self._dead_nodes_detected(
+                    survivor=survivor,
+                    expected_dead_count=len(killed_ids),
+                ),
+                timeout_sec=MEDIUM_TIMEOUT.timeout_s,
+                backoff_sec=MEDIUM_TIMEOUT.backoff_s,
+                err_msg="Surviving node did not detect dead brokers in time",
+            )
+
+        all_ips: list[str] = []
+        for n in self.redpanda.nodes:
+            assert n.account.hostname is not None
+            all_ips.append(n.account.hostname)
+        cmd = [
+            CFR_SCRIPT,
+            CFR_SUBCMD_BAREMETAL,
+            CFR_FLAG_NODES,
+            *all_ips,
+            CFR_FLAG_CHECK_LIVENESS,
             *self._common_auth_tls_args(
                 is_auth_enabled=is_auth_enabled,
                 is_tls_enabled=is_tls_enabled,
