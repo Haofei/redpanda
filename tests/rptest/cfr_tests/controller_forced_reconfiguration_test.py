@@ -7,28 +7,33 @@
 # the Business Source License, use of this software will be governed
 # by the Apache License, Version 2.0
 
-from dataclasses import dataclass
 from enum import Enum
-from random import shuffle
-from rptest.clients.kcl import KCL
 import threading
-from typing import Any, Optional
+from typing import Any
 
 from ducktape.cluster.cluster import ClusterNode
 from ducktape.mark import matrix
 from ducktape.tests.test import TestContext
 from ducktape.utils.util import wait_until
 
+from rptest.cfr_tests.cfr_test_base import (
+    ControllerForceReconfigurationTestBase as _CfrTestBase,
+    NTP,
+    TimeoutConfig,
+    long_timeout,
+    medium_timeout,
+    really_long_timeout,
+    really_short_timeout,
+    short_timeout,
+)
+from rptest.clients.kcl import KCL
 from rptest.clients.rpk import RpkTool
 from rptest.clients.types import TopicSpec
-from rptest.services.admin import PartitionDetails, Replica
+from rptest.services.admin import Replica
 from rptest.services.cluster import cluster
 from rptest.services.kgo_verifier_services import KgoVerifierProducer
-from rptest.tests.redpanda_test import RedpandaTest
 from rptest.utils.node_operations import NodeDecommissionWaiter
 from rptest.tests.partition_movement import PartitionMovementMixin
-
-from rptest.util import wait_until_result
 
 from connectrpc.unary import UnaryOutput
 from rptest.clients.admin.v2 import Admin as AdminV2
@@ -36,19 +41,6 @@ from rptest.clients.admin.proto.redpanda.core.admin.internal.v1 import (
     breakglass_pb2,
     breakglass_pb2_connect,
 )
-
-
-@dataclass
-class NTP:
-    namespace: str = "kafka"
-    topic: str = "topic"
-    partition: int = 0
-
-
-@dataclass
-class TimeoutConfig:
-    timeout_s: int
-    backoff_s: int
 
 
 class Scenario(str, Enum):
@@ -59,173 +51,21 @@ class Scenario(str, Enum):
     RandomMoves = "RandomMoves"
 
 
-really_short_timeout = TimeoutConfig(timeout_s=5, backoff_s=1)
-short_timeout = TimeoutConfig(timeout_s=30, backoff_s=2)
-medium_timeout = TimeoutConfig(timeout_s=60, backoff_s=2)
-long_timeout = TimeoutConfig(timeout_s=120, backoff_s=10)
-really_long_timeout = TimeoutConfig(timeout_s=300, backoff_s=10)
+class ControllerForceReconfigurationTestBase(
+    _CfrTestBase,
+):
+    """Adds the API-specific CFR helpers (protobuf invocation, partition
+    recovery checks, etc.) on top of the shared base."""
 
-
-class ControllerForceReconfigurationTestBase(RedpandaTest):
     def __init__(
         self, test_context: TestContext, cluster_size: int, *args: Any, **kwargs: Any
     ):
-        super(ControllerForceReconfigurationTestBase, self).__init__(
+        super().__init__(
             test_context,
-            num_brokers=cluster_size,
+            cluster_size=cluster_size,
             *args,
             **kwargs,
         )
-        self.next_node_id = cluster_size + 1
-
-    def _next_node_id(self) -> int:
-        """this test kills nodes, cleans them, then reboots with a new node_id, keep track of the node id"""
-        next = self.next_node_id
-        self.next_node_id += 1
-        return next
-
-    def setUp(self):
-        """rp will be custom started in each test"""
-        pass
-
-    def _start_redpanda(self, cluster_size: int) -> list[ClusterNode]:
-        """start redpanda with a specific cluster size"""
-        seed_nodes = self.redpanda.nodes[0:cluster_size]
-        joiner_nodes = self.redpanda.nodes[cluster_size:]
-
-        self.redpanda.set_seed_servers(seed_nodes)
-
-        """Controller force reconfiguration does not guarantee that internal topics are safe from data loss
-           but data loss on these topics does make it really hard to create any produce/consume test that
-           passes. We are enforcing no data loss on internal topics for ease of testing."""
-        self.redpanda.add_extra_rp_conf(
-            {"internal_topic_replication_factor": cluster_size}
-        )
-        self.redpanda.start(nodes=seed_nodes, omit_seeds_on_idx_one=False)
-        return joiner_nodes
-
-    def _setup_topic(self, topic_spec: TopicSpec, timeout: TimeoutConfig):
-        """start a topic given the spec"""
-        self.client().create_topic(topic_spec)
-        # Wait for initial leader
-        self.redpanda._admin.await_stable_leader(
-            topic=topic_spec.name,
-            replication=topic_spec.replication_factor,
-            timeout_s=timeout.timeout_s,
-            backoff_s=timeout.backoff_s,
-        )
-
-    def _living_nodes(self) -> list[ClusterNode]:
-        return self.redpanda.started_nodes()
-
-    def _living_hostnames(self) -> list[str]:
-        hostnames: list[str] = []
-        node: ClusterNode
-        for node in self.redpanda.started_nodes():
-            hostname = node.account.hostname
-            assert hostname is not None
-            hostnames.append(hostname)
-        return hostnames
-
-    def _wait_until_no_leader(self, ntp: NTP, timeout: TimeoutConfig):
-        """Scrapes the debug endpoints of all replicas and checks if any of the replicas think they are the leader"""
-
-        def no_leader():
-            living_nodes = self._living_nodes()
-            for living_node in living_nodes:
-                state = self.redpanda._admin.get_partition_state(
-                    ntp.namespace, ntp.topic, ntp.partition, node=living_node
-                )
-                if "replicas" not in state.keys() or len(state["replicas"]) == 0:
-                    continue
-                for r in state["replicas"]:
-                    assert "raft_state" in r.keys()
-                    if r["raft_state"]["is_leader"]:
-                        return False
-            return True
-
-        wait_until(
-            no_leader,
-            timeout_sec=timeout.timeout_s,
-            backoff_sec=timeout.backoff_s,
-            err_msg="Partition has a leader",
-        )
-
-    def _split_cluster(
-        self, ntp: NTP, timeout: TimeoutConfig, replication: int = 5
-    ) -> tuple[list[Replica], list[Replica]]:
-        """
-        Splits the cluster into nodes to kill and nodes to survive
-        """
-        assert self.redpanda
-
-        def _get_details() -> tuple[bool, Optional[PartitionDetails]]:
-            d = self.redpanda._admin._get_stable_configuration(
-                hosts=self._living_hostnames(),
-                namespace=ntp.namespace,
-                topic=ntp.topic,
-                partition=ntp.partition,
-                replication=replication,
-            )
-            if d is None:
-                return (False, None)
-            return (True, d)
-
-        partition_details: PartitionDetails = wait_until_result(
-            _get_details, timeout_sec=timeout.timeout_s, backoff_sec=timeout.backoff_s
-        )
-
-        replicas = partition_details.replicas
-        shuffle(replicas)
-        mid = len(replicas) // 2 + 1
-        (to_kill, to_survive) = (replicas[0:mid], replicas[mid:])
-        return (to_kill, to_survive)
-
-    def _do_stop_nodes(self, ntp: NTP, to_kill: list[Replica], timeout: TimeoutConfig):
-        """ingests the output of _split_cluster, actually stops those nodes"""
-        for replica in to_kill:
-            node = self.redpanda.get_node_by_id(replica.node_id)
-            assert node
-            self.logger.debug(f"Stopping node with node_id: {replica.node_id}")
-            self.redpanda.stop_node(node)
-        # The partition should be leaderless.
-        self._wait_until_no_leader(ntp=ntp, timeout=timeout)
-
-    def _stop_majority_nodes(
-        self, ntp: NTP, timeout: TimeoutConfig, replication: int = 5
-    ) -> tuple[list[Replica], list[Replica]]:
-        """chains together the above two, split the cluster then kill the majority"""
-        killed, alive = self._split_cluster(
-            ntp=ntp, timeout=timeout, replication=replication
-        )
-        self._do_stop_nodes(ntp=ntp, to_kill=killed, timeout=timeout)
-        return (killed, alive)
-
-    def _toggle_recovery_mode(
-        self, node: ClusterNode, timeout: TimeoutConfig, recovery_mode_enabled: bool
-    ):
-        """reboot a node with recovery mode set accordingly"""
-        self.redpanda.nodes
-        self.logger.info(f"stopping node: {node.name}")
-        self.redpanda.stop_node(node, timeout=timeout.timeout_s)
-
-        self.logger.info(f"restarting node: {node.name}")
-        self.redpanda.start_node(
-            node,
-            timeout=timeout.timeout_s,
-            auto_assign_node_id=True,
-            override_cfg_params={"recovery_mode_enabled": recovery_mode_enabled},
-        )
-
-    def _bulk_toggle_recovery_mode(
-        self,
-        nodes: list[ClusterNode],
-        timeout: TimeoutConfig,
-        recovery_mode_enabled: bool,
-    ):
-        """toggle recovery mode on all provided nodes"""
-        for node in nodes:
-            self._toggle_recovery_mode(node, timeout, recovery_mode_enabled)
 
     def _do_request(
         self,
@@ -234,27 +74,6 @@ class ControllerForceReconfigurationTestBase(RedpandaTest):
     ) -> UnaryOutput[breakglass_pb2.ControllerForcedReconfigurationResponse]:
         """helper method to do a cfr request, handles the typing concerns"""
         return client.call_controller_forced_reconfiguration(request)
-
-    def _join_new_node(self, joiner_node: ClusterNode) -> int:
-        """joins a given cluster node with a new node id"""
-        self.redpanda.logger.debug(f"joining {joiner_node.name=}")
-        self.redpanda.clean_node(
-            joiner_node, preserve_logs=True, preserve_current_install=True
-        )
-        joiner_node_id = self._next_node_id()
-        self.redpanda.logger.debug(f"assigned {joiner_node_id=} to {joiner_node.name=}")
-        self.redpanda.start_node(
-            joiner_node,
-            auto_assign_node_id=False,
-            node_id_override=joiner_node_id,
-            omit_seeds_on_idx_one=True,
-        )
-        wait_until(
-            lambda: self.redpanda.registered(joiner_node),
-            timeout_sec=120,
-            backoff_sec=5,
-        )
-        return joiner_node_id
 
     def _check_tp_recovered(
         self,
@@ -526,7 +345,6 @@ class ControllerForcedReconfiguration_SmokeTest(
         _ = self._start_redpanda(cluster_size=cluster_size)
 
         controller_ntp = NTP(namespace="redpanda", topic="controller", partition=0)
-        short_timeout = TimeoutConfig(timeout_s=30, backoff_s=2)
 
         topic = TopicSpec(
             replication_factor=3,
