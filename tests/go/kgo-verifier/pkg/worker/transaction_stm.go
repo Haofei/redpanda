@@ -85,13 +85,13 @@ func (t *TransactionSTM) BeforeMessageSent() error {
 	}
 
 	if !t.activeTransaction {
-		t.abortedTransaction = t.config.abortRate >= rand.Float64()
-		t.activeTransaction = true
-
 		if err := t.client.BeginTransaction(); err != nil {
 			log.Errorf("Couldn't start a transaction: %v", err)
 			return err
 		}
+
+		t.abortedTransaction = t.config.abortRate >= rand.Float64()
+		t.activeTransaction = true
 
 		log.Debugf("Started transaction; will abort = %t", t.abortedTransaction)
 	}
