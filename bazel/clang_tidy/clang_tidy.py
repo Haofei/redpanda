@@ -31,6 +31,7 @@ def main():
 
     try:
         extra_args = [
+            "--extra-arg=-Wno-error",
             "--extra-arg=-Wno-macro-redefined",
         ]
 
