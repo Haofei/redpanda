@@ -1,0 +1,39 @@
+--- a/BUILD.bazel	2026-03-24 11:46:07.317446858 -0300
++++ b/BUILD.bazel	2026-03-25 10:48:54.430923058 -0300
+@@ -20,20 +20,28 @@
+         "src/include/liburing/io_uring_version.h",
+     ],
+     cmd = """
+-            export CC=$(CC) CXX=$(CC)++
++            export CC=$(CC) CXX=$(CC)++ CFLAGS="$(CC_FLAGS)"
+ 
+-            # switch to the package dir to execute "configure" right there
+-            pushd $$(dirname $(location configure))
+-              mkdir -p src/include/liburing
+-              ./configure --use-libc
+-            popd
++            # We do an out-of-source build of liburing here, so that
++            # CWD does not change and CC and other relative paths work
++            # (e.g. those embedded in sysroot). Currently, liburing
++            # doesn't support out of source builds, so we fake it
++            # with symlinks.
++            pkg_dir=$$(dirname $(location configure))
++            ln -sf $$pkg_dir/Makefile.common Makefile.common
++            ln -sf $$pkg_dir/liburing.spec liburing.spec
++            mkdir -p src/include/liburing
++            $$pkg_dir/configure --use-libc
+ 
+             # collect the outputs
+             for out in $(OUTS); do
+-              cp $$(realpath --relative-to=$(BINDIR) $$out) $$out
++              cp $${out#$(RULEDIR)/} $$out
+             done
+           """,
+-    toolchains = ["@bazel_tools//tools/cpp:current_cc_toolchain"],
++    toolchains = [
++        "@bazel_tools//tools/cpp:current_cc_toolchain",
++        "@bazel_tools//tools/cpp:cc_flags",
++    ],
+     tools = ["configure"],
+ )
+ 
