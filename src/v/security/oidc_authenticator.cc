@@ -159,18 +159,6 @@ authenticator::authenticate(std::string_view bearer_token) {
     return _impl->authenticate(bearer_token);
 }
 
-std::ostream& operator<<(std::ostream& os, const sasl_authenticator::state s) {
-    using state = sasl_authenticator::state;
-    switch (s) {
-    case state::init:
-        return os << "init";
-    case state::complete:
-        return os << "complete";
-    case state::failed:
-        return os << "failed";
-    }
-}
-
 sasl_authenticator::sasl_authenticator(service& service)
   : _authenticator{service}
   , _audit_user() {}

@@ -17,7 +17,7 @@
 
 #include <boost/algorithm/string/case_conv.hpp>
 #include <fmt/format.h>
-#include <fmt/ostream.h>
+#include <fmt/ranges.h>
 
 #include <charconv>
 
@@ -127,16 +127,6 @@ std::optional<ss::sstring> gssapi_principal_mapper::apply(
 
     vlog(seclog.warn, "No rules apply to {}, rules: {}", name, rules);
     return std::nullopt;
-}
-
-std::ostream& operator<<(std::ostream& os, const gssapi_name& n) {
-    fmt::print(os, "{}", n);
-    return os;
-}
-
-std::ostream& operator<<(std::ostream& os, const gssapi_principal_mapper& m) {
-    fmt::print(os, "{}", m);
-    return os;
 }
 
 } // namespace security

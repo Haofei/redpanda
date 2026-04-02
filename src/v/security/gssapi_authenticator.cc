@@ -34,25 +34,6 @@
 
 namespace security {
 
-std::ostream&
-operator<<(std::ostream& os, const gssapi_authenticator::state s) {
-    using state = gssapi_authenticator::state;
-    switch (s) {
-    case state::init:
-        return os << "init";
-    case state::more:
-        return os << "more";
-    case state::ssfcap:
-        return os << "ssfcap";
-    case state::ssfreq:
-        return os << "ssfreq";
-    case state::complete:
-        return os << "complete";
-    case state::failed:
-        return os << "failed";
-    }
-}
-
 static void display_status_1(std::string_view m, OM_uint32 code, int type) {
     while (true) {
         OM_uint32 msg_ctx{};
