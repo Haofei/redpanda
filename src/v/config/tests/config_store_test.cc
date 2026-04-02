@@ -147,12 +147,6 @@ YAML::Node valid_configuration() {
 } // namespace
 
 namespace std {
-static inline ostream&
-operator<<(ostream& o, const testing::custom_aggregate& c) {
-    o << "int_value=" << c.int_value << ", string_value=" << c.string_value;
-    return o;
-}
-
 static inline std::ostream&
 operator<<(std::ostream& ostr, const std::optional<int16_t>& rhs) {
     if (rhs.has_value()) {
