@@ -13,8 +13,25 @@
 
 #include <fmt/format.h>
 #include <fmt/ostream.h>
+#include <fmt/std.h>
 
 namespace fmt {
+
+/// Formatter for std::unique_ptr<T> — formats the pointee or "null".
+template<typename T, typename D>
+requires is_formattable<T>::value
+struct formatter<std::unique_ptr<T, D>> {
+    constexpr auto parse(format_parse_context& ctx) const {
+        return ctx.begin();
+    }
+    template<typename Ctx>
+    auto format(const std::unique_ptr<T, D>& p, Ctx& ctx) const {
+        if (p) {
+            return fmt::format_to(ctx.out(), "{}", *p);
+        }
+        return fmt::format_to(ctx.out(), "null");
+    }
+};
 
 using iterator = format_context::iterator;
 
@@ -22,6 +39,17 @@ template<typename T>
 concept HasFormatToMethod = requires(const T& obj, iterator out) {
     { obj.format_to(out) } -> std::same_as<iterator>;
 };
+
+/// Concept for types with a free function `format_to(const T&, iterator)`.
+/// Used for enums and other types that cannot have member functions.
+/// The free function must be ADL-findable (i.e. in the same namespace as T).
+template<typename T>
+concept HasFormatToFreeFunction = !HasFormatToMethod<T>
+                                  && requires(const T& obj, iterator out) {
+                                         {
+                                             format_to(obj, out)
+                                         } -> std::same_as<iterator>;
+                                     };
 
 /**
  * A formatter that supports any type that implements a `format_to` method.
@@ -66,16 +94,40 @@ struct formatter<T> {
     }
 };
 
+/**
+ * A formatter for types that provide a free function
+ * `format_to(const T&, fmt::iterator) -> fmt::iterator`, found via ADL.
+ *
+ * This is the counterpart of HasFormatToMethod for types that cannot have
+ * member functions (e.g. enums).
+ */
+template<HasFormatToFreeFunction T>
+struct formatter<T> {
+    constexpr fmt::format_parse_context::iterator
+    parse(fmt::format_parse_context& ctx) const {
+        auto it = ctx.begin();
+        if (it != ctx.end() && *it != '}') {
+            throw fmt::format_error("invalid format specifier for this type");
+        }
+        return it;
+    }
+
+    iterator format(const T& obj, format_context& ctx) const {
+        return format_to(obj, ctx.out());
+    }
+};
+
 } // namespace fmt
 
 namespace std {
 // For both googletest and for other external libraries that may use
 // `operator<<` to print stuff, give a blanket implementation that delegates to
-// the `format_to` method.
+// the `format_to` method or free function.
 //
 // We have to put this in the std namespace for overload resolution rules to be
 // able to find it for arbitrary T.
-template<fmt::HasFormatToMethod T>
+template<typename T>
+requires fmt::HasFormatToMethod<T> || fmt::HasFormatToFreeFunction<T>
 // NOLINTNEXTLINE(*-dcl58-*)
 ostream& operator<<(ostream& os, const T& obj) {
     fmt::print(os, "{}", obj);
