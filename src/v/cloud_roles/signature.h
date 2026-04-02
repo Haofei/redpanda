@@ -73,7 +73,7 @@ private:
     explicit time_source(Fn&& fn, int);
 
     /// Format date-time according to format string
-    ss::sstring format(auto fmt) const;
+    ss::sstring format(fmt::format_string<const std::tm&> fmt) const;
 
     static timestamp default_source();
     ss::noncopyable_function<timestamp()> _gettime_fn;
