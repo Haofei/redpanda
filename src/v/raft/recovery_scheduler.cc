@@ -108,15 +108,14 @@ follower_recovery_state::~follower_recovery_state() noexcept {
     }
 }
 
-std::ostream& operator<<(std::ostream& o, const follower_recovery_state& frs) {
-    fmt::print(
-      o,
+fmt::iterator follower_recovery_state::format_to(fmt::iterator it) const {
+    return fmt::format_to(
+      it,
       "{{ntp: {} is_active: {}, our_last_offset: {} leader_last_offset: {}}}",
-      frs.ntp(),
-      frs._is_active,
-      frs._our_last_offset,
-      frs._leader_last_offset);
-    return o;
+      ntp(),
+      _is_active,
+      _our_last_offset,
+      _leader_last_offset);
 }
 
 recovery_scheduler_base::recovery_scheduler_base(
