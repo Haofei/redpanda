@@ -50,8 +50,6 @@
 #include <seastar/util/noncopyable_function.hh>
 #include <seastar/util/optimized_optional.hh>
 
-#include <fmt/ostream.h>
-
 #include <algorithm>
 #include <alloca.h>
 #include <csignal>

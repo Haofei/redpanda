@@ -21,7 +21,6 @@
 #include <seastar/util/variant_utils.hh>
 
 #include <fmt/format.h>
-#include <fmt/ostream.h>
 #include <sys/types.h>
 
 #include <algorithm>

@@ -9,6 +9,7 @@
 
 #include "http/client.h"
 
+#include "base/external_fmt.h"
 #include "base/likely.h"
 #include "base/vlog.h"
 #include "bytes/details/io_iterator_consumer.h"

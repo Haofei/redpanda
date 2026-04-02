@@ -2927,7 +2927,7 @@ admin_server::get_decommission_progress_handler(
         f_details.ns = ntp.ns;
         f_details.topic = ntp.tp.topic;
         f_details.partition = ntp.tp.partition;
-        f_details.error = fmt::to_string(details.error);
+        f_details.error = fmt::format("{}", details.error);
 
         ret.reallocation_failure_details.push(f_details);
     }
@@ -5062,6 +5062,10 @@ constexpr std::string_view to_string_view(service_kind kind) {
         return "http-proxy";
     }
     return "invalid";
+}
+
+fmt::iterator format_to(service_kind kind, fmt::iterator out) {
+    return fmt::format_to(out, "{}", to_string_view(kind));
 }
 
 template<typename E>
