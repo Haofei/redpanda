@@ -24,6 +24,8 @@
 #include "rpc/connection_cache.h"
 #include "ssx/when_all.h"
 
+#include <algorithm>
+
 namespace cluster::cluster_link {
 
 using ::cluster_link::model::add_mirror_topic_cmd;
@@ -1181,6 +1183,12 @@ ss::future<errc> frontend::failover_link_topics(
         }
     }
 
+    if (_features->is_active(features::feature::batch_mirror_topic_status)) {
+        co_return co_await failover_link_topics_batched(
+          id, std::move(topics_to_failover), timeout);
+    }
+
+    // Legacy per-topic path for mixed-version clusters
     chunked_vector<errc> errors;
     errors.reserve(topics_to_failover.size());
     co_await ss::max_concurrent_for_each(
@@ -1204,6 +1212,57 @@ ss::future<errc> frontend::failover_link_topics(
         vlog(
           cluster::clusterlog.warn,
           "Encountered {} errors while failing over topics of link id {}",
+          errors.size(),
+          id);
+        co_return map_errc(errors.front());
+    }
+    co_return errc::success;
+}
+
+ss::future<errc> frontend::failover_link_topics_batched(
+  ::cluster_link::model::id_t id,
+  chunked_vector<::model::topic> topics,
+  model::timeout_clock::duration timeout) {
+    auto batch_size
+      = config::shard_local_cfg().shadow_link_failover_batch_size();
+
+    chunked_vector<chunked_vector<::model::topic>> batches;
+    for (size_t i = 0; i < topics.size(); i += batch_size) {
+        auto begin = std::make_move_iterator(topics.begin() + i);
+        auto end = std::make_move_iterator(
+          topics.begin() + std::min(i + batch_size, topics.size()));
+        batches.emplace_back(begin, end);
+    }
+
+    // If batch_size is 1, this will allow up to 32 concurrent RPCs, if
+    // batch_size is 32 or more, this will allow 4 concurrent RPCs, and scales
+    // linearly in between. This is to prevent too much concurrency when the
+    // batch size is large, while still allowing for more concurrency when the
+    // batch size is small.
+    auto max_concurrent = std::max<size_t>(4, 32 / batch_size);
+    chunked_vector<errc> errors;
+    co_await ss::max_concurrent_for_each(
+      batches,
+      max_concurrent,
+      [this, &errors, id, timeout](chunked_vector<::model::topic>& batch) {
+          return batch_update_mirror_topic_status(
+                   id,
+                   {.status
+                    = ::cluster_link::model::mirror_topic_status::failing_over,
+                    .topics = std::move(batch)},
+                   model::timeout_clock::now() + timeout)
+            .then([&errors](errc err_code) {
+                if (err_code != errc::success) {
+                    errors.push_back(err_code);
+                }
+            });
+      });
+
+    if (!errors.empty()) {
+        vlog(
+          cluster::clusterlog.warn,
+          "Encountered {} errors while failing over topics of link id {} "
+          "(batched)",
           errors.size(),
           id);
         co_return map_errc(errors.front());

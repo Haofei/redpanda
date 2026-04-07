@@ -159,6 +159,11 @@ private:
     cluster::cluster_link::errc
     validate_mutation(const cluster_link_cmd&) const;
 
+    ss::future<errc> failover_link_topics_batched(
+      ::cluster_link::model::id_t,
+      chunked_vector<::model::topic>,
+      model::timeout_clock::duration);
+
     bool is_sanctioned();
 
 public:
