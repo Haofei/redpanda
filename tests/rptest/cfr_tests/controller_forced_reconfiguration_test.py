@@ -342,7 +342,7 @@ class ControllerForcedReconfiguration_SmokeTest(
 
         # will start a cluster of 3 nodes on 1, 2, 3
         cluster_size: int = 3
-        _ = self._start_redpanda(cluster_size=cluster_size)
+        _ = self._start_redpanda_base(cluster_size=cluster_size)
 
         controller_ntp = NTP(namespace="redpanda", topic="controller", partition=0)
 
@@ -545,7 +545,7 @@ class ControllerForcedReconfiguration_Size5(
 
         """ setup 1: bootstrap """
         admin = AdminV2(self.redpanda)
-        _ = self._start_redpanda(cluster_size=cluster_size)
+        _ = self._start_redpanda_base(cluster_size=cluster_size)
         self.client().create_topic(topic)
 
         """ setup 2: start with some data in the topic"""
@@ -767,7 +767,7 @@ class ControllerForcedReconfiguration_Size6(
         step_f_dead_ids = step_d_shut_down_ids
 
         admin = AdminV2(self.redpanda)
-        _ = self._start_redpanda(cluster_size=cluster_size)
+        _ = self._start_redpanda_base(cluster_size=cluster_size)
 
         step_b_shut_down_nodes = [
             self.redpanda.node_by_id(node_id) for node_id in step_b_shut_down_ids

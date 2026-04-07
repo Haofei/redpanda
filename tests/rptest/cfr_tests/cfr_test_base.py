@@ -53,25 +53,25 @@ class ControllerForcedReconfigurationTestBase(RedpandaTest):
     def __init__(
         self, test_context: TestContext, cluster_size: int, *args: Any, **kwargs: Any
     ):
-        super(ControllerForcedReconfigurationTestBase, self).__init__(
+        super().__init__(
             test_context,
             num_brokers=cluster_size,
             *args,
             **kwargs,
         )
-        self.next_node_id = cluster_size + 1
+        self._next_node_id_counter = cluster_size + 1
 
     def _next_node_id(self) -> int:
         """this test kills nodes, cleans them, then reboots with a new node_id, keep track of the node id"""
-        next = self.next_node_id
-        self.next_node_id += 1
-        return next
+        nid = self._next_node_id_counter
+        self._next_node_id_counter += 1
+        return nid
 
     def setUp(self):
         """rp will be custom started in each test"""
         pass
 
-    def _start_redpanda(self, cluster_size: int) -> list[ClusterNode]:
+    def _start_redpanda_base(self, cluster_size: int) -> list[ClusterNode]:
         """start redpanda with a specific cluster size"""
         seed_nodes = self.redpanda.nodes[0:cluster_size]
         joiner_nodes = self.redpanda.nodes[cluster_size:]
@@ -188,7 +188,6 @@ class ControllerForcedReconfigurationTestBase(RedpandaTest):
         self, node: ClusterNode, timeout: TimeoutConfig, recovery_mode_enabled: bool
     ):
         """reboot a node with recovery mode set accordingly"""
-        self.redpanda.nodes
         self.logger.info(f"stopping node: {node.name}")
         self.redpanda.stop_node(node, timeout=timeout.timeout_s)
 
@@ -212,12 +211,12 @@ class ControllerForcedReconfigurationTestBase(RedpandaTest):
 
     def _join_new_node(self, joiner_node: ClusterNode) -> int:
         """joins a given cluster node with a new node id"""
-        self.redpanda.logger.debug(f"joining {joiner_node.name=}")
+        self.logger.debug(f"joining {joiner_node.name=}")
         self.redpanda.clean_node(
             joiner_node, preserve_logs=True, preserve_current_install=True
         )
         joiner_node_id = self._next_node_id()
-        self.redpanda.logger.debug(f"assigned {joiner_node_id=} to {joiner_node.name=}")
+        self.logger.debug(f"assigned {joiner_node_id=} to {joiner_node.name=}")
         self.redpanda.start_node(
             joiner_node,
             auto_assign_node_id=False,
