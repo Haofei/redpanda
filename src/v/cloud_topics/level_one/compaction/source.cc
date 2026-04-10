@@ -282,7 +282,7 @@ ss::future<ss::stop_iteration> compaction_source::deduplication_iteration(
             config, _ntp, _tp, _metastore, _io, _l1_reader_probe));
 
         co_await sink.prepare_iteration(start_offset);
-        auto stats = co_await rdr.consume(
+        auto stats = co_await std::move(rdr).consume(
           compaction_filter{sink, *_map, _ntp, _removable_tombstone_ranges},
           model::no_timeout);
         co_await sink.finish_iteration(start_offset, last_offset);
