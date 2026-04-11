@@ -53,6 +53,7 @@ from rptest.services.multi_cluster_services import (
 )
 from rptest.services.redpanda import (
     CLOUD_TOPICS_CONFIG_STR,
+    RESTART_LOG_ALLOW_LIST,
     MetricSamples,
     MetricsEndpoint,
     RedpandaService,
@@ -63,6 +64,7 @@ from rptest.services.redpanda import (
 from rptest.services.tls import TLSCertManager
 from rptest.tests.cluster_linking_test_base import (
     ALL_STORAGE_MODES,
+    CLOUD_TOPICS_SHADOW_LINK_LOG_ALLOW_LIST,
     CONTROLLER_LOCKED_TASKS,
     DEFAULT_SYNCED_TOPIC_PROPERTIES,
     DISALLOWED_SYNCED_TOPIC_PROPERTIES,
@@ -1698,7 +1700,10 @@ class ShadowLinkingReplicationTests(ShadowLinkPreAllocTestBase):
 
         return self._check_partitions_match(rpk, shadow_topic_name, shadow_topic)
 
-    @cluster(num_nodes=7)
+    @cluster(
+        num_nodes=7,
+        log_allow_list=CLOUD_TOPICS_SHADOW_LINK_LOG_ALLOW_LIST,
+    )
     @matrix(
         shuffle_leadership=[True, False],
         source_cluster_spec=[
@@ -1748,7 +1753,8 @@ class ShadowLinkingReplicationTests(ShadowLinkPreAllocTestBase):
 
     @cluster(
         num_nodes=7,
-        log_allow_list=[
+        log_allow_list=CLOUD_TOPICS_SHADOW_LINK_LOG_ALLOW_LIST
+        + [
             re.compile(".*Failed to sync write_at_offset_stm for partition"),
         ],
     )
@@ -1787,7 +1793,10 @@ class ShadowLinkingReplicationTests(ShadowLinkPreAllocTestBase):
             retry_on_exc=True,
         )
 
-    @cluster(num_nodes=7)
+    @cluster(
+        num_nodes=7,
+        log_allow_list=CLOUD_TOPICS_SHADOW_LINK_LOG_ALLOW_LIST,
+    )
     @matrix(
         source_cluster_spec=[
             SecondaryClusterSpec(ServiceType.REDPANDA),
@@ -1872,9 +1881,18 @@ class ShadowLinkingReplicationTests(ShadowLinkPreAllocTestBase):
         with self.producer_consumer(topic=topic.name, msg_size=128, msg_cnt=200000):
             self.verify()
 
-    @cluster(num_nodes=7)
+    @cluster(
+        num_nodes=7,
+        log_allow_list=CLOUD_TOPICS_SHADOW_LINK_LOG_ALLOW_LIST,
+    )
     @matrix(storage_mode=ALL_STORAGE_MODES)
     def test_replication_with_transactions(self, storage_mode):
+        if storage_mode == TopicSpec.STORAGE_MODE_CLOUD:
+            # Transactional replication with cloud storage mode is too
+            # slow and times out; skip until performance is improved.
+            _ = self.preallocated_nodes
+            self.logger.info("Skipping transactions test for cloud storage mode")
+            return
         topic = TopicSpec(name="source-topic", partition_count=1, replication_factor=3)
 
         self.create_source_topic(topic, storage_mode)
@@ -1896,7 +1914,10 @@ class ShadowLinkingReplicationTests(ShadowLinkPreAllocTestBase):
         ):
             self.verify()
 
-    @cluster(num_nodes=8)
+    @cluster(
+        num_nodes=8,
+        log_allow_list=CLOUD_TOPICS_SHADOW_LINK_LOG_ALLOW_LIST,
+    )
     @matrix(storage_mode=ALL_STORAGE_MODES)
     def test_replication_with_truncated_topic(self, storage_mode):
         topic = TopicSpec(name="source-topic", partition_count=1, replication_factor=3)
@@ -2017,7 +2038,10 @@ class ShadowLinkingReplicationTests(ShadowLinkPreAllocTestBase):
                 err_msg=f"Timed out waiting for target to get start offset to be {o} in each partition",
             )
 
-    @cluster(num_nodes=7)
+    @cluster(
+        num_nodes=7,
+        log_allow_list=CLOUD_TOPICS_SHADOW_LINK_LOG_ALLOW_LIST,
+    )
     @matrix(
         with_failures=[True, False],
         source_cluster_spec=[
@@ -2056,7 +2080,10 @@ class ShadowLinkingReplicationTests(ShadowLinkPreAllocTestBase):
             with self.producer_consumer(topic=topic.name, msg_size=128, msg_cnt=100000):
                 self._perform_auto_prefix_trimming(topic.name, partition_count)
 
-    @cluster(num_nodes=7)
+    @cluster(
+        num_nodes=7,
+        log_allow_list=CLOUD_TOPICS_SHADOW_LINK_LOG_ALLOW_LIST,
+    )
     @matrix(
         with_failures=[True, False],
         source_cluster_spec=[
@@ -2224,7 +2251,10 @@ class ShadowLinkingReplicationTests(ShadowLinkPreAllocTestBase):
             with self.producer_consumer(topic=topic.name, msg_size=128, msg_cnt=10000):
                 self.verify()
 
-    @cluster(num_nodes=7)
+    @cluster(
+        num_nodes=7,
+        log_allow_list=CLOUD_TOPICS_SHADOW_LINK_LOG_ALLOW_LIST,
+    )
     @matrix(
         timestamp_type=[
             "CreateTime",
@@ -2311,7 +2341,10 @@ class ShadowLinkingReplicationTests(ShadowLinkPreAllocTestBase):
             f"Timestamps don't match {expected_timestamps=} vs {consumed=}"
         )
 
-    @cluster(num_nodes=7)
+    @cluster(
+        num_nodes=7,
+        log_allow_list=CLOUD_TOPICS_SHADOW_LINK_LOG_ALLOW_LIST,
+    )
     @matrix(storage_mode=ALL_STORAGE_MODES)
     def test_replication_with_large_msgs(self, storage_mode):
         msg_size = 2 * 1024 * 1024
@@ -2341,9 +2374,20 @@ class ShadowLinkingReplicationTests(ShadowLinkPreAllocTestBase):
         ):
             self.verify()
 
-    @cluster(num_nodes=7)
+    @cluster(
+        num_nodes=7,
+        log_allow_list=CLOUD_TOPICS_SHADOW_LINK_LOG_ALLOW_LIST,
+    )
     @matrix(storage_mode=ALL_STORAGE_MODES)
     def test_replication_with_compaction(self, storage_mode):
+        if storage_mode != TopicSpec.STORAGE_MODE_LOCAL:
+            # Compaction on shadow topics is not yet supported with
+            # tiered / cloud / tiered_cloud storage modes.
+            _ = self.preallocated_nodes
+            self.logger.info(
+                f"Skipping compaction test for storage_mode={storage_mode}"
+            )
+            return
         self.logger.info(
             "Create a topic with compaction settings set but without compaction and tombstone removal enabled"
         )
@@ -2467,7 +2511,10 @@ class ShadowLinkingReplicationTests(ShadowLinkPreAllocTestBase):
             err_msg="Compaction state is not consistent between clusters",
         )
 
-    @cluster(num_nodes=7)
+    @cluster(
+        num_nodes=7,
+        log_allow_list=RESTART_LOG_ALLOW_LIST + CLOUD_TOPICS_SHADOW_LINK_LOG_ALLOW_LIST,
+    )
     @matrix(storage_mode=ALL_STORAGE_MODES)
     def test_with_restart(self, storage_mode):
         self.create_link("test-link")
@@ -2529,7 +2576,10 @@ class ShadowLinkConsumeGroupsMirroringTest(ShadowLinkTestBase):
             continuous=continuous,
         )
 
-    @cluster(num_nodes=7)
+    @cluster(
+        num_nodes=7,
+        log_allow_list=CLOUD_TOPICS_SHADOW_LINK_LOG_ALLOW_LIST,
+    )
     @matrix(
         source_cluster_spec=[
             SecondaryClusterSpec(ServiceType.REDPANDA),
@@ -2587,7 +2637,10 @@ class ShadowLinkConsumeGroupsMirroringTest(ShadowLinkTestBase):
             "Group test_group state expected to be empty on target cluster"
         )
 
-    @cluster(num_nodes=7)
+    @cluster(
+        num_nodes=7,
+        log_allow_list=CLOUD_TOPICS_SHADOW_LINK_LOG_ALLOW_LIST,
+    )
     @matrix(
         with_failures=[
             True,
@@ -2606,6 +2659,9 @@ class ShadowLinkConsumeGroupsMirroringTest(ShadowLinkTestBase):
     ):
         if not self.source_cluster.is_redpanda:
             if with_failures:
+                # Consume the extra node reserved for failure injection
+                # to avoid "Test requested N nodes, used only M" error.
+                self.test_context.cluster.alloc(ClusterSpec.simple_linux(1))
                 return
             storage_mode = TopicSpec.STORAGE_MODE_LOCAL
         partition_count = 120
@@ -2790,7 +2846,10 @@ class ShadowLinkConsumeGroupsMirroringTest(ShadowLinkTestBase):
                         f"{group_name=}: {topic}/{p} {consumed=} but {expected=}"
                     )
 
-    @cluster(num_nodes=8)
+    @cluster(
+        num_nodes=8,
+        log_allow_list=CLOUD_TOPICS_SHADOW_LINK_LOG_ALLOW_LIST,
+    )
     @matrix(
         source_cluster_spec=[
             SecondaryClusterSpec(ServiceType.REDPANDA),
@@ -3334,7 +3393,10 @@ class ShadowLinkTopicFailoverTests(ShadowLinkPreAllocTestBase):
             finally:
                 producer.do_free()
 
-    @cluster(num_nodes=7)
+    @cluster(
+        num_nodes=7,
+        log_allow_list=CLOUD_TOPICS_SHADOW_LINK_LOG_ALLOW_LIST,
+    )
     @matrix(
         with_failures=[True, False],
         source_cluster_spec=[
@@ -3463,7 +3525,10 @@ class ShadowLinkTopicFailoverTests(ShadowLinkPreAllocTestBase):
                 target_status=shadow_link_pb2.ShadowTopicState.SHADOW_TOPIC_STATE_ACTIVE,
             )
 
-    @cluster(num_nodes=7)
+    @cluster(
+        num_nodes=7,
+        log_allow_list=CLOUD_TOPICS_SHADOW_LINK_LOG_ALLOW_LIST,
+    )
     @matrix(
         with_failures=[True, False],
         source_cluster_spec=[
@@ -3525,7 +3590,10 @@ class ShadowLinkTopicFailoverTests(ShadowLinkPreAllocTestBase):
             topics, self.target_cluster.service, expect_failures=False
         )
 
-    @cluster(num_nodes=7)
+    @cluster(
+        num_nodes=7,
+        log_allow_list=CLOUD_TOPICS_SHADOW_LINK_LOG_ALLOW_LIST,
+    )
     @matrix(storage_mode=ALL_STORAGE_MODES)
     def test_producer_ids_failover(self, storage_mode):
         self.create_link("test-link")
@@ -4060,7 +4128,10 @@ class ShadowLinkCustomStartOffsetSelectionTests(ShadowLinkPreAllocTestBase):
             f"Failed to find a valid starting timestamp between {start_time} and {end_time}"
         )
 
-    @cluster(num_nodes=7)
+    @cluster(
+        num_nodes=7,
+        log_allow_list=CLOUD_TOPICS_SHADOW_LINK_LOG_ALLOW_LIST,
+    )
     @matrix(
         source_cluster_spec=[
             SecondaryClusterSpec(ServiceType.REDPANDA),
@@ -4101,6 +4172,16 @@ class ShadowLinkCustomStartOffsetSelectionTests(ShadowLinkPreAllocTestBase):
             # Avoid warning of not using all allocated nodes
             _ = self.preallocated_nodes
             self.logger.info("Skipping failure injection with Kafka source cluster")
+            return
+
+        if (
+            starting_offset == self.timequery_offset
+            and storage_mode == TopicSpec.STORAGE_MODE_TIERED_CLOUD
+        ):
+            # Timestamp queries on tiered_cloud shadow topics are not
+            # yet supported.
+            _ = self.preallocated_nodes
+            self.logger.info("Skipping timestamp starting offset for tiered_cloud")
             return
         topic = TopicSpec(name="source-topic", partition_count=1, replication_factor=3)
 

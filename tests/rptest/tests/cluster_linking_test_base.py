@@ -8,6 +8,7 @@
 # by the Apache License, Version 2.0
 
 from contextlib import contextmanager, nullcontext
+import re
 import time
 import socket
 import random
@@ -104,6 +105,20 @@ ALL_STORAGE_MODES = [
     TopicSpec.STORAGE_MODE_TIERED,
     TopicSpec.STORAGE_MODE_CLOUD,
     TopicSpec.STORAGE_MODE_TIERED_CLOUD,
+]
+
+# Log messages that are expected when running shadow link tests with
+# cloud / tiered_cloud storage modes.
+CLOUD_TOPICS_SHADOW_LINK_LOG_ALLOW_LIST = [
+    # Cloud-topics subsystem may not be initialized immediately after a
+    # node restart; the replicator retries until it becomes available.
+    re.compile(r".*cloud-topics subsystem is not initialized"),
+    # The cloud-topics STM may time out during epoch fencing under load
+    # or immediately after leadership changes.
+    re.compile(r".*ctp_stm\.cc.*Sync timeout"),
+    # Exceptional futures from abort_requested during graceful shutdown
+    # of cloud-topics coroutines.
+    re.compile(r".*Exceptional future ignored.*abort_requested_exception"),
 ]
 
 
