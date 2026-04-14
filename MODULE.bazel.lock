@@ -178,6 +178,8 @@
     "https://bcr.bazel.build/modules/pybind11_bazel/2.11.1/MODULE.bazel": "88af1c246226d87e65be78ed49ecd1e6f5e98648558c14ce99176da041dc378e",
     "https://bcr.bazel.build/modules/pybind11_bazel/2.12.0/MODULE.bazel": "e6f4c20442eaa7c90d7190d8dc539d0ab422f95c65a57cc59562170c58ae3d34",
     "https://bcr.bazel.build/modules/pybind11_bazel/2.12.0/source.json": "6900fdc8a9e95866b8c0d4ad4aba4d4236317b5c1cd04c502df3f0d33afed680",
+    "https://bcr.bazel.build/modules/ragel/26.04.0-20260414092900-8841e561489e/MODULE.bazel": "284007e15ea4c28c23fe4f59df7cf0efae9d5956afe1255b4dc713ea37b0e942",
+    "https://bcr.bazel.build/modules/ragel/26.04.0-20260414092900-8841e561489e/source.json": "e79414655a0efaaabfd73b88a816445e5bb5a96496a7e8e7e3e49eb22536c963",
     "https://bcr.bazel.build/modules/re2/2021-09-01/MODULE.bazel": "bcb6b96f3b071e6fe2d8bed9cc8ada137a105f9d2c5912e91d27528b3d123833",
     "https://bcr.bazel.build/modules/re2/2023-09-01/MODULE.bazel": "cb3d511531b16cfc78a225a9e2136007a48cf8a677e4264baeab57fe78a80206",
     "https://bcr.bazel.build/modules/re2/2024-07-02.bcr.1/MODULE.bazel": "b4963dda9b31080be1905ef085ecd7dd6cd47c05c79b9cdf83ade83ab2ab271a",
@@ -350,7 +352,7 @@
   "moduleExtensions": {
     "//bazel:extensions.bzl%non_module_dependencies": {
       "general": {
-        "bzlTransitiveDigest": "hWJ4F3DLMHQe1ZxGPd1fns2LARdH2EBhh1lJKn2CROo=",
+        "bzlTransitiveDigest": "QjTj1c16NUTHtgapkCb3zvr9rfAZchyhmf6C3j78FBU=",
         "usagesDigest": "FEiDyZe9eAU6yEqnarZf0XMEUk+prUyYClvq1RU1J98=",
         "recordedInputs": [
           "REPO_MAPPING:,bazel_tools bazel_tools"
@@ -471,15 +473,6 @@
               "sha256": "0c8fac0a5c66eea339dce6be857101b308ce1064c838b81125b0dde3901e8032",
               "strip_prefix": "lksctp-tools-lksctp-tools-1.0.19",
               "url": "https://vectorized-public.s3.amazonaws.com/dependencies/lksctp-tools-1.0.19.tar.gz"
-            }
-          },
-          "ragel": {
-            "repoRuleId": "@@bazel_tools//tools/build_defs/repo:http.bzl%http_archive",
-            "attributes": {
-              "build_file": "@@//bazel/thirdparty:ragel.BUILD",
-              "sha256": "5f156edb65d20b856d638dd9ee2dfb43285914d9aa2b6ec779dac0270cd56c3f",
-              "strip_prefix": "ragel-6.10",
-              "url": "http://www.colm.net/files/ragel/ragel-6.10.tar.gz"
             }
           },
           "openssl": {
