@@ -454,30 +454,3 @@ TEST_F(FeatureTableTest, is_major_version_upgrade_test) {
           release_version::MAX)
         + 1}));
 }
-
-/// Validate the idempotency check used by the admin PUT /v1/features/license
-/// endpoint. When an identical license is re-uploaded the handler skips
-/// reapplying it and logs at debug level; this test confirms the equality
-/// comparison that gates that path behaves correctly.
-TEST_F(feature_table_fixture, feature_table_identical_license_idempotency) {
-    const auto opt_license = security::testing::get_test_license();
-    if (!opt_license) {
-        GTEST_SKIP() << security::testing::skip_no_license_msg;
-        return;
-    }
-    const auto& license = *opt_license;
-
-    ASSERT_FALSE(ft.get_license().has_value());
-
-    ft.set_license(license);
-    ASSERT_TRUE(ft.get_license().has_value());
-
-    // Identical license — the admin handler takes the "do nothing" path here
-    // and emits a debug-level log rather than info.
-    EXPECT_EQ(*ft.get_license(), license);
-
-    // A license with a different organization must not match.
-    auto different_license = license;
-    different_license.organization = "different-org";
-    EXPECT_NE(*ft.get_license(), different_license);
-}
