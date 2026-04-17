@@ -65,15 +65,11 @@
 #include "security/audit/types.h"
 #include "security/authorizer.h"
 #include "security/gssapi_authenticator.h"
-#include "security/mtls.h"
 #include "security/oidc_authenticator.h"
 #include "security/plain_authenticator.h"
 #include "security/request_auth.h"
 #include "security/scram_authenticator.h"
 #include "utils/unresolved_address.h"
-
-#include <seastar/core/lowres_clock.hh>
-#include <seastar/core/smp.hh>
 
 #include <boost/algorithm/string/predicate.hpp>
 

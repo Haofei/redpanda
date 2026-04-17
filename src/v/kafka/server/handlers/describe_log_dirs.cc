@@ -17,11 +17,9 @@
 #include "kafka/server/request_context.h"
 #include "kafka/server/response.h"
 #include "model/fundamental.h"
-#include "model/namespace.h"
 
 #include <seastar/core/coroutine.hh>
 #include <seastar/core/smp.hh>
-#include <seastar/util/log.hh>
 
 namespace kafka {
 

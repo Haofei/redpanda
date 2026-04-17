@@ -12,10 +12,7 @@
 #include "storage/file_sanitizer_types.h"
 
 #include "json/document.h"
-#include "json/schema.h"
-#include "json/stringbuffer.h"
 #include "json/validator.h"
-#include "json/writer.h"
 #include "model/fundamental.h"
 #include "storage/logger.h"
 #include "strings/string_switch.h"
@@ -23,8 +20,6 @@
 
 #include <seastar/core/coroutine.hh>
 #include <seastar/core/seastar.hh>
-
-#include <functional>
 
 namespace {
 std::optional<model::record_batch_type>

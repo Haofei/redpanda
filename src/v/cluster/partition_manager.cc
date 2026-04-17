@@ -25,27 +25,16 @@
 #include "cluster/partition_recovery_manager.h"
 #include "cluster/topic_configuration.h"
 #include "cluster/types.h"
-#include "config/configuration.h"
 #include "model/metadata.h"
 #include "raft/consensus.h"
 #include "raft/consensus_utils.h"
 #include "raft/fundamental.h"
-#include "raft/group_configuration.h"
-#include "raft/rpc_client_protocol.h"
 #include "ssx/async-clear.h"
-#include "storage/segment_utils.h"
-#include "storage/snapshot.h"
-#include "utils/retry_chain_node.h"
 
-#include <seastar/core/coroutine.hh>
 #include <seastar/core/lowres_clock.hh>
-#include <seastar/core/reactor.hh>
 #include <seastar/core/shared_ptr.hh>
-#include <seastar/core/smp.hh>
 
-#include <algorithm>
 #include <exception>
-#include <iterator>
 #include <optional>
 #include <utility>
 

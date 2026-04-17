@@ -34,10 +34,8 @@
 #include <avro/Compiler.hh>
 #include <avro/Exception.hh>
 #include <avro/GenericDatum.hh>
-#include <avro/Stream.hh>
 #include <avro/Types.hh>
 #include <avro/ValidSchema.hh>
-#include <boost/outcome/std_result.hpp>
 #include <boost/outcome/success_failure.hpp>
 #include <fmt/core.h>
 #include <fmt/format.h>

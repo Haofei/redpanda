@@ -10,9 +10,7 @@
 
 #include "cluster_link/replication/link_replication_mgr.h"
 
-#include "base/units.h"
 #include "cluster_link/logger.h"
-#include "ssx/async_algorithm.h"
 #include "ssx/future-util.h"
 
 using namespace std::chrono_literals;

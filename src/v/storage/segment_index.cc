@@ -9,7 +9,6 @@
 
 #include "storage/segment_index.h"
 
-#include "base/vassert.h"
 #include "compaction/utils.h"
 #include "model/fundamental.h"
 #include "model/timestamp.h"
@@ -21,10 +20,6 @@
 #include <seastar/core/fstream.hh>
 #include <seastar/core/iostream.hh>
 #include <seastar/core/seastar.hh>
-
-#include <bits/stdint-uintn.h>
-#include <boost/container/container_fwd.hpp>
-#include <fmt/format.h>
 
 #include <algorithm>
 

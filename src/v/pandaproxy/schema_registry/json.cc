@@ -28,22 +28,15 @@
 
 #include <seastar/core/coroutine.hh>
 #include <seastar/core/shared_ptr.hh>
-#include <seastar/coroutine/as_future.hh>
-#include <seastar/coroutine/exception.hh>
-#include <seastar/util/defer.hh>
 #include <seastar/util/variant_utils.hh>
 
 #include <boost/graph/adjacency_list.hpp>
 #include <boost/graph/max_cardinality_matching.hpp>
 #include <boost/math/special_functions/ulp.hpp>
-#include <boost/outcome/std_result.hpp>
-#include <boost/outcome/success_failure.hpp>
 #include <fmt/core.h>
 #include <fmt/format.h>
-#include <fmt/ranges.h>
 #include <jsoncons/basic_json.hpp>
 #include <jsoncons/json.hpp>
-#include <jsoncons_ext/jsonschema/evaluation_options.hpp>
 #include <jsoncons_ext/jsonschema/json_schema_factory.hpp>
 #include <jsoncons_ext/jsonschema/jsonschema.hpp>
 

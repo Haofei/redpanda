@@ -11,8 +11,6 @@
 
 #include "crash_tracker/types.h"
 
-#include "version/version.h"
-
 namespace crash_tracker {
 
 fmt::iterator crash_description::format_to(fmt::iterator it) const {

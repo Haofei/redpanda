@@ -9,8 +9,6 @@
 
 #include <boost/algorithm/string.hpp>
 
-#include <charconv>
-
 // ALPHA / DIGIT / "/" / "+"
 // NOLINTNEXTLINE
 #define BASE64_CHAR "[a-zA-Z0-9/+]"

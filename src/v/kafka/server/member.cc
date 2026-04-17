@@ -20,8 +20,6 @@
 #include "utils/named_type.h"
 #include "utils/to_string.h"
 
-#include <seastar/core/print.hh>
-
 #include <algorithm>
 #include <stdexcept>
 

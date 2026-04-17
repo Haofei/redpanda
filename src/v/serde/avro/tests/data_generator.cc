@@ -14,8 +14,6 @@
 #include "random/generators.h"
 #include "utils/uuid.h"
 
-#include <seastar/util/defer.hh>
-
 #include <fmt/core.h>
 
 namespace testing {

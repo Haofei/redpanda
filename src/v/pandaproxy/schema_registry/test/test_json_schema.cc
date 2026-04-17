@@ -21,7 +21,6 @@
 
 #include <seastar/core/sstring.hh>
 #include <seastar/testing/thread_test_case.hh>
-#include <seastar/util/defer.hh>
 
 #include <boost/test/tools/context.hpp>
 #include <fmt/core.h>

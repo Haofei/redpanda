@@ -11,7 +11,6 @@
 
 #include "base/vlog.h"
 #include "bytes/bytes.h"
-#include "kafka/protocol/wire.h"
 #include "security/acl.h"
 #include "security/errc.h"
 #include "security/gssapi.h"
@@ -21,13 +20,8 @@
 #include "thirdparty/krb5/gssapi.h"
 #include "thirdparty/krb5/gssapi_ext.h"
 
-#include <seastar/core/lowres_clock.hh>
-
-#include <boost/outcome/basic_outcome.hpp>
 #include <boost/outcome/success_failure.hpp>
-#include <fmt/ranges.h>
 
-#include <array>
 #include <sstream>
 #include <string_view>
 #include <utility>

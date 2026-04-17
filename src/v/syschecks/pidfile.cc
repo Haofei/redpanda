@@ -12,7 +12,6 @@
 #include "base/vassert.h"
 #include "syschecks/syschecks.h"
 
-#include <seastar/core/future.hh>
 #include <seastar/core/posix.hh>
 #include <seastar/core/sstring.hh>
 

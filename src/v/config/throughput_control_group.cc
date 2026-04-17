@@ -14,9 +14,7 @@
 #include "config/convert.h"
 #include "re2/re2.h"
 #include "re2/stringpiece.h"
-#include "ssx/sformat.h"
 #include "strings/utf8.h"
-#include "utils/functional.h"
 #include "utils/to_string.h"
 
 #include <seastar/core/sstring.hh>
@@ -24,12 +22,9 @@
 #include <fmt/core.h>
 #include <yaml-cpp/node/node.h>
 
-#include <algorithm>
 #include <memory>
 #include <optional>
 #include <string>
-#include <type_traits>
-#include <variant>
 
 using namespace std::string_literals;
 

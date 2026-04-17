@@ -40,7 +40,6 @@
 #include <seastar/coroutine/as_future.hh>
 #include <seastar/http/exception.hh>
 #include <seastar/http/request.hh>
-#include <seastar/http/url.hh>
 #include <seastar/json/json_elements.hh>
 
 #include <algorithm>
