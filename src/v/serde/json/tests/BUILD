@@ -67,6 +67,17 @@ redpanda_cc_gtest(
     ],
 )
 
+redpanda_test_cc_library(
+    name = "test_cases",
+    hdrs = [
+        "test_cases.h",
+    ],
+    visibility = ["//visibility:private"],
+    deps = [
+        "//src/v/base",
+    ],
+)
+
 redpanda_cc_gtest(
     name = "json_checker_test",
     timeout = "short",
@@ -79,6 +90,7 @@ redpanda_cc_gtest(
         "testdata/jsonchecker/*",
     ]),
     deps = [
+        ":test_cases",
         "//src/v/bytes:iobuf",
         "//src/v/serde/json:parser",
         "//src/v/test_utils:gtest",
