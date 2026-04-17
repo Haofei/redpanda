@@ -102,7 +102,7 @@ metadata_to_map(const manifest_metadata& meta) {
       {"schema", to_json_str(meta.schema)},
       {"content", std::string{content_type_to_str(meta.manifest_content_type)}},
       {"partition-spec", to_json_str(meta.partition_spec.fields)},
-      {"partition-spec-id", fmt::to_string(meta.partition_spec.spec_id())},
+      {"partition-spec-id", fmt::format("{}", meta.partition_spec.spec_id())},
       {"format-version", std::string{format_to_str(meta.format_version)}}};
 }
 // TODO: make DataFileReader::getMetadata const!

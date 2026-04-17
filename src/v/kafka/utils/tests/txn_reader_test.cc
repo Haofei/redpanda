@@ -393,7 +393,7 @@ TEST_F_CORO(seastar_test, UncleanDestroy) {
               std::move(result));
         }
 
-        void print(std::ostream&) final {}
+        fmt::iterator format_to(fmt::iterator it) const final { return it; }
 
         ss::future<> finally() noexcept final {
             _resources_initalized = false;

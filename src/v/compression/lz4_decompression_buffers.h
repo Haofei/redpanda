@@ -11,6 +11,7 @@
 
 #pragma once
 
+#include "base/format_to.h"
 #include "base/seastarx.h"
 #include "base/units.h"
 #define LZ4F_STATIC_LINKING_ONLY
@@ -109,8 +110,8 @@ private:
     stats _allocation_stats;
 };
 
-std::ostream& operator<<(
-  std::ostream&, lz4_decompression_buffers::alloc_ctx::allocation_state);
+fmt::iterator format_to(
+  lz4_decompression_buffers::alloc_ctx::allocation_state, fmt::iterator);
 
 // Initializes the buffer instance. If preallocation is disabled the instance
 // will pass through all calls to malloc and free. Two buffers of size

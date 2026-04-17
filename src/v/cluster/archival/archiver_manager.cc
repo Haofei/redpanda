@@ -10,6 +10,7 @@
 
 #include "cluster/archival/archiver_manager.h"
 
+#include "base/format_to.h"
 #include "cloud_io/cache_service.h"
 #include "cluster/archival/logger.h"
 #include "cluster/archival/ntp_archiver_service.h"
@@ -37,7 +38,6 @@
 #include <boost/msm/front/functor_row.hpp>
 #include <boost/msm/front/state_machine_def.hpp>
 #include <fmt/format.h>
-#include <fmt/ostream.h>
 
 #include <exception>
 #include <optional>
@@ -94,41 +94,34 @@ enum class managed_partition_event_t {
     // Shutdown initiated
     shutdown,
 };
-
-std::ostream& operator<<(std::ostream& o, managed_partition_event_t e) {
+fmt::iterator format_to(managed_partition_event_t e, fmt::iterator out) {
     switch (e) {
     case managed_partition_event_t::leadership_acquired:
-        return o << "leadership_acquired";
+        return fmt::format_to(out, "leadership_acquired");
     case managed_partition_event_t::leadership_lost:
-        return o << "leadership_lost";
+        return fmt::format_to(out, "leadership_lost");
     case managed_partition_event_t::archiver_started:
-        return o << "archiver_started";
+        return fmt::format_to(out, "archiver_started");
     case managed_partition_event_t::archiver_failure:
-        return o << "archiver_failure";
+        return fmt::format_to(out, "archiver_failure");
     case managed_partition_event_t::archiver_stopped:
-        return o << "archiver_stopped";
+        return fmt::format_to(out, "archiver_stopped");
     case managed_partition_event_t::shutdown:
-        return o << "shutdown";
+        return fmt::format_to(out, "shutdown");
     }
 }
 
 // This is a base class for all events that FSM can handle.
 // The events may trigger state transitions.
 template<managed_partition_event_t event, class Derived>
-struct managed_partition_event_base : auto_fmt<Derived> {};
-} // namespace archival
-
-/// Automagically prints any event object derived from
-/// managed_partition_event_base
-template<archival::managed_partition_event_t id, class Derived>
-struct fmt::formatter<archival::managed_partition_event_base<id, Derived>> {
-    template<typename FormatContext>
-    auto format(
-      const archival::managed_partition_event_base<id, Derived>& event,
-      FormatContext& ctx) const -> decltype(ctx.out()) {
-        return fmt::format_to(ctx.out(), "[{}..{}]", id, event);
+struct managed_partition_event_base : auto_fmt<Derived> {
+    fmt::iterator format_to(fmt::iterator it) const {
+        it = fmt::format_to(it, "[{}..", event);
+        it = auto_fmt<Derived>::format_to(it);
+        return fmt::format_to(it, "]");
     }
 };
+} // namespace archival
 
 namespace archival {
 std::ostream&
@@ -143,17 +136,16 @@ enum class managed_partition_state_t {
     active,
     stopping,
 };
-
-std::ostream& operator<<(std::ostream& o, managed_partition_state_t s) {
-    switch (s) {
+fmt::iterator format_to(managed_partition_state_t e, fmt::iterator out) {
+    switch (e) {
     case managed_partition_state_t::passive:
-        return o << "passive";
+        return fmt::format_to(out, "passive");
     case managed_partition_state_t::active:
-        return o << "active";
+        return fmt::format_to(out, "active");
     case managed_partition_state_t::starting:
-        return o << "starting";
+        return fmt::format_to(out, "starting");
     case managed_partition_state_t::stopping:
-        return o << "stopping";
+        return fmt::format_to(out, "stopping");
     }
 }
 

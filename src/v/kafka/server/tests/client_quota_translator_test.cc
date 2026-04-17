@@ -98,6 +98,20 @@ SEASTAR_THREAD_TEST_CASE(quota_translator_modified_default_test) {
     BOOST_CHECK(!f.tr.is_empty());
 }
 
+SEASTAR_THREAD_TEST_CASE(quota_translator_tracker_key_formatting) {
+    BOOST_CHECK_EQUAL(
+      fmt::format("{}", tracker_key{k_user{"alice"}}), "k_user{alice}");
+    BOOST_CHECK_EQUAL(
+      fmt::format("{}", tracker_key{k_client_id{"client-a"}}),
+      "k_client_id{client-a}");
+    BOOST_CHECK_EQUAL(
+      fmt::format(
+        "{}", tracker_key{std::pair{k_user{"alice"}, k_group_name{"group-a"}}}),
+      "k_user{alice}, k_group_name{group-a}");
+    BOOST_CHECK_EQUAL(
+      fmt::format("{}", tracker_key{k_not_applicable{}}), "k_not_applicable");
+}
+
 void run_quota_translator_client_group_test(fixture& f) {
     // Stage 1 - Start by checking that tracker_key's are correctly detected
     // for various client ids

@@ -842,7 +842,9 @@ std::string_view to_string_view(state s) {
     vunreachable("Unrecognized GC state: {}", s);
 }
 
-auto format_as(state s) { return to_string_view(s); }
+fmt::iterator format_to(state s, fmt::iterator out) {
+    return fmt::format_to(out, "{}", to_string_view(s));
+}
 
 std::string_view to_string_view(collection_outcome::status s) {
     using enum collection_outcome::status;
@@ -862,7 +864,9 @@ std::string_view to_string_view(collection_outcome::status s) {
       "Unrecognized collection_outcome::status: {}", static_cast<int>(s));
 }
 
-auto format_as(collection_outcome::status s) { return to_string_view(s); }
+fmt::iterator format_to(collection_outcome::status s, fmt::iterator out) {
+    return fmt::format_to(out, "{}", to_string_view(s));
+}
 
 fmt::iterator collection_outcome::format_to(fmt::iterator it) const {
     return fmt::format_to(it, "{{st={}, eligible={}}}", st, eligible_);

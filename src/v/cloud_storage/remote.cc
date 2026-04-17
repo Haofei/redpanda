@@ -510,7 +510,7 @@ ss::future<download_result> remote::object_exists(
     _as.check();
     auto holder = _gate.hold();
     co_return co_await io().object_exists(
-      bucket, path, parent, fmt::to_string(object_type));
+      bucket, path, parent, fmt::format("{}", object_type));
 }
 
 ss::future<download_result> remote::segment_exists(
@@ -523,7 +523,7 @@ ss::future<download_result> remote::segment_exists(
       bucket,
       cloud_storage_clients::object_key{segment_path},
       parent,
-      fmt::to_string(existence_check_type::segment));
+      fmt::format("{}", existence_check_type::segment));
 }
 
 ss::future<upload_result> remote::delete_object(

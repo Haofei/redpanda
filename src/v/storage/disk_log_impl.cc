@@ -158,9 +158,9 @@ public:
 
     ss::future<> finally() noexcept final { return _rdr.close(); }
 
-    void print(std::ostream& os) final {
-        fmt::print(
-          os,
+    fmt::iterator format_to(fmt::iterator it) const final {
+        return fmt::format_to(
+          it,
           "storage::single_segment_reader for {}, config {}",
           _seg->filename(),
           _config);
@@ -3796,20 +3796,15 @@ void disk_log_impl::wrote_stm_bytes(size_t byte_size) {
 
 storage_resources& disk_log_impl::resources() { return _manager.resources(); }
 
-std::ostream& disk_log_impl::print(std::ostream& o) const {
-    fmt::print(
-      o,
+fmt::iterator disk_log_impl::format_to(fmt::iterator it) const {
+    return fmt::format_to(
+      it,
       "{{offsets: {}, is_closed: {}, segments: "
       "[{}], config: {}}}",
       offsets(),
       _closed,
       _segs,
       config());
-    return o;
-}
-
-std::ostream& operator<<(std::ostream& o, const disk_log_impl& d) {
-    return d.print(o);
 }
 
 ss::shared_ptr<log> make_disk_backed_log(

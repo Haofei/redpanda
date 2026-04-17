@@ -52,10 +52,10 @@ void maybe_throw_wrong_logical_type(
             "Expected (type: {}, precision: {}, scale: {}) logical_type but "
             "got: "
             "(type: {}, precision: {}, scale: {})",
-            expected.type(),
+            static_cast<int>(expected.type()),
             expected.precision(),
             expected.scale(),
-            actual.type(),
+            static_cast<int>(actual.type()),
             actual.precision(),
             actual.scale()));
     }
@@ -149,7 +149,7 @@ struct primitive_value_avro_visitor {
     }
     avro::GenericDatum operator()(const uuid_value& uuid) {
         maybe_throw_invalid_schema(avro_schema_, avro::AVRO_STRING);
-        return {avro_schema_, fmt::to_string(uuid.val)};
+        return {avro_schema_, fmt::format("{}", uuid.val)};
     }
 };
 

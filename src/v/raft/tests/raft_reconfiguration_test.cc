@@ -8,6 +8,7 @@
 // by the Apache License, Version 2.0
 
 #include "absl/container/flat_hash_set.h"
+#include "base/format_to.h"
 #include "base/outcome.h"
 #include "bytes/bytes.h"
 #include "gtest/gtest.h"
@@ -62,16 +63,16 @@ enum class isolated_t {
     random,
 };
 
-std::ostream& operator<<(std::ostream& o, isolated_t pt) {
+fmt::iterator format_to(isolated_t pt, fmt::iterator it) {
     switch (pt) {
     case isolated_t::none:
-        return o << "isolated::none";
+        return fmt::format_to(it, "isolated::none");
     case isolated_t::old_leader:
-        return o << "isolated::old_leader";
+        return fmt::format_to(it, "isolated::old_leader");
     case isolated_t::old_followers:
-        return o << "isolated::old_followers";
+        return fmt::format_to(it, "isolated::old_followers");
     case isolated_t::random:
-        return o << "isolated::random";
+        return fmt::format_to(it, "isolated::random");
     }
     __builtin_unreachable();
 }

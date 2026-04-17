@@ -50,7 +50,9 @@ public:
         return reader_->do_load_slice(deadline);
     }
 
-    void print(std::ostream& o) override { reader_->print(o); }
+    fmt::iterator format_to(fmt::iterator it) const override {
+        return reader_->format_to(it);
+    }
 
 private:
     // The metastore must be kept alive for the lifetime of the reader

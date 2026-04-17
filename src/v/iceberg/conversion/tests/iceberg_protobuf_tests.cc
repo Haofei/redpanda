@@ -20,7 +20,6 @@
 #include <seastar/core/sstring.hh>
 
 #include <fmt/core.h>
-#include <fmt/ostream.h>
 #include <gmock/gmock.h>
 #include <google/protobuf/compiler/parser.h>
 #include <google/protobuf/descriptor.h>

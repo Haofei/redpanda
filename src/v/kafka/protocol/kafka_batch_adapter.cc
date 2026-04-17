@@ -22,8 +22,6 @@
 
 #include <seastar/core/smp.hh>
 
-#include <fmt/ostream.h>
-
 #include <stdexcept>
 
 namespace kafka {

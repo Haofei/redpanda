@@ -11,6 +11,7 @@
 #include "cluster/partition_recovery_manager.h"
 
 #include "absl/container/btree_map.h"
+#include "base/format_to.h"
 #include "bytes/streambuf.h"
 #include "cloud_storage/logger.h"
 #include "cloud_storage/partition_manifest_downloader.h"
@@ -240,19 +241,31 @@ using retention = std::variant<
   std::monostate,
   size_bound_deletion_parameters,
   time_bound_deletion_parameters>;
+} // namespace cloud_storage
 
-std::ostream& operator<<(std::ostream& o, const retention& r) {
-    if (std::holds_alternative<std::monostate>(r)) {
-        fmt::print(o, "{{none}}");
-    } else if (std::holds_alternative<size_bound_deletion_parameters>(r)) {
-        auto p = std::get<size_bound_deletion_parameters>(r);
-        fmt::print(o, "{{size-bytes: {}}}", p.bytes);
-    } else if (std::holds_alternative<time_bound_deletion_parameters>(r)) {
-        auto p = std::get<time_bound_deletion_parameters>(r);
-        fmt::print(o, "{{time-ms: {}}}", p.duration.count());
+template<>
+struct fmt::formatter<cloud_storage::retention> {
+    constexpr auto parse(fmt::format_parse_context& ctx) const {
+        return ctx.begin();
     }
-    return o;
-}
+    fmt::iterator
+    format(const cloud_storage::retention& r, fmt::format_context& ctx) const {
+        auto it = ctx.out();
+        if (std::holds_alternative<std::monostate>(r)) {
+            return fmt::format_to(it, "{{none}}");
+        } else if (
+          std::holds_alternative<cloud_storage::size_bound_deletion_parameters>(
+            r)) {
+            auto p = std::get<cloud_storage::size_bound_deletion_parameters>(r);
+            return fmt::format_to(it, "{{size-bytes: {}}}", p.bytes);
+        } else {
+            auto p = std::get<cloud_storage::time_bound_deletion_parameters>(r);
+            return fmt::format_to(it, "{{time-ms: {}}}", p.duration.count());
+        }
+    }
+};
+
+namespace cloud_storage {
 
 static retention get_retention_policy(const storage::ntp_config& prop) {
     if (prop.is_remotely_collectable()) {

@@ -16,7 +16,6 @@
 
 #include <boost/algorithm/string.hpp>
 #include <boost/test/unit_test.hpp>
-#include <fmt/ostream.h>
 
 namespace kafka {
 
@@ -127,13 +126,13 @@ BOOST_AUTO_TEST_CASE(to_acl_permission) {
 
 BOOST_AUTO_TEST_CASE(redact_sensitive_messages) {
     BOOST_REQUIRE_EQUAL(
-      "{auth_bytes=****}", fmt::to_string(sasl_authenticate_request_data{}));
+      "{auth_bytes=****}", fmt::format("{}", sasl_authenticate_request_data{}));
 
     BOOST_REQUIRE_EQUAL(
-      "{error_code={ error_code: none [0] } error_message={nullopt} "
+      "{error_code={ error_code: none [0] } error_message=none "
       "auth_bytes=**** "
       "session_lifetime_ms=0}",
-      fmt::to_string(sasl_authenticate_response_data{}));
+      fmt::format("{}", sasl_authenticate_response_data{}));
 }
 
 } // namespace kafka

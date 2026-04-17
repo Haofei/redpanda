@@ -530,8 +530,9 @@ public:
         co_return storage_t{};
     }
 
-    void print(std::ostream& o) override {
-        o << "cloud_storage_partition_record_batch_reader";
+    fmt::iterator format_to(fmt::iterator it) const override {
+        return fmt::format_to(
+          it, "cloud_storage_partition_record_batch_reader");
     }
 
 private:

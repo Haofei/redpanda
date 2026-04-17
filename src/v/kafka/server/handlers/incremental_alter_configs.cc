@@ -32,8 +32,6 @@
 #include <seastar/core/smp.hh>
 #include <seastar/util/log.hh>
 
-#include <fmt/ostream.h>
-
 #include <string_view>
 
 namespace kafka {

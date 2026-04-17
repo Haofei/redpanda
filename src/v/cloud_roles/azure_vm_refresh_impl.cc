@@ -27,9 +27,8 @@ azure_vm_refresh_impl::azure_vm_refresh_impl(
   : refresh_credentials::impl(
       std::move(address), std::move(region), as, retry_params) {}
 
-std::ostream& azure_vm_refresh_impl::print(std::ostream& os) const {
-    fmt::print(os, "azure_vm_refresh_impl{{address:{}}}", address());
-    return os;
+fmt::iterator azure_vm_refresh_impl::format_to(fmt::iterator it) const {
+    return fmt::format_to(it, "azure_vm_refresh_impl{{address:{}}}", address());
 }
 
 ss::future<api_response> azure_vm_refresh_impl::fetch_credentials() {

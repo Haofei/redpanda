@@ -26,8 +26,6 @@
 #include <seastar/core/file.hh>
 #include <seastar/core/future-util.hh>
 
-#include <fmt/ostream.h>
-
 #include <exception>
 using namespace std::chrono_literals;
 
@@ -390,19 +388,16 @@ ss::future<> spill_key_index::close() {
     }
 }
 
-void spill_key_index::print(std::ostream& o) const { o << *this; }
-
-std::ostream& operator<<(std::ostream& o, const spill_key_index& k) {
-    fmt::print(
-      o,
+fmt::iterator spill_key_index::format_to(fmt::iterator it) const {
+    return fmt::format_to(
+      it,
       "{{name:{}, key_mem_usage:{}, persisted_entries:{}, "
       "in_memory_entries:{}, file_appender:{}}}",
-      k.filename(),
-      k._keys_mem_usage,
-      k._footer.keys,
-      k._midx.size(),
-      k._appender);
-    return o;
+      filename(),
+      _keys_mem_usage,
+      _footer.keys,
+      _midx.size(),
+      _appender);
 }
 
 size_t spill_key_index::size_bytes() const {

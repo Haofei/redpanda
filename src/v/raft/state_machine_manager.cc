@@ -890,12 +890,4 @@ ss::future<> state_machine_manager::write_initial_recovery_snapshot(
     co_await _initial_recovery_snapshot_mgr.finish_snapshot(writer);
 }
 
-std::ostream& operator<<(
-  std::ostream& o, const state_machine_manager::initial_recovery_snapshot& s) {
-    fmt::print(
-      o,
-      "{{ initial_recovery_next_offsets: {} }}",
-      s.initial_recovery_next_offsets);
-    return o;
-}
 } // namespace raft

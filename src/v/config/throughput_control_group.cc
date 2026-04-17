@@ -68,9 +68,8 @@ struct copyable_RE2 : re2::RE2 {
     copyable_RE2& operator=(copyable_RE2&&) noexcept = delete;
     explicit copyable_RE2(const std::string& s)
       : RE2(s) {}
-    friend std::ostream& operator<<(std::ostream& os, const copyable_RE2& re) {
-        fmt::print(os, "{}", re.pattern());
-        return os;
+    fmt::iterator format_to(fmt::iterator it) const {
+        return fmt::format_to(it, "{}", pattern());
     }
 };
 
@@ -80,15 +79,6 @@ struct client_id_matcher_type {
     client_id_matcher_type() = default;
     explicit client_id_matcher_type(const copyable_RE2& d)
       : v(d) {}
-    friend std::ostream& operator<<(
-      std::ostream& os, const std::unique_ptr<client_id_matcher_type>& mt) {
-        if (mt) {
-            fmt::print(os, "{{v: {}}}", mt->v);
-        } else {
-            fmt::print(os, "null");
-        }
-        return os;
-    }
 };
 
 throughput_control_group::throughput_control_group() = default;
@@ -113,17 +103,22 @@ throughput_control_group::operator=(const throughput_control_group& other) {
     return *this = throughput_control_group(other);
 }
 
-std::ostream&
-operator<<(std::ostream& os, const throughput_control_group& tcg) {
-    fmt::print(
-      os,
+fmt::iterator throughput_control_group::format_to(fmt::iterator it) const {
+    auto format_matcher =
+      [](const std::unique_ptr<client_id_matcher_type>& mt) -> std::string {
+        if (mt) {
+            return fmt::format("{{v: {}}}", mt->v);
+        }
+        return "null";
+    };
+    return fmt::format_to(
+      it,
       "{{group_name: {}, client_id: {}, throughput_limit_node_in_bps: {}, "
       "throughput_limit_node_out_bps: {}}}",
-      tcg.is_noname() ? ""s : fmt::format("{{{}}}", tcg.name),
-      tcg.client_id_matcher,
-      tcg.throughput_limit_node_in_bps,
-      tcg.throughput_limit_node_out_bps);
-    return os;
+      is_noname() ? ""s : fmt::format("{{{}}}", name),
+      format_matcher(client_id_matcher),
+      throughput_limit_node_in_bps,
+      throughput_limit_node_out_bps);
 }
 
 bool throughput_control_group::match_client_id(

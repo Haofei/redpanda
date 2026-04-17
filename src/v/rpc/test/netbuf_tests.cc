@@ -20,8 +20,6 @@
 // utils
 #include "test_types.h"
 
-#include <fmt/ostream.h>
-
 struct envelope_pod
   : serde::envelope<envelope_pod, serde::version<0>, serde::compat_version<0>> {
     int16_t x = 1;

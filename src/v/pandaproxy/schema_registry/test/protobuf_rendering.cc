@@ -8,6 +8,7 @@
 // by the Apache License, Version 2.0
 
 #include "absl/container/flat_hash_set.h"
+#include "base/format_to.h"
 #include "bytes/iobuf_parser.h"
 #include "pandaproxy/schema_registry/protobuf.h"
 #include "pandaproxy/schema_registry/sharded_store.h"

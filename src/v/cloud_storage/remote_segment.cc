@@ -1452,8 +1452,8 @@ public:
         co_return stop_parser::no;
     }
 
-    void print(std::ostream& o) const override {
-        o << "remote_segment_batch_consumer";
+    fmt::iterator format_to(fmt::iterator it) const override {
+        return fmt::format_to(it, "remote_segment_batch_consumer");
     }
 
 private:
@@ -1625,17 +1625,6 @@ ss::future<> remote_segment_batch_reader::stop() {
 remote_segment_batch_reader::~remote_segment_batch_reader() noexcept {
     vassert(_stopped, "Destroyed without stopping");
     _ts_probe.segment_reader_destroyed();
-}
-
-std::ostream& operator<<(std::ostream& os, hydration_request::kind kind) {
-    switch (kind) {
-    case hydration_request::kind::segment:
-        return os << "segment";
-    case hydration_request::kind::tx:
-        return os << "tx-range";
-    case hydration_request::kind::index:
-        return os << "index";
-    }
 }
 
 hydration_loop_state::hydration_loop_state(

@@ -10,6 +10,7 @@
 
 #include "cloud_storage_clients/util.h"
 
+#include "base/external_fmt.h"
 #include "base/vlog.h"
 #include "bytes/streambuf.h"
 #include "container/chunked_vector.h"

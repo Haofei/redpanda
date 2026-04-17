@@ -443,9 +443,9 @@ client::do_load_wasm_binary_once(
                       : do_remote_load_wasm_binary(*leader, offset, timeout));
     vlog(
       log.trace,
-      "do_load_wasm_binary_once_response(node={}): {}",
+      "do_load_wasm_binary_once_response(node={}): has_value={}",
       *leader,
-      reply);
+      reply.has_value());
     co_return reply;
 }
 

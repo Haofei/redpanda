@@ -21,8 +21,6 @@
 
 #include <seastar/util/log.hh>
 
-#include <fmt/ostream.h>
-
 #include <expected>
 #include <iterator>
 

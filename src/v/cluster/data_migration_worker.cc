@@ -32,8 +32,6 @@
 #include <seastar/core/sleep.hh>
 #include <seastar/coroutine/all.hh>
 
-#include <fmt/ostream.h>
-
 #include <chrono>
 #include <memory>
 #include <optional>

@@ -25,11 +25,6 @@
 #include <limits>
 #include <string_view>
 
-std::ostream& operator<<(std::ostream& o, const iobuf& io) {
-    return o << "{bytes=" << io.size_bytes()
-             << ", fragments=" << std::distance(io.cbegin(), io.cend()) << "}";
-}
-
 iobuf iobuf::copy() const {
     auto in = iobuf::iterator_consumer(cbegin(), cend());
     return iobuf_copy(in, _size);

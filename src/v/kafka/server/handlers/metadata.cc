@@ -38,7 +38,6 @@
 #include <seastar/core/thread.hh>
 
 #include <boost/numeric/conversion/cast.hpp>
-#include <fmt/ostream.h>
 
 #include <algorithm>
 #include <iterator>

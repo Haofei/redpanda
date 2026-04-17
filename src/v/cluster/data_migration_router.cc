@@ -27,8 +27,6 @@
 #include <seastar/core/sleep.hh>
 #include <seastar/coroutine/all.hh>
 
-#include <fmt/ostream.h>
-
 #include <chrono>
 
 namespace cluster::data_migrations {

@@ -28,16 +28,9 @@
 #include <boost/algorithm/string/compare.hpp>
 #include <boost/algorithm/string/split.hpp>
 #include <boost/algorithm/string/trim.hpp>
-#include <fmt/compile.h>
+#include <fmt/chrono.h>
 
 #include <system_error>
-
-namespace {
-constexpr auto iso_8061_date_fmt = FMT_COMPILE("{:%Y%m%d}");
-constexpr auto iso_8061_datetime_fmt = FMT_COMPILE("{:%Y%m%dT%H%M%SZ}");
-constexpr auto rfc_9110_datetime_fmt = FMT_COMPILE(
-  "{:%a, %d %b %Y %H:%M:%S %Z}");
-} // namespace
 
 namespace cloud_roles {
 
@@ -73,6 +66,12 @@ time_source::time_source()
 
 time_source::time_source(timestamp instant)
   : time_source([instant]() { return instant; }, 0) {}
+
+namespace {
+constexpr auto iso_8061_date_fmt = "{:%Y%m%d}";
+constexpr auto iso_8061_datetime_fmt = "{:%Y%m%dT%H%M%SZ}";
+constexpr auto rfc_9110_datetime_fmt = "{:%a, %d %b %Y %H:%M:%S %Z}";
+} // namespace
 
 ss::sstring time_source::format_date() const {
     return format(iso_8061_date_fmt);
@@ -137,7 +136,7 @@ inline void tolower(ss::sstring& str) {
     }
 }
 
-ss::sstring time_source::format(auto fmt) const {
+ss::sstring time_source::format(fmt::format_string<const std::tm&> fmt) const {
     const auto point = _gettime_fn();
     const std::time_t time = std::chrono::system_clock::to_time_t(point);
     const std::tm gm = fmt::gmtime(time);

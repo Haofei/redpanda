@@ -21,8 +21,6 @@
 #include <seastar/core/smp.hh>
 #include <seastar/util/log.hh>
 
-#include <fmt/ostream.h>
-
 namespace kafka {
 
 static void fill_response(

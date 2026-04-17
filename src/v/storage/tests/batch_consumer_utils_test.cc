@@ -82,7 +82,9 @@ struct round_robin_consumer : storage::batch_consumer {
         co_return stop_parser::yes;
     }
 
-    void print(std::ostream& o) const override { o << "test_consumer"; }
+    fmt::iterator format_to(fmt::iterator it) const override {
+        return fmt::format_to(it, "test_consumer");
+    }
 
     size_t side{0};
     size_t size_limit{0};
@@ -119,8 +121,8 @@ struct throwing_consumer : storage::batch_consumer {
         co_return stop_parser::yes;
     }
 
-    void print(std::ostream& o) const override {
-        o << "throwing_test_consumer";
+    fmt::iterator format_to(fmt::iterator it) const override {
+        return fmt::format_to(it, "throwing_test_consumer");
     }
 };
 

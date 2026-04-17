@@ -16,7 +16,6 @@
 #include <boost/range/irange.hpp>
 #include <boost/test/tools/old/interface.hpp>
 #include <boost/test/unit_test.hpp>
-#include <fmt/ostream.h>
 
 namespace cluster::client_quota {
 

@@ -79,9 +79,8 @@ api_response_parse_result gcp_refresh_impl::parse_response(iobuf response) {
         doc[gcp_response_schema::token_field.data()].GetString()}};
 }
 
-std::ostream& gcp_refresh_impl::print(std::ostream& os) const {
-    fmt::print(os, "gcp_refresh_impl{{address:{}}}", address());
-    return os;
+fmt::iterator gcp_refresh_impl::format_to(fmt::iterator it) const {
+    return fmt::format_to(it, "gcp_refresh_impl{{address:{}}}", address());
 }
 
 } // namespace cloud_roles

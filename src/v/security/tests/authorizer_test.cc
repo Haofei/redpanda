@@ -19,7 +19,6 @@
 #include <seastar/util/defer.hh>
 
 #include <boost/algorithm/string.hpp>
-#include <fmt/ostream.h>
 #include <gtest/gtest.h>
 
 namespace security {

@@ -24,7 +24,6 @@
 #include <seastar/core/smp.hh>
 
 #include <boost/test/tools/old/interface.hpp>
-#include <fmt/ostream.h>
 
 #include <chrono>
 #include <limits>

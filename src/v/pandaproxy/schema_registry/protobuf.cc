@@ -37,7 +37,6 @@
 #include <confluent/meta.pb.h>
 #include <confluent/types/decimal.pb.h>
 #include <fmt/core.h>
-#include <fmt/ostream.h>
 #include <google/protobuf/any.pb.h>
 #include <google/protobuf/api.pb.h>
 #include <google/protobuf/compiler/parser.h>
@@ -625,16 +624,14 @@ bool operator==(
     return lhs.raw() == rhs.raw();
 }
 
-std::ostream&
-operator<<(std::ostream& os, const protobuf_schema_definition& def) {
-    fmt::print(
-      os,
+fmt::iterator protobuf_schema_definition::format_to(fmt::iterator it) const {
+    return fmt::format_to(
+      it,
       "type: {}, definition: {}, references: {}, metadata: {}",
-      to_string_view(def.type()),
-      def.raw(),
-      def.refs(),
-      def.meta());
-    return os;
+      to_string_view(type()),
+      raw(),
+      refs(),
+      meta());
 }
 
 ss::future<protobuf_schema_definition> make_protobuf_schema_definition(
@@ -970,7 +967,9 @@ template<>
 struct fmt::formatter<pandaproxy::schema_registry::io_error_collector::err> {
     using type = pandaproxy::schema_registry::io_error_collector;
 
-    constexpr auto parse(format_parse_context& ctx) { return ctx.begin(); }
+    constexpr auto parse(format_parse_context& ctx) const {
+        return ctx.begin();
+    }
 
     template<typename FormatContext>
     auto format(const type::err& e, FormatContext& ctx) const {
@@ -988,7 +987,9 @@ template<>
 struct fmt::formatter<pandaproxy::schema_registry::dp_error_collector::err> {
     using type = pandaproxy::schema_registry::dp_error_collector;
 
-    constexpr auto parse(format_parse_context& ctx) { return ctx.begin(); }
+    constexpr auto parse(format_parse_context& ctx) const {
+        return ctx.begin();
+    }
 
     template<typename FormatContext>
     auto format(const type::err& e, FormatContext& ctx) const {
@@ -1000,7 +1001,7 @@ struct fmt::formatter<pandaproxy::schema_registry::dp_error_collector::err> {
           e.filename,
           e.element_name,
           e.descriptor->DebugString(),
-          e.location,
+          static_cast<int>(e.location),
           e.message);
     }
 };

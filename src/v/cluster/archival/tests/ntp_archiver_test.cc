@@ -1400,9 +1400,9 @@ public:
     ss::future<stop_parser> consume_batch_end() override {
         co_return stop_parser::no;
     }
-    void print(std::ostream& o) const override {
-        fmt::print(
-          o,
+    fmt::iterator format_to(fmt::iterator it) const override {
+        return fmt::format_to(
+          it,
           "counting_batch_consumer, min_offset: {}, max_offset: {}, {} batches "
           "consumed",
           _stats.min_offset,

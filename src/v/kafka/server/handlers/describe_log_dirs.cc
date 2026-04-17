@@ -23,8 +23,6 @@
 #include <seastar/core/smp.hh>
 #include <seastar/util/log.hh>
 
-#include <fmt/ostream.h>
-
 namespace kafka {
 
 struct log_partition_data {

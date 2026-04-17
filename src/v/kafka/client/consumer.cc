@@ -632,4 +632,13 @@ ss::future<shared_consumer_t> make_consumer(
     return c->initialize().then([c]() mutable { return std::move(c); });
 }
 
+fmt::iterator consumer::format_to(fmt::iterator it) const {
+    return fmt::format_to(
+      it,
+      "type={}, member_id={}, name={}",
+      is_leader() ? "leader" : "member",
+      _member_id,
+      _name);
+}
+
 } // namespace kafka::client

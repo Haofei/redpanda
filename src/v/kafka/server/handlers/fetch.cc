@@ -51,7 +51,6 @@
 #include <seastar/util/log.hh>
 
 #include <boost/range/irange.hpp>
-#include <fmt/ostream.h>
 
 #include <chrono>
 #include <exception>
@@ -1913,8 +1912,8 @@ fetch_scheduling_group_provider(const connection_context& conn_ctx) {
     return conn_ctx.server().fetch_scheduling_group();
 }
 
-std::ostream& operator<<(std::ostream& o, const consumer_info& ci) {
-    fmt::print(o, "rack_id: {}, fetch_offset: {}", ci.rack_id, ci.fetch_offset);
-    return o;
+fmt::iterator consumer_info::format_to(fmt::iterator it) const {
+    return fmt::format_to(
+      it, "rack_id: {}, fetch_offset: {}", rack_id, fetch_offset);
 }
 } // namespace kafka

@@ -35,7 +35,6 @@
 #include <seastar/util/log.hh>
 
 #include <boost/container_hash/extensions.hpp>
-#include <fmt/ostream.h>
 
 #include <chrono>
 #include <exception>

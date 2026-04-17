@@ -500,8 +500,8 @@ remote_segment_index_builder::consume_batch_end() {
     co_return stop_parser::no;
 }
 
-void remote_segment_index_builder::print(std::ostream& o) const {
-    o << "remote_segment_index_builder";
+fmt::iterator remote_segment_index_builder::format_to(fmt::iterator it) const {
+    return fmt::format_to(it, "remote_segment_index_builder");
 }
 
 } // namespace cloud_storage

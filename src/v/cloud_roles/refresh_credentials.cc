@@ -466,8 +466,4 @@ refresh_credentials make_refresh_credentials(
     }
 }
 
-std::ostream& operator<<(std::ostream& os, const refresh_credentials& rc) {
-    return rc.print(os);
-}
-
 } // namespace cloud_roles

@@ -28,6 +28,8 @@
 #include <seastar/util/defer.hh>
 
 #include <boost/test/tools/old/interface.hpp>
+#include <fmt/format.h>
+#include <fmt/ostream.h>
 #include <yaml-cpp/emitter.h>
 
 #include <chrono>
@@ -35,9 +37,11 @@
 namespace kafka::client {
 // BOOST_REQURE_EQUAL fails to find this if it's in the global namespace
 bool operator==(const configuration& lhs, const configuration& rhs) {
-    return fmt::format("{}", config::to_yaml(lhs, config::redact_secrets::no))
-           == fmt::format(
-             "{}", config::to_yaml(rhs, config::redact_secrets::no));
+    auto to_str = [](const configuration& c) {
+        return fmt::format(
+          "{}", fmt_streamed(config::to_yaml(c, config::redact_secrets::no)));
+    };
+    return to_str(lhs) == to_str(rhs);
 }
 
 std::ostream& operator<<(std::ostream& os, const configuration& c) {

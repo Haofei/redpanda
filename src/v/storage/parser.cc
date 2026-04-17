@@ -214,7 +214,7 @@ ss::future<result<stop_parser>> continuous_batch_parser::consume_records() {
                   _recovery ? ss::log_level::debug : ss::log_level::error,
                   "parser::consume_records error: {} (record_batch_header: {}, "
                   "batch consumer: {}) ",
-                  to_string(record.error()),
+                  to_string_view(record.error()),
                   *_header,
                   *_consumer);
                 return ss::make_ready_future<result<stop_parser>>(

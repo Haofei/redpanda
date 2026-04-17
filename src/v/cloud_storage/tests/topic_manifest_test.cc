@@ -359,7 +359,7 @@ SEASTAR_THREAD_TEST_CASE(wrong_version_throws) {
       std::runtime_error,
       [](std::runtime_error ex) {
           return std::string(ex.what()).find(
-                   "topic manifest version {99} is not supported")
+                   "topic manifest version 99 is not supported")
                  != std::string::npos;
       });
 }

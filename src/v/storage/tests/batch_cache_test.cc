@@ -19,7 +19,6 @@
 #include <seastar/util/defer.hh>
 
 #include <fmt/format.h>
-#include <fmt/ostream.h>
 #include <gtest/gtest.h>
 
 static storage::batch_cache::reclaim_options opts = {

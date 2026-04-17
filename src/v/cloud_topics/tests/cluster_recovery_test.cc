@@ -47,11 +47,12 @@ struct test_params {
     bool unstable_controller{false};
     bool unstable_metastore{false};
 
-    friend std::ostream& operator<<(std::ostream& os, const test_params& p) {
-        return os << fmt::format(
-                 "controller_{}_metastore_{}",
-                 p.unstable_controller ? "unstable" : "stable",
-                 p.unstable_metastore ? "unstable" : "stable");
+    fmt::iterator format_to(fmt::iterator it) const {
+        return fmt::format_to(
+          it,
+          "controller_{}_metastore_{}",
+          unstable_controller ? "unstable" : "stable",
+          unstable_metastore ? "unstable" : "stable");
     }
 };
 

@@ -50,31 +50,6 @@
 
 namespace security::audit {
 
-std::ostream& operator<<(std::ostream& os, event_type t) {
-    switch (t) {
-    case event_type::management:
-        return os << "management";
-    case event_type::produce:
-        return os << "produce";
-    case event_type::consume:
-        return os << "consume";
-    case event_type::describe:
-        return os << "describe";
-    case event_type::heartbeat:
-        return os << "heartbeat";
-    case event_type::authenticate:
-        return os << "authenticate";
-    case event_type::admin:
-        return os << "admin";
-    case event_type::schema_registry:
-        return os << "schema_registry";
-    case event_type::unknown:
-        return os << "unknown";
-    default:
-        return os << "invalid";
-    }
-}
-
 /// audit_log_manager
 
 void audit_log_manager::set_enabled_events() {
