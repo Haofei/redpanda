@@ -15,9 +15,6 @@
 #include "cloud_storage/types.h"
 #include "cluster/archival/logger.h"
 #include "model/fundamental.h"
-#include "model/metadata.h"
-
-#include <vector>
 
 namespace archival {
 

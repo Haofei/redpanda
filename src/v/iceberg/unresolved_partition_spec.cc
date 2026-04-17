@@ -14,8 +14,6 @@
 
 #include <fmt/format.h>
 
-#include <type_traits>
-
 namespace iceberg {
 
 bool unresolved_partition_spec::is_valid_for_default_spec() const {

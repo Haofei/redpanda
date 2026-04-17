@@ -10,9 +10,7 @@
 #include "net/server.h"
 
 #include "base/likely.h"
-#include "base/vassert.h"
 #include "base/vlog.h"
-#include "config/configuration.h"
 #include "metrics/metrics.h"
 #include "metrics/prometheus_sanitize.h"
 #include "net/connection.h"

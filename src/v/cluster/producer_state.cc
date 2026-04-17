@@ -13,7 +13,6 @@
 
 #include "base/format_to.h"
 #include "base/vassert.h"
-#include "cluster/logger.h"
 
 namespace cluster::tx {
 fmt::iterator format_to(request_state e, fmt::iterator out) {

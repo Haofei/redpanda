@@ -10,12 +10,10 @@
 #include "kafka/protocol/kafka_batch_adapter.h"
 
 #include "base/likely.h"
-#include "base/vassert.h"
 #include "bytes/iobuf.h"
 #include "compression/compression.h"
 #include "hashing/crc32c.h"
 #include "kafka/protocol/legacy_message.h"
-#include "kafka/protocol/wire.h"
 #include "model/fundamental.h"
 #include "model/record.h"
 #include "model/timestamp.h"

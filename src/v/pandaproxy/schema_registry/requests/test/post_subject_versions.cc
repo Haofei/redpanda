@@ -15,8 +15,6 @@
 #include <seastar/testing/thread_test_case.hh>
 #include <seastar/util/defer.hh>
 
-#include <type_traits>
-
 namespace ppj = pandaproxy::json;
 namespace pps = pandaproxy::schema_registry;
 

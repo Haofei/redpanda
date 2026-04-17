@@ -12,8 +12,6 @@
 #include "base/units.h"
 #include "bytes/iobuf.h"
 #include "iceberg/avro_utils.h"
-#include "iceberg/datatypes_json.h"
-#include "iceberg/json_utils.h"
 #include "iceberg/manifest.h"
 #include "iceberg/manifest_entry_type.h"
 #include "iceberg/manifest_entry_values.h"
@@ -24,8 +22,6 @@
 #include "iceberg/schema_json.h"
 #include "iceberg/values_avro.h"
 #include "strings/string_switch.h"
-
-#include <seastar/core/temporary_buffer.hh>
 
 #include <avro/Compiler.hh>
 #include <avro/DataFile.hh>

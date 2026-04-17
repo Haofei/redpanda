@@ -18,10 +18,8 @@
 
 #include <seastar/core/coroutine.hh>
 #include <seastar/coroutine/maybe_yield.hh>
-#include <seastar/util/variant_utils.hh>
 
 #include <fmt/format.h>
-#include <sys/types.h>
 
 #include <algorithm>
 #include <array>

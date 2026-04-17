@@ -14,6 +14,7 @@
 #include "utils/to_string.h"
 
 #include <fmt/format.h>
+
 namespace cluster {
 fmt::iterator commit_tx_request::format_to(fmt::iterator it) const {
     return fmt::format_to(

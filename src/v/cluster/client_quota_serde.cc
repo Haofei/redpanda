@@ -18,7 +18,6 @@
 
 #include <seastar/util/variant_utils.hh>
 
-#include <fmt/format.h>
 #include <fmt/ranges.h>
 
 #include <ostream>

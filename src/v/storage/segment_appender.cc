@@ -13,7 +13,6 @@
 #include "base/vassert.h"
 #include "base/vlog.h"
 #include "config/configuration.h"
-#include "reflection/adl.h"
 #include "ssx/semaphore.h"
 #include "storage/chunk_cache.h"
 #include "storage/logger.h"
@@ -23,8 +22,6 @@
 #include <seastar/core/align.hh>
 #include <seastar/core/future-util.hh>
 #include <seastar/core/future.hh>
-
-#include <fmt/format.h>
 
 #include <optional>
 #include <ostream>

@@ -20,14 +20,11 @@
 #include "cloud_storage/remote_path_provider.h"
 #include "cloud_storage/segment_meta_cstore.h"
 #include "cloud_storage/types.h"
-#include "hashing/xx.h"
-#include "json/document.h"
 #include "json/istreamwrapper.h"
 #include "json/ostreamwrapper.h"
 #include "json/writer.h"
 #include "model/fundamental.h"
 #include "model/timestamp.h"
-#include "reflection/to_tuple.h"
 #include "reflection/type_traits.h"
 #include "serde/rw/envelope.h"
 #include "serde/rw/iobuf.h"
@@ -42,14 +39,11 @@
 #include <seastar/core/coroutine.hh>
 #include <seastar/core/iostream.hh>
 #include <seastar/core/shared_ptr.hh>
-#include <seastar/util/later.hh>
 
 #include <rapidjson/error/en.h>
 
 #include <algorithm>
-#include <charconv>
 #include <exception>
-#include <iterator>
 #include <memory>
 #include <numeric>
 #include <optional>

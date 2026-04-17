@@ -26,7 +26,6 @@
 #include <seastar/core/smp.hh>
 #include <seastar/util/variant_utils.hh>
 
-#include <algorithm>
 #include <optional>
 #include <stdexcept>
 

@@ -12,7 +12,6 @@
 #include "cluster/scheduling/types.h"
 
 #include "base/format_to.h"
-#include "cluster/logger.h"
 #include "cluster/scheduling/allocation_state.h"
 #include "utils/exceptions.h"
 

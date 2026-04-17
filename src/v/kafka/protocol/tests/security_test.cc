@@ -12,9 +12,6 @@
 #include "kafka/server/handlers/details/security.h"
 #include "security/acl.h"
 
-#include <seastar/testing/thread_test_case.hh>
-
-#include <boost/algorithm/string.hpp>
 #include <boost/test/unit_test.hpp>
 
 namespace kafka {
