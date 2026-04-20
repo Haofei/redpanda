@@ -13,7 +13,6 @@
 
 #include "crash_tracker/logger.h"
 #include "crash_tracker/types.h"
-#include "hashing/xx.h"
 #include "model/timestamp.h"
 #include "utils/arch.h"
 #include "version/version.h"
@@ -21,17 +20,10 @@
 #include <seastar/core/file-types.hh>
 #include <seastar/core/file.hh>
 #include <seastar/core/seastar.hh>
-#include <seastar/core/sleep.hh>
-#include <seastar/util/print_safe.hh>
 
-#include <fmt/chrono.h>
-
-#include <chrono>
 #include <fcntl.h>
 #include <system_error>
 #include <unistd.h>
-
-using namespace std::chrono_literals;
 
 namespace crash_tracker {
 

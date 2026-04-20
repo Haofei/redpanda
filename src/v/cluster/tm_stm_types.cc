@@ -11,7 +11,6 @@
 #include "cluster/tm_stm_types.h"
 
 #include "base/format_to.h"
-#include "model/timeout_clock.h"
 
 #include <seastar/core/lowres_clock.hh>
 

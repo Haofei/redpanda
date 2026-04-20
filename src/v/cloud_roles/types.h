@@ -16,13 +16,10 @@
 #include "bytes/iobuf.h"
 #include "utils/named_type.h"
 
-#include <seastar/core/metrics.hh>
 #include <seastar/core/sstring.hh>
 
 #include <boost/beast/http/status.hpp>
 #include <boost/beast/http/verb.hpp>
-
-#include <unordered_set>
 
 namespace cloud_roles {
 

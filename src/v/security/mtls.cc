@@ -14,9 +14,6 @@
 #include <fmt/format.h>
 #include <fmt/ranges.h>
 
-#include <regex>
-#include <stdexcept>
-
 namespace security::tls {
 
 namespace detail {

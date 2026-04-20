@@ -11,7 +11,6 @@
 #include "cluster/log_eviction_stm.h"
 #include "cluster/tests/cluster_test_fixture.h"
 #include "container/chunked_vector.h"
-#include "kafka/protocol/batch_consumer.h"
 #include "kafka/protocol/types.h"
 #include "kafka/server/handlers/fetch.h"
 #include "model/fundamental.h"

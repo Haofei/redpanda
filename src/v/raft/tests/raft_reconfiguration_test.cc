@@ -23,14 +23,12 @@
 #include "raft/types.h"
 #include "random/generators.h"
 #include "serde/rw/rw.h"
-#include "ssx/future-util.h"
 #include "ssx/watchdog.h"
 #include "storage/record_batch_builder.h"
 #include "test_utils/async.h"
 #include "test_utils/randoms.h"
 #include "test_utils/test.h"
 
-#include <seastar/core/coroutine.hh>
 #include <seastar/core/future.hh>
 #include <seastar/core/loop.hh>
 #include <seastar/coroutine/parallel_for_each.hh>

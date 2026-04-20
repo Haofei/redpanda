@@ -10,7 +10,6 @@
 
 #include "datalake/data_writer_interface.h"
 
-#include <fmt/core.h>
 namespace datalake {
 std::string data_writer_error_category::message(int ev) const {
     return fmt::format("{}", static_cast<writer_error>(ev));

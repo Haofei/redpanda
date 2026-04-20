@@ -12,10 +12,7 @@
 
 #include "absl/container/flat_hash_map.h"
 #include "absl/container/node_hash_map.h"
-#include "pandaproxy/schema_registry/types.h"
 #include "security/acl_store.h"
-#include "security/logger.h"
-#include "serde/envelope.h"
 #include "serde/read_header.h"
 #include "serde/rw/rw.h"
 #include "utils/to_string.h"

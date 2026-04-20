@@ -26,7 +26,6 @@
 #include <chrono>
 #include <exception>
 #include <functional>
-#include <variant>
 
 using namespace std::chrono_literals;
 

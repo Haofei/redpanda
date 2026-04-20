@@ -20,7 +20,6 @@
 #include <rapidjson/document.h>
 #include <rapidjson/istreamwrapper.h>
 #include <rapidjson/ostreamwrapper.h>
-#include <rapidjson/rapidjson.h>
 #include <rapidjson/writer.h>
 
 namespace cluster::cloud_metadata {

@@ -37,16 +37,11 @@
 
 #include <seastar/core/abort_source.hh>
 #include <seastar/core/coroutine.hh>
-#include <seastar/core/gate.hh>
 #include <seastar/core/iostream.hh>
-#include <seastar/core/loop.hh>
 #include <seastar/core/lowres_clock.hh>
 #include <seastar/core/shared_ptr.hh>
-#include <seastar/core/temporary_buffer.hh>
-#include <seastar/net/inet_address.hh>
 #include <seastar/util/log.hh>
 
-#include <boost/beast/core/error.hpp>
 #include <boost/beast/http/field.hpp>
 #include <boost/beast/http/status.hpp>
 #include <boost/property_tree/ptree.hpp>

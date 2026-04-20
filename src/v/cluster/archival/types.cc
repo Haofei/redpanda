@@ -12,7 +12,6 @@
 
 #include "base/format_to.h"
 #include "cloud_storage/configuration.h"
-#include "cloud_storage/partition_manifest.h"
 #include "cloud_storage/types.h"
 #include "cluster/archival/logger.h"
 #include "config/configuration.h"

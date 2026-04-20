@@ -12,11 +12,8 @@
 
 #include "base/format_to.h"
 #include "utils/human.h"
-#include "utils/to_string.h"
 
 #include <fmt/chrono.h>
-
-#include <chrono>
 
 namespace cluster::node {
 fmt::iterator local_state::log_data_state::format_to(fmt::iterator it) const {

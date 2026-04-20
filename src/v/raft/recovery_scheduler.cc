@@ -12,7 +12,6 @@
 #include "base/vassert.h"
 #include "metrics/prometheus_sanitize.h"
 #include "raft/consensus.h"
-#include "raft/types.h"
 
 #include <seastar/core/coroutine.hh>
 #include <seastar/core/metrics.hh>

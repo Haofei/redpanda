@@ -16,7 +16,6 @@
 #include "container/chunked_vector.h"
 #include "http/utils.h"
 #include "net/connection.h"
-#include "strings/string_switch.h"
 #include "utils/retry_chain_node.h"
 
 #include <seastar/core/future.hh>

@@ -45,7 +45,6 @@
 
 #include <chrono>
 #include <exception>
-#include <memory>
 #include <optional>
 #include <ranges>
 

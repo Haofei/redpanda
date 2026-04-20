@@ -19,7 +19,6 @@
 #include "model/metadata.h"
 
 #include <seastar/core/future.hh>
-#include <seastar/util/noncopyable_function.hh>
 
 #include <memory>
 

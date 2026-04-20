@@ -19,7 +19,6 @@
 #include "model/record.h"
 #include "model/record_batch_types.h"
 #include "model/timestamp.h"
-#include "model/validation.h"
 #include "serde/rw/enum.h"
 #include "serde/rw/rw.h"
 #include "serde/rw/sstring.h"
@@ -28,9 +27,7 @@
 #include "utils/base64.h"
 #include "utils/to_string.h"
 
-#include <seastar/core/print.hh>
-#include <seastar/net/inet_address.hh>
-#include <seastar/net/ip.hh>
+#include <fmt/ostream.h>
 
 #include <iostream>
 #include <optional>
