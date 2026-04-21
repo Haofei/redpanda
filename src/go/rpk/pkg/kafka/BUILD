@@ -24,6 +24,7 @@ go_library(
 
 go_test(
     name = "kafka_test",
+    size = "small",
     srcs = ["client_franz_test.go"],
     embed = [":kafka"],
     deps = [

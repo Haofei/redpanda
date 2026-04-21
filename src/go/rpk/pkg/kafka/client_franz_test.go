@@ -21,6 +21,7 @@ import (
 // through the config system so internal fields are populated.
 func loadProfile(t *testing.T, fs afero.Fs, p *config.RpkProfile) *config.RpkProfile {
 	t.Helper()
+	t.Setenv("HOME", "/")
 	p.Name = "test"
 	rpkyaml := config.RpkYaml{
 		CurrentProfile: "test",

@@ -24,6 +24,7 @@ go_library(
 
 go_test(
     name = "schemaregistry_test",
+    size = "small",
     srcs = [
         "client_test.go",
         "context_test.go",
