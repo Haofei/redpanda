@@ -686,8 +686,8 @@ cluster::partitions_filter random_partitions_filter() {
     return {.namespaces = ret};
 }
 
-cluster::drain_manager::drain_status random_drain_status() {
-    cluster::drain_manager::drain_status data{
+cluster::drain_status random_drain_status() {
+    cluster::drain_status data{
       .finished = tests::random_bool(),
       .errors = tests::random_bool(),
     };

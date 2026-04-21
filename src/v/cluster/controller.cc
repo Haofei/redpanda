@@ -41,6 +41,7 @@
 #include "cluster/data_migration_table.h"
 #include "cluster/data_migration_types.h"
 #include "cluster/data_migration_worker.h"
+#include "cluster/drain_manager.h"
 #include "cluster/ephemeral_credential_frontend.h"
 #include "cluster/feature_backend.h"
 #include "cluster/feature_manager.h"

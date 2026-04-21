@@ -78,7 +78,7 @@ ss::future<> drain_manager::restore() {
     });
 }
 
-ss::future<std::optional<drain_manager::drain_status>> drain_manager::status() {
+ss::future<std::optional<drain_status>> drain_manager::status() {
     if (_abort.abort_requested()) {
         co_return std::nullopt;
     }
@@ -283,7 +283,7 @@ ss::future<> drain_manager::do_restore() {
     _partition_manager.local().unblock_new_leadership();
     co_return;
 }
-fmt::iterator drain_manager::drain_status::format_to(fmt::iterator it) const {
+fmt::iterator drain_status::format_to(fmt::iterator it) const {
     return fmt::format_to(
       it,
       "{{finished: {}, errors: {}, partitions: {}, eligible: {}, transferring: "
