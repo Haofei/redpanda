@@ -11,6 +11,7 @@ redpanda_cc_gtest(
     deps = [
         "//src/v/base",
         "//src/v/cluster",
+        "//src/v/cluster:errc",
         "//src/v/config",
         "//src/v/model",
         "//src/v/random:generators",

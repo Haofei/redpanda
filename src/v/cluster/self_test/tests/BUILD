@@ -6,6 +6,7 @@ redpanda_cc_btest(
     srcs = ["self_test_config_test.cc"],
     deps = [
         "//src/v/cluster",
+        "//src/v/cluster:self_test",
         "//src/v/json",
         "//src/v/test_utils:seastar_boost",
         "@boost//:math",
@@ -22,6 +23,7 @@ redpanda_cc_btest(
     deps = [
         "//src/v/bytes:iobuf",
         "//src/v/cluster",
+        "//src/v/cluster:self_test_rpc_types",
         "//src/v/test_utils:seastar_boost",
         "@boost//:test",
         "@seastar",

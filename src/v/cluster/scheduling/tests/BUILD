@@ -8,6 +8,7 @@ redpanda_cc_gtest(
     ],
     deps = [
         "//src/v/cluster",
+        "//src/v/cluster:leader_balancer_strategy",
         "//src/v/config",
         "//src/v/model",
         "//src/v/raft",
