@@ -26,17 +26,23 @@ repos:
         # except that we add -d to provide some feedback about the error
         args: ['-i', '2', '-ci', '-s', '-w', '-d']
 
-  - repo: https://github.com/golangci/golangci-lint
-    rev: v2.11.4
-    hooks:
-      - id: golangci-lint-full
-        name: Go linting (golangci-lint)
-        entry: bash -c 'cd src/go/rpk && golangci-lint run --timeout=10m --verbose'
-        files: '^src/go/rpk/.*\.go$|^src/go/rpk/go\.(mod|sum)$|^src/go/rpk/\.golangci\.yml$'
-      - id: golangci-lint-config-verify
-        name: Go lint config verify
-        entry: bash -c 'cd src/go/rpk && golangci-lint config verify'
-        files: '^src/go/rpk/\.golangci\.yml$'
+  # Disabled: pre-commit's `language: golang` builds golangci-lint from source
+  # using the local Go toolchain, which (via golangci-lint's own go.mod) pulls
+  # Go 1.25 and produces a binary whose bundled `go/types` cannot type-check
+  # packages declaring `go 1.26` -- as src/go/rpk/go.mod now does. CI is
+  # unaffected because it downloads the prebuilt release binary (built with
+  # Go 1.26). Re-enable once the hook uses the same binary as CI.
+  # - repo: https://github.com/golangci/golangci-lint
+  #   rev: v2.11.4
+  #   hooks:
+  #     - id: golangci-lint-full
+  #       name: Go linting (golangci-lint)
+  #       entry: bash -c 'cd src/go/rpk && golangci-lint run --timeout=10m --verbose'
+  #       files: '^src/go/rpk/.*\.go$|^src/go/rpk/go\.(mod|sum)$|^src/go/rpk/\.golangci\.yml$'
+  #     - id: golangci-lint-config-verify
+  #       name: Go lint config verify
+  #       entry: bash -c 'cd src/go/rpk && golangci-lint config verify'
+  #       files: '^src/go/rpk/\.golangci\.yml$'
 
   # Local hooks
   - repo: local
