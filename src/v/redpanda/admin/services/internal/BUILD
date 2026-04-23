@@ -73,7 +73,6 @@ redpanda_cc_library(
         "//src/v/cloud_topics/level_one/metastore:leader_router",
         "//src/v/cloud_topics/level_one/metastore:replicated_metastore",
         "//src/v/cloud_topics/level_one/metastore:rpc_types",
-        "//src/v/cluster",
         "//src/v/cluster:fwd",
         "//src/v/cluster:shard_table",
         "//src/v/cluster:topic_table",
@@ -125,7 +124,6 @@ redpanda_cc_library(
     ],
     deps = [
         "//proto/redpanda/core/admin/internal/shadow_link_internal/v1:shadow_link_internal_redpanda_proto",
-        "//src/v/cluster",
         "//src/v/cluster:fwd",
         "//src/v/cluster_link:fwd",
         "//src/v/cluster_link/model",

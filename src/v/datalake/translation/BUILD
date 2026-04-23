@@ -142,7 +142,6 @@ redpanda_cc_library(
         ":translator_deps",
         ":utils",
         "//src/v/base",
-        "//src/v/cluster",
         "//src/v/cluster:fwd",
         "//src/v/config",
         "//src/v/datalake:logger",

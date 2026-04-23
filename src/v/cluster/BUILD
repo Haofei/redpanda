@@ -1065,8 +1065,15 @@ redpanda_cc_library(
 
 redpanda_cc_library(
     name = "drain_status",
+    srcs = [
+        "drain_status.cc",
+    ],
     hdrs = [
         "drain_status.h",
+    ],
+    implementation_deps = [
+        "//src/v/base",
+        "@fmt",
     ],
     visibility = ["//visibility:public"],
     deps = [

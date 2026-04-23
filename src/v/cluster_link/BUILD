@@ -265,7 +265,6 @@ redpanda_cc_library(
     deps = [
         ":cluster_link",
         ":shadow_link_rpc_gen",
-        "//src/v/cluster",
         "//src/v/cluster:fwd",
         "@seastar",
     ],

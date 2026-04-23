@@ -27,7 +27,6 @@ redpanda_cc_library(
     deps = [
         ":logger",
         "//src/v/base",
-        "//src/v/cluster",
         "//src/v/cluster:errc",
         "//src/v/config",
         "//src/v/model",

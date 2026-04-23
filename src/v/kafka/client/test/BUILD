@@ -97,7 +97,6 @@ redpanda_cc_btest(
     ],
     deps = [
         ":utils",
-        "//src/v/cluster",
         "//src/v/cluster:simple_batch_builder",
         "//src/v/kafka/client",
         "//src/v/kafka/client:configuration",
@@ -206,7 +205,6 @@ redpanda_cc_btest(
         "fetch.cc",
     ],
     deps = [
-        "//src/v/cluster",
         "//src/v/cluster:cluster_utils",
         "//src/v/cluster:controller_log_limiter",
         "//src/v/cluster:data_migration_table",

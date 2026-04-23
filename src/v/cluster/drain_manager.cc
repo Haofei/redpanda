@@ -1,6 +1,5 @@
 #include "cluster/drain_manager.h"
 
-#include "base/format_to.h"
 #include "base/vlog.h"
 #include "cluster/logger.h"
 #include "cluster/partition_manager.h"
@@ -282,18 +281,6 @@ ss::future<> drain_manager::do_restore() {
     vlog(clusterlog.info, "Node drain stopped");
     _partition_manager.local().unblock_new_leadership();
     co_return;
-}
-fmt::iterator drain_status::format_to(fmt::iterator it) const {
-    return fmt::format_to(
-      it,
-      "{{finished: {}, errors: {}, partitions: {}, eligible: {}, transferring: "
-      "{}, failed: {}}}",
-      finished,
-      errors,
-      partitions,
-      eligible,
-      transferring,
-      failed);
 }
 
 } // namespace cluster

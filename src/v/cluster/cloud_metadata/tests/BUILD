@@ -41,7 +41,6 @@ redpanda_cc_gtest(
     ],
     deps = [
         "//src/v/bytes:iostream",
-        "//src/v/cluster",
         "//src/v/cluster:cloud_metadata_cluster_manifest",
         "//src/v/test_utils:gtest",
         "@googletest//:gtest",
@@ -139,7 +138,6 @@ redpanda_cc_gtest(
         ":manual_mixin",
         "//src/v/cloud_io/tests:s3_imposter",
         "//src/v/cloud_storage",
-        "//src/v/cluster",
         "//src/v/cluster:cloud_metadata_cluster_manifest",
         "//src/v/cluster:cloud_metadata_key_utils",
         "//src/v/cluster:cloud_metadata_manifest_downloads",
@@ -198,7 +196,6 @@ redpanda_cc_gtest(
     cpu = 1,
     deps = [
         "//src/v/cloud_io/tests:s3_imposter",
-        "//src/v/cluster",
         "//src/v/cluster:cluster_utils",
         "//src/v/cluster:controller_log_limiter",
         "//src/v/cluster:data_migration_table",
@@ -290,7 +287,6 @@ redpanda_cc_gtest(
     ],
     cpu = 1,
     deps = [
-        "//src/v/cluster",
         "//src/v/cluster:cloud_metadata_key_utils",
         "//src/v/test_utils:gtest",
         "@googletest//:gtest",

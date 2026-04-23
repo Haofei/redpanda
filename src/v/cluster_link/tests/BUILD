@@ -10,7 +10,6 @@ redpanda_test_cc_library(
     ],
     visibility = ["//visibility:public"],
     deps = [
-        "//src/v/cluster",
         "//src/v/cluster:cluster_link_rpc_types",
         "//src/v/cluster:cluster_link_table",
         "//src/v/cluster:types",
@@ -36,7 +35,6 @@ redpanda_cc_gtest(
     ],
     deps = [
         ":test_deps",
-        "//src/v/cluster",
         "//src/v/cluster:cluster_link_table",
         "//src/v/cluster/cluster_link/tests:test_lib",
         "//src/v/cluster_link:impl",

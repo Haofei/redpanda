@@ -139,7 +139,6 @@ redpanda_cc_library(
     visibility = ["//visibility:public"],
     deps = [
         ":migration",
-        "//src/v/cluster",
         "//src/v/cluster:data_migration_types",
         "//src/v/json",
         "//src/v/model",

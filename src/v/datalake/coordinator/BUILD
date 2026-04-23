@@ -55,7 +55,6 @@ redpanda_cc_library(
         ":state_update",
         ":stm",
         "//src/v/base",
-        "//src/v/cluster",
         "//src/v/cluster:fwd",
         "//src/v/cluster:topic_table",
         "//src/v/config",

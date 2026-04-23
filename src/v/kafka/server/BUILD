@@ -513,7 +513,6 @@ redpanda_cc_library(
     ],
     visibility = ["//visibility:public"],
     deps = [
-        "//src/v/cluster",
         "//src/v/cluster:cluster_link_errc",
         "//src/v/cluster:errc",
         "//src/v/cluster:tx_errc",

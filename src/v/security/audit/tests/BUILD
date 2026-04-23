@@ -5,7 +5,6 @@ redpanda_test_cc_library(
     srcs = ["audit_test_utils.cc"],
     hdrs = ["audit_test_utils.h"],
     deps = [
-        "//src/v/cluster",
         "//src/v/config",
         "//src/v/random:generators",
         "//src/v/security/audit",
@@ -22,7 +21,6 @@ redpanda_cc_gtest(
     deps = [
         ":utils",
         "//src/v/base",
-        "//src/v/cluster",
         "//src/v/cluster:cluster_utils",
         "//src/v/cluster:controller_log_limiter",
         "//src/v/cluster:data_migration_table",

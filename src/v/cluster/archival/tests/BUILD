@@ -320,7 +320,6 @@ redpanda_cc_btest(
     memory = "2048MiB",
     deps = [
         ":archival_service_fixture",
-        "//src/v/cluster",
         "//src/v/cluster:cluster_utils",
         "//src/v/cluster:data_migration_table",
         "//src/v/cluster:errc",

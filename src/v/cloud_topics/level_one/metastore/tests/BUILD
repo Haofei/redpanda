@@ -165,7 +165,6 @@ redpanda_cc_gtest(
         "//src/v/cloud_io:remote",
         "//src/v/cloud_topics/level_one/metastore:simple",
         "//src/v/cloud_topics/level_one/metastore:topic_purger",
-        "//src/v/cluster",
         "//src/v/cluster:data_migrated_resources",
         "//src/v/cluster:nt_revision",
         "//src/v/cluster:topic_table",

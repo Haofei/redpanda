@@ -118,7 +118,6 @@ redpanda_cc_btest(
         "types_conversion_tests.cc",
     ],
     deps = [
-        "//src/v/cluster",
         "//src/v/cluster:types",
         "//src/v/kafka/protocol/schemata:create_topics_request",
         "//src/v/kafka/server",
@@ -196,7 +195,6 @@ redpanda_cc_btest(
         "config_utils_test.cc",
     ],
     deps = [
-        "//src/v/cluster",
         "//src/v/cluster:types",
         "//src/v/config",
         "//src/v/kafka/server",
@@ -479,7 +477,6 @@ redpanda_cc_btest(
         "create_topics_test.cc",
     ],
     deps = [
-        "//src/v/cluster",
         "//src/v/cluster:client_quota_backend",
         "//src/v/cluster:controller_log_limiter",
         "//src/v/cluster:data_migration_table",
@@ -713,7 +710,6 @@ redpanda_cc_btest(
         "replicated_partition_test.cc",
     ],
     deps = [
-        "//src/v/cluster",
         "//src/v/cluster:cluster_utils",
         "//src/v/cluster:controller_log_limiter",
         "//src/v/cluster:data_migration_table",
@@ -779,7 +775,6 @@ redpanda_cc_btest(
         "quota_manager_test.cc",
     ],
     deps = [
-        "//src/v/cluster",
         "//src/v/cluster:client_quota_serde",
         "//src/v/cluster:client_quota_store",
         "//src/v/config",
@@ -799,7 +794,6 @@ redpanda_cc_btest(
     ],
     deps = [
         "//src/v/base",
-        "//src/v/cluster",
         "//src/v/cluster:client_quota_serde",
         "//src/v/cluster:client_quota_store",
         "//src/v/config",
@@ -947,7 +941,6 @@ redpanda_cc_btest(
     cpu = 1,
     deps = [
         "//src/v/base",
-        "//src/v/cluster",
         "//src/v/cluster:fwd",
         "//src/v/cluster:inventory_service",
         "//src/v/cluster:leader_balancer_strategy",
@@ -1102,7 +1095,6 @@ redpanda_cc_bench(
     memory = "4GiB",
     runs = 1,
     deps = [
-        "//src/v/cluster",
         "//src/v/cluster:client_quota_serde",
         "//src/v/cluster:client_quota_store",
         "//src/v/config",

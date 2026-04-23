@@ -105,7 +105,6 @@ redpanda_cc_gtest(
         "//src/v/cloud_topics/level_one/compaction:log_info_collector",
         "//src/v/cloud_topics/level_one/compaction:meta",
         "//src/v/cloud_topics/level_one/frontend_reader/tests:l1_reader_fixture",
-        "//src/v/cluster",
         "//src/v/cluster:fwd",
         "//src/v/cluster:members_table",
         "//src/v/cluster:partition_leaders_table",
@@ -130,7 +129,6 @@ redpanda_cc_gtest(
     ],
     deps = [
         "//src/v/cloud_topics/level_one/compaction:log_collector",
-        "//src/v/cluster",
         "//src/v/cluster:commands",
         "//src/v/cluster:data_migrated_resources",
         "//src/v/cluster:fwd",
@@ -157,7 +155,6 @@ redpanda_test_cc_library(
         "//src/v/cloud_topics/level_one/compaction:scheduling_policies",
         "//src/v/cloud_topics/level_one/compaction:worker",
         "//src/v/cloud_topics/level_one/frontend_reader/tests:l1_reader_fixture",
-        "//src/v/cluster",
         "//src/v/cluster:topic_configuration",
         "//src/v/container:chunked_hash_map",
         "//src/v/model",
@@ -233,7 +230,6 @@ redpanda_cc_gtest(
     deps = [
         "//src/v/cloud_io/tests:s3_imposter",
         "//src/v/cloud_topics/level_zero/stm:ctp_stm",
-        "//src/v/cluster",
         "//src/v/cluster:cluster_utils",
         "//src/v/cluster:controller_log_limiter",
         "//src/v/cluster:data_migration_table",

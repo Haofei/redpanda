@@ -28,7 +28,6 @@ redpanda_cc_gtest(
     ],
     deps = [
         ":test_lib",
-        "//src/v/cluster",
         "//src/v/cluster:cluster_link_rpc_types",
         "//src/v/cluster:cluster_link_table",
         "//src/v/cluster:commands",
