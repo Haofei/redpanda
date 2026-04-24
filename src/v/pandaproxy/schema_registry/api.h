@@ -68,6 +68,8 @@ public:
     contribute_metrics(cluster::metrics_reporter::metrics_snapshot&) const;
 
 private:
+    struct transport_impl;
+
     friend class schema_id_validator;
     friend class schema::registry;
     model::node_id _node_id;
