@@ -52,7 +52,7 @@ fi
 
 # If the AI path produced a skill report, use it verbatim as the PR body.
 # Otherwise fall back to the plain one-line summary below.
-if [[ -n "${AI_REPORT_FILE:-}" && -s "$AI_REPORT_FILE" ]]; then
+if [[ -n ${AI_REPORT_FILE:-} && -s $AI_REPORT_FILE ]]; then
   body_args=(--body-file "$AI_REPORT_FILE")
 else
   body_args=(--body "Backport of PR $ORIG_ISSUE_URL
