@@ -367,10 +367,34 @@ def read_incremental_topic_update_serde(rdr: Reader):
                     rdr, lambda r: r.read_optional(Reader.read_uuid)
                 ),
             }
+        if version >= 9:
+            incr_obj |= {
+                "message_timestamp_before_max_ms": read_property_update_serde(
+                    rdr, lambda r: r.read_optional(Reader.read_int64)
+                ),
+                "message_timestamp_after_max_ms": read_property_update_serde(
+                    rdr, lambda r: r.read_optional(Reader.read_int64)
+                ),
+            }
+        if version >= 10:
+            incr_obj |= {
+                "remote_label": read_property_update_serde(
+                    rdr,
+                    lambda r: r.read_optional(
+                        lambda r: r.read_envelope(
+                            lambda r, _: {"cluster_uuid": r.read_uuid()},
+                            reader_version=0,
+                        )
+                    ),
+                ),
+                "storage_mode": read_property_update_serde(
+                    rdr, lambda r: r.read_optional(Reader.read_serde_enum)
+                ),
+            }
 
         return incr_obj
 
-    return rdr.read_envelope(incr_topic_upd, reader_version=8)
+    return rdr.read_envelope(incr_topic_upd, reader_version=10)
 
 
 def read_create_partitions_serde(rdr: Reader):
