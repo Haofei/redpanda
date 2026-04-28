@@ -515,8 +515,7 @@ public:
               random_generators::get_int<int64_t>(
                 min_replaced_offset, max_replaced_offset));
 
-            std::vector<ss::future<l1_rpc::replace_objects_no_compact_reply>>
-              futs;
+            std::vector<ss::future<l1_rpc::replace_objects_reply>> futs;
             std::vector<db_domain_manager*> managers;
             managers.reserve(node.managers.size());
             for (auto& mgr : node.managers) {
@@ -530,15 +529,14 @@ public:
                 if (prereg.ec != l1_rpc::errc::ok) {
                     continue;
                 }
-                l1_rpc::replace_objects_no_compact_request req{
+                l1_rpc::replace_objects_request req{
                   .metastore_partition = model::partition_id(0),
                   .new_objects = make_new_objects_with_ids(
                     tp, offset_to_replace, 1, prereg.object_ids),
                   .expected_epochs
                   = {{tp, partition_state::compaction_epoch_t{0}}},
                 };
-                futs.emplace_back(
-                  mgr->replace_objects_no_compact(std::move(req)));
+                futs.emplace_back(mgr->replace_objects(std::move(req)));
 
                 co_await ss::maybe_yield();
             }
@@ -876,14 +874,13 @@ TEST_F(DbDomainManagerTest, TestBasicReplaceObjects) {
                           })
                           .get();
     ASSERT_EQ(prereg_reply.ec, l1_rpc::errc::ok);
-    l1_rpc::replace_objects_no_compact_request req{
+    l1_rpc::replace_objects_request req{
       .metastore_partition = model::partition_id(0),
       .new_objects = make_new_objects_with_ids(
         tp, kafka::offset(0), 10, prereg_reply.object_ids),
       .expected_epochs = {{tp, partition_state::compaction_epoch_t{0}}},
     };
-    auto reply
-      = initial_manager->replace_objects_no_compact(std::move(req)).get();
+    auto reply = initial_manager->replace_objects(std::move(req)).get();
     ASSERT_EQ(reply.ec, l1_rpc::errc::ok);
 
     // Check that the replacement results in 1 extent.
@@ -1207,15 +1204,14 @@ TEST_F(DbDomainManagerTest, TestGetSizeAfterReplace) {
                                   })
                                   .get();
     ASSERT_EQ(replace_prereg_reply.ec, l1_rpc::errc::ok);
-    l1_rpc::replace_objects_no_compact_request replace_req{
+    l1_rpc::replace_objects_request replace_req{
       .metastore_partition = model::partition_id(0),
       .new_objects = make_new_objects_with_ids(
         tp, kafka::offset(0), 5, replace_prereg_reply.object_ids),
       .expected_epochs = {{tp, partition_state::compaction_epoch_t{0}}},
     };
-    auto replace_reply = initial_manager
-                           ->replace_objects_no_compact(std::move(replace_req))
-                           .get();
+    auto replace_reply
+      = initial_manager->replace_objects(std::move(replace_req)).get();
     ASSERT_EQ(replace_reply.ec, l1_rpc::errc::ok);
 
     // Size should now be 1 * 512 = 512 bytes.

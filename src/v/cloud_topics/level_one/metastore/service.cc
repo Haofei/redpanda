@@ -27,10 +27,9 @@ service::add_objects(add_objects_request request, ::rpc::streaming_context&) {
       std::move(request), leader_router::local_only::yes);
 }
 
-ss::future<replace_objects_no_compact_reply>
-service::replace_objects_no_compact(
-  replace_objects_no_compact_request request, ::rpc::streaming_context&) {
-    return _leader_router->local().replace_objects_no_compact(
+ss::future<replace_objects_reply> service::replace_objects_no_compact(
+  replace_objects_request request, ::rpc::streaming_context&) {
+    return _leader_router->local().replace_objects(
       std::move(request), leader_router::local_only::yes);
 }
 

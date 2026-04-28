@@ -536,7 +536,7 @@ add_objects_update::apply(state& state) {
 }
 
 std::expected<std::monostate, stm_update_error>
-replace_objects_no_compact_update::can_apply(const state& state) {
+replace_objects_update::can_apply(const state& state) {
     auto layout_res = validate_new_objects_layout(state, new_objects);
     if (!layout_res.has_value()) {
         return std::unexpected(layout_res.error());
@@ -589,7 +589,7 @@ replace_objects_no_compact_update::can_apply(const state& state) {
 }
 
 std::expected<std::monostate, stm_update_error>
-replace_objects_no_compact_update::apply(state& state) {
+replace_objects_update::apply(state& state) {
     auto allowed = can_apply(state);
     if (!allowed.has_value()) {
         return std::unexpected(allowed.error());
@@ -599,8 +599,8 @@ replace_objects_no_compact_update::apply(state& state) {
     return std::monostate{};
 }
 
-std::expected<replace_objects_no_compact_update, stm_update_error>
-replace_objects_no_compact_update::build(
+std::expected<replace_objects_update, stm_update_error>
+replace_objects_update::build(
   const state& state,
   chunked_vector<new_object> objects,
   chunked_hash_map<
@@ -615,7 +615,7 @@ replace_objects_no_compact_update::build(
     for (auto& [tp, epoch] : flat_expected_epochs) {
         expected_epochs[tp.topic_id][tp.partition] = epoch;
     }
-    replace_objects_no_compact_update update{
+    replace_objects_update update{
       .new_objects = std::move(objects),
       .expected_epochs = std::move(expected_epochs),
     };

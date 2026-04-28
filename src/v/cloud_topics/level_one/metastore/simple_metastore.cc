@@ -284,7 +284,7 @@ simple_metastore::replace_objects(
     for (const auto& [tp, epoch] : epoch_map) {
         expected_epochs[tp] = partition_state::compaction_epoch_t{epoch()};
     }
-    auto update_res = replace_objects_no_compact_update::build(
+    auto update_res = replace_objects_update::build(
       state_, std::move(new_objects), std::move(expected_epochs));
     if (!update_res.has_value()) {
         vlog(cd_log.debug, "Object replacement failed: {}", update_res.error());

@@ -40,9 +40,8 @@ public:
         return _compact_objects.auto_measure();
     }
 
-    std::unique_ptr<hist_t::measurement>
-    auto_measure_replace_objects_no_compact() {
-        return _replace_objects_no_compact.auto_measure();
+    std::unique_ptr<hist_t::measurement> auto_measure_replace_objects() {
+        return _replace_objects.auto_measure();
     }
 
     std::unique_ptr<hist_t::measurement> auto_measure_get_first_offset_ge() {
@@ -110,7 +109,7 @@ public:
 private:
     hist_t _add_objects;
     hist_t _compact_objects;
-    hist_t _replace_objects_no_compact;
+    hist_t _replace_objects;
     hist_t _get_first_offset_ge;
     hist_t _get_first_timestamp_ge;
     hist_t _get_first_offset_for_bytes;

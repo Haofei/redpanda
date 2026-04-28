@@ -60,7 +60,7 @@ struct add_objects_db_update {
     term_state_update_t new_terms;
 };
 
-struct replace_objects_no_compact_db_update {
+struct replace_objects_db_update {
     ss::future<std::expected<void, db_update_error>>
     build_rows(state_reader&, chunked_vector<write_batch_row>&) const;
 

@@ -23,8 +23,8 @@
         },
         {
             "name": "replace_objects_no_compact",
-            "input_type": "replace_objects_no_compact_request",
-            "output_type": "replace_objects_no_compact_reply"
+            "input_type": "replace_objects_request",
+            "output_type": "replace_objects_reply"
         },
         {
             "name": "get_first_offset_ge",

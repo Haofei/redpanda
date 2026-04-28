@@ -29,7 +29,7 @@ enum class update_key : uint8_t {
     remove_topics = 4,
     preregister_objects = 5,
     expire_preregistered_objects = 6,
-    replace_objects_no_compact = 7,
+    replace_objects = 7,
 };
 
 using stm_update_error = named_type<ss::sstring, struct update_error_tag>;
@@ -175,19 +175,17 @@ struct compact_objects_update
       compaction_updates;
 };
 
-struct replace_objects_no_compact_update
+struct replace_objects_update
   : public serde::envelope<
-      replace_objects_no_compact_update,
+      replace_objects_update,
       serde::version<0>,
       serde::compat_version<0>> {
     friend bool operator==(
-      const replace_objects_no_compact_update&,
-      const replace_objects_no_compact_update&) = default;
+      const replace_objects_update&, const replace_objects_update&) = default;
     auto serde_fields() { return std::tie(new_objects, expected_epochs); }
 
-    static constexpr auto key{update_key::replace_objects_no_compact};
-    static std::expected<replace_objects_no_compact_update, stm_update_error>
-    build(
+    static constexpr auto key{update_key::replace_objects};
+    static std::expected<replace_objects_update, stm_update_error> build(
       const state&,
       chunked_vector<new_object>,
       chunked_hash_map<
@@ -336,9 +334,8 @@ struct fmt::formatter<cloud_topics::l1::update_key> final
         case cloud_topics::l1::update_key::expire_preregistered_objects:
             return formatter<string_view>::format(
               "expire_preregistered_objects", ctx);
-        case cloud_topics::l1::update_key::replace_objects_no_compact:
-            return formatter<string_view>::format(
-              "replace_objects_no_compact", ctx);
+        case cloud_topics::l1::update_key::replace_objects:
+            return formatter<string_view>::format("replace_objects", ctx);
         }
     }
 };

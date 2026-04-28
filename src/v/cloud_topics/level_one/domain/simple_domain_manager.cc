@@ -170,18 +170,17 @@ simple_domain_manager::add_objects(rpc::add_objects_request req) {
     };
 }
 
-ss::future<rpc::replace_objects_no_compact_reply>
-simple_domain_manager::replace_objects_no_compact(
-  rpc::replace_objects_no_compact_request req) {
+ss::future<rpc::replace_objects_reply>
+simple_domain_manager::replace_objects(rpc::replace_objects_request req) {
     auto gate = maybe_gate();
     if (!gate.has_value()) {
-        co_return rpc::replace_objects_no_compact_reply{
+        co_return rpc::replace_objects_reply{
           .ec = rpc::errc::not_leader,
         };
     }
     auto sync_res = co_await stm_->sync(10s);
     if (!sync_res.has_value()) {
-        co_return rpc::replace_objects_no_compact_reply{
+        co_return rpc::replace_objects_reply{
           .ec = convert_stm_errc(sync_res.error()),
         };
     }
@@ -190,26 +189,26 @@ simple_domain_manager::replace_objects_no_compact(
         added_oids.emplace(obj.oid);
     }
     auto& stm_state = stm_->state();
-    auto update_res = replace_objects_no_compact_update::build(
+    auto update_res = replace_objects_update::build(
       stm_state, std::move(req.new_objects), std::move(req.expected_epochs));
     if (!update_res.has_value()) {
         vlog(
           cd_log.debug,
           "Rejecting request to replace objects: {}",
           update_res.error());
-        co_return rpc::replace_objects_no_compact_reply{
+        co_return rpc::replace_objects_reply{
           .ec = rpc::errc::concurrent_requests,
         };
     }
     storage::record_batch_builder builder(
       model::record_batch_type::l1_stm, model::offset{0});
     builder.add_raw_kv(
-      serde::to_iobuf(replace_objects_no_compact_update::key),
+      serde::to_iobuf(replace_objects_update::key),
       serde::to_iobuf(std::move(update_res.value())));
     auto repl_res = co_await stm_->replicate_and_wait(
       sync_res.value(), std::move(builder).build(), as_);
     if (!repl_res.has_value()) {
-        co_return rpc::replace_objects_no_compact_reply{
+        co_return rpc::replace_objects_reply{
           .ec = convert_stm_errc(repl_res.error()),
         };
     }
@@ -224,11 +223,11 @@ simple_domain_manager::replace_objects_no_compact(
         }
     }
     if (!any_added) {
-        co_return rpc::replace_objects_no_compact_reply{
+        co_return rpc::replace_objects_reply{
           .ec = rpc::errc::concurrent_requests,
         };
     }
-    co_return rpc::replace_objects_no_compact_reply{
+    co_return rpc::replace_objects_reply{
       .ec = rpc::errc::ok,
     };
 }

@@ -187,8 +187,8 @@ struct replace_spec {
 using replace_specs = std::vector<replace_spec>;
 
 template<typename... Objects>
-replace_objects_no_compact_db_update make_replace_objects_no_compact_update(
-  const replace_specs& rs, Objects... objects) {
+replace_objects_db_update
+make_replace_objects_update(const replace_specs& rs, Objects... objects) {
     chunked_hash_map<
       model::topic_id,
       chunked_hash_map<
@@ -201,7 +201,7 @@ replace_objects_no_compact_db_update make_replace_objects_no_compact_update(
     }
 
     auto new_objects = make_new_objects(objects...);
-    return replace_objects_no_compact_db_update{
+    return replace_objects_db_update{
       .new_objects = std::move(new_objects),
       .expected_epochs = std::move(expected_epochs),
     };
@@ -289,8 +289,7 @@ protected:
         db_->apply(std::move(wb)).get();
     }
 
-    void apply_replace_no_compact_update(
-      replace_objects_no_compact_db_update& update) {
+    void apply_replace_no_compact_update(replace_objects_db_update& update) {
         preregister_new_objects(update.new_objects);
         auto reader = make_reader();
         chunked_vector<write_batch_row> rows;
@@ -445,9 +444,8 @@ protected:
     }
 
     template<typename... Objects>
-    void replace_objects_no_compact(replace_specs rs, Objects... objects) {
-        auto db_update = make_replace_objects_no_compact_update(
-          std::move(rs), objects...);
+    void replace_objects(replace_specs rs, Objects... objects) {
+        auto db_update = make_replace_objects_update(std::move(rs), objects...);
         apply_replace_no_compact_update(db_update);
     }
 
@@ -851,7 +849,7 @@ TEST_F(StateUpdateTest, TestReplaceObjectsBasic) {
 
     // Create a new object that replaces the first two extents [0-199].
     auto new_oid = make_oid();
-    replace_objects_no_compact(
+    replace_objects(
       replace_specs{{.tidp = tidp0, .epoch = 0}},
       make_object(new_oid, tp(tidp0, 0, 199).pos(0, 2047)));
 
@@ -874,7 +872,7 @@ TEST_F(StateUpdateTest, TestReplaceObjectsRejectsMissingPartition) {
     prereg_oids.push_back(oid);
     preregister_objects(std::move(prereg_oids), model::timestamp(1000));
 
-    auto db_update = make_replace_objects_no_compact_update(
+    auto db_update = make_replace_objects_update(
       replace_specs{{.tidp = tidp0, .epoch = 0}},
       make_object(oid, tp(tidp0, 0, 99).pos(0, 1023)));
     auto reader = make_reader();
@@ -887,7 +885,7 @@ TEST_F(StateUpdateTest, TestReplaceObjectsRejectsMissingPartition) {
 }
 
 TEST_F(StateUpdateTest, TestReplaceObjectsRejectsEmptyObjects) {
-    replace_objects_no_compact_db_update update{
+    replace_objects_db_update update{
       .new_objects = {},
       .expected_epochs = {},
     };
@@ -962,7 +960,7 @@ TEST_F(StateUpdateTest, TestReplaceObjectsRejectsDuplicateObject) {
       make_object(oid, tp(tidp0, 0, 99).pos(0, 1023)));
 
     // Try to replace using an object ID that already exists.
-    auto db_update = make_replace_objects_no_compact_update(
+    auto db_update = make_replace_objects_update(
       replace_specs{{.tidp = tidp0, .epoch = 0}},
       make_object(oid, tp(tidp0, 0, 99).pos(0, 1023)));
     auto reader = make_reader();
@@ -1574,7 +1572,7 @@ TEST_F(StateUpdateTest, TestReplaceObjectsTracksSize) {
 
     // Replace both extents with a single smaller extent.
     auto new_oid = make_oid();
-    replace_objects_no_compact(
+    replace_objects(
       replace_specs{{.tidp = tidp0, .epoch = 0}},
       make_object(new_oid, tp(tidp0, 0, 199).pos(0, 511)));
 
@@ -1597,7 +1595,7 @@ TEST_F(StateUpdateTest, TestReplaceObjectsTracksSizeMultiplePartitions) {
     verify_metadata_size(tidp1, 500);
 
     // Replace only tidp0's extent with a smaller one.
-    replace_objects_no_compact(
+    replace_objects(
       replace_specs{{.tidp = tidp0, .epoch = 0}},
       make_object(make_oid(), tp(tidp0, 0, 99).pos(0, 199))); // size = 200
 
@@ -1837,7 +1835,7 @@ TEST_F(StateUpdateTest, TestDiscoverReplacedObjectIds) {
     // Build a replace update that replaces extents [0-199]. Discovery
     // should find old_oid1 and old_oid2 but not old_oid3.
     auto new_oid = make_oid();
-    auto db_update = make_replace_objects_no_compact_update(
+    auto db_update = make_replace_objects_update(
       replace_specs{{.tidp = tidp0, .epoch = 0}},
       make_object(new_oid, tp(tidp0, 0, 199).pos(0, 2047)));
 
@@ -1893,7 +1891,7 @@ TEST_F(StateUpdateTest, TestReplaceObjectsEpochMismatchRejectedAtBuildRows) {
 
     verify_metadata(tidp0, kafka::offset(0), kafka::offset(100));
 
-    // Build a replace_objects_no_compact_db_update with expected_epoch = 1, but
+    // Build a replace_objects_db_update with expected_epoch = 1, but
     // the actual epoch is still 0.
     auto new_oid = make_oid();
     chunked_vector<object_id> prereg_oids;
@@ -1909,7 +1907,7 @@ TEST_F(StateUpdateTest, TestReplaceObjectsEpochMismatchRejectedAtBuildRows) {
     expected_epochs[tidp0.topic_id][tidp0.partition]
       = partition_state::compaction_epoch_t{1};
 
-    replace_objects_no_compact_db_update db_update{
+    replace_objects_db_update db_update{
       .new_objects = make_new_objects(
         make_object(new_oid, tp(tidp0, 0, 99).pos(0, 1023))),
       .expected_epochs = std::move(expected_epochs),
@@ -1926,12 +1924,12 @@ TEST_F(StateUpdateTest, TestReplaceObjectsEpochMismatchRejectedAtBuildRows) {
 }
 
 TEST_F(StateUpdateTest, TestReplaceObjectsRejectsExtentsWithoutEpochEntry) {
-    // Build a replace_objects_no_compact_db_update with new_objects but empty
+    // Build a replace_objects_db_update with new_objects but empty
     // expected_epochs. validate_inputs should reject it because the
     // bidirectional invariant requires an expected_epochs entry for every
     // partition that has new extents.
     auto oid = make_oid();
-    replace_objects_no_compact_db_update db_update{
+    replace_objects_db_update db_update{
       .new_objects = make_new_objects(
         make_object(oid, tp(tidp0, 0, 99).pos(0, 1023))),
       .expected_epochs = {},
@@ -1944,7 +1942,7 @@ TEST_F(StateUpdateTest, TestReplaceObjectsRejectsExtentsWithoutEpochEntry) {
 }
 
 TEST_F(StateUpdateTest, TestReplaceObjectsRejectsEpochEntryWithoutExtents) {
-    // Build a replace_objects_no_compact_db_update where expected_epochs
+    // Build a replace_objects_db_update where expected_epochs
     // contains an entry for a partition that has no corresponding new extents.
     // validate_inputs should reject it (bidirectional invariant).
     auto oid = make_oid();
@@ -1968,7 +1966,7 @@ TEST_F(StateUpdateTest, TestReplaceObjectsRejectsEpochEntryWithoutExtents) {
     expected_epochs[other_tidp.topic_id][other_tidp.partition]
       = partition_state::compaction_epoch_t{0};
 
-    replace_objects_no_compact_db_update db_update{
+    replace_objects_db_update db_update{
       .new_objects = make_new_objects(
         make_object(oid, tp(tidp0, 0, 99).pos(0, 1023))),
       .expected_epochs = std::move(expected_epochs),

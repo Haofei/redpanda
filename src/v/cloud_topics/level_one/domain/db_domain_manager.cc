@@ -341,9 +341,8 @@ db_domain_manager::add_objects(rpc::add_objects_request req) {
     };
 }
 
-ss::future<rpc::replace_objects_no_compact_reply>
-db_domain_manager::replace_objects_no_compact(
-  rpc::replace_objects_no_compact_request req) {
+ss::future<rpc::replace_objects_reply>
+db_domain_manager::replace_objects(rpc::replace_objects_request req) {
     // Collect topics and partitions upfront.
     absl::btree_set<model::topic_id> topics;
     absl::btree_set<model::topic_id_partition> partitions;
@@ -359,7 +358,7 @@ db_domain_manager::replace_objects_no_compact(
       .partition_locks = std::move(partitions),
     });
     if (!locks_res.has_value()) {
-        co_return rpc::replace_objects_no_compact_reply{
+        co_return rpc::replace_objects_reply{
           .ec = locks_res.error(),
         };
     }
@@ -375,7 +374,7 @@ db_domain_manager::replace_objects_no_compact(
         const auto& p = tp.partition;
         nested_epochs[t][p] = epoch;
     }
-    auto update = replace_objects_no_compact_db_update{
+    auto update = replace_objects_db_update{
       .new_objects = std::move(req.new_objects),
       .expected_epochs = std::move(nested_epochs),
     };
@@ -390,7 +389,7 @@ db_domain_manager::replace_objects_no_compact(
         auto discovered_res = co_await update.discover_replaced_object_ids(
           discovery_reader);
         if (!discovered_res.has_value()) {
-            co_return rpc::replace_objects_no_compact_reply{
+            co_return rpc::replace_objects_reply{
               .ec = log_and_convert(
                 discovered_res.error(), "Error discovering replaced objects: "),
             };
@@ -399,7 +398,7 @@ db_domain_manager::replace_objects_no_compact(
         auto obj_locks_res = co_await locks_res.value().acquire_objects(
           std::move(all_oids));
         if (!obj_locks_res.has_value()) {
-            co_return rpc::replace_objects_no_compact_reply{
+            co_return rpc::replace_objects_reply{
               .ec = obj_locks_res.error(),
             };
         }
@@ -410,18 +409,18 @@ db_domain_manager::replace_objects_no_compact(
     chunked_vector<write_batch_row> rows;
     auto build_res = co_await update.build_rows(reader, rows);
     if (!build_res.has_value()) {
-        co_return rpc::replace_objects_no_compact_reply{
+        co_return rpc::replace_objects_reply{
           .ec = log_and_convert(
             build_res.error(), "Rejecting request to replace objects: "),
         };
     }
     auto apply_res = co_await write_rows(locks_res.value(), std::move(rows));
     if (!apply_res.has_value()) {
-        co_return rpc::replace_objects_no_compact_reply{
+        co_return rpc::replace_objects_reply{
           .ec = apply_res.error(),
         };
     }
-    co_return rpc::replace_objects_no_compact_reply{
+    co_return rpc::replace_objects_reply{
       .ec = rpc::errc::ok,
     };
 }
