@@ -753,6 +753,21 @@ replace_objects_update::can_apply(const state& state) {
         }
     }
 
+    // Every partition with new extents must have a compaction_update entry
+    // so its expected_compaction_epoch can be validated. Without this,
+    // callers could silently bump epochs without OCC.
+    for (const auto& [tidp, _] : new_extents_by_tp) {
+        auto t_it = compaction_updates.find(tidp.topic_id);
+        if (
+          t_it == compaction_updates.end()
+          || !t_it->second.contains(tidp.partition)) {
+            return std::unexpected(stm_update_error(
+              fmt::format(
+                "Partition {} has new extents but no compaction_update entry",
+                tidp)));
+        }
+    }
+
     return std::monostate{};
 }
 

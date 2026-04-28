@@ -2681,3 +2681,119 @@ TEST(SimpleMetastoreTest, TestGetExtentMetadataForwardsWithObjectMetadata) {
         EXPECT_FALSE(res->end_of_stream);
     }
 }
+
+TEST(SimpleMetastoreTest, ReplaceObjectsRejectsEpoch) {
+    simple_metastore m;
+    auto tp = model::topic_id_partition::from(tid_a);
+
+    // Add an initial object.
+    auto ometa = om_builder(oid1, 100, 1100)
+                   .add(tid_a, 0_o, 10_o, 2000_t, 0, 99)
+                   .build();
+    m.preregister_objects(chunked_vector<object_id>::single(oid1));
+    auto add_res = m.add_objects(
+                      om_list_t::single(std::move(ometa)),
+                      terms_builder().add(tid_a, 0_tm, 0_o).build())
+                     .get();
+    ASSERT_TRUE(add_res.has_value()) << int(add_res.error());
+
+    // Read the current epoch (should be 0 since no replace has happened).
+    auto info_res = m.get_compaction_info({
+                                            .tidp = tp,
+                                            .tombstone_removal_upper_bound_ts
+                                            = model::timestamp::min(),
+                                          })
+                      .get();
+    ASSERT_TRUE(info_res.has_value()) << int(info_res.error());
+    EXPECT_EQ(info_res->compaction_epoch, metastore::compaction_epoch{0});
+
+    // First replace with the correct epoch (0). Should succeed.
+    om_list_t new_os1;
+    new_os1.emplace_back(
+      om_builder(oid2, 100, 1100).add(tid_a, 0_o, 10_o, 2000_t, 0, 99).build());
+    m.preregister_objects(chunked_vector<object_id>::single(oid2));
+    metastore::replace_epoch_map_t epochs1;
+    epochs1[tp] = metastore::compaction_epoch{0};
+    auto replace1 = m.replace_objects(new_os1, epochs1).get();
+    ASSERT_TRUE(replace1.has_value()) << int(replace1.error());
+
+    // Epoch should still be 0, since replace_objects() does not bump the epoch.
+    info_res = m
+                 .get_compaction_info({
+                   .tidp = tp,
+                   .tombstone_removal_upper_bound_ts = model::timestamp::min(),
+                 })
+                 .get();
+    ASSERT_TRUE(info_res.has_value());
+    EXPECT_EQ(info_res->compaction_epoch, metastore::compaction_epoch{0});
+
+    // Replace again with incorrect epoch (1). Should fail.
+    om_list_t new_os2;
+    new_os2.emplace_back(
+      om_builder(oid3, 100, 1100).add(tid_a, 0_o, 10_o, 2000_t, 0, 99).build());
+    m.preregister_objects(chunked_vector<object_id>::single(oid3));
+    metastore::replace_epoch_map_t incorrect_epochs;
+    incorrect_epochs[tp] = metastore::compaction_epoch{1};
+    auto replace2 = m.replace_objects(new_os2, incorrect_epochs).get();
+    ASSERT_FALSE(replace2.has_value());
+    EXPECT_EQ(replace2.error(), metastore::errc::invalid_request);
+}
+
+TEST(SimpleMetastoreTest, CompactObjectsBumpsEpochAndRejectsStale) {
+    simple_metastore m;
+    auto tp = model::topic_id_partition::from(tid_a);
+
+    // Add an initial object.
+    auto ometa = om_builder(oid1, 100, 1100)
+                   .add(tid_a, 0_o, 10_o, 2000_t, 0, 99)
+                   .build();
+    m.preregister_objects(chunked_vector<object_id>::single(oid1));
+    auto add_res = m.add_objects(
+                      om_list_t::single(std::move(ometa)),
+                      terms_builder().add(tid_a, 0_tm, 0_o).build())
+                     .get();
+    ASSERT_TRUE(add_res.has_value()) << int(add_res.error());
+
+    // Read the current epoch (should be 0).
+    auto info_res = m.get_compaction_info({
+                                            .tidp = tp,
+                                            .tombstone_removal_upper_bound_ts
+                                            = model::timestamp::min(),
+                                          })
+                      .get();
+    ASSERT_TRUE(info_res.has_value()) << int(info_res.error());
+    EXPECT_EQ(info_res->compaction_epoch, metastore::compaction_epoch{0});
+
+    // First compact with the correct epoch (0). Should succeed.
+    om_list_t new_os1;
+    new_os1.emplace_back(
+      om_builder(oid2, 100, 1100).add(tid_a, 0_o, 10_o, 2000_t, 0, 99).build());
+    m.preregister_objects(chunked_vector<object_id>::single(oid2));
+    auto cmb1 = cm_builder();
+    cmb1.clean(tid_a, 3_o, 5_o, 3000_t);
+    cmb1.set_expected_epoch(tid_a, metastore::compaction_epoch{0});
+    auto compact1 = m.compact_objects(new_os1, cmb1.build()).get();
+    ASSERT_TRUE(compact1.has_value()) << int(compact1.error());
+
+    // Epoch should now be 1.
+    info_res = m
+                 .get_compaction_info({
+                   .tidp = tp,
+                   .tombstone_removal_upper_bound_ts = model::timestamp::min(),
+                 })
+                 .get();
+    ASSERT_TRUE(info_res.has_value());
+    EXPECT_EQ(info_res->compaction_epoch, metastore::compaction_epoch{1});
+
+    // Second compact with the stale epoch (0). Should fail.
+    om_list_t new_os2;
+    new_os2.emplace_back(
+      om_builder(oid3, 100, 1100).add(tid_a, 0_o, 10_o, 2000_t, 0, 99).build());
+    m.preregister_objects(chunked_vector<object_id>::single(oid3));
+    auto cmb2 = cm_builder();
+    cmb2.clean(tid_a, 6_o, 8_o, 3000_t);
+    cmb2.set_expected_epoch(tid_a, metastore::compaction_epoch{0});
+    auto compact2 = m.compact_objects(new_os2, cmb2.build()).get();
+    ASSERT_FALSE(compact2.has_value());
+    EXPECT_EQ(compact2.error(), metastore::errc::invalid_request);
+}

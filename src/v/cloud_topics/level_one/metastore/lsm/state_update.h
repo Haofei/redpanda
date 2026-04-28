@@ -95,7 +95,9 @@ struct replace_objects_db_update {
     // Validates the given update is well-formed:
     // - There are new objects
     // - Input extents are in order and form contiguous intervals
-    // - Compaction updates align with new extents
+    // - Every partition in new_objects has a compaction_update entry and
+    //   vice versa (the bidirectional invariant that gates the OCC epoch
+    //   bump)
     std::expected<void, db_update_error> validate_inputs() const;
 
     chunked_vector<new_object> new_objects;

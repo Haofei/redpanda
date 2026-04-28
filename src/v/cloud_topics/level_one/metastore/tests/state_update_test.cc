@@ -134,6 +134,24 @@ public:
 private:
     replace_objects_update out;
 };
+
+struct replace_objects_no_compact_builder {
+public:
+    replace_objects_no_compact_builder& add(new_object o) {
+        out.new_objects.emplace_back(std::move(o));
+        return *this;
+    }
+    replace_objects_no_compact_builder& set_expected_epoch(
+      std::string_view tp_str, partition_state::compaction_epoch_t epoch) {
+        auto tp = model::topic_id_partition::from(tp_str);
+        out.expected_epochs[tp.topic_id][tp.partition] = epoch;
+        return *this;
+    }
+    replace_objects_no_compact_update build() { return std::move(out); }
+
+private:
+    replace_objects_no_compact_update out;
+};
 } // namespace
 
 enum class state_backend { simple, lsm };
@@ -210,6 +228,38 @@ protected:
         replace_objects_db_update db_update{
           .new_objects = std::move(update.new_objects),
           .compaction_updates = std::move(update.compaction_updates),
+        };
+        auto reader = state_reader(db_->create_snapshot());
+        chunked_vector<write_batch_row> rows;
+        auto result = db_update.build_rows(reader, rows).get();
+        if (!result.has_value()) {
+            return std::unexpected(
+              stm_update_error{fmt::format("{}", result.error())});
+        }
+        apply_rows_to_db(rows);
+        return std::monostate{};
+    }
+
+    std::expected<std::monostate, stm_update_error>
+    apply_replace_objects_no_compact(replace_objects_no_compact_update update) {
+        chunked_vector<object_id> oids;
+        for (const auto& o : update.new_objects) {
+            oids.push_back(o.oid);
+        }
+        if (GetParam() == state_backend::simple) {
+            auto prereg = preregister_for_simple(oids);
+            if (!prereg.has_value()) {
+                return prereg;
+            }
+            return update.apply(state_);
+        }
+        auto prereg = preregister_for_lsm(oids);
+        if (!prereg.has_value()) {
+            return prereg;
+        }
+        replace_objects_no_compact_db_update db_update{
+          .new_objects = std::move(update.new_objects),
+          .expected_epochs = std::move(update.expected_epochs),
         };
         auto reader = state_reader(db_->create_snapshot());
         chunked_vector<write_batch_row> rows;
@@ -715,14 +765,17 @@ TEST_P(StateUpdateParamTest, TestReplaceBasic) {
     ASSERT_TRUE(add_res.has_value());
 
     // Fully replace partition a, partially replace c.
-    auto replace = replace_objects_builder()
-                     .add(new_obj_builder(oid3, 100, 1100)
-                            .add(tidp_a, 0_o, 20_o, 1999_t, 0, 99)
-                            .add(tidp_c, 0_o, 10_o, 1999_t, 100, 199)
-                            .build())
-                     .build();
+    auto replace
+      = replace_objects_no_compact_builder()
+          .add(new_obj_builder(oid3, 100, 1100)
+                 .add(tidp_a, 0_o, 20_o, 1999_t, 0, 99)
+                 .add(tidp_c, 0_o, 10_o, 1999_t, 100, 199)
+                 .build())
+          .set_expected_epoch(tidp_a, partition_state::compaction_epoch_t{0})
+          .set_expected_epoch(tidp_c, partition_state::compaction_epoch_t{0})
+          .build();
 
-    auto replace_res = apply_replace_objects(std::move(replace));
+    auto replace_res = apply_replace_objects_no_compact(std::move(replace));
     ASSERT_TRUE(replace_res.has_value());
 
     auto& s = get_state();
@@ -751,13 +804,15 @@ TEST_P(StateUpdateParamTest, TestReplaceBasic) {
 }
 
 TEST_P(StateUpdateParamTest, TestReplaceEmptyState) {
-    auto replace = replace_objects_builder()
+    auto replace = replace_objects_no_compact_builder()
                      .add(new_obj_builder(oid1, 100, 1100)
                             .add(tidp_a, 0_o, 20_o, 1999_t, 0, 99)
                             .build())
+                     .set_expected_epoch(
+                       tidp_a, partition_state::compaction_epoch_t{0})
                      .build();
 
-    auto replace_res = apply_replace_objects(std::move(replace));
+    auto replace_res = apply_replace_objects_no_compact(std::move(replace));
     EXPECT_FALSE(replace_res.has_value());
 }
 
@@ -771,13 +826,15 @@ TEST_P(StateUpdateParamTest, TestReplaceDuplicate) {
     auto add_res = apply_add_objects(std::move(add));
     ASSERT_TRUE(add_res.has_value());
 
-    auto replace = replace_objects_builder()
+    auto replace = replace_objects_no_compact_builder()
                      .add(new_obj_builder(oid1, 100, 1100)
                             .add(tidp_a, 0_o, 10_o, 1999_t, 0, 99)
                             .build())
+                     .set_expected_epoch(
+                       tidp_a, partition_state::compaction_epoch_t{0})
                      .build();
 
-    auto replace_res = apply_replace_objects(std::move(replace));
+    auto replace_res = apply_replace_objects_no_compact(std::move(replace));
     EXPECT_FALSE(replace_res.has_value());
 }
 
@@ -791,13 +848,15 @@ TEST_P(StateUpdateParamTest, TestReplaceMisaligned) {
     auto add_res = apply_add_objects(std::move(add));
     ASSERT_TRUE(add_res.has_value());
 
-    auto replace = replace_objects_builder()
+    auto replace = replace_objects_no_compact_builder()
                      .add(new_obj_builder(oid2, 100, 1100)
                             .add(tidp_a, 0_o, 9_o, 1999_t, 0, 99)
                             .build())
+                     .set_expected_epoch(
+                       tidp_a, partition_state::compaction_epoch_t{0})
                      .build();
 
-    auto replace_res = apply_replace_objects(std::move(replace));
+    auto replace_res = apply_replace_objects_no_compact(std::move(replace));
     EXPECT_FALSE(replace_res.has_value());
 }
 
@@ -812,16 +871,18 @@ TEST_P(StateUpdateParamTest, TestReplaceBadOrdering) {
     ASSERT_TRUE(add_res.has_value());
 
     // Make the replacement overlap with itself.
-    auto replace = replace_objects_builder()
+    auto replace = replace_objects_no_compact_builder()
                      .add(new_obj_builder(oid2, 100, 1100)
                             .add(tidp_a, 0_o, 7_o, 1999_t, 0, 99)
                             .build())
                      .add(new_obj_builder(oid3, 100, 1100)
                             .add(tidp_a, 5_o, 10_o, 1999_t, 0, 99)
                             .build())
+                     .set_expected_epoch(
+                       tidp_a, partition_state::compaction_epoch_t{0})
                      .build();
 
-    auto replace_res = apply_replace_objects(std::move(replace));
+    auto replace_res = apply_replace_objects_no_compact(std::move(replace));
     EXPECT_FALSE(replace_res.has_value());
 }
 
@@ -836,12 +897,14 @@ TEST_P(StateUpdateParamTest, TestReplaceRejectsInvertedExtent) {
     ASSERT_TRUE(add_res.has_value());
 
     // Replacement with an inverted extent should be rejected.
-    auto replace = replace_objects_builder()
+    auto replace = replace_objects_no_compact_builder()
                      .add(new_obj_builder(oid2, 100, 1100)
                             .add(tidp_a, 10_o, 0_o, 1999_t, 0, 99)
                             .build())
+                     .set_expected_epoch(
+                       tidp_a, partition_state::compaction_epoch_t{0})
                      .build();
-    auto replace_res = apply_replace_objects(std::move(replace));
+    auto replace_res = apply_replace_objects_no_compact(std::move(replace));
     EXPECT_FALSE(replace_res.has_value());
 }
 
@@ -855,9 +918,9 @@ TEST_P(StateUpdateParamTest, TestEmptyReplace) {
     auto add_res = apply_add_objects(std::move(add));
     ASSERT_TRUE(add_res.has_value());
 
-    auto replace = replace_objects_builder().build();
+    auto replace = replace_objects_no_compact_builder().build();
 
-    auto replace_res = apply_replace_objects(std::move(replace));
+    auto replace_res = apply_replace_objects_no_compact(std::move(replace));
     EXPECT_FALSE(replace_res.has_value());
 }
 
@@ -881,16 +944,18 @@ TEST_P(StateUpdateParamTest, TestReplaceValidNonContiguous) {
     // non-contiguous update. While the update itself is non-contiguous, the
     // individual objects still align with existing extents, and is therefore
     // valid.
-    auto replace = replace_objects_builder()
+    auto replace = replace_objects_no_compact_builder()
                      .add(new_obj_builder(oid4, 100, 1100)
                             .add(tidp_a, 0_o, 99_o, 1999_t, 0, 99)
                             .build())
                      .add(new_obj_builder(oid5, 100, 1100)
                             .add(tidp_a, 200_o, 299_o, 1999_t, 0, 99)
                             .build())
+                     .set_expected_epoch(
+                       tidp_a, partition_state::compaction_epoch_t{0})
                      .build();
 
-    auto replace_res = apply_replace_objects(std::move(replace));
+    auto replace_res = apply_replace_objects_no_compact(std::move(replace));
     ASSERT_TRUE(replace_res.has_value());
 
     auto& s = get_state();
@@ -918,7 +983,7 @@ TEST_P(StateUpdateParamTest, TestReplaceValidNonContiguousSplitExtent) {
     // non-contiguous update whose objects align with existing extents.
     // The update should see oid3 split into two new extents (for a total of 4
     // extents).
-    auto replace = replace_objects_builder()
+    auto replace = replace_objects_no_compact_builder()
                      .add(new_obj_builder(oid4, 100, 1100)
                             .add(tidp_a, 0_o, 99_o, 1999_t, 0, 99)
                             .build())
@@ -928,9 +993,11 @@ TEST_P(StateUpdateParamTest, TestReplaceValidNonContiguousSplitExtent) {
                      .add(new_obj_builder(oid6, 100, 1100)
                             .add(tidp_a, 250_o, 299_o, 1999_t, 0, 99)
                             .build())
+                     .set_expected_epoch(
+                       tidp_a, partition_state::compaction_epoch_t{0})
                      .build();
 
-    auto replace_res = apply_replace_objects(std::move(replace));
+    auto replace_res = apply_replace_objects_no_compact(std::move(replace));
     ASSERT_TRUE(replace_res.has_value());
 
     auto& s = get_state();
@@ -956,7 +1023,7 @@ TEST_P(StateUpdateParamTest, TestReplaceInvalidNonContiguousBadOffsets) {
 
     // Attempt to replace oid1 and oid3 while leaving oid2 in place with a
     // invalid non-contiguous update with bad offsets.
-    auto replace = replace_objects_builder()
+    auto replace = replace_objects_no_compact_builder()
                      .add(new_obj_builder(oid4, 100, 1100)
                             .add(tidp_a, 0_o, 99_o, 1999_t, 0, 99)
                             .build())
@@ -966,9 +1033,11 @@ TEST_P(StateUpdateParamTest, TestReplaceInvalidNonContiguousBadOffsets) {
                      .add(new_obj_builder(oid6, 100, 1100)
                             .add(tidp_a, 239_o, 299_o, 1999_t, 0, 99)
                             .build())
+                     .set_expected_epoch(
+                       tidp_a, partition_state::compaction_epoch_t{0})
                      .build();
 
-    auto replace_res = apply_replace_objects(std::move(replace));
+    auto replace_res = apply_replace_objects_no_compact(std::move(replace));
     EXPECT_FALSE(replace_res.has_value());
 
     auto& s = get_state();
@@ -994,7 +1063,7 @@ TEST_P(StateUpdateParamTest, TestReplaceInvalidNonContiguousDoesNotSpan) {
 
     // Attempt to replace oid1 and oid3 while leaving oid2 in place with a
     // invalid non-contiguous update that doesn't exactly span existing extents.
-    auto replace = replace_objects_builder()
+    auto replace = replace_objects_no_compact_builder()
                      .add(new_obj_builder(oid4, 100, 1100)
                             .add(tidp_a, 0_o, 99_o, 1999_t, 0, 99)
                             .build())
@@ -1004,9 +1073,11 @@ TEST_P(StateUpdateParamTest, TestReplaceInvalidNonContiguousDoesNotSpan) {
                      .add(new_obj_builder(oid6, 100, 1100)
                             .add(tidp_a, 250_o, 298_o, 1999_t, 0, 99)
                             .build())
+                     .set_expected_epoch(
+                       tidp_a, partition_state::compaction_epoch_t{0})
                      .build();
 
-    auto replace_res = apply_replace_objects(std::move(replace));
+    auto replace_res = apply_replace_objects_no_compact(std::move(replace));
     EXPECT_FALSE(replace_res.has_value());
 
     auto& s = get_state();
@@ -1038,7 +1109,7 @@ TEST_P(StateUpdateParamTest, TestReplaceSingleExtentBeforeNewStartOffset) {
     // containing offsets before the truncation point (the new start offset).
     // The metastore should be able to apply the update by ignoring the first
     // extent.
-    auto replace = replace_objects_builder()
+    auto replace = replace_objects_no_compact_builder()
                      .add(new_obj_builder(oid4, 100, 1100)
                             .add(tidp_a, 0_o, 99_o, 1999_t, 0, 99)
                             .build())
@@ -1048,9 +1119,11 @@ TEST_P(StateUpdateParamTest, TestReplaceSingleExtentBeforeNewStartOffset) {
                      .add(new_obj_builder(oid6, 100, 1100)
                             .add(tidp_a, 200_o, 299_o, 1999_t, 0, 99)
                             .build())
+                     .set_expected_epoch(
+                       tidp_a, partition_state::compaction_epoch_t{0})
                      .build();
 
-    auto replace_res = apply_replace_objects(std::move(replace));
+    auto replace_res = apply_replace_objects_no_compact(std::move(replace));
     ASSERT_TRUE(replace_res.has_value());
 }
 
@@ -1078,7 +1151,7 @@ TEST_P(
     // Attempt to replace with a list of valid objects built before the
     // truncation occurred. The metastore should be able to accept and prune the
     // extents below the start offset.
-    auto replace = replace_objects_builder()
+    auto replace = replace_objects_no_compact_builder()
                      .add(new_obj_builder(oid4, 100, 1100)
                             .add(tidp_a, 0_o, 30_o, 1999_t, 0, 99)
                             .build())
@@ -1088,9 +1161,11 @@ TEST_P(
                      .add(new_obj_builder(oid6, 100, 1100)
                             .add(tidp_a, 61_o, 100_o, 1999_t, 0, 99)
                             .build())
+                     .set_expected_epoch(
+                       tidp_a, partition_state::compaction_epoch_t{0})
                      .build();
 
-    auto replace_res = apply_replace_objects(std::move(replace));
+    auto replace_res = apply_replace_objects_no_compact(std::move(replace));
     ASSERT_TRUE(replace_res.has_value());
 
     auto& s = get_state();
@@ -1122,7 +1197,7 @@ TEST_P(StateUpdateParamTest, TestReplaceAllExtentsBeforeNewStartOffset) {
     // Attempt to replace with a list of valid objects, with all extents
     // containing offsets before the truncation point (the new start offset).
     // The metastore should be able to recognize this is a no-op.
-    auto replace = replace_objects_builder()
+    auto replace = replace_objects_no_compact_builder()
                      .add(new_obj_builder(oid4, 100, 1100)
                             .add(tidp_a, 0_o, 99_o, 1999_t, 0, 99)
                             .build())
@@ -1132,9 +1207,11 @@ TEST_P(StateUpdateParamTest, TestReplaceAllExtentsBeforeNewStartOffset) {
                      .add(new_obj_builder(oid6, 100, 1100)
                             .add(tidp_a, 200_o, 299_o, 1999_t, 0, 99)
                             .build())
+                     .set_expected_epoch(
+                       tidp_a, partition_state::compaction_epoch_t{0})
                      .build();
 
-    auto replace_res = apply_replace_objects(std::move(replace));
+    auto replace_res = apply_replace_objects_no_compact(std::move(replace));
     ASSERT_FALSE(replace_res.has_value());
 }
 
@@ -1157,7 +1234,7 @@ TEST_P(StateUpdateParamTest, TestReplaceMultipleExtentsBeforeNewStartOffset) {
     // If we fail to consider the fact that the extent {0,100} is still
     // present in the existing state, removing the first two extents would
     // result in a misaligned update and a failure to replace.
-    auto replace = replace_objects_builder()
+    auto replace = replace_objects_no_compact_builder()
                      .add(new_obj_builder(oid2, 100, 1100)
                             .add(tidp_a, 0_o, 30_o, 1999_t, 0, 99)
                             .build())
@@ -1167,9 +1244,11 @@ TEST_P(StateUpdateParamTest, TestReplaceMultipleExtentsBeforeNewStartOffset) {
                      .add(new_obj_builder(oid4, 100, 1100)
                             .add(tidp_a, 61_o, 100_o, 1999_t, 0, 99)
                             .build())
+                     .set_expected_epoch(
+                       tidp_a, partition_state::compaction_epoch_t{0})
                      .build();
 
-    auto replace_res = apply_replace_objects(std::move(replace));
+    auto replace_res = apply_replace_objects_no_compact(std::move(replace));
     ASSERT_TRUE(replace_res.has_value());
 
     auto& s = get_state();
@@ -1203,16 +1282,18 @@ TEST_P(
     // Attempt to replace with a list of extents that are misaligned to the
     // existing extents ([11,20],[21,30]), but form a valid, contiguous update
     // when considering the new start offset.
-    auto replace = replace_objects_builder()
+    auto replace = replace_objects_no_compact_builder()
                      .add(new_obj_builder(oid4, 100, 1100)
                             .add(tidp_a, 0_o, 15_o, 1999_t, 0, 99)
                             .build())
                      .add(new_obj_builder(oid5, 100, 1100)
                             .add(tidp_a, 16_o, 30_o, 1999_t, 0, 99)
                             .build())
+                     .set_expected_epoch(
+                       tidp_a, partition_state::compaction_epoch_t{0})
                      .build();
 
-    auto replace_res = apply_replace_objects(std::move(replace));
+    auto replace_res = apply_replace_objects_no_compact(std::move(replace));
     ASSERT_TRUE(replace_res.has_value());
 
     auto& s = get_state();
@@ -1221,7 +1302,101 @@ TEST_P(
     EXPECT_EQ(p_state->get().extents.size(), 2);
 }
 
-TEST_P(StateUpdateParamTest, TestReplaceWithCompaction) {
+TEST_P(StateUpdateParamTest, TestCompactWithoutUpdateRejects) {
+    auto add = add_objects_builder()
+                 .add(new_obj_builder(oid1, 100, 1100)
+                        .add(tidp_a, 0_o, 10_o, 1999_t, 0, 99)
+                        .build())
+                 .add_term_start(tidp_a, 0_tm, 0_o)
+                 .build();
+    auto add_res = apply_add_objects(std::move(add));
+    ASSERT_TRUE(add_res.has_value());
+
+    // A replace_objects request that supplies new extents for a partition
+    // but omits the compaction_update entry must be rejected. Without that
+    // invariant the apply path would silently bump the partition's
+    // compaction_epoch without OCC.
+    auto replace = replace_objects_builder()
+                     .add(new_obj_builder(oid2, 100, 1100)
+                            .add(tidp_a, 0_o, 10_o, 1999_t, 0, 99)
+                            .build())
+                     .build();
+
+    auto replace_res = apply_replace_objects(std::move(replace));
+    ASSERT_FALSE(replace_res.has_value());
+    EXPECT_THAT(
+      replace_res.error()(), testing::HasSubstr("no compaction_update entry"));
+}
+
+TEST_P(StateUpdateParamTest, TestCompactWithEpochOnlyUpdate) {
+    using testing::ElementsAre;
+    auto add = add_objects_builder()
+                 .add(new_obj_builder(oid1, 100, 1100)
+                        .add(tidp_a, 0_o, 10_o, 1999_t, 0, 99)
+                        .build())
+                 .add_term_start(tidp_a, 0_tm, 0_o)
+                 .build();
+    auto add_res = apply_add_objects(std::move(add));
+    ASSERT_TRUE(add_res.has_value());
+
+    // A replace_objects request whose compaction_update has only the
+    // expected_compaction_epoch set — no cleaned ranges, no tombstone
+    // removals — is valid. Extents are replaced, the epoch is bumped, and
+    // an empty compaction_state is visible.
+    auto replace = replace_objects_builder()
+                     .add(new_obj_builder(oid2, 100, 1100)
+                            .add(tidp_a, 0_o, 10_o, 1999_t, 0, 99)
+                            .build())
+                     .set_expected_epoch(
+                       tidp_a, partition_state::compaction_epoch_t{0})
+                     .build();
+
+    auto replace_res = apply_replace_objects(std::move(replace));
+    ASSERT_TRUE(replace_res.has_value()) << replace_res.error();
+
+    auto& s = get_state();
+    const auto& prt_a
+      = s.partition_state(model::topic_id_partition::from(tidp_a))->get();
+    EXPECT_THAT(prt_a.extents, ElementsAre(MatchesRange(oid2, 0_o, 10_o)));
+    EXPECT_EQ(prt_a.compaction_epoch, partition_state::compaction_epoch_t{1});
+    EXPECT_TRUE(prt_a.compaction_state.has_value());
+}
+
+TEST_P(StateUpdateParamTest, TestRejectsNotPreregistered) {
+    // Exercise the "Object not pre-registered" error path in
+    // validate_new_objects_layout. The apply_replace_objects_no_compact helper
+    // auto-pre-registers objects, so we bypass it and call can_apply()
+    // directly on the in-memory state.
+    //
+    // First set up a valid partition so epoch validation doesn't fire first.
+    auto add = add_objects_builder()
+                 .add(new_obj_builder(oid1, 100, 1100)
+                        .add(tidp_a, 0_o, 10_o, 1999_t, 0, 99)
+                        .build())
+                 .add_term_start(tidp_a, 0_tm, 0_o)
+                 .build();
+    auto add_res = apply_add_objects(std::move(add));
+    ASSERT_TRUE(add_res.has_value());
+
+    // Build the update manually and call can_apply() directly without
+    // pre-registering oid2. Both backends derive the check from the
+    // in-memory state returned by get_state().
+    replace_objects_no_compact_update update;
+    update.new_objects.push_back(new_obj_builder(oid2, 100, 1100)
+                                   .add(tidp_a, 0_o, 10_o, 1999_t, 0, 99)
+                                   .build());
+    auto tidp_a_tp = model::topic_id_partition::from(tidp_a);
+    update.expected_epochs[tidp_a_tp.topic_id][tidp_a_tp.partition]
+      = partition_state::compaction_epoch_t{0};
+
+    auto& s = get_state();
+    auto can_apply_res = update.can_apply(s);
+    ASSERT_FALSE(can_apply_res.has_value());
+    EXPECT_THAT(
+      can_apply_res.error()(), testing::HasSubstr("not pre-registered"));
+}
+
+TEST_P(StateUpdateParamTest, TestCompactWithCompaction) {
     using testing::ElementsAre;
     using range = struct compaction_state_update::cleaned_range;
     auto add = add_objects_builder()
@@ -1941,15 +2116,19 @@ TEST_P(StateUpdateParamTest, TestRemoveObjectsBasic) {
     EXPECT_EQ(2, get_state().objects.size());
 
     // Replace objects to mark originals as unreferenced.
-    auto replace = replace_objects_builder()
-                     .add(new_obj_builder(oid3, 100, 1100)
-                            .add(tidp_a, 0_o, 10_o, 1999_t, 0, 99)
-                            .build())
-                     .add(new_obj_builder(oid4, 100, 1100)
-                            .add(tidp_b, 0_o, 10_o, 1999_t, 0, 99)
-                            .build())
-                     .build();
-    ASSERT_TRUE(apply_replace_objects(std::move(replace)).has_value());
+    auto replace
+      = replace_objects_no_compact_builder()
+          .add(new_obj_builder(oid3, 100, 1100)
+                 .add(tidp_a, 0_o, 10_o, 1999_t, 0, 99)
+                 .build())
+          .add(new_obj_builder(oid4, 100, 1100)
+                 .add(tidp_b, 0_o, 10_o, 1999_t, 0, 99)
+                 .build())
+          .set_expected_epoch(tidp_a, partition_state::compaction_epoch_t{0})
+          .set_expected_epoch(tidp_b, partition_state::compaction_epoch_t{0})
+          .build();
+    ASSERT_TRUE(
+      apply_replace_objects_no_compact(std::move(replace)).has_value());
     EXPECT_EQ(4, get_state().objects.size());
 
     // Remove the unreferenced objects.
@@ -2275,6 +2454,148 @@ TEST_P(StateUpdateParamTest, TestExpirePreregisteredObjectsClearsFlag) {
     // oid2 untouched
     ASSERT_TRUE(s.objects.contains(oid2));
     EXPECT_TRUE(s.objects.at(oid2).is_preregistration);
+}
+
+// Tests for the new replace_objects_no_compact_update (key 7, epoch-validating
+// replace path). These are distinct from the compact path (key 1).
+TEST_P(StateUpdateParamTest, TestReplaceObjectsEpoch) {
+    // Set up a partition at epoch 0.
+    auto add = add_objects_builder()
+                 .add(new_obj_builder(oid1, 100, 1100)
+                        .add(tidp_a, 0_o, 10_o, 1999_t, 0, 99)
+                        .build())
+                 .add_term_start(tidp_a, 0_tm, 0_o)
+                 .build();
+    ASSERT_TRUE(apply_add_objects(std::move(add)).has_value());
+
+    // Build a replace_objects_no_compact_update with expected_epoch = 0.
+    auto replace = replace_objects_no_compact_builder()
+                     .add(new_obj_builder(oid2, 100, 1100)
+                            .add(tidp_a, 0_o, 10_o, 1999_t, 0, 99)
+                            .build())
+                     .set_expected_epoch(
+                       tidp_a, partition_state::compaction_epoch_t{0})
+                     .build();
+
+    auto res = apply_replace_objects_no_compact(std::move(replace));
+    ASSERT_TRUE(res.has_value()) << res.error();
+
+    auto& s = get_state();
+    auto p_ref = s.partition_state(model::topic_id_partition::from(tidp_a));
+    ASSERT_TRUE(p_ref.has_value());
+    const auto& p = p_ref->get();
+
+    // Epoch should still be 0, since replace_objects_no_compact() does not bump
+    // the epoch.
+    EXPECT_EQ(p.compaction_epoch, partition_state::compaction_epoch_t{0});
+
+    // The replace path must NOT create compaction_state for partitions that
+    // have never been compacted.
+    EXPECT_FALSE(p.compaction_state.has_value());
+}
+
+TEST_P(StateUpdateParamTest, TestReplaceObjectsEpochMismatchRejects) {
+    // Set up a partition at epoch 0.
+    auto add = add_objects_builder()
+                 .add(new_obj_builder(oid1, 100, 1100)
+                        .add(tidp_a, 0_o, 10_o, 1999_t, 0, 99)
+                        .build())
+                 .add_term_start(tidp_a, 0_tm, 0_o)
+                 .build();
+    ASSERT_TRUE(apply_add_objects(std::move(add)).has_value());
+
+    // Supply expected_epoch = 1, but the actual epoch is still 0.
+    auto replace = replace_objects_no_compact_builder()
+                     .add(new_obj_builder(oid2, 100, 1100)
+                            .add(tidp_a, 0_o, 10_o, 1999_t, 0, 99)
+                            .build())
+                     .set_expected_epoch(
+                       tidp_a, partition_state::compaction_epoch_t{1})
+                     .build();
+
+    auto res = apply_replace_objects_no_compact(std::move(replace));
+    EXPECT_FALSE(res.has_value());
+    EXPECT_THAT(fmt::format("{}", res.error()), testing::HasSubstr("epoch"));
+
+    // Partition state must be unchanged.
+    auto& s = get_state();
+    auto p_ref = s.partition_state(model::topic_id_partition::from(tidp_a));
+    ASSERT_TRUE(p_ref.has_value());
+    EXPECT_EQ(
+      p_ref->get().compaction_epoch, partition_state::compaction_epoch_t{0});
+}
+
+TEST_P(
+  StateUpdateParamTest,
+  TestReplaceObjectsEpochRejectsExtentsWithoutEpochEntry) {
+    // Set up partition a.
+    auto add = add_objects_builder()
+                 .add(new_obj_builder(oid1, 100, 1100)
+                        .add(tidp_a, 0_o, 10_o, 1999_t, 0, 99)
+                        .build())
+                 .add_term_start(tidp_a, 0_tm, 0_o)
+                 .build();
+    ASSERT_TRUE(apply_add_objects(std::move(add)).has_value());
+
+    // Pre-register oid2 so can_apply() passes the pre-registration check
+    // and reaches the bidirectional invariant check.
+    ASSERT_TRUE(apply_preregister_objects({oid2}).has_value());
+
+    // Build an update with extents for tidp_a but no expected_epochs entry.
+    replace_objects_no_compact_update update;
+    update.new_objects.push_back(new_obj_builder(oid2, 100, 1100)
+                                   .add(tidp_a, 0_o, 10_o, 1999_t, 0, 99)
+                                   .build());
+    // expected_epochs is intentionally empty.
+
+    // Build should fail because the bidirectional invariant is violated.
+    auto& s = get_state();
+    auto build_res = replace_objects_no_compact_update::build(
+      s, std::move(update.new_objects), {});
+    EXPECT_FALSE(build_res.has_value());
+    EXPECT_THAT(
+      fmt::format("{}", build_res.error()),
+      testing::HasSubstr("expected_epochs"));
+}
+
+TEST_P(
+  StateUpdateParamTest,
+  TestReplaceObjectsEpochRejectsEpochEntryWithoutExtents) {
+    // Set up partition a.
+    auto add = add_objects_builder()
+                 .add(new_obj_builder(oid1, 100, 1100)
+                        .add(tidp_a, 0_o, 10_o, 1999_t, 0, 99)
+                        .build())
+                 .add_term_start(tidp_a, 0_tm, 0_o)
+                 .build();
+    ASSERT_TRUE(apply_add_objects(std::move(add)).has_value());
+
+    // Pre-register oid2 so can_apply() passes the pre-registration check
+    // and reaches the bidirectional invariant check.
+    ASSERT_TRUE(apply_preregister_objects({oid2}).has_value());
+
+    // Extents are for tidp_a but expected_epochs has an entry for tidp_b.
+    auto tp_a = model::topic_id_partition::from(tidp_a);
+    auto tp_b = model::topic_id_partition::from(tidp_b);
+    chunked_hash_map<
+      model::topic_id_partition,
+      partition_state::compaction_epoch_t>
+      flat_epochs;
+    flat_epochs[tp_a] = partition_state::compaction_epoch_t{0};
+    flat_epochs[tp_b] = partition_state::compaction_epoch_t{0};
+
+    chunked_vector<new_object> new_objs;
+    new_objs.push_back(new_obj_builder(oid2, 100, 1100)
+                         .add(tidp_a, 0_o, 10_o, 1999_t, 0, 99)
+                         .build());
+
+    auto& s = get_state();
+    auto build_res = replace_objects_no_compact_update::build(
+      s, std::move(new_objs), std::move(flat_epochs));
+    EXPECT_FALSE(build_res.has_value());
+    EXPECT_THAT(
+      fmt::format("{}", build_res.error()),
+      testing::HasSubstr("expected_epochs"));
 }
 
 TEST(AddObjectsUpdateTest, RejectsUnregisteredObject) {

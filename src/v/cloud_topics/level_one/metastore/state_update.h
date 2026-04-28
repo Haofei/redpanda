@@ -165,7 +165,10 @@ struct replace_objects_update
 
     chunked_vector<new_object> new_objects;
 
-    // The new cleaned ranges that are represented in 'new_objects', if any.
+    // Per-partition compaction-state updates. Every partition with new
+    // extents MUST have an entry here; can_apply enforces this so callers
+    // can't silently bump compaction_epoch without also passing the OCC
+    // epoch via expected_compaction_epoch.
     chunked_hash_map<
       model::topic_id,
       chunked_hash_map<model::partition_id, compaction_state_update>>
