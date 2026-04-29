@@ -19,6 +19,7 @@ import (
 
 	"github.com/redpanda-data/common-go/rpadmin"
 	"github.com/redpanda-data/redpanda/src/go/rpk/pkg/adminapi"
+	"github.com/redpanda-data/redpanda/src/go/rpk/pkg/cobraext"
 	"github.com/redpanda-data/redpanda/src/go/rpk/pkg/config"
 	"github.com/redpanda-data/redpanda/src/go/rpk/pkg/out"
 	"github.com/redpanda-data/redpanda/src/go/rpk/pkg/redpanda"
@@ -36,7 +37,7 @@ func NewCommand(fs afero.Fs, p *config.Params) *cobra.Command {
 		Args:  cobra.ExactArgs(0),
 	}
 	cmd.AddCommand(
-		newPrintCommand(fs, p),
+		cobraext.DeprecateCmd(newPrintCommand(fs, p), "rpk cluster config list --node-id <ID>"),
 		newLogLevelCommand(fs, p),
 	)
 	return cmd
