@@ -1,6 +1,16 @@
 common --registry=https://bcr.bazel.build
 common --extra_toolchains=@current_llvm_toolchain//:all
 
+# Bazel 9 removes native C++ rule symbols. Autoload them for external rulesets
+# that have not migrated all generated BUILD/Starlark files to explicit loads.
+common --incompatible_autoload_externally=+@rules_cc
+
+# Bazel 9 no longer enables this rules_cc toolchain feature by default. Keep
+# external dependency headers on -isystem include paths so their warnings are
+# not promoted by Redpanda's -Werror settings.
+build --features=external_include_paths
+build --host_features=external_include_paths
+
 # Fail the build if MODULE.bazel declares a direct dependency on a version
 # that doesn't match what the resolved module graph actually uses.
 common --check_direct_dependencies=error
