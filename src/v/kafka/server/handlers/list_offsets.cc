@@ -189,7 +189,10 @@ static ss::future<list_offset_partition_response> list_offsets_partition(
     auto res = res_fut.get();
     if (res) {
         co_return list_offsets_response::make_partition(
-          id, res->time, res->offset, kafka_partition->leader_epoch());
+          id,
+          res->time,
+          res->offset,
+          response_leader_epoch(*kafka_partition, is_read_replica, res->term));
     }
     co_return list_offsets_response::make_partition(id, error_code::none);
 }

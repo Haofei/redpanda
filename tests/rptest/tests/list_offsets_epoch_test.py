@@ -372,7 +372,9 @@ class BaseListOffsetsLeaderEpochTest:
 
         return (-1, -1)
 
-    def _test_list_offsets_epoch(self, cluster, expect_incorrect_behavior):
+    def _test_list_offsets_epoch(
+        self, cluster, expect_incorrect_earliest, expect_incorrect_timequery
+    ):
         """Verify ListOffsets returns the correct leader epoch for each
         timestamp query type.
 
@@ -380,6 +382,10 @@ class BaseListOffsetsLeaderEpochTest:
         times.  The earliest and timequery paths should return the
         initial epoch (the record epoch), while the latest path should
         return the current leader epoch (correct per Kafka).
+
+        Earliest and timequery are gated by separate flags because
+        Redpanda's partial fix (CORE-12505) addresses timequery before
+        earliest — the earliest-path lookup ships in a follow-up.
         """
         initial_epoch, current_epoch = self._setup_topic_with_epoch_gap(cluster)
 
@@ -388,7 +394,7 @@ class BaseListOffsetsLeaderEpochTest:
         self.logger.info(
             f"Earliest: offset={offset}, epoch={epoch}, current_epoch={current_epoch}"
         )
-        if expect_incorrect_behavior:
+        if expect_incorrect_earliest:
             assert epoch == current_epoch, (
                 f"Bug expected: earliest epoch should be current "
                 f"({current_epoch}), got {epoch}"
@@ -416,7 +422,7 @@ class BaseListOffsetsLeaderEpochTest:
         self.logger.info(
             f"Timequery: offset={offset}, epoch={epoch}, current_epoch={current_epoch}"
         )
-        if expect_incorrect_behavior:
+        if expect_incorrect_timequery:
             assert epoch == current_epoch, (
                 f"Bug expected: timequery epoch should be current "
                 f"({current_epoch}), got {epoch}"
@@ -638,8 +644,21 @@ class ListOffsetsLeaderEpochRedpandaTest(RedpandaTest, BaseListOffsetsLeaderEpoc
                 )
 
     @cluster(num_nodes=3)
-    def test_list_offsets_epoch(self):
-        self._test_list_offsets_epoch(self.redpanda, expect_incorrect_behavior=True)
+    @parametrize(correct_epoch=False)
+    @parametrize(correct_epoch=True)
+    def test_list_offsets_epoch(self, correct_epoch):
+        if correct_epoch:
+            # enable_listoffsets_historical_leader_epoch is gated as a
+            # development feature; opt in to dev features before flipping it.
+            self.redpanda.enable_development_feature_support()
+            self.redpanda.set_cluster_config(
+                {"enable_listoffsets_historical_leader_epoch": True}
+            )
+        self._test_list_offsets_epoch(
+            self.redpanda,
+            expect_incorrect_earliest=True,  # earliest still buggy until follow-up PR
+            expect_incorrect_timequery=not correct_epoch,
+        )
 
     @cluster(num_nodes=3)
     @parametrize(correct_epoch=False)
@@ -871,7 +890,11 @@ class ListOffsetsLeaderEpochKafkaTest(Test, BaseListOffsetsLeaderEpochTest):
     @ducktape_cluster(num_nodes=4)
     def test_list_offsets_epoch(self):
         # Kafka defines the correct behavior we compare against.
-        self._test_list_offsets_epoch(self.kafka, expect_incorrect_behavior=False)
+        self._test_list_offsets_epoch(
+            self.kafka,
+            expect_incorrect_earliest=False,
+            expect_incorrect_timequery=False,
+        )
 
     @ducktape_cluster(num_nodes=4)
     def test_list_offsets_epoch_empty_partition(self):
