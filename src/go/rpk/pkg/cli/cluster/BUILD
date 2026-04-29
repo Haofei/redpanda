@@ -16,6 +16,7 @@ go_library(
         "//src/go/rpk/pkg/cli/cluster/config",
         "//src/go/rpk/pkg/cli/cluster/connections",
         "//src/go/rpk/pkg/cli/cluster/license",
+        "//src/go/rpk/pkg/cli/cluster/loggers",
         "//src/go/rpk/pkg/cli/cluster/maintenance",
         "//src/go/rpk/pkg/cli/cluster/partitions",
         "//src/go/rpk/pkg/cli/cluster/quotas",

@@ -14,6 +14,7 @@ import (
 	"github.com/redpanda-data/redpanda/src/go/rpk/pkg/cli/cluster/config"
 	"github.com/redpanda-data/redpanda/src/go/rpk/pkg/cli/cluster/connections"
 	"github.com/redpanda-data/redpanda/src/go/rpk/pkg/cli/cluster/license"
+	"github.com/redpanda-data/redpanda/src/go/rpk/pkg/cli/cluster/loggers"
 	"github.com/redpanda-data/redpanda/src/go/rpk/pkg/cli/cluster/maintenance"
 	"github.com/redpanda-data/redpanda/src/go/rpk/pkg/cli/cluster/partitions"
 	"github.com/redpanda-data/redpanda/src/go/rpk/pkg/cli/cluster/quotas"
@@ -46,6 +47,7 @@ func NewCommand(fs afero.Fs, p *pkgconfig.Params) *cobra.Command {
 		brokers.NewCommand(fs, p),
 		config.NewConfigCommand(fs, p),
 		license.NewLicenseCommand(fs, p),
+		loggers.NewCommand(fs, p),
 		maintenance.NewMaintenanceCommand(fs, p),
 		partitions.NewPartitionsCommand(fs, p),
 		selftest.NewSelfTestCommand(fs, p),
