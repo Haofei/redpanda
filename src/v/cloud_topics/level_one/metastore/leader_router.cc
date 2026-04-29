@@ -295,7 +295,7 @@ leader_router::process(req_t req, bool local_only) {
               req_name,
               l1_ntp);
             auto ret = co_await (this->*LocalFunc)(
-              std::move(req), std::move(l1_ntp), shard.value());
+              std::move(req), l1_ntp, shard.value());
             vlog(
               cd_log.debug,
               "Processed local request for {} as leader of {}",
