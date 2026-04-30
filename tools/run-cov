@@ -1184,7 +1184,11 @@ def main():
     workspace_root = find_workspace_root()
     if workspace_root:
         os.chdir(workspace_root)
-    toolchain_bin = find_toolchain_bin()
+    # When running inside a Bazel test action (sandboxed), calling `bazel`
+    # subprocesses can hang trying to connect back to the parent Bazel server.
+    # With --reuse we only need the demangler for real coverage data, not
+    # fixture tests, so skip the nested `bazel info` call entirely.
+    toolchain_bin = None if args.reuse else find_toolchain_bin()
 
     # Get LCOV data
     if not args.reuse:
