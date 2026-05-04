@@ -133,6 +133,10 @@ ss::future<> controller_stm::apply_snapshot(
         // applying the rest of the snapshot.
         co_await std::get<feature_backend&>(_state).apply_snapshot(
           offset, snapshot);
+        // apply config_manager next so that downstream backends see a
+        // fresh shard_local_cfg during their own apply_snapshot work.
+        co_await std::get<config_manager&>(_state).apply_snapshot(
+          offset, snapshot);
         // apply members early so that we have rpc clients to all cluster nodes.
         co_await std::get<members_manager&>(_state).apply_snapshot(
           offset, snapshot);
@@ -143,7 +147,6 @@ ss::future<> controller_stm::apply_snapshot(
 
         // apply everything else in no particular order.
         co_await ss::when_all(
-          std::get<config_manager&>(_state).apply_snapshot(offset, snapshot),
           std::get<plugin_backend&>(_state).apply_snapshot(offset, snapshot),
           std::get<cluster_recovery_manager&>(_state).apply_snapshot(
             offset, snapshot),
