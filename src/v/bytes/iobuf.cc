@@ -22,8 +22,12 @@
 scattered_buffer iobuf::as_scattered() && {
     scattered_buffer bufs;
     bufs.reserve(std::distance(begin(), end()));
-    for (auto& frag : *this) {
-        bufs.push_back(frag.share());
+    while (!_frags.empty()) {
+        // This ordering is to preserve weak exception safety
+        auto front_buf = std::move(_frags.front()).unoptimized_release();
+        // _size is wrong here (still counts bytes in front_buf)
+        pop_front(); // fixes up size
+        bufs.emplace_back(std::move(front_buf));
     }
     return bufs;
 }

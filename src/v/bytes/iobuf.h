@@ -125,10 +125,16 @@ public:
         }
     }
 
-    /// \brief converts this iobuf into a scattered_buffer of shared
+    /// \brief converts this iobuf into a scattered_buffer of
     /// temporary_buffer<char>. No byte copying occurs, temporary buffers
-    /// reflect the iobuf's fragment structure and share their underlying
-    /// buffers (using the usual temporary buffer reference counting).
+    /// reflect the iobuf's fragment structure and take ownership of their
+    /// underlying buffers (using the usual temporary buffer reference
+    /// counting).
+    ///
+    /// After this call returns the iobuf is in an unspecified-but-valid
+    /// state: it may be (and currently is) moved-from, with no fragments
+    /// and zero size. Callers must not rely on the iobuf retaining its
+    /// contents.
     scattered_buffer as_scattered() &&;
 
     /// \brief returns the total size in bytes of a scattered_buffer
