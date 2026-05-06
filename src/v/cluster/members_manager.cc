@@ -962,8 +962,12 @@ members_manager::make_join_node_success_reply(model::node_id id) {
     // Provide the joining node with a controller snapshot, so
     // that it may load correct configuration + feature table
     // before applying the controller log.
-    return _controller_stm.local().maybe_make_join_snapshot().then(
-      [id](std::optional<iobuf> snapshot) {
+    return _controller_stm.local()
+      .maybe_make_join_snapshot<
+        bootstrap_backend,
+        feature_backend,
+        config_manager>()
+      .then([id](std::optional<iobuf> snapshot) {
           vlog(
             clusterlog.debug,
             "Responding to node {} join with {} byte snapshot",
