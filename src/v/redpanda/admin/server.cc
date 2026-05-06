@@ -3421,7 +3421,7 @@ admin_server::self_test_start_handler(std::unique_ptr<ss::http::request> req) {
               return self_test_frontend.start_test(r, ids);
           });
         vlog(adminlog.info, "Request to start self test succeeded: {}", tid);
-        co_return ss::json::json_return_type(tid);
+        co_return ss::json::json_return_type(ss::sstring(tid));
     } catch (const std::exception& ex) {
         throw ss::httpd::base_exception(
           fmt::format("Failed to start self test, reason: {}", ex),
