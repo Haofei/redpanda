@@ -19,7 +19,7 @@
 #include "features/feature_table.h"
 #include "model/fundamental.h"
 #include "model/metadata.h"
-#include "storage/api.h"
+#include "storage/ntp_config.h"
 #include "utils/directory_walker.h"
 
 #include <seastar/core/seastar.hh>
@@ -33,12 +33,12 @@ namespace cluster {
 
 cluster_discovery::cluster_discovery(
   const model::node_uuid& node_uuid,
-  storage::api& storage,
+  std::optional<model::cluster_uuid> cluster_uuid,
   ss::abort_source& as)
   : _node_uuid(node_uuid)
+  , _cluster_uuid(std::move(cluster_uuid))
   , _join_retry_jitter(config::shard_local_cfg().join_retry_timeout_ms())
   , _join_timeout(std::chrono::seconds(2))
-  , _storage(storage)
   , _as(as) {}
 
 ss::future<cluster_discovery::registration_result>
@@ -115,7 +115,7 @@ ss::future<bool> cluster_discovery::is_cluster_founder() {
         }
         _founding_brokers = brokers{make_self_broker(config::node())};
         _node_ids_by_uuid = node_ids_by_uuid{
-          {_storage.node_uuid(), _founding_brokers.front().id()}};
+          {_node_uuid, _founding_brokers.front().id()}};
         _is_cluster_founder = true;
         co_return *_is_cluster_founder;
     }
@@ -350,7 +350,7 @@ ss::future<> cluster_discovery::discover_founding_brokers() {
         _is_cluster_founder = false;
         co_return;
     }
-    if (_storage.get_cluster_uuid().has_value()) {
+    if (_cluster_uuid.has_value()) {
         _is_cluster_founder = false;
         co_return;
     }
@@ -449,7 +449,7 @@ ss::future<> cluster_discovery::discover_founding_brokers() {
             vassert(
               broker.id() != model::unassigned_node_id,
               "Should have been assigned before");
-            node_uuid = _storage.node_uuid();
+            node_uuid = _node_uuid;
         } else {
             cluster::cluster_bootstrap_info_reply& reply = replies[seed.addr];
 

@@ -22,7 +22,6 @@
 
 namespace storage {
 class kvstore;
-class api;
 } // namespace storage
 
 namespace cluster {
@@ -80,7 +79,9 @@ public:
     };
 
     cluster_discovery(
-      const model::node_uuid& node_uuid, storage::api&, ss::abort_source&);
+      const model::node_uuid& node_uuid,
+      std::optional<model::cluster_uuid> cluster_uuid,
+      ss::abort_source&);
 
     // Register with the cluster:
     // - If we are a fresh cluster founder, broadcast to other founders
@@ -147,11 +148,11 @@ private:
     ss::future<> discover_founding_brokers();
 
     const model::node_uuid _node_uuid;
+    const std::optional<model::cluster_uuid> _cluster_uuid;
     simple_time_jitter<model::timeout_clock> _join_retry_jitter;
     const std::chrono::milliseconds _join_timeout;
 
     std::optional<bool> _is_cluster_founder;
-    storage::api& _storage;
     ss::abort_source& _as;
     brokers _founding_brokers;
     node_ids_by_uuid _node_ids_by_uuid;
