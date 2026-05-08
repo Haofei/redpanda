@@ -252,6 +252,7 @@ private:
 
     ss::future<join_node_reply> make_join_node_success_reply(model::node_id id);
 
+public:
     struct members_snapshot
       : serde::envelope<
           members_snapshot,
@@ -261,6 +262,16 @@ private:
         model::offset update_offset;
         auto serde_fields() { return std::tie(members, update_offset); }
     };
+
+    // Reads the cluster-members snapshot persisted by
+    // persist_members_in_kvstore. Returns an empty snapshot if the key
+    // has never been written (e.g. on a brand-new node before its first
+    // membership-changing apply). Available pre-controller-start so that
+    // bootstrap can use the last-known peer set without depending on
+    // members_manager itself being constructed.
+    static members_snapshot read_members_from_kvstore(storage::kvstore&);
+
+private:
     /**
      * In order to be able to determine the current cluster configuration before
      * raft-0 log is replied or controller snapshot is applied we store
@@ -268,7 +279,6 @@ private:
      * configuration changes.
      */
     ss::future<> persist_members_in_kvstore(model::offset);
-    members_snapshot read_members_from_kvstore();
 
     const std::vector<config::seed_server> _seed_servers;
     const model::broker _self;

@@ -97,7 +97,7 @@ ss::future<> members_manager::start(std::vector<model::broker> brokers) {
             _last_connection_update_offset
               = _raft0->get_latest_configuration_offset();
         } else {
-            auto snapshot = read_members_from_kvstore();
+            auto snapshot = read_members_from_kvstore(_storage.local().kvs());
             brokers = std::move(snapshot.members);
             _last_connection_update_offset = snapshot.update_offset;
         }
@@ -1668,7 +1668,8 @@ ss::future<>
 members_manager::persist_members_in_kvstore(model::offset update_offset) {
     static const auto cluster_members_key = bytes::from_string(
       "cluster_members");
-    auto current_members_snapshot = read_members_from_kvstore();
+    auto current_members_snapshot = read_members_from_kvstore(
+      _storage.local().kvs());
     if (current_members_snapshot.update_offset >= update_offset) {
         vlog(
           clusterlog.trace,
@@ -1699,10 +1700,11 @@ members_manager::persist_members_in_kvstore(model::offset update_offset) {
           .members = std::move(brokers), .update_offset = update_offset}));
 }
 
-members_manager::members_snapshot members_manager::read_members_from_kvstore() {
+members_manager::members_snapshot
+members_manager::read_members_from_kvstore(storage::kvstore& kvs) {
     static const auto cluster_members_key = bytes::from_string(
       "cluster_members");
-    auto buffer = _storage.local().kvs().get(
+    auto buffer = kvs.get(
       storage::kvstore::key_space::controller, cluster_members_key);
     if (buffer) {
         return serde::from_iobuf<members_snapshot>(std::move(*buffer));
