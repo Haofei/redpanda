@@ -23,6 +23,18 @@ redpanda_cc_library(
 )
 
 redpanda_cc_library(
+    name = "leveling_range_builder",
+    hdrs = [
+        "leveling_range_builder.h",
+    ],
+    visibility = ["//visibility:public"],
+    deps = [
+        ":offset_interval_set",
+        "//src/v/model",
+    ],
+)
+
+redpanda_cc_library(
     name = "metastore_manifest",
     hdrs = [
         "metastore_manifest.h",
