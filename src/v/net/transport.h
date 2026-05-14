@@ -118,6 +118,7 @@ public:
 
     void set_keepalive_parameters(const ss::net::keepalive_params& params);
     void set_keepalive(bool);
+    // Set TCP_NODELAY on the socket
     void set_nodelay(bool);
 
     [[gnu::always_inline]] bool is_valid() const {
