@@ -46,6 +46,7 @@
 #include <seastar/core/future.hh>
 #include <seastar/core/shared_ptr.hh>
 #include <seastar/coroutine/as_future.hh>
+#include <seastar/coroutine/exception.hh>
 
 #include <chrono>
 #include <expected>
@@ -872,7 +873,7 @@ ss::future<std::expected<kafka::offset, std::error_code>> frontend::replicate(
               ntp(),
               e);
         }
-        std::rethrow_exception(e);
+        co_await ss::coroutine::return_exception_ptr(std::move(e));
     }
     auto fence = std::move(fence_fut.get());
     if (!fence.has_value()) {
@@ -1306,7 +1307,7 @@ ss::future<result<raft::replicate_result>> frontend::replicate_at_offset(
               ntp(),
               e);
         }
-        std::rethrow_exception(e);
+        co_await ss::coroutine::return_exception_ptr(std::move(e));
     }
     auto fence = std::move(fence_fut.get());
     if (!fence.has_value()) {
