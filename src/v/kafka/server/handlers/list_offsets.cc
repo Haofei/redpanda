@@ -23,6 +23,8 @@
 #include "ssx/future-util.h"
 #include "ssx/when_all.h"
 
+#include <seastar/coroutine/exception.hh>
+
 namespace kafka {
 
 void list_offsets_request::compute_duplicate_topics() {
@@ -155,7 +157,7 @@ static ss::future<list_offset_partition_response> list_offsets_partition(
               ktp.get_partition(), error_code::not_leader_for_partition);
         }
         // Not expecting any other kinds of exceptions -- just rethrow.
-        std::rethrow_exception(ex);
+        co_await ss::coroutine::return_exception_ptr(std::move(ex));
     }
     auto id = ktp.get_partition();
     auto res = res_fut.get();
