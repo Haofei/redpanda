@@ -159,7 +159,7 @@ private:
 
     /// Whether there is work to do in maybe_update_feature_table
     bool updates_pending() {
-        if (!_am_controller_leader) {
+        if (!_is_leader_of.has_value()) {
             return false;
         }
         if (!_updates.empty() || _manual_finalize_pending) {
@@ -217,18 +217,15 @@ private:
     // the controller leader.
     version_map _node_versions;
 
-    // Keep track of whether this node is the controller leader
-    // via leadership notifications
-    bool _am_controller_leader{false};
-
     // The raft0 term this node currently believes itself to be the
-    // controller leader for. Updated from the leadership notification
-    // alongside _am_controller_leader.
-    std::optional<model::term_id> _leader_term;
+    // controller leader for, or nullopt if it isn't. Updated from
+    // the leadership notification handler; has_value() is the
+    // canonical "am I the controller leader" check.
+    std::optional<model::term_id> _is_leader_of;
 
     // The most recent term for which we have completed a linearizable
     // barrier against raft0 and waited for the controller STM to apply
-    // through the barrier offset. Until this matches _leader_term, the
+    // through the barrier offset. Until this matches _is_leader_of, the
     // background loop must not consult cluster-config values whose
     // intermediate replay state could cause incorrect decisions (e.g.
     // features_auto_finalization racing a freshly-elected leader's

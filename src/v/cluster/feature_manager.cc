@@ -147,12 +147,8 @@ feature_manager::start(std::vector<model::node_id>&& cluster_founder_nodes) {
 
             vlog(
               clusterlog.debug, "Controller leader notification term {}", term);
-            _am_controller_leader = leader_id == *config::node().node_id();
-            if (_am_controller_leader) {
-                _leader_term = term;
-            } else {
-                _leader_term.reset();
-            }
+            const bool am_leader = leader_id == *config::node().node_id();
+            _is_leader_of = am_leader ? std::optional{term} : std::nullopt;
             // Force the background loop to re-establish a linearizable
             // barrier on every leadership transition: cluster-config
             // values it consults must not be read until we have applied
@@ -168,7 +164,7 @@ feature_manager::start(std::vector<model::node_id>&& cluster_founder_nodes) {
             if (
               _feature_table.local().get_active_version()
                 != features::feature_table::get_latest_logical_version()
-              && _am_controller_leader) {
+              && am_leader) {
                 // When I become leader for first time (i.e. when active
                 // version is not known yet, proactively persist it)
                 vlog(
@@ -179,7 +175,7 @@ feature_manager::start(std::vector<model::node_id>&& cluster_founder_nodes) {
                 update_node_version(
                   *config::node().node_id(),
                   features::feature_table::get_latest_logical_version());
-            } else if (_am_controller_leader) {
+            } else if (am_leader) {
                 // In any case, kick the background update loop when
                 // we gain leadership, in case there is work to do like
                 // auto-activating some features.
@@ -567,7 +563,7 @@ ss::future<> feature_manager::do_maybe_update_active_version() {
     const bool was_manual_finalize_pending = std::exchange(
       _manual_finalize_pending, false);
 
-    if (!_am_controller_leader) {
+    if (!_is_leader_of.has_value()) {
         // Drop accumulated updates to bound memory while we're not
         // the leader; updates_pending() already short-circuits when
         // not leader, so this isn't load-bearing for the loop's
@@ -588,10 +584,13 @@ ss::future<> feature_manager::do_maybe_update_active_version() {
     // sleeps status_retry before retrying (avoiding a tight spin when
     // the barrier fails synchronously), and so that _updates is
     // preserved for the next attempt.
-    if (
-      !_caught_up_for_term.has_value() || _caught_up_for_term != _leader_term) {
-        vassert(_leader_term.has_value(), "leader without term");
-        const auto target_term = *_leader_term;
+    // Need a fresh barrier when we have no record of one, or when the
+    // recorded barrier was for a different term than the one we now
+    // hold leadership for.
+    const bool need_barrier = !_caught_up_for_term.has_value()
+                              || *_caught_up_for_term != *_is_leader_of;
+    if (need_barrier) {
+        const auto target_term = *_is_leader_of;
         auto deadline = model::timeout_clock::now() + status_retry;
         auto barrier = co_await _stm.local().insert_linearizable_barrier(
           deadline);
@@ -599,13 +598,18 @@ ss::future<> feature_manager::do_maybe_update_active_version() {
             throw std::runtime_error(
               fmt::format("Linearizable barrier failed: {}", barrier.error()));
         }
-        if (!_am_controller_leader || _leader_term != target_term) {
+        // Leadership may have changed during the co_await above:
+        // either we lost it (no longer leader) or it bounced to a
+        // newer term.
+        const bool leadership_changed = !_is_leader_of.has_value()
+                                        || *_is_leader_of != target_term;
+        if (leadership_changed) {
             // Leadership changed mid-barrier. Don't throw — this isn't
             // a transient error to retry against, it's a state change.
             // The next loop iteration handles it cleanly: if we're no
-            // longer leader, the !_am_controller_leader branch above
-            // drains _updates and returns; if we're leader in a fresh
-            // term, the leadership notification handler already reset
+            // longer leader, the !_is_leader_of branch above drains
+            // _updates and returns; if we're leader in a fresh term,
+            // the leadership notification handler already reset
             // _caught_up_for_term, so we re-run the barrier for the
             // new term before draining and applying updates. We
             // deliberately do not set _caught_up_for_term here: the
@@ -616,7 +620,7 @@ ss::future<> feature_manager::do_maybe_update_active_version() {
               "Deferring active version update: leadership changed "
               "during barrier (was term {}, now {})",
               target_term,
-              _leader_term);
+              _is_leader_of);
             co_return;
         }
         _caught_up_for_term = target_term;
@@ -749,7 +753,7 @@ ss::future<feature_manager::finalize_status>
 feature_manager::submit_manual_finalize_request() {
     vassert(ss::this_shard_id() == backend_shard, "Wrong shard!");
 
-    if (!_am_controller_leader) {
+    if (!_is_leader_of.has_value()) {
         co_return finalize_status::not_leader;
     }
 
@@ -763,7 +767,7 @@ feature_manager::submit_manual_finalize_request() {
 }
 
 ss::future<> feature_manager::do_maybe_activate_features() {
-    if (!_am_controller_leader) {
+    if (!_is_leader_of.has_value()) {
         co_return;
     }
 
