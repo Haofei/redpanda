@@ -1138,8 +1138,7 @@ configuration::configuration()
       "allows compaction.",
       {.needs_restart = needs_restart::no, .visibility = visibility::tunable},
       true,
-      property<bool>::noop_validator,
-      legacy_default<bool>(false, legacy_version{17}))
+      property<bool>::noop_validator)
   , retention_bytes(
       *this,
       "retention_bytes",
