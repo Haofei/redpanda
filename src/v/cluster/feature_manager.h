@@ -151,7 +151,7 @@ private:
     ss::future<> maybe_update_feature_table();
 
     /// Consume _updates and evaluate whether the cluster version may advance
-    ss::future<> do_maybe_update_active_version();
+    ss::future<> do_maybe_update_active_version(bool&);
 
     /// Check _feature_table for any features that are elegible to auto
     /// activate but not yet active.

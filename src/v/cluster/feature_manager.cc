@@ -432,8 +432,9 @@ ss::future<> feature_manager::maybe_update_feature_table() {
 
     vlog(clusterlog.debug, "Checking for active version update...");
     bool failed = false;
+    bool failed_barrier = false;
     try {
-        co_await do_maybe_update_active_version();
+        co_await do_maybe_update_active_version(failed_barrier);
     } catch (...) {
         // This is fine: exceptions can result from unavailability of
         // raft0 for writes, or unavailability of health monitor
@@ -448,8 +449,14 @@ ss::future<> feature_manager::maybe_update_feature_table() {
     try {
         // Even if we didn't advance our logical version, we might have some
         // features to activate due to policy changes across different redpanda
-        // binaries with the same logical version
-        co_await do_maybe_activate_features();
+        // binaries with the same logical version.
+        //
+        // since do_maybe_activate_features also controls feature activation
+        // based on configuration options, we skip it if the step above failed
+        // to enforce a lineariable barrier.
+        if (!failed_barrier) {
+            co_await do_maybe_activate_features();
+        }
     } catch (...) {
         vlog(
           clusterlog.debug,
@@ -553,7 +560,8 @@ void feature_manager::update_node_version(
  * This function is allowed to throw: throwing an exception indicates
  * a transient error that the caller should retry after a backoff.
  */
-ss::future<> feature_manager::do_maybe_update_active_version() {
+ss::future<>
+feature_manager::do_maybe_update_active_version(bool& failed_barrier) {
     vassert(ss::this_shard_id() == backend_shard, "Wrong shard!");
 
     // One-shot consume of the manual-finalization request: every
@@ -596,6 +604,7 @@ ss::future<> feature_manager::do_maybe_update_active_version() {
         auto barrier = co_await _stm.local().insert_linearizable_barrier(
           deadline);
         if (!barrier) {
+            failed_barrier = true;
             throw std::runtime_error(
               fmt::format("Linearizable barrier failed: {}", barrier.error()));
         }
@@ -622,6 +631,7 @@ ss::future<> feature_manager::do_maybe_update_active_version() {
               "during barrier (was term {}, now {})",
               target_term,
               _is_leader_of);
+            failed_barrier = true;
             co_return;
         }
         _caught_up_for_term = target_term;
