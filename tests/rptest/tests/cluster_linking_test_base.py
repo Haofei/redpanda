@@ -1164,7 +1164,9 @@ class ShadowLinkPreAllocTestBase(ShadowLinkTestBase):
         finally:
             self.verifier.stop_kgo_services()
 
-    def verify(self):
-        success, error = self.verifier.wait_and_verify()
+    def verify(self, progress_timeout: int = 60):
+        success, error = self.verifier.wait_and_verify(
+            progress_timeout=progress_timeout
+        )
 
         assert success, f"Verification failed: {error}"
