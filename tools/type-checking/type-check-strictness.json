@@ -424,7 +424,6 @@
         "rptest/tests/shadow_indexing_admin_api_test.py",
         "rptest/tests/shadow_indexing_compacted_topic_test.py",
         "rptest/tests/shadow_indexing_tx_test.py",
-        "rptest/tests/shadow_linking_rnot_test.py",
         "rptest/tests/shard_placement_test.py",
         "rptest/tests/simple_e2e_test.py",
         "rptest/tests/storage_resources_test.py",
