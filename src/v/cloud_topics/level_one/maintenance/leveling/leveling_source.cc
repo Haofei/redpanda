@@ -22,7 +22,7 @@ namespace cloud_topics::l1 {
 namespace {
 
 /// A passthrough consumer that forwards batches directly to the sink
-/// without decompression or filtering.
+/// without decompression or use of a compaction::filter for deduplication.
 struct passthrough_consumer {
     compaction::sliding_window_reducer::sink& sink;
 
