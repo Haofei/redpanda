@@ -162,7 +162,7 @@ private:
         if (!_is_leader_of.has_value()) {
             return false;
         }
-        if (!_updates.empty() || _manual_finalize_pending) {
+        if (!_updates.empty() || _manual_finalize_pending || _members_changed) {
             return true;
         }
         return !auto_activate_features(
@@ -209,6 +209,8 @@ private:
       notification_id_type_invalid};
     cluster::notification_id_type _health_notify_handle{
       notification_id_type_invalid};
+    cluster::notification_id_type _members_notify_handle{
+      notification_id_type_invalid};
 
     // Barriers are only populated on shard 0
     feature_barrier_state<ss::lowres_clock> _barrier_state;
@@ -240,6 +242,18 @@ private:
     // before the loop replicates the advance loses the request. Cleared
     // on leadership change and consumed (one-shot) by the loop body.
     bool _manual_finalize_pending{false};
+
+    // Whether the cluster's membership has changed since the loop last
+    // evaluated the active version. Set from the members_table
+    // notification and consumed (one-shot) by the loop body. Required
+    // because do_maybe_update_active_version reads
+    // members_table::node_ids() to decide whether all members are at the
+    // candidate version: when a node is fully removed (e.g. its
+    // decommission completes), health reports cease and no leader
+    // change fires, so without this signal the loop never re-evaluates
+    // and the active version stays pinned to the just-removed node's
+    // version.
+    bool _members_changed{false};
 
     // Blocks cluster upgrades until the enterprise license has been verified
     ssx::semaphore _verified_enterprise_license{
