@@ -126,6 +126,48 @@ public:
     /// \c backend_shard.
     ss::future<finalize_status> submit_manual_finalize_request();
 
+    /// Observability snapshot of the upgrade-finalization lifecycle,
+    /// returned by \ref get_upgrade_status.
+    struct upgrade_status {
+        enum class finalization_state {
+            /// active_version already equals the version uniformly
+            /// supported by all members; nothing to finalize.
+            finalized,
+            /// All members report the same version > active_version and
+            /// are alive: finalizable now.
+            ready_to_finalize,
+            /// Members differ, or a member's version is unknown, or a
+            /// member is not alive: not finalizable yet.
+            upgrade_in_progress,
+        };
+
+        /// One member's reported version state.
+        struct member {
+            model::node_id id;
+            cluster_version logical_version{invalid_version};
+            bool version_known{false};
+            bool alive{false};
+            ss::sstring release_version;
+        };
+
+        finalization_state state{finalization_state::finalized};
+        cluster_version active_version{invalid_version};
+        cluster_version version_after_finalization{invalid_version};
+        bool auto_finalization_enabled{false};
+        std::vector<member> members;
+    };
+
+    /// Snapshot the cluster's upgrade-finalization state for
+    /// observability: per-member logical versions (from health reports)
+    /// and liveness, the active version, and the version a finalize
+    /// would advance to. The per-member preconditions mirror those
+    /// \ref do_maybe_update_active_version applies; the raw per-member
+    /// fields are authoritative even if the rolled-up \c state lags a
+    /// change to that loop. Reflects the controller leader's view, so
+    /// callers should invoke this on the leader. Must run on
+    /// \c backend_shard.
+    ss::future<upgrade_status> get_upgrade_status();
+
     features::enterprise_feature_report report_enterprise_features() const;
 
     /**
