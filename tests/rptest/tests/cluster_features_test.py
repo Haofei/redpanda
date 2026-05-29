@@ -785,10 +785,45 @@ class ManualFinalizationTest(FeaturesTestBase):
     def _disable_auto_finalization(self):
         self.redpanda.set_cluster_config({"features_auto_finalization": False})
 
+    def _call_with_leader_retry(self, call, timeout_sec=30):
+        """Invoke a controller-leader-routed admin v2 call, retrying through
+        the transient UNAVAILABLE ("controller has no leader") window that can
+        occur during or after node restarts and leadership transfers --
+        notably under parallel load, where elections take longer. Unlike the
+        v1 Admin client, the v2 connect client does not retry leadership
+        itself. Only UNAVAILABLE is retried; other errors (e.g.
+        FAILED_PRECONDITION) propagate immediately."""
+        deadline = time.time() + timeout_sec
+        while True:
+            try:
+                return call()
+            except ConnectError as e:
+                if e.code != ConnectErrorCode.UNAVAILABLE or time.time() >= deadline:
+                    raise
+                time.sleep(1)
+
     def _finalize(self):
-        return self.admin_v2.features().finalize_upgrade(
-            features_pb2.FinalizeUpgradeRequest()
+        return self._call_with_leader_retry(
+            lambda: self.admin_v2.features().finalize_upgrade(
+                features_pb2.FinalizeUpgradeRequest()
+            )
         )
+
+    def _get_upgrade_status(self):
+        return self._call_with_leader_retry(
+            lambda: self.admin_v2.features().get_upgrade_status(
+                features_pb2.GetUpgradeStatusRequest()
+            )
+        )
+
+    def _wait_for_status_state(self, state, timeout_sec=30):
+        """Wait until GetUpgradeStatus reports `state`; return that status."""
+        wait_until(
+            lambda: self._get_upgrade_status().state == state,
+            timeout_sec=timeout_sec,
+            backoff_sec=1,
+        )
+        return self._get_upgrade_status()
 
     @cluster(num_nodes=3, log_allow_list=RESTART_LOG_ALLOW_LIST)
     def test_auto_finalization_disabled_blocks_advance(self):
@@ -810,6 +845,16 @@ class ManualFinalizationTest(FeaturesTestBase):
             self.admin.get_features()["cluster_version"] == MANUAL_FINALIZE_OLD_VERSION
         )
 
+        # The observability RPC reports the same situation: a uniform higher
+        # version is available, but the cluster is held at the old (downgrade
+        # floor) version pending an explicit finalize.
+        status = self._wait_for_status_state(
+            features_pb2.FINALIZATION_STATE_READY_TO_FINALIZE
+        )
+        assert status.active_version == MANUAL_FINALIZE_OLD_VERSION
+        assert status.version_after_finalization == MANUAL_FINALIZE_NEW_VERSION
+        assert not status.auto_finalization_enabled
+
     @cluster(num_nodes=3, log_allow_list=RESTART_LOG_ALLOW_LIST)
     def test_manual_request_triggers_advance(self):
         """
@@ -828,9 +873,23 @@ class ManualFinalizationTest(FeaturesTestBase):
             self.admin.get_features()["cluster_version"] == MANUAL_FINALIZE_OLD_VERSION
         )
 
+        # Uniformly upgraded but deferred: the cluster is ready to finalize.
+        ready = self._wait_for_status_state(
+            features_pb2.FINALIZATION_STATE_READY_TO_FINALIZE
+        )
+        assert ready.version_after_finalization == MANUAL_FINALIZE_NEW_VERSION
+
         self._finalize()
 
         self._wait_for_version_everywhere(MANUAL_FINALIZE_NEW_VERSION)
+
+        # Once the advance lands, the status flips to finalized and the active
+        # version (the downgrade floor) catches up to the binaries.
+        finalized = self._wait_for_status_state(
+            features_pb2.FINALIZATION_STATE_FINALIZED
+        )
+        assert finalized.active_version == MANUAL_FINALIZE_NEW_VERSION
+        assert finalized.version_after_finalization == MANUAL_FINALIZE_NEW_VERSION
 
     @cluster(num_nodes=3)
     def test_manual_request_rejected_when_auto_enabled(self):
@@ -846,6 +905,12 @@ class ManualFinalizationTest(FeaturesTestBase):
             lambda e: e.code == ConnectErrorCode.FAILED_PRECONDITION,
         ):
             self._finalize()
+
+        # The read-only status RPC is not gated on auto-finalization: it
+        # succeeds and reflects that automatic finalization is enabled.
+        status = self._get_upgrade_status()
+        assert status.state == features_pb2.FINALIZATION_STATE_FINALIZED, status.state
+        assert status.auto_finalization_enabled
 
     @cluster(num_nodes=3)
     def test_manual_request_idempotent_when_no_advance_pending(self):
@@ -866,6 +931,11 @@ class ManualFinalizationTest(FeaturesTestBase):
 
         time.sleep(2)
         assert self.admin.get_features()["cluster_version"] == version_before
+
+        status = self._get_upgrade_status()
+        assert status.state == features_pb2.FINALIZATION_STATE_FINALIZED, status.state
+        assert status.active_version == version_before
+        assert status.version_after_finalization == version_before
 
     @cluster(num_nodes=3, log_allow_list=RESTART_LOG_ALLOW_LIST)
     def test_manual_request_does_not_advance_on_mixed_version(self):
@@ -892,6 +962,18 @@ class ManualFinalizationTest(FeaturesTestBase):
         assert (
             self.admin.get_features()["cluster_version"] == MANUAL_FINALIZE_OLD_VERSION
         )
+
+        # The status RPC exposes the mixed versions and keeps
+        # version_after_finalization pinned to the (unchanged) active version.
+        status = self._wait_for_status_state(
+            features_pb2.FINALIZATION_STATE_UPGRADE_IN_PROGRESS
+        )
+        assert status.version_after_finalization == MANUAL_FINALIZE_OLD_VERSION
+        assert sorted(m.logical_version for m in status.members) == [
+            MANUAL_FINALIZE_OLD_VERSION,
+            MANUAL_FINALIZE_NEW_VERSION,
+            MANUAL_FINALIZE_NEW_VERSION,
+        ]
 
     @cluster(
         num_nodes=3,
@@ -931,6 +1013,22 @@ class ManualFinalizationTest(FeaturesTestBase):
         time.sleep(15)
         assert (
             self.admin.get_features()["cluster_version"] == MANUAL_FINALIZE_OLD_VERSION
+        )
+
+        # The status RPC surfaces the liveness gap: every node is on the new
+        # version, but the stopped node reports not-alive, so the cluster is
+        # not finalizable.
+        victim_id = self.redpanda.node_id(victim)
+        status = self._wait_for_status_state(
+            features_pb2.FINALIZATION_STATE_UPGRADE_IN_PROGRESS
+        )
+        assert status.version_after_finalization == MANUAL_FINALIZE_OLD_VERSION
+        members = {m.node_id: m for m in status.members}
+        assert not members[victim_id].alive, f"victim {victim_id} should be dead"
+        assert all(
+            members[self.redpanda.node_id(n)].alive
+            for n in self.redpanda.nodes
+            if self.redpanda.node_id(n) != victim_id
         )
 
     @cluster(num_nodes=3, log_allow_list=RESTART_LOG_ALLOW_LIST)
@@ -986,6 +1084,85 @@ class ManualFinalizationTest(FeaturesTestBase):
         # landed; otherwise this is the call that drives the advance.
         self._finalize()
         self._wait_for_version_everywhere(MANUAL_FINALIZE_NEW_VERSION)
+
+        # The new leader serves the status RPC and reports the finalized state.
+        finalized = self._wait_for_status_state(
+            features_pb2.FINALIZATION_STATE_FINALIZED
+        )
+        assert finalized.active_version == MANUAL_FINALIZE_NEW_VERSION
+
+    @cluster(num_nodes=3, log_allow_list=RESTART_LOG_ALLOW_LIST)
+    def test_get_upgrade_status_reports_lifecycle(self):
+        """
+        GetUpgradeStatus reflects the finalization lifecycle: FINALIZED at
+        rest, READY_TO_FINALIZE once all nodes report a higher version under
+        `features_auto_finalization=false`, then FINALIZED again after an
+        explicit FinalizeUpgrade. active_version doubles as the downgrade
+        floor: it equals version_after_finalization (no downgrade possible)
+        only in the FINALIZED states.
+        """
+        self._start_at_old()
+        self._disable_auto_finalization()
+
+        # At rest: nothing to finalize, no downgrade possible.
+        status = self._get_upgrade_status()
+        assert status.state == features_pb2.FINALIZATION_STATE_FINALIZED, status.state
+        assert status.active_version == MANUAL_FINALIZE_OLD_VERSION
+        assert status.version_after_finalization == MANUAL_FINALIZE_OLD_VERSION
+        assert not status.auto_finalization_enabled
+        assert len(status.members) == len(self.redpanda.nodes)
+        assert all(m.version_known and m.alive for m in status.members)
+        assert all(
+            m.logical_version == MANUAL_FINALIZE_OLD_VERSION for m in status.members
+        )
+        # release_version is plumbed through from the per-node health report.
+        assert all(m.release_version for m in status.members)
+
+        # Roll every node to the new version. Auto-finalization is off, so the
+        # active version holds and the cluster becomes READY_TO_FINALIZE.
+        self._restart_at_new(self.redpanda.nodes)
+
+        status = self._wait_for_status_state(
+            features_pb2.FINALIZATION_STATE_READY_TO_FINALIZE
+        )
+        assert status.active_version == MANUAL_FINALIZE_OLD_VERSION
+        assert status.version_after_finalization == MANUAL_FINALIZE_NEW_VERSION
+        assert all(
+            m.logical_version == MANUAL_FINALIZE_NEW_VERSION for m in status.members
+        )
+
+        # Finalize: the active version catches up; no downgrade after this.
+        self._finalize()
+        self._wait_for_version_everywhere(MANUAL_FINALIZE_NEW_VERSION)
+
+        status = self._wait_for_status_state(features_pb2.FINALIZATION_STATE_FINALIZED)
+        assert status.active_version == MANUAL_FINALIZE_NEW_VERSION
+        assert status.version_after_finalization == MANUAL_FINALIZE_NEW_VERSION
+
+    @cluster(num_nodes=3, log_allow_list=RESTART_LOG_ALLOW_LIST)
+    def test_get_upgrade_status_reports_in_progress(self):
+        """
+        With a partial rolling upgrade (mixed logical versions),
+        GetUpgradeStatus reports UPGRADE_IN_PROGRESS and holds
+        version_after_finalization at the unchanged active version, while
+        the per-member list exposes the version spread.
+        """
+        self._start_at_old()
+        self._disable_auto_finalization()
+
+        # Upgrade only two of three nodes; the third stays at OLD_VERSION.
+        self._restart_at_new(self.redpanda.nodes[:2])
+
+        status = self._wait_for_status_state(
+            features_pb2.FINALIZATION_STATE_UPGRADE_IN_PROGRESS
+        )
+        assert status.active_version == MANUAL_FINALIZE_OLD_VERSION
+        assert status.version_after_finalization == MANUAL_FINALIZE_OLD_VERSION
+        assert sorted(m.logical_version for m in status.members) == [
+            MANUAL_FINALIZE_OLD_VERSION,
+            MANUAL_FINALIZE_NEW_VERSION,
+            MANUAL_FINALIZE_NEW_VERSION,
+        ]
 
 
 class ManualFinalizationLicenseTest(RedpandaTest):
