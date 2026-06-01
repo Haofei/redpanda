@@ -7,26 +7,21 @@
 // the Business Source License, use of this software will be governed
 // by the Apache License, Version 2.0
 
-#include "bytes/iobuf.h"
 #include "model/fundamental.h"
 #include "model/record_batch_types.h"
-#include "storage/log_manager.h"
 #include "storage/record_batch_builder.h"
 #include "storage/segment.h"
 #include "storage/segment_appender.h"
 #include "storage/tests/utils/disk_log_builder.h"
-#include "test_utils/test_env.h"
 
 #include <seastar/core/temporary_buffer.hh>
 
 #include <gtest/gtest.h>
 
+#include <optional>
+
 struct segment_flush_fixture : public testing::Test {
-    storage::disk_log_builder b{storage::log_config(
-      test_env::random_dir_path(),
-      1_GiB,
-      storage::with_cache::no,
-      storage::make_sanitized_file_config())};
+    storage::disk_log_builder b;
     ~segment_flush_fixture() override { b.stop().get(); }
 };
 
@@ -44,27 +39,24 @@ TEST_F(segment_flush_fixture, flush_with_inflight_partial_batch) {
 
     // One complete, flushed batch establishes a well-defined committed
     // boundary.
-    constexpr size_t payload_size = 64;
-    auto key = iobuf();
-    auto value = iobuf();
-    value.append(ss::temporary_buffer<char>(payload_size).share());
-    key.append(ss::temporary_buffer<char>(payload_size).share());
     auto batch = std::move(
                    record_batch_builder(
                      model::record_batch_type::raft_data, model::offset(0))
-                     .add_raw_kv(std::move(key), std::move(value)))
+                     .add_raw_kv(std::nullopt, std::nullopt))
                    .build();
     seg.append(std::move(batch)).get();
     seg.flush().get();
     ASSERT_TRUE(seg.has_appender());
 
     const auto committed = seg.offsets().get_committed_offset();
+    ASSERT_EQ(committed, model::offset(0));
     const auto complete_file_size = seg.file_size();
     ASSERT_GT(complete_file_size, 0u);
 
     // Mimic do_append caught mid-batch: push raw bytes through the appender so
     // its write cursor moves past the last complete batch WITHOUT completing a
     // batch (dirty_offset stays put).
+    constexpr size_t payload_size = 64;
     ss::temporary_buffer<char> partial(payload_size);
     seg.appender().append(partial.get(), partial.size()).get();
     ASSERT_GT(seg.appender().file_byte_offset(), complete_file_size);
@@ -74,12 +66,6 @@ TEST_F(segment_flush_fixture, flush_with_inflight_partial_batch) {
     // Flushing does not advance committed past the last complete batch.
     EXPECT_EQ(seg.offsets().get_committed_offset(), committed);
 
-    // NOTE: this asserts CURRENT, undesirable behavior. do_flush() exposes the
-    // raw appender cursor, including the in-flight `payload_size` partial
-    // bytes, through file_size(). The desired behavior is for the readable
-    // extent to stay at the last complete batch boundary. Once do_flush() is
-    // fixed, flip the assertions below to:
-    //   EXPECT_EQ(seg.file_size(), complete_file_size);
-    EXPECT_GT(seg.file_size(), complete_file_size);
-    EXPECT_EQ(seg.file_size(), seg.appender().file_byte_offset());
+    // Readable extent stays at the last complete batch boundary.
+    EXPECT_EQ(seg.file_size(), complete_file_size);
 }
