@@ -168,6 +168,14 @@ cache::delete_file_and_empty_parents(const std::string_view& key) {
             if (e.code() == std::errc::directory_not_empty) {
                 // we stop when we find a non-empty directory
                 co_return deletions > 1;
+            } else if (e.code() == std::errc::no_such_file_or_directory) {
+                // The path is already gone. This is expected for hot chunks
+                // that get concurrently evicted and re-hydrated: the trimmer
+                // can select a chunk that another path (or an earlier trim)
+                // has already removed. The desired end state (absent) is
+                // already satisfied, so treat it as removed and keep cleaning
+                // up empty parents rather than throwing, which would surface
+                // a spurious "trim: couldn't delete" error.
             } else {
                 throw;
             }
