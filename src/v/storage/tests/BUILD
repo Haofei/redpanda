@@ -794,6 +794,24 @@ redpanda_cc_gtest(
 )
 
 redpanda_cc_gtest(
+    name = "segment_flush_test",
+    timeout = "short",
+    srcs = [
+        "segment_flush_test.cc",
+    ],
+    deps = [
+        "//src/v/model",
+        "//src/v/storage",
+        "//src/v/storage:record_batch_builder",
+        "//src/v/storage:segment_appender",
+        "//src/v/storage/tests:disk_log_builder",
+        "//src/v/test_utils:gtest",
+        "@googletest//:gtest",
+        "@seastar",
+    ],
+)
+
+redpanda_cc_gtest(
     name = "file_sanitizer_test",
     timeout = "short",
     srcs = [
