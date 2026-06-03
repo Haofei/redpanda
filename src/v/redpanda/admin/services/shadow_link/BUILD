@@ -56,6 +56,7 @@ redpanda_cc_library(
         "//src/v/cluster:partition_leaders_table",
         "//src/v/cluster_link:fwd",
         "//src/v/cluster_link/model",
+        "//src/v/features",
         "//src/v/redpanda/admin/proxy:client",
         "//src/v/serde/protobuf:rpc",
         "@seastar",
