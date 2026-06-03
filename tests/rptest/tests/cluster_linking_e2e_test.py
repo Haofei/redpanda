@@ -2395,9 +2395,12 @@ class ShadowLinkingReplicationTests(ShadowLinkPreAllocTestBase):
     )
     @matrix(storage_mode=ALL_STORAGE_MODES)
     def test_replication_with_compaction(self, storage_mode):
-        if storage_mode != TopicSpec.STORAGE_MODE_LOCAL:
+        if storage_mode not in (
+            TopicSpec.STORAGE_MODE_LOCAL,
+            TopicSpec.STORAGE_MODE_CLOUD,
+        ):
             # Compaction on shadow topics is not yet supported with
-            # tiered / cloud / tiered_cloud storage modes.
+            # tiered / tiered_cloud storage modes.
             _ = self.preallocated_nodes
             self.logger.info(
                 f"Skipping compaction test for storage_mode={storage_mode}"
