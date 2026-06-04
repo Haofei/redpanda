@@ -190,22 +190,6 @@ log_info_collector::build_compaction_specs(
             continue;
         }
 
-        if (log.compaction.info_and_ts.has_value()) {
-            auto sample_interval
-              = config::shard_local_cfg().cloud_topics_compaction_interval_ms();
-            auto delta = to_time_point(collection_timestamp)
-                         - to_time_point(
-                           log.compaction.info_and_ts->collected_at);
-            if (delta <= sample_interval) {
-                vlog(
-                  compaction_log.debug,
-                  "Skipping compaction info collection for CTP {}, delta is "
-                  "less than sample interval.",
-                  log.ntp);
-                continue;
-            }
-        }
-
         auto topic_cfg_opt = _topic_metadata_provider->get_topic_cfg(
           model::topic_namespace_view(log.ntp));
 
@@ -338,8 +322,7 @@ void log_info_collector::populate_logs_with_compaction_info(
 }
 
 chunked_vector<metastore::leveling_info_spec>
-log_info_collector::build_leveling_specs(
-  log_list_t& logs_list, model::timestamp collection_timestamp) const {
+log_info_collector::build_leveling_specs(log_list_t& logs_list) const {
     auto target_size
       = config::shard_local_cfg().cloud_topics_reconciliation_max_object_size();
     auto ratio
@@ -349,21 +332,6 @@ log_info_collector::build_leveling_specs(
 
     chunked_vector<metastore::leveling_info_spec> specs;
     for (auto& log : logs_list) {
-        if (log.leveling.info_and_ts.has_value()) {
-            // TODO: replace with cluster config
-            auto sample_interval = 10min;
-            auto delta = to_time_point(collection_timestamp)
-                         - to_time_point(
-                           log.leveling.info_and_ts->collected_at);
-            if (delta <= sample_interval) {
-                vlog(
-                  compaction_log.debug,
-                  "Skipping leveling info collection for CTP {}, delta is "
-                  "less than sample interval.",
-                  log.ntp);
-                continue;
-            }
-        }
         specs.emplace_back(
           metastore::leveling_info_spec{log.tidp, min_acceptable});
     }
@@ -376,7 +344,7 @@ ss::future<> log_info_collector::collect_leveling_info(
   leveling_queue& leveling_queue) const {
     auto now = model::timestamp::now();
 
-    auto specs = build_leveling_specs(logs_list, now);
+    auto specs = build_leveling_specs(logs_list);
 
     if (specs.empty()) {
         co_return;
