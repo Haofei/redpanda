@@ -76,3 +76,23 @@ redpanda_cc_library(
         "@seastar",
     ],
 )
+
+redpanda_cc_library(
+    name = "instance_metrics",
+    srcs = [
+        "instance_metrics.cc",
+    ],
+    hdrs = [
+        "instance_metrics.h",
+    ],
+    implementation_deps = [
+        "//src/v/ssx:future_util",
+    ],
+    visibility = ["//visibility:public"],
+    deps = [
+        ":instance_type_detector",
+        ":metrics",
+        "//src/v/base",
+        "@seastar",
+    ],
+)

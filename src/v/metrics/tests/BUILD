@@ -44,6 +44,22 @@ redpanda_cc_gtest(
 )
 
 redpanda_cc_gtest(
+    name = "instance_metrics_test",
+    timeout = "short",
+    srcs = [
+        "instance_metrics_test.cc",
+    ],
+    deps = [
+        "//src/v/metrics:instance_metrics",
+        "//src/v/metrics:instance_type_detector",
+        "//src/v/test_utils:gtest",
+        "//src/v/test_utils:metrics",
+        "@googletest//:gtest",
+        "@seastar",
+    ],
+)
+
+redpanda_cc_gtest(
     name = "instance_type_detector_test",
     timeout = "short",
     srcs = [
