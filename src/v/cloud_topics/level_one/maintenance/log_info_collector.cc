@@ -401,15 +401,13 @@ void log_info_collector::populate_logs_with_leveling_info(
         }
 
         log->has_seen_reconciled_data = true;
-        log->leveling.info_and_ts = leveling_info_and_timestamp{
-          .info = std::move(leveling_info).value(),
-          .collected_at = collection_timestamp};
+        auto info = std::move(leveling_info).value();
 
         vlog(
           compaction_log.debug,
           "Leveling info for CTP {} returned {}",
           log->ntp,
-          log->leveling.info_and_ts->info);
+          info);
 
         // This fresh metastore sample supersedes whatever we previously queued
         // for the CTP, so drop its existing queue and rebuild it below from the
@@ -438,7 +436,6 @@ void log_info_collector::populate_logs_with_leveling_info(
         }
         inflight = std::move(retained);
 
-        auto& info = log->leveling.info_and_ts->info;
         for (auto& range : info.ranges) {
             // Skip any range that overlaps one already inflight; its rewrite
             // has not yet committed, so the metastore still reports it as
@@ -447,9 +444,8 @@ void log_info_collector::populate_logs_with_leveling_info(
                 continue;
             }
             auto job = ss::make_lw_shared<leveling_job>(log, range, info.epoch);
-            leveling_queue.push(job);
+            leveling_queue.push(std::move(job));
         }
-        info.ranges.clear();
     }
 }
 

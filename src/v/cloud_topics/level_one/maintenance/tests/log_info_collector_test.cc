@@ -172,10 +172,6 @@ TEST_F(LogInfoCollectorTestFixture, TestSampleLevelingInfo) {
 
     log_info_collector.collect_leveling_info(logs_set, logs_list, queue).get();
 
-    ASSERT_TRUE(log_ptr->leveling.info_and_ts.has_value());
-    // info.ranges is cleared after queueing; only the timestamp cookie is
-    // retained for the next tick.
-    ASSERT_TRUE(log_ptr->leveling.info_and_ts->info.ranges.empty());
     ASSERT_GT(queue.size(), 0u);
     size_t total_size_bytes = 0;
     while (!queue.empty()) {

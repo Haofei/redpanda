@@ -95,13 +95,10 @@ public:
     ss::future<>
     collect_compaction_info(log_set_t&, log_list_t&, compaction_queue&) const;
 
-    // Populates `leveling.info_and_ts` within `log_compaction_meta`s from the
-    // provided `log_list_t` by collecting each log's leveling info from the
-    // metastore. Logs are skipped if `leveling.info_and_ts` is still fresh.
-    // For each freshly-sampled log, its queue in the `leveling_queue` is
-    // overwritten from the newly collected ranges, skipping any that overlap a
-    // range already inflight for the CTP. The transient `info.ranges` is
-    // cleared after queueing.
+    // Collects each managed log's leveling info from the metastore. For each
+    // freshly-sampled log, its existing jobs in the `leveling_queue` are
+    // dropped and rebuilt from the newly collected ranges, skipping any that
+    // overlap a range already inflight for the CTP.
     ss::future<>
     collect_leveling_info(log_set_t&, log_list_t&, leveling_queue&) const;
 

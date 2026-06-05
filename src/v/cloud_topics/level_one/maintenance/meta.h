@@ -34,13 +34,6 @@ struct compaction_info_and_timestamp {
     kafka::offset max_compactible_offset;
 };
 
-// Contains leveling information collected from the metastore and the time at
-// which it was obtained.
-struct leveling_info_and_timestamp {
-    metastore::leveling_info_response info;
-    model::timestamp collected_at;
-};
-
 // Per-CTP state for the compaction maintenance subsystem.
 struct log_compaction_state {
     // If set, the worker shard on which this CTP is currently undergoing an
@@ -53,10 +46,6 @@ struct log_compaction_state {
 
 // Per-CTP state for the leveling maintenance subsystem.
 struct log_leveling_state {
-    // If set, leveling metadata obtained from the metastore at
-    // `collected_at` time.
-    std::optional<leveling_info_and_timestamp> info_and_ts{std::nullopt};
-
     // Refcount of inflight leveling ranges per worker shard for this CTP.
     chunked_hash_map<ss::shard_id, size_t> inflight_shards;
 
