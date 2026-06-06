@@ -55,8 +55,7 @@ worker_manager::try_acquire_compaction_work(ss::shard_id shard) {
     vassert(
       ss::this_shard_id() == worker_manager_shard,
       "Expected calls to worker_manager::try_acquire_compaction_work() to "
-      "always "
-      "execute on shard {}",
+      "always execute on shard {}",
       worker_manager_shard);
 
     if (_compaction_queue.empty()) {
@@ -88,8 +87,7 @@ void worker_manager::complete_compaction_work(compaction_job* job) {
     vassert(
       ss::this_shard_id() == worker_manager_shard,
       "Expected calls to worker_manager::complete_compaction_work() to always "
-      "execute on "
-      "shard {}",
+      "execute on shard {}",
       worker_manager_shard);
 
     dassert(
