@@ -597,3 +597,157 @@ class EndToEndCloudTopicsCompactionTest(EndToEndCloudTopicsBase):
                 backoff_sec=1,
                 err_msg="Did not see a fully compacted CTP log.",
             )
+
+
+class EndToEndCloudTopicsLevelingTest(EndToEndCloudTopicsBase):
+    """End-to-end test for per-range leveling.
+
+    Produces enough data to create many small L1 objects, raises the slot
+    pool so multiple ranges per shard can run in parallel, lowers the
+    leveling interval so the test does not wait several minutes, then waits
+    for leveling to converge: the completed-ranges counter must stop
+    advancing AND the queue must be empty. Verifies data integrity by
+    reading all produced records back.
+    """
+
+    topics = (
+        TopicSpec(
+            name=EndToEndCloudTopicsBase.s3_topic_name,
+            partition_count=1,
+            replication_factor=3,
+        ),
+    )
+
+    kgo_producer: KgoVerifierProducer
+    kgo_consumer: KgoVerifierSeqConsumer
+
+    LEVELING_INTERVAL_MS = 2000
+    MAX_CONCURRENT = 4
+    MIN_EXTENT_RATIO = 0.8
+    RECONCILIATION_MAX_OBJECT_SIZE = 4 * 1024 * 1024
+    TARGET_FILL_RATIO = 0.2
+
+    # Rate-limit produce so each ~250ms reconciliation flush stays well
+    # under the threshold (~0.5 MiB), yielding a long run of undersized extents.
+    PRODUCE_RATE_BPS = 2 * 1024 * 1024
+
+    def __init__(self, test_context):
+        extra_rp_conf = {
+            "cloud_topics_leveling_interval_ms": self.LEVELING_INTERVAL_MS,
+            "cloud_topics_max_concurrent_leveling_jobs_per_shard": self.MAX_CONCURRENT,
+            "cloud_topics_leveling_min_extent_size_ratio": self.MIN_EXTENT_RATIO,
+            "cloud_topics_reconciliation_max_object_size": self.RECONCILIATION_MAX_OBJECT_SIZE,
+            "cloud_topics_reconciliation_target_fill_ratio": self.TARGET_FILL_RATIO,
+        }
+        super(EndToEndCloudTopicsLevelingTest, self).__init__(
+            test_context,
+            extra_rp_conf,
+        )
+        self.msg_size = 4096
+        self.msg_count = 20000
+
+    def _metric_sum(self, metric_name):
+        assert self.redpanda
+        return self.redpanda.metric_sum(
+            metric_name=metric_name,
+            metrics_endpoint=MetricsEndpoint.METRICS,
+            expect_metric=True,
+        )
+
+    def get_leveling_queue_length(self):
+        return self._metric_sum(
+            "vectorized_cloud_topics_compaction_scheduler_leveling_queue_length"
+        )
+
+    def get_leveling_completed(self):
+        return self._metric_sum(
+            "vectorized_cloud_topics_compaction_scheduler_leveling_ranges_completed_total"
+        )
+
+    def produce(self):
+        assert self.redpanda
+        assert self.topic
+        try:
+            self.kgo_producer = KgoVerifierProducer(
+                self.test_context,
+                self.redpanda,
+                self.topic,
+                msg_size=self.msg_size,
+                msg_count=self.msg_count,
+                rate_limit_bps=self.PRODUCE_RATE_BPS,
+            )
+            self.kgo_producer.start()
+            self.kgo_producer.wait()
+        finally:
+            self.kgo_producer.stop()
+
+    def consume(self):
+        assert self.redpanda
+        assert self.topic
+        traffic_node = self.kgo_producer.nodes[0]
+        try:
+            self.kgo_consumer = KgoVerifierSeqConsumer(
+                self.test_context,
+                self.redpanda,
+                self.topic,
+                self.msg_size,
+                loop=False,
+                nodes=[traffic_node],
+            )
+            self.kgo_consumer.start(clean=False)
+            self.kgo_consumer.wait()
+        finally:
+            self.kgo_consumer.stop()
+
+    def wait_for_leveling_quiesce(self, stable_sec: int = 10, timeout_sec: int = 120):
+        """Wait for leveling to converge.
+
+        The completed-ranges counter must stop advancing for `stable_sec`
+        consecutive seconds AND the queue must be empty. Polling
+        `queue_length == 0` alone is unreliable: the collector refills the
+        queue every interval, and ranges that have been dequeued but not yet
+        committed are not counted there, so the queue can read 0 mid-flight.
+        """
+        prev = self.get_leveling_completed()
+        stable_since = time.time()
+
+        def quiesced() -> bool:
+            nonlocal prev, stable_since
+            completed = self.get_leveling_completed()
+            if completed != prev:
+                prev = completed
+                stable_since = time.time()
+                return False
+            if self.get_leveling_queue_length() != 0:
+                return False
+            return time.time() - stable_since >= stable_sec
+
+        wait_until(
+            quiesced,
+            timeout_sec=timeout_sec,
+            backoff_sec=2,
+            err_msg=lambda: (
+                f"Leveling did not quiesce "
+                f"(completed={self.get_leveling_completed()}, "
+                f"queue_length={self.get_leveling_queue_length()})"
+            ),
+        )
+
+    @cluster(num_nodes=4)
+    def test_per_range_leveling(self):
+        self.produce()
+
+        # Wait until at least one leveling range has been completed, so we know
+        # leveling actually engaged before checking for convergence.
+        wait_until(
+            lambda: self.get_leveling_completed() > 0,
+            timeout_sec=120,
+            backoff_sec=1,
+            err_msg="No leveling ranges were completed",
+        )
+
+        # Wait for leveling to fully converge before verifying data integrity.
+        self.wait_for_leveling_quiesce()
+
+        # Read all records back to verify data integrity.
+        self.consume()
