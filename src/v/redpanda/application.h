@@ -33,6 +33,7 @@
 #include "datalake/credential_manager.h"
 #include "datalake/fwd.h"
 #include "debug_bundle/fwd.h"
+#include "features/feature_table_snapshot.h"
 #include "features/fwd.h"
 #include "finjector/stress_fiber.h"
 #include "kafka/client/configuration.h"
@@ -216,16 +217,52 @@ public:
         return _datalake_coordinator_fe;
     }
 
+    // At a minimum, we need to construct the feature table and storage systems
+    // in order to properly bootstrap the system. Public for test fixture
+    // access.
+    void wire_up_bootstrap_services();
+
+    // We need the RPC server and bootstrap service (at a minimum) running
+    // before cluster discovery can be performed.
+    void wire_up_and_start_rpc_service();
+
+    // Before we can continue in the bootstrap process, we need to establish
+    // a consistent view of the cluster-wide state - namely, the cluster
+    // configuration and feature table state. We do that by:
+    // 1. Applying any local kvstore snapshots (which contain potentially
+    //    stale config and feature table state, as well as persisted
+    //    node/cluster UUID information).
+    // 2. If we already have an identity and a persisted member set,
+    //    refreshing that view by fetching an authoritative
+    //    controller_join_snapshot from the controller leader via the
+    //    `fetch_controller_snapshot` RPC. New nodes that lack persisted
+    //    state skip this step; they will instead receive their snapshot
+    //    later through the join_node response in resolve_node_identity.
+    // 3. Marking shard_local_cfg() as ready, after which downstream
+    //    services may safely read cluster configuration.
+    // Public for test fixture access.
+    void establish_cluster_view();
+
     // Constructs and starts the services required to provide cryptographic
     // algorithm support to Redpanda. Public for test fixture access.
     void wire_up_and_start_crypto_services();
 
-private:
-    // Constructs services across shards required to get bootstrap metadata.
-    void wire_up_bootstrap_services();
+    // Public for test fixture access.
+    void hydrate_cluster_config(const YAML::Node& config);
 
-    // Starts services across shards required to get bootstrap metadata.
-    void start_bootstrap_services();
+    // Performs recovery on the local kvstore, applies a local feature table
+    // snapshot, and sets in-memory node/cluster UUIDs.
+    // Public for test fixture access.
+    void bootstrap_from_kvstore();
+
+private:
+    // Constructs storage services across shards required early on in the
+    // bootstrap process.
+    void wire_up_storage_services();
+
+    // Starts storage services across shards required early on in the
+    // bootstrap process.
+    void start_storage_services();
 
     // Constructs services across shards meant for Redpanda runtime.
     void wire_up_runtime_services(
@@ -239,16 +276,30 @@ private:
       std::optional<cloud_storage_clients::bucket_name>& bucket_name,
       cloud_topics::test_fixture_cfg ct_test_cfg);
 
-    void load_feature_table_snapshot();
+    // Applies the provided feature_table_snapshot directly to the in-memory
+    // feature table state.
+    ss::future<>
+    apply_feature_table_snapshot(const features::feature_table_snapshot& snap);
+    // Attempts to read a local feature table snapshot from the kvstore and
+    // apply it.
+    ss::future<> maybe_apply_local_feature_table_snapshot();
+    // Performs cluster discovery for first time cluster joiners, or resolves
+    // node identity from persisted kvstore state.
+    ss::future<> resolve_node_identity();
+    // Fetches and applies a view of the controller_stm from the current
+    // controller leader.
+    ss::future<> bootstrap_controller_view();
+    // Refreshes the cluster config and feature table from the provided
+    // snapshot.
+    ss::future<>
+    apply_controller_snapshot(const cluster::controller_join_snapshot&);
 
     void trigger_abort_source();
 
     // Starts the services meant for Redpanda runtime. Must be called after
     // having constructed the subsystems via the corresponding `wire_up` calls.
     void start_runtime_services(
-      cluster::cluster_discovery&,
-      ::stop_signal&,
-      cloud_topics::test_fixture_cfg ct_test_cfg);
+      ::stop_signal&, cloud_topics::test_fixture_cfg ct_test_cfg);
     void start_kafka(const model::node_id&, ::stop_signal&);
     void add_runtime_rpc_services(rpc::rpc_server&, bool start_raft_rpc_early);
 
@@ -256,7 +307,7 @@ private:
     ss::app_template::config setup_app_config();
     void validate_arguments(const po::variables_map&);
     YAML::Node hydrate_node_config(const po::variables_map&);
-    void hydrate_cluster_config(const YAML::Node& config);
+    void log_cluster_config();
 
     bool requires_cloud_io();
 
@@ -278,6 +329,9 @@ private:
     // so that the config doesn't walk through all intermediate states
     // in the log during startup.
     cluster::config_manager::preload_result _config_preload;
+
+    std::unique_ptr<cluster::cluster_discovery> _cluster_discovery;
+    bool _node_uuid_needs_persisting{false};
 
     // When joining a cluster, we are tipped off as to the last applied
     // offset of the controller stm from another node.  We will wait for

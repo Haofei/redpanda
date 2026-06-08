@@ -125,8 +125,12 @@ redpanda_thread_fixture::redpanda_thread_fixture(
               return std::make_optional(proxy_client_config(kafka_port));
           }),
           audit_log_client_config(kafka_port));
-        app.check_environment();
         app.wire_up_and_start_crypto_services();
+        app.wire_up_bootstrap_services();
+        app.hydrate_cluster_config(make_minimal_cfg());
+        app.bootstrap_from_kvstore();
+        app.establish_cluster_view();
+        app.check_environment();
         app.wire_up_and_start(*app_signal, true, ct_test_cfg);
     } catch (...) {
         // shutdown half-initialized app nicely so that its destructor doesn't
@@ -347,8 +351,12 @@ void redpanda_thread_fixture::restart(should_wipe w) {
         config.get("disable_metrics").set_value(false);
     }).get();
     app.initialize(proxy_config(), proxy_client_config());
-    app.check_environment();
     app.wire_up_and_start_crypto_services();
+    app.wire_up_bootstrap_services();
+    app.hydrate_cluster_config(make_minimal_cfg());
+    app.bootstrap_from_kvstore();
+    app.establish_cluster_view();
+    app.check_environment();
     app.wire_up_and_start(*app_signal, true, ct_test_cfg);
 }
 
