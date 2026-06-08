@@ -578,14 +578,14 @@ configuration::configuration()
       "disable_metrics",
       "Disable registering the metrics exposed on the internal `/metrics` "
       "endpoint.",
-      base_property::metadata{},
+      base_property::metadata{.usable_before_ready = usable_before_ready::yes},
       false)
   , disable_public_metrics(
       *this,
       "disable_public_metrics",
       "Disable registering the metrics exposed on the `/public_metrics` "
       "endpoint.",
-      base_property::metadata{},
+      base_property::metadata{.usable_before_ready = usable_before_ready::yes},
       false)
   , aggregate_metrics(
       *this,
@@ -595,7 +595,8 @@ configuration::configuration()
       "instead of raw, per-instance metrics. Metric aggregation is performed "
       "by summing the values of samples by labels and is done when it makes "
       "sense by the shard and/or partition labels.",
-      {.needs_restart = needs_restart::no},
+      {.needs_restart = needs_restart::no,
+       .usable_before_ready = usable_before_ready::yes},
       false)
   , enable_consumer_group_metrics(
       *this,
@@ -1387,13 +1388,16 @@ configuration::configuration()
       *this,
       "kvstore_flush_interval",
       "Key-value store flush interval (in milliseconds).",
-      {.needs_restart = needs_restart::no, .visibility = visibility::tunable},
+      {.needs_restart = needs_restart::no,
+       .visibility = visibility::tunable,
+       .usable_before_ready = usable_before_ready::yes},
       std::chrono::milliseconds(10))
   , kvstore_max_segment_size(
       *this,
       "kvstore_max_segment_size",
       "Key-value maximum segment size (in bytes).",
-      {.visibility = visibility::tunable},
+      {.visibility = visibility::tunable,
+       .usable_before_ready = usable_before_ready::yes},
       16_MiB)
   , max_kafka_throttle_delay_ms(
       *this,
@@ -1427,7 +1431,8 @@ configuration::configuration()
       *this,
       "join_retry_timeout_ms",
       "Time between cluster join retries in milliseconds.",
-      {.visibility = visibility::tunable},
+      {.visibility = visibility::tunable,
+       .usable_before_ready = usable_before_ready::yes},
       5s)
   , raft_timeout_now_timeout_ms(
       *this,
@@ -1472,7 +1477,9 @@ configuration::configuration()
       "for these writes as more data is collected before each write operation. "
       "A smaller chunk size can decrease write latency, but potentially "
       "increase the number of disk I/O operations.",
-      {.example = "32768", .visibility = visibility::tunable},
+      {.example = "32768",
+       .visibility = visibility::tunable,
+       .usable_before_ready = usable_before_ready::yes},
       16_KiB,
       {.min = 4096, .max = 32_MiB, .align = 4096})
   , storage_read_buffer_size(
@@ -1481,7 +1488,8 @@ configuration::configuration()
       "Size of each read buffer (one per in-flight read, per log segment).",
       {.needs_restart = needs_restart::no,
        .example = "31768",
-       .visibility = visibility::tunable},
+       .visibility = visibility::tunable,
+       .usable_before_ready = usable_before_ready::yes},
       128_KiB)
   , storage_read_readahead_count(
       *this,
@@ -1489,7 +1497,8 @@ configuration::configuration()
       "How many additional reads to issue ahead of current read location.",
       {.needs_restart = needs_restart::no,
        .example = "1",
-       .visibility = visibility::tunable},
+       .visibility = visibility::tunable,
+       .usable_before_ready = usable_before_ready::yes},
       1)
   , segment_fallocation_step(
       *this,
@@ -1507,7 +1516,8 @@ configuration::configuration()
       "controls frequency of snapshots and checkpoints.",
       {.needs_restart = needs_restart::no,
        .example = "2147483648",
-       .visibility = visibility::tunable},
+       .visibility = visibility::tunable,
+       .usable_before_ready = usable_before_ready::yes},
       10_GiB,
       {.min = 128_MiB, .max = 1_TiB})
   , storage_max_concurrent_replay(
@@ -1517,7 +1527,8 @@ configuration::configuration()
       "at startup, or flushed concurrently on shutdown.",
       {.needs_restart = needs_restart::no,
        .example = "2048",
-       .visibility = visibility::tunable},
+       .visibility = visibility::tunable,
+       .usable_before_ready = usable_before_ready::yes},
       1024,
       {.min = 128})
   , storage_compaction_index_memory(
@@ -1527,7 +1538,8 @@ configuration::configuration()
       "index writers.",
       {.needs_restart = needs_restart::no,
        .example = "1073741824",
-       .visibility = visibility::tunable},
+       .visibility = visibility::tunable,
+       .usable_before_ready = usable_before_ready::yes},
       128_MiB,
       {.min = 16_MiB, .max = 100_GiB})
   , storage_compaction_key_map_memory(
@@ -2049,10 +2061,7 @@ configuration::configuration()
       "cloud_storage_enabled",
       "Enable object storage. Must be set to `true` to use Tiered Storage or "
       "Remote Read Replicas.",
-      meta{
-        .needs_restart = needs_restart::yes,
-        .visibility = visibility::user,
-      },
+      meta{.needs_restart = needs_restart::yes, .visibility = visibility::user},
       false)
   , cloud_storage_enable_remote_read(
       *this,
@@ -4171,7 +4180,9 @@ configuration::configuration()
       "The minimum TLS version that Redpanda clusters support. This property "
       "prevents client applications from negotiating a downgrade to the TLS "
       "version when they make a connection to a Redpanda cluster.",
-      {.needs_restart = needs_restart::yes, .visibility = visibility::user},
+      {.needs_restart = needs_restart::yes,
+       .visibility = visibility::user,
+       .usable_before_ready = usable_before_ready::yes},
       tls_version::v1_2,
       {tls_version::v1_0,
        tls_version::v1_1,
@@ -4184,7 +4195,9 @@ configuration::configuration()
       "default disabled.  Only re-enable it if you are experiencing issues "
       "with your TLS-enabled client.  This option has no effect on TLSv1.3 "
       "connections as client-initiated renegotiation was removed.",
-      {.needs_restart = needs_restart::yes, .visibility = visibility::tunable},
+      {.needs_restart = needs_restart::yes,
+       .visibility = visibility::tunable,
+       .usable_before_ready = usable_before_ready::yes},
       false)
   , tls_v1_2_cipher_suites(
       *this,
@@ -4192,7 +4205,9 @@ configuration::configuration()
       "Specifies the TLS 1.2 cipher suites available for external client "
       "connections as a colon-separated OpenSSL-compatible list. Configure "
       "this property to support legacy clients.",
-      {.needs_restart = needs_restart::yes, .visibility = visibility::user},
+      {.needs_restart = needs_restart::yes,
+       .visibility = visibility::user,
+       .usable_before_ready = usable_before_ready::yes},
       ss::sstring{net::tls_v1_2_cipher_suites},
       [](ss::sstring s) -> std::optional<ss::sstring> {
           if (!validate_tls_v1_2_cipher_suites(s)) {
@@ -4207,7 +4222,9 @@ configuration::configuration()
       "connections as a colon-separated OpenSSL-compatible list. Most "
       "deployments don't need to modify this setting. Configure this property "
       "only for specific organizational security policies.",
-      {.needs_restart = needs_restart::yes, .visibility = visibility::user},
+      {.needs_restart = needs_restart::yes,
+       .visibility = visibility::user,
+       .usable_before_ready = usable_before_ready::yes},
       ss::sstring{net::tls_v1_3_cipher_suites},
       [](ss::sstring s) -> std::optional<ss::sstring> {
           if (!validate_tls_v1_3_cipher_suites(s)) {
@@ -4224,10 +4241,7 @@ configuration::configuration()
       "Iceberg open table format. Setting iceberg_enabled to true activates "
       "the feature at the cluster level, but each topic must also configure "
       "the redpanda.iceberg.mode topic-level property to use it.",
-      meta{
-        .needs_restart = needs_restart::yes,
-        .visibility = visibility::user,
-      },
+      meta{.needs_restart = needs_restart::yes, .visibility = visibility::user},
       false)
   , iceberg_catalog_commit_interval_ms(
       *this,

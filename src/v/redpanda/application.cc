@@ -31,6 +31,7 @@
 #include "datalake/credential_manager.h"
 #include "datalake/datalake_manager.h"
 #include "datalake/datalake_usage_aggregator.h"
+#include "features/feature_table.h"
 #include "kafka/client/configuration.h"
 #include "kafka/server/rm_group_frontend.h"
 #include "metrics/prometheus_sanitize.h"
@@ -345,6 +346,7 @@ int application::run(int ac, char** av) {
                 // Cluster config validation uses OpenSSL (e.g. TLS cipher
                 // checks), so crypto must be initialized first.
                 wire_up_and_start_crypto_services();
+                mark_config_ready(false).get();
                 hydrate_cluster_config(node_cfg_yaml);
                 wire_up_bootstrap_services();
                 bootstrap_from_kvstore();
@@ -769,6 +771,15 @@ void application::wire_up_bootstrap_services() {
 
 void application::establish_cluster_view() {
     bootstrap_controller_view().get();
+
+    // The shard_local_cfg() is now safe to use as we have a view consistent
+    // with the rest of the cluster.
+    mark_config_ready(true).get();
+}
+
+ss::future<> application::mark_config_ready(bool ready) {
+    co_await ss::smp::invoke_on_all(
+      [ready] { config::shard_local_cfg().mark_ready(ready); });
 }
 
 void application::hydrate_cluster_config(const YAML::Node& config) {

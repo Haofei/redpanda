@@ -276,6 +276,9 @@ private:
       std::optional<cloud_storage_clients::bucket_name>& bucket_name,
       cloud_topics::test_fixture_cfg ct_test_cfg);
 
+    // Marks the shard_local_cfg as ready (or not ready) per the provided flag.
+    ss::future<> mark_config_ready(bool ready);
+
     // Applies the provided feature_table_snapshot directly to the in-memory
     // feature table state.
     ss::future<>
