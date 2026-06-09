@@ -253,6 +253,7 @@ redpanda_cc_gtest(
         "//src/v/cluster:tx_protocol_types",
         "//src/v/container:chunked_circular_buffer",
         "//src/v/container:chunked_hash_map",
+        "//src/v/container:chunked_vector",
         "//src/v/kafka/protocol",
         "//src/v/kafka/server",
         "//src/v/model",
