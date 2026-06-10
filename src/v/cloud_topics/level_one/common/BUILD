@@ -86,6 +86,18 @@ redpanda_cc_library(
 )
 
 redpanda_cc_library(
+    name = "single_flight",
+    srcs = ["single_flight.cc"],
+    hdrs = ["single_flight.h"],
+    deps = [
+        ":abstract_io",
+        "//src/v/base",
+        "//src/v/container:chunked_hash_map",
+        "@seastar",
+    ],
+)
+
+redpanda_cc_library(
     name = "file_io",
     srcs = ["file_io.cc"],
     hdrs = ["file_io.h"],
