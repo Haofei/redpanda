@@ -12,6 +12,7 @@
 #include "metrics/instance_metrics.h"
 
 #include "metrics/instance_type_detector.h"
+#include "metrics/metrics.h"
 #include "ssx/future-util.h"
 
 #include <seastar/core/metrics.hh>
@@ -30,6 +31,10 @@ void instance_metrics::start() {
 ss::future<> instance_metrics::stop() { return _gate.close(); }
 
 ss::future<> instance_metrics::detect_and_register() {
+    if (!metrics::any_enabled()) {
+        // Short-circuit when no metrics are enabled.
+        co_return;
+    }
     register_metrics(co_await detect_instance(_as));
 }
 
