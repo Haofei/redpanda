@@ -1,8 +1,6 @@
 module github.com/redpanda-data/redpanda/tests/go/kgo-verifier
 
-go 1.24.0
-
-toolchain go1.24.7
+go 1.25.0
 
 require (
 	github.com/google/uuid v1.6.0
@@ -10,11 +8,11 @@ require (
 	github.com/sirupsen/logrus v1.9.3
 	github.com/stretchr/testify v1.11.1
 	github.com/twmb/franz-go v1.20.6-0.20251204171952-b7b6b8e44d30
-	github.com/twmb/franz-go/pkg/kadm v1.17.1
-	github.com/twmb/franz-go/pkg/kmsg v1.12.0
+	github.com/twmb/franz-go/pkg/kadm v1.17.2
+	github.com/twmb/franz-go/pkg/kmsg v1.13.1
 	github.com/vectorizedio/redpanda/src/go/rpk v0.0.0-20211217123319-86af7226d9f0
-	golang.org/x/sync v0.18.0
-	golang.org/x/time v0.9.0
+	golang.org/x/sync v0.20.0
+	golang.org/x/time v0.15.0
 )
 
 require (

@@ -250,6 +250,7 @@ go_sdk.download(
 )
 
 go_deps = use_extension("@gazelle//:extensions.bzl", "go_deps")
+go_deps.config(check_direct_dependencies = "error")
 go_deps.from_file(go_work = "//bazel/thirdparty:go.work")
 
 # TODO(bazel): Upstream this so we can remove this obscure workaround.
