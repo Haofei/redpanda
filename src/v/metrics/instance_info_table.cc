@@ -32,7 +32,8 @@ namespace {
 
 using enum cloud_provider;
 
-// Column legend (full field docs in instance_info.h).
+// Column legend (full field docs in instance_info.h). Sizes use the _GiB
+// (base 2) / _GB (base 10) literals from base/units.h; both yield bytes.
 //   cpu  = vCPUs                  net   = network bytes/sec (one direction)
 //   mem  = memory                 riops = read IOPS
 //   disk = local SSD              wiops = write IOPS
@@ -41,7 +42,7 @@ using enum cloud_provider;
 // initializers would bloat this generated file with no readability gain.
 // NOLINTBEGIN(modernize-use-designated-initializers)
 // clang-format off
-constexpr std::array<table_entry, 466> entries{{
+constexpr std::array<table_entry, 480> entries{{
 // prov    name                        cpu,       mem,       disk,          net,    riops,    wiops
   {aws,    "i3.large",               {   2,    15_GiB,     475_GB,    100000000,   103125,    35000}},
   {aws,    "i3.xlarge",              {   4,    30_GiB,     950_GB,    150000000,   206250,    70000}},
@@ -365,13 +366,13 @@ constexpr std::array<table_entry, 466> entries{{
   {azure,  "Standard_D96ads_v7",     {  96,   384_GiB,   5280_GiB,   8750000000,  1800000,   720000}},
   {azure,  "Standard_D128ads_v7",    { 128,   512_GiB,   7040_GiB,   9375000000,  2400000,   960000}},
   {azure,  "Standard_D160ads_v7",    { 160,   640_GiB,   8800_GiB,  10000000000,  3000000,  1200000}},
-  {azure,  "Standard_D2d_v4",        {   2,     8_GiB,     75_GiB,    625000000,    19000,    19000}},
-  {azure,  "Standard_D4d_v4",        {   4,    16_GiB,    150_GiB,   1250000000,    38500,    38500}},
-  {azure,  "Standard_D8d_v4",        {   8,    32_GiB,    300_GiB,   1562500000,    77000,    77000}},
-  {azure,  "Standard_D16d_v4",       {  16,    64_GiB,    600_GiB,   1562500000,   154000,   154000}},
-  {azure,  "Standard_D32d_v4",       {  32,   128_GiB,   1200_GiB,   2000000000,   308000,   308000}},
-  {azure,  "Standard_D48d_v4",       {  48,   192_GiB,   1800_GiB,   3000000000,   462000,   462000}},
-  {azure,  "Standard_D64d_v4",       {  64,   256_GiB,   2400_GiB,   3750000000,   615000,   615000}},
+  {azure,  "Standard_D2d_v4",        {   2,     8_GiB,     75_GiB,    625000000,     9000,     9000}},
+  {azure,  "Standard_D4d_v4",        {   4,    16_GiB,    150_GiB,   1250000000,    19000,    19000}},
+  {azure,  "Standard_D8d_v4",        {   8,    32_GiB,    300_GiB,   1562500000,    38000,    38000}},
+  {azure,  "Standard_D16d_v4",       {  16,    64_GiB,    600_GiB,   1562500000,    75000,    75000}},
+  {azure,  "Standard_D32d_v4",       {  32,   128_GiB,   1200_GiB,   2000000000,   150000,   150000}},
+  {azure,  "Standard_D48d_v4",       {  48,   192_GiB,   1800_GiB,   3000000000,   225000,   225000}},
+  {azure,  "Standard_D64d_v4",       {  64,   256_GiB,   2400_GiB,   3750000000,   300000,   300000}},
   {azure,  "Standard_D2d_v5",        {   2,     8_GiB,     75_GiB,   1562500000,     9000,     9000}},
   {azure,  "Standard_D4d_v5",        {   4,    16_GiB,    150_GiB,   1562500000,    19000,    19000}},
   {azure,  "Standard_D8d_v5",        {   8,    32_GiB,    300_GiB,   1562500000,    38000,    38000}},
@@ -380,13 +381,13 @@ constexpr std::array<table_entry, 466> entries{{
   {azure,  "Standard_D48d_v5",       {  48,   192_GiB,   1800_GiB,   3000000000,   225000,   225000}},
   {azure,  "Standard_D64d_v5",       {  64,   256_GiB,   2400_GiB,   3750000000,   300000,   300000}},
   {azure,  "Standard_D96d_v5",       {  96,   384_GiB,   3600_GiB,   4375000000,   450000,   450000}},
-  {azure,  "Standard_D2ds_v4",       {   2,     8_GiB,     75_GiB,    625000000,    19000,    19000}},
-  {azure,  "Standard_D4ds_v4",       {   4,    16_GiB,    150_GiB,   1250000000,    38500,    38500}},
-  {azure,  "Standard_D8ds_v4",       {   8,    32_GiB,    300_GiB,   1562500000,    77000,    77000}},
-  {azure,  "Standard_D16ds_v4",      {  16,    64_GiB,    600_GiB,   1562500000,   154000,   154000}},
-  {azure,  "Standard_D32ds_v4",      {  32,   128_GiB,   1200_GiB,   2000000000,   308000,   308000}},
-  {azure,  "Standard_D48ds_v4",      {  48,   192_GiB,   1800_GiB,   3000000000,   462000,   462000}},
-  {azure,  "Standard_D64ds_v4",      {  64,   256_GiB,   2400_GiB,   3750000000,   615000,   615000}},
+  {azure,  "Standard_D2ds_v4",       {   2,     8_GiB,     75_GiB,    625000000,     9000,     9000}},
+  {azure,  "Standard_D4ds_v4",       {   4,    16_GiB,    150_GiB,   1250000000,    19000,    19000}},
+  {azure,  "Standard_D8ds_v4",       {   8,    32_GiB,    300_GiB,   1562500000,    38000,    38000}},
+  {azure,  "Standard_D16ds_v4",      {  16,    64_GiB,    600_GiB,   1562500000,    75000,    75000}},
+  {azure,  "Standard_D32ds_v4",      {  32,   128_GiB,   1200_GiB,   2000000000,   150000,   150000}},
+  {azure,  "Standard_D48ds_v4",      {  48,   192_GiB,   1800_GiB,   3000000000,   225000,   225000}},
+  {azure,  "Standard_D64ds_v4",      {  64,   256_GiB,   2400_GiB,   3750000000,   300000,   300000}},
   {azure,  "Standard_D2ds_v5",       {   2,     8_GiB,     75_GiB,   1562500000,     9000,     9000}},
   {azure,  "Standard_D4ds_v5",       {   4,    16_GiB,    150_GiB,   1562500000,    19000,    19000}},
   {azure,  "Standard_D8ds_v5",       {   8,    32_GiB,    300_GiB,   1562500000,    38000,    38000}},
@@ -423,6 +424,13 @@ constexpr std::array<table_entry, 466> entries{{
   {azure,  "Standard_D48lds_v5",     {  48,    96_GiB,   1800_GiB,   3000000000,   225000,   225000}},
   {azure,  "Standard_D64lds_v5",     {  64,   128_GiB,   2400_GiB,   3750000000,   300000,   300000}},
   {azure,  "Standard_D96lds_v5",     {  96,   192_GiB,   3600_GiB,   4375000000,   450000,   450000}},
+  {azure,  "Standard_D2pds_v5",      {   2,     8_GiB,     75_GiB,   1562500000,     9375,     9375}},
+  {azure,  "Standard_D4pds_v5",      {   4,    16_GiB,    150_GiB,   1562500000,    19000,    19000}},
+  {azure,  "Standard_D8pds_v5",      {   8,    32_GiB,    300_GiB,   1562500000,    38000,    38000}},
+  {azure,  "Standard_D16pds_v5",     {  16,    64_GiB,    600_GiB,   1562500000,    75000,    75000}},
+  {azure,  "Standard_D32pds_v5",     {  32,   128_GiB,   1200_GiB,   2000000000,   150000,   150000}},
+  {azure,  "Standard_D48pds_v5",     {  48,   192_GiB,   1800_GiB,   3000000000,   225000,   225000}},
+  {azure,  "Standard_D64pds_v5",     {  64,   208_GiB,   2400_GiB,   5000000000,   300000,   300000}},
   {azure,  "Standard_D2pds_v6",      {   2,     8_GiB,    110_GiB,   1562500000,    37500,    15000}},
   {azure,  "Standard_D4pds_v6",      {   4,    16_GiB,    220_GiB,   1562500000,    75000,    30000}},
   {azure,  "Standard_D8pds_v6",      {   8,    32_GiB,    440_GiB,   1875000000,   150000,    60000}},
@@ -431,6 +439,13 @@ constexpr std::array<table_entry, 466> entries{{
   {azure,  "Standard_D48pds_v6",     {  48,   192_GiB,   2640_GiB,   3750000000,   900000,   360000}},
   {azure,  "Standard_D64pds_v6",     {  64,   256_GiB,   3520_GiB,   5000000000,  1200000,   480000}},
   {azure,  "Standard_D96pds_v6",     {  96,   384_GiB,   5280_GiB,   7500000000,  1800000,   720000}},
+  {azure,  "Standard_D2plds_v5",     {   2,     4_GiB,     75_GiB,   1562500000,     9375,     9375}},
+  {azure,  "Standard_D4plds_v5",     {   4,     8_GiB,    150_GiB,   1562500000,    19000,    19000}},
+  {azure,  "Standard_D8plds_v5",     {   8,    16_GiB,    300_GiB,   1562500000,    38000,    38000}},
+  {azure,  "Standard_D16plds_v5",    {  16,    32_GiB,    600_GiB,   1562500000,    75000,    75000}},
+  {azure,  "Standard_D32plds_v5",    {  32,    64_GiB,   1200_GiB,   2000000000,   150000,   150000}},
+  {azure,  "Standard_D48plds_v5",    {  48,    96_GiB,   1800_GiB,   3000000000,   225000,   225000}},
+  {azure,  "Standard_D64plds_v5",    {  64,   128_GiB,   2400_GiB,   5000000000,   300000,   300000}},
   {azure,  "Standard_D2plds_v6",     {   2,     4_GiB,    110_GiB,   1562500000,    37500,    15000}},
   {azure,  "Standard_D4plds_v6",     {   4,     8_GiB,    220_GiB,   1562500000,    75000,    30000}},
   {azure,  "Standard_D8plds_v6",     {   8,    16_GiB,    440_GiB,   1875000000,   150000,    60000}},
@@ -455,14 +470,14 @@ constexpr std::array<table_entry, 466> entries{{
   {azure,  "Standard_E48ads_v6",     {  48,   384_GiB,   2640_GiB,   3500000000,   900000,   360000}},
   {azure,  "Standard_E64ads_v6",     {  64,   512_GiB,   3520_GiB,   4500000000,  1200000,   480000}},
   {azure,  "Standard_E96ads_v6",     {  96,   672_GiB,   5280_GiB,   5000000000,  1800000,   720000}},
-  {azure,  "Standard_E2d_v4",        {   2,    16_GiB,     75_GiB,    625000000,    19000,    19000}},
-  {azure,  "Standard_E4d_v4",        {   4,    32_GiB,    150_GiB,   1250000000,    38500,    38500}},
-  {azure,  "Standard_E8d_v4",        {   8,    64_GiB,    300_GiB,   1562500000,    77000,    77000}},
-  {azure,  "Standard_E16d_v4",       {  16,   128_GiB,    600_GiB,   1562500000,   154000,   154000}},
-  {azure,  "Standard_E20d_v4",       {  20,   160_GiB,    750_GiB,   2000000000,   193000,   193000}},
-  {azure,  "Standard_E32d_v4",       {  32,   256_GiB,   1200_GiB,   2000000000,   308000,   308000}},
-  {azure,  "Standard_E48d_v4",       {  48,   384_GiB,   1800_GiB,   3000000000,   462000,   462000}},
-  {azure,  "Standard_E64d_v4",       {  64,   504_GiB,   2400_GiB,   3750000000,   615000,   615000}},
+  {azure,  "Standard_E2d_v4",        {   2,    16_GiB,     75_GiB,    625000000,     9000,     9000}},
+  {azure,  "Standard_E4d_v4",        {   4,    32_GiB,    150_GiB,   1250000000,    19000,    19000}},
+  {azure,  "Standard_E8d_v4",        {   8,    64_GiB,    300_GiB,   1562500000,    38000,    38000}},
+  {azure,  "Standard_E16d_v4",       {  16,   128_GiB,    600_GiB,   1562500000,    75000,    75000}},
+  {azure,  "Standard_E20d_v4",       {  20,   160_GiB,    750_GiB,   2000000000,    94000,    94000}},
+  {azure,  "Standard_E32d_v4",       {  32,   256_GiB,   1200_GiB,   2000000000,   150000,   150000}},
+  {azure,  "Standard_E48d_v4",       {  48,   384_GiB,   1800_GiB,   3000000000,   225000,   225000}},
+  {azure,  "Standard_E64d_v4",       {  64,   504_GiB,   2400_GiB,   3750000000,   300000,   300000}},
   {azure,  "Standard_E2d_v5",        {   2,    16_GiB,     75_GiB,   1562500000,     9000,     9000}},
   {azure,  "Standard_E4d_v5",        {   4,    32_GiB,    150_GiB,   1562500000,    19000,    19000}},
   {azure,  "Standard_E8d_v5",        {   8,    64_GiB,    300_GiB,   1562500000,    38000,    38000}},
