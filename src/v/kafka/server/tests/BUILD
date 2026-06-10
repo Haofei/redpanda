@@ -1077,6 +1077,7 @@ redpanda_cc_bench(
         "//src/v/cluster:self_test",
         "//src/v/cluster:topic_metrics_watcher",
         "//src/v/container:chunked_vector",
+        "//src/v/kafka/protocol",
         "//src/v/kafka/protocol/schemata:produce_request",
         "//src/v/kafka/server",
         "//src/v/model",
