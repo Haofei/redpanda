@@ -13,7 +13,7 @@ from ducktape.tests.test import TestContext
 from typing import Any
 from ducktape.utils.util import wait_until
 from ducktape.mark import matrix
-from collections.abc import Iterable
+from collections.abc import Callable, Iterable
 
 from rptest.clients.kafka_cli_tools import KafkaCliTools
 from rptest.clients.rpk import RpkTool
@@ -163,6 +163,150 @@ class EndToEndCloudTopicsBase(EndToEndTest):
         for topic in topics or self.topics:
             for partition in range(topic.partition_count):
                 self.wait_until_reconciled(topic=topic.name, partition=partition)
+
+    # ── L1 maintenance metric helpers ───────────────────────────────
+
+    def _metric_sum(self, metric_name: str) -> float:
+        assert self.redpanda
+        return self.redpanda.metric_sum(
+            metric_name=metric_name,
+            metrics_endpoint=MetricsEndpoint.METRICS,
+            expect_metric=True,
+        )
+
+    def get_managed_logs(self) -> float:
+        return self._metric_sum(
+            "vectorized_cloud_topics_compaction_scheduler_managed_log_count"
+        )
+
+    def get_log_compactions(self) -> float:
+        return self._metric_sum(
+            "vectorized_cloud_topics_compaction_scheduler_log_compactions_total"
+        )
+
+    def get_records_removed(self) -> float:
+        return self._metric_sum(
+            "vectorized_cloud_topics_compaction_worker_records_removed_total"
+        )
+
+    def get_leveling_completed(self) -> float:
+        return self._metric_sum(
+            "vectorized_cloud_topics_compaction_scheduler_leveling_ranges_completed_total"
+        )
+
+    def get_leveling_queue_length(self) -> float:
+        return self._metric_sum(
+            "vectorized_cloud_topics_compaction_scheduler_leveling_queue_length"
+        )
+
+    def get_extents_reclaimed(self) -> float:
+        """Net object/extent-count reduction from committed leveling ranges."""
+        return self._metric_sum(
+            "vectorized_cloud_topics_compaction_worker_leveling_extents_reclaimed_total"
+        )
+
+    # ── L1 maintenance wait helpers ─────────────────────────────────
+
+    def wait_for_managed_logs(self, timeout_sec: int = 60):
+        wait_until(
+            lambda: self.get_managed_logs() > 0,
+            timeout_sec=timeout_sec,
+            backoff_sec=1,
+            err_msg="Did not see management of cloud-topic partitions.",
+        )
+
+    def _wait_for_maintenance_quiesce(
+        self,
+        kind: str,
+        get_progress: Callable[[], float],
+        get_queue_length: Callable[[], float] | None,
+        stable_sec: int,
+        timeout_sec: int,
+    ):
+        """Wait for one kind of L1 maintenance to start and then converge.
+
+        The progress counter must stop advancing for `stable_sec` consecutive
+        seconds AND (when a queue getter is given) the scheduler queue must be
+        drained. Polling `queue_length == 0` alone is unreliable: the
+        collector refills the queue every interval, and work that has been
+        dequeued but not yet committed is not counted there, so the queue can
+        read 0 mid-flight.
+        """
+        # First wait for the maintenance kind to actually start doing work.
+        wait_until(
+            lambda: get_progress() > 0,
+            timeout_sec=60,
+            backoff_sec=2,
+            err_msg=f"{kind} never made any progress",
+        )
+
+        def status() -> str:
+            s = f"progress={get_progress()}"
+            if get_queue_length is not None:
+                s += f", queue_length={get_queue_length()}"
+            return s
+
+        prev = get_progress()
+        stable_since = time.time()
+
+        def _quiesced() -> bool:
+            nonlocal prev, stable_since
+            progress = get_progress()
+            if progress != prev:
+                self.logger.info(f"{kind} still active: {prev} -> {progress}")
+                prev = progress
+                stable_since = time.time()
+                return False
+            # Progress is stable; also require the queue to be empty.
+            if get_queue_length is not None and get_queue_length() != 0:
+                return False
+            return time.time() - stable_since >= stable_sec
+
+        wait_until(
+            _quiesced,
+            timeout_sec=timeout_sec,
+            backoff_sec=5,
+            err_msg=lambda: (
+                f"{kind} did not quiesce within {timeout_sec}s ({status()})"
+            ),
+        )
+        self.logger.info(f"{kind} quiesced ({status()})")
+
+    def wait_for_compaction_quiesce(
+        self,
+        stable_sec: int = 30,
+        timeout_sec: int = 360,
+    ):
+        """
+        Wait for records_removed to stabilize, meaning compaction has
+        converged and there is nothing left to remove.
+        """
+        self._wait_for_maintenance_quiesce(
+            "Compaction",
+            self.get_records_removed,
+            None,
+            stable_sec,
+            timeout_sec,
+        )
+
+    def wait_for_leveling_quiesce(
+        self,
+        stable_sec: int = 30,
+        timeout_sec: int = 360,
+    ):
+        """
+        Wait for leveling to converge: the reclaimed-extents counter must stop
+        changing for `stable_sec` consecutive seconds AND the leveling queue
+        must be drained. Together these mean leveling has folded everything it
+        is going to and there is no pending work.
+        """
+        self._wait_for_maintenance_quiesce(
+            "Leveling",
+            self.get_extents_reclaimed,
+            self.get_leveling_queue_length,
+            stable_sec,
+            timeout_sec,
+        )
 
 
 class EndToEndCloudTopicsTest(EndToEndCloudTopicsBase):
@@ -475,29 +619,6 @@ class EndToEndCloudTopicsCompactionTest(EndToEndCloudTopicsBase):
         self.key_set_cardinality = 100
         self.tombstone_probability = 0.5
 
-    def _metric_sum(self, metric_name):
-        assert self.redpanda
-        return self.redpanda.metric_sum(
-            metric_name=metric_name,
-            metrics_endpoint=MetricsEndpoint.METRICS,
-            expect_metric=True,
-        )
-
-    def get_removed_records(self):
-        return self._metric_sum(
-            "vectorized_cloud_topics_compaction_worker_records_removed_total"
-        )
-
-    def get_log_compactions(self):
-        return self._metric_sum(
-            "vectorized_cloud_topics_compaction_scheduler_log_compactions_total"
-        )
-
-    def get_managed_logs(self):
-        return self._metric_sum(
-            "vectorized_cloud_topics_compaction_scheduler_managed_log_count"
-        )
-
     def produce(self):
         assert self.redpanda
         assert self.topic
@@ -542,15 +663,7 @@ class EndToEndCloudTopicsCompactionTest(EndToEndCloudTopicsBase):
     @cluster(num_nodes=4)
     @matrix(cloud_topics_compaction_key_map_memory_kb=[3, 10, 128 * 1024])
     def test_compact(self, cloud_topics_compaction_key_map_memory_kb):
-        def seen_managed_logs():
-            return self.get_managed_logs() > 0
-
-        wait_until(
-            seen_managed_logs,
-            timeout_sec=60,
-            backoff_sec=1,
-            err_msg="Did not see management of compact-enabled CTPs.",
-        )
+        self.wait_for_managed_logs()
 
         num_rounds = 1
         self.prev_log_compactions = 0.0
@@ -572,7 +685,7 @@ class EndToEndCloudTopicsCompactionTest(EndToEndCloudTopicsBase):
             )
 
             def seen_removed_records():
-                removed_records = self.get_removed_records()
+                removed_records = self.get_records_removed()
                 res = removed_records > self.prev_removed_records
                 self.prev_removed_records = removed_records
                 return res
@@ -646,24 +759,6 @@ class EndToEndCloudTopicsLevelingTest(EndToEndCloudTopicsBase):
         self.msg_size = 4096
         self.msg_count = 20000
 
-    def _metric_sum(self, metric_name):
-        assert self.redpanda
-        return self.redpanda.metric_sum(
-            metric_name=metric_name,
-            metrics_endpoint=MetricsEndpoint.METRICS,
-            expect_metric=True,
-        )
-
-    def get_leveling_queue_length(self):
-        return self._metric_sum(
-            "vectorized_cloud_topics_compaction_scheduler_leveling_queue_length"
-        )
-
-    def get_leveling_completed(self):
-        return self._metric_sum(
-            "vectorized_cloud_topics_compaction_scheduler_leveling_ranges_completed_total"
-        )
-
     def produce(self):
         assert self.redpanda
         assert self.topic
@@ -699,40 +794,6 @@ class EndToEndCloudTopicsLevelingTest(EndToEndCloudTopicsBase):
         finally:
             self.kgo_consumer.stop()
 
-    def wait_for_leveling_quiesce(self, stable_sec: int = 10, timeout_sec: int = 120):
-        """Wait for leveling to converge.
-
-        The completed-ranges counter must stop advancing for `stable_sec`
-        consecutive seconds AND the queue must be empty. Polling
-        `queue_length == 0` alone is unreliable: the collector refills the
-        queue every interval, and ranges that have been dequeued but not yet
-        committed are not counted there, so the queue can read 0 mid-flight.
-        """
-        prev = self.get_leveling_completed()
-        stable_since = time.time()
-
-        def quiesced() -> bool:
-            nonlocal prev, stable_since
-            completed = self.get_leveling_completed()
-            if completed != prev:
-                prev = completed
-                stable_since = time.time()
-                return False
-            if self.get_leveling_queue_length() != 0:
-                return False
-            return time.time() - stable_since >= stable_sec
-
-        wait_until(
-            quiesced,
-            timeout_sec=timeout_sec,
-            backoff_sec=2,
-            err_msg=lambda: (
-                f"Leveling did not quiesce "
-                f"(completed={self.get_leveling_completed()}, "
-                f"queue_length={self.get_leveling_queue_length()})"
-            ),
-        )
-
     @cluster(num_nodes=4)
     def test_per_range_leveling(self):
         self.produce()
@@ -751,3 +812,4 @@ class EndToEndCloudTopicsLevelingTest(EndToEndCloudTopicsBase):
 
         # Read all records back to verify data integrity.
         self.consume()
+
