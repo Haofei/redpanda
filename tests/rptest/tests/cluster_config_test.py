@@ -280,6 +280,13 @@ class ClusterConfigTest(RedpandaTest, ClusterConfigHelpersMixin):
         # with cloud configs and prevent uploads from succeeding.
         rp_conf["enable_cluster_metadata_upload_loop"] = False
 
+        # Cloud topics infrastructure now starts whenever cloud_storage_enabled
+        # is true. Tests that point cloud storage at a fake bucket (e.g.
+        # test_cloud_validation) would otherwise have the L1 metastore flush loop
+        # make real object-storage PUTs that fail with a hard S3 error and trip
+        # the bad-log-lines check.
+        rp_conf["cloud_topics_disable_metastore_flush_loop_for_tests"] = True
+
         super(ClusterConfigTest, self).__init__(*args, extra_rp_conf=rp_conf, **kwargs)
 
         self.admin = Admin(self.redpanda)
