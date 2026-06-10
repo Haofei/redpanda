@@ -1308,9 +1308,19 @@ health_monitor_backend::get_cluster_health_overview(
     // cluster is not healthy if the health report can't be obtained
     if (ec) {
         ret.unhealthy_reasons.emplace_back("no_health_report");
+        ret.refresh_failed = true;
     }
 
     ret.bytes_in_cloud_storage = _bytes_in_cloud_storage;
+
+    // True only when every known member produced a successful health
+    // report. Distinct from refresh_failed, which only catches errors
+    // from maybe_refresh_cluster_health itself - per-peer RPC failures
+    // (e.g., during boot before connections are established) do NOT set
+    // ec, but they do leave _reports incomplete.
+    ret.all_members_reported = !ec
+                               && reports().size()
+                                    == _members.local().nodes().size();
 
     co_return ret;
 }
