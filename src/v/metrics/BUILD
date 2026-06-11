@@ -63,6 +63,7 @@ redpanda_cc_library(
     ],
     implementation_deps = [
         "//src/v/bytes:iobuf",
+        "//src/v/cloud_instance_metadata",
         "//src/v/http",
         "//src/v/net",
         "//src/v/ssx:future_util",

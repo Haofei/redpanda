@@ -14,6 +14,7 @@
 #include "base/seastarx.h"
 #include "base/vlog.h"
 #include "bytes/iobuf.h"
+#include "cloud_instance_metadata/aws_imds.h"
 #include "http/client.h"
 #include "instance_type_detector_impl.h"
 #include "metrics/instance_info_impl.h"
@@ -24,28 +25,21 @@
 #include <seastar/coroutine/as_future.hh>
 #include <seastar/util/log.hh>
 
-#include <boost/beast/http/field.hpp>
-#include <boost/beast/http/verb.hpp>
+#include <boost/beast/http/status.hpp>
 
 #include <chrono>
 #include <cstdlib>
 
 namespace instance_info {
 
+namespace imds = cloud_instance_metadata::aws_imds;
+
 namespace {
 
 ss::logger ii_log("instance_info"); // NOLINT
 
-// EC2 Instance Metadata Service (IMDS), reachable via the link-local address
-// from inside any EC2 instance. https://docs.aws.amazon.com/...
-constexpr std::string_view imds_host = "169.254.169.254";
-constexpr uint16_t imds_port = 80;
-constexpr auto imds_token_path = "/latest/api/token";
-constexpr auto imds_instance_type_path = "/latest/meta-data/instance-type";
-// IMDSv2 token TTL header. The token outlives this one-shot use trivially.
-constexpr auto imds_token_ttl_key = "X-aws-ec2-metadata-token-ttl-seconds";
-constexpr auto imds_token_ttl_value = "60";
-constexpr auto imds_token_key = "X-aws-ec2-metadata-token";
+// IMDSv2 token TTL. The token outlives this one-shot use trivially.
+constexpr auto imds_token_ttl = std::chrono::seconds{60};
 
 // Resolve a detected instance-type name (provider unknown) against the table,
 // recovering the provider so it can be used as a metric label.
@@ -61,25 +55,13 @@ std::optional<detected_instance> resolve_by_name(ss::sstring instance_type) {
     return std::nullopt;
 }
 
-http::client::request_header
-imds_request(boost::beast::http::verb method, std::string_view target) {
-    http::client::request_header req;
-    req.insert(
-      boost::beast::http::field::host, {imds_host.data(), imds_host.size()});
-    req.method(method);
-    req.target({target.data(), target.size()});
-    return req;
-}
-
 } // namespace
 
 ss::future<std::optional<ss::sstring>> query_ec2_instance_type(
   http::abstract_client& client, ss::lowres_clock::duration timeout) {
     // IMDSv2: PUT to obtain a session token, then GET the metadata with the
     // token in a header. We don't fall back to IMDSv1; modern EC2 supports v2.
-    auto token_req = imds_request(
-      boost::beast::http::verb::put, imds_token_path);
-    token_req.insert(imds_token_ttl_key, imds_token_ttl_value);
+    auto token_req = imds::token_request(imds::host, imds_token_ttl);
 
     auto token_resp = co_await client.request_and_collect_response(
       std::move(token_req), std::nullopt, timeout);
@@ -92,9 +74,8 @@ ss::future<std::optional<ss::sstring>> query_ec2_instance_type(
     }
     auto token = token_resp.body.linearize_to_string();
 
-    auto meta_req = imds_request(
-      boost::beast::http::verb::get, imds_instance_type_path);
-    meta_req.insert(imds_token_key, {token.data(), token.size()});
+    auto meta_req = imds::get(
+      imds::host, imds::instance_type_path, std::string_view{token});
 
     auto meta_resp = co_await client.request_and_collect_response(
       std::move(meta_req), std::nullopt, timeout);
@@ -137,7 +118,8 @@ detect_instance(ss::abort_source& as) {
     //    generous timeout to ride out a slow or briefly-unavailable IMDS.
     constexpr auto imds_timeout = std::chrono::seconds{10};
     const net::base_transport::configuration config{
-      .server_addr = net::unresolved_address{ss::sstring{imds_host}, imds_port},
+      .server_addr
+      = net::unresolved_address{ss::sstring{imds::host}, imds::port},
       .disable_metrics = net::metrics_disabled::yes,
       .disable_public_metrics = net::public_metrics_disabled::yes};
 
