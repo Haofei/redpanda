@@ -106,11 +106,17 @@ public:
     // available in the `_leveling_queue`.
     ss::future<> alert_leveling_workers();
 
-    // Pauses the worker on the provided shard.
-    ss::future<> pause_worker(ss::shard_id);
+    // Pauses/resumes the given kind(s) of maintenance work on the worker at
+    // the provided shard.
+    ss::future<> pause_worker(
+      ss::shard_id, maintenance_job_type = maintenance_job_type::all);
+    ss::future<> resume_worker(
+      ss::shard_id, maintenance_job_type = maintenance_job_type::all);
 
-    // Resumes the worker on the provided shard.
-    ss::future<> resume_worker(ss::shard_id);
+    // Pauses/resumes the given kind(s) of maintenance work on every worker
+    // shard.
+    ss::future<> pause_all_workers(maintenance_job_type);
+    ss::future<> resume_all_workers(maintenance_job_type);
 
 private:
     friend class ::WorkerManagerTestFixture;

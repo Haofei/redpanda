@@ -250,6 +250,7 @@ redpanda_cc_library(
         "//src/v/container:intrusive",
         "//src/v/model",
         "//src/v/ssx:semaphore",
+        "//src/v/ssx:work_queue",
         "@seastar",
     ],
 )

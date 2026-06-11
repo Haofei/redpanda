@@ -7,7 +7,6 @@
 # the Business Source License, use of this software will be governed
 # by the Apache License, Version 2.0
 
-import time
 from typing import Any
 
 from ducktape.tests.test import TestContext
@@ -19,7 +18,6 @@ from rptest.services.kgo_verifier_services import (
     KgoVerifierProducer,
     KgoVerifierSeqConsumer,
 )
-from rptest.services.redpanda import MetricsEndpoint
 from rptest.tests.cloud_topics.e2e_test import EndToEndCloudTopicsBase
 from rptest.utils.mode_checks import is_debug_mode
 
@@ -71,47 +69,7 @@ class LevelingStressBase(EndToEndCloudTopicsBase):
             environment=environment,
         )
 
-    # ── Metric helpers ──────────────────────────────────────────────
-
-    def _metric_sum(self, metric_name: str) -> float:
-        assert self.redpanda
-        return self.redpanda.metric_sum(
-            metric_name=metric_name,
-            metrics_endpoint=MetricsEndpoint.METRICS,
-            expect_metric=True,
-        )
-
-    def get_managed_logs(self) -> float:
-        return self._metric_sum(
-            "vectorized_cloud_topics_compaction_scheduler_managed_log_count"
-        )
-
-    def get_leveling_queue_length(self) -> float:
-        return self._metric_sum(
-            "vectorized_cloud_topics_compaction_scheduler_leveling_queue_length"
-        )
-
-    def get_leveling_completed(self) -> float:
-        return self._metric_sum(
-            "vectorized_cloud_topics_compaction_scheduler_"
-            "leveling_ranges_completed_total"
-        )
-
-    def get_extents_reclaimed(self) -> float:
-        """Net object/extent-count reduction from committed leveling ranges."""
-        return self._metric_sum(
-            "vectorized_cloud_topics_compaction_worker_leveling_extents_reclaimed_total"
-        )
-
     # ── Wait helpers ────────────────────────────────────────────────
-
-    def wait_for_managed_logs(self, timeout_sec: int = 60):
-        wait_until(
-            lambda: self.get_managed_logs() > 0,
-            timeout_sec=timeout_sec,
-            backoff_sec=1,
-            err_msg="Did not see management of cloud-topic partitions.",
-        )
 
     def wait_for_extents_reclaimed(
         self,
@@ -127,58 +85,6 @@ class LevelingStressBase(EndToEndCloudTopicsBase):
                 f"Expected >= {min_reclaimed} extents reclaimed, "
                 f"got {self.get_extents_reclaimed()}"
             ),
-        )
-
-    def wait_for_leveling_quiesce(
-        self,
-        stable_sec: int = 30,
-        timeout_sec: int = 360,
-    ):
-        """
-        Wait for leveling to converge: the reclaimed-extents counter must stop
-        changing for `stable_sec` consecutive seconds AND the leveling queue
-        must be drained. Together these mean leveling has folded everything it
-        is going to and there is no pending work.
-        """
-        # First wait for leveling to actually start doing work.
-        wait_until(
-            lambda: self.get_extents_reclaimed() > 0,
-            timeout_sec=60,
-            backoff_sec=2,
-            err_msg="Leveling never reclaimed any extents",
-        )
-
-        prev = self.get_extents_reclaimed()
-        stable_since = time.time()
-
-        def _quiesced() -> bool:
-            nonlocal prev, stable_since
-            now_reclaimed = self.get_extents_reclaimed()
-            if now_reclaimed != prev:
-                self.logger.info(
-                    f"Leveling still active: extents_reclaimed "
-                    f"{prev} -> {now_reclaimed}"
-                )
-                prev = now_reclaimed
-                stable_since = time.time()
-                return False
-            # Counter is stable; also require the queue to be empty.
-            if self.get_leveling_queue_length() != 0:
-                return False
-            return time.time() - stable_since >= stable_sec
-
-        wait_until(
-            _quiesced,
-            timeout_sec=timeout_sec,
-            backoff_sec=5,
-            err_msg=lambda: (
-                f"Leveling did not quiesce within {timeout_sec}s "
-                f"(extents_reclaimed={self.get_extents_reclaimed()}, "
-                f"queue_length={self.get_leveling_queue_length()})"
-            ),
-        )
-        self.logger.info(
-            f"Leveling quiesced: {self.get_extents_reclaimed()} extents reclaimed"
         )
 
     # ── Workflow helpers ────────────────────────────────────────────

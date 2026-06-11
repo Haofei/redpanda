@@ -234,16 +234,32 @@ ss::future<> worker_manager::alert_leveling_workers() {
       [](compaction_worker& worker) { worker.alert_leveling_fiber(); });
 }
 
-ss::future<> worker_manager::pause_worker(ss::shard_id worker) {
+ss::future<>
+worker_manager::pause_worker(ss::shard_id worker, maintenance_job_type kind) {
     auto guard = _gate.hold();
-    co_await _workers.invoke_on(
-      worker, [](compaction_worker& worker) { return worker.pause_worker(); });
+    co_await _workers.invoke_on(worker, [kind](compaction_worker& worker) {
+        return worker.pause_worker(kind);
+    });
 }
 
-ss::future<> worker_manager::resume_worker(ss::shard_id worker) {
+ss::future<>
+worker_manager::resume_worker(ss::shard_id worker, maintenance_job_type kind) {
     auto guard = _gate.hold();
-    co_await _workers.invoke_on(
-      worker, [](compaction_worker& worker) { return worker.resume_worker(); });
+    co_await _workers.invoke_on(worker, [kind](compaction_worker& worker) {
+        return worker.resume_worker(kind);
+    });
+}
+
+ss::future<> worker_manager::pause_all_workers(maintenance_job_type kind) {
+    auto guard = _gate.hold();
+    co_await _workers.invoke_on_all(
+      [kind](compaction_worker& worker) { return worker.pause_worker(kind); });
+}
+
+ss::future<> worker_manager::resume_all_workers(maintenance_job_type kind) {
+    auto guard = _gate.hold();
+    co_await _workers.invoke_on_all(
+      [kind](compaction_worker& worker) { return worker.resume_worker(kind); });
 }
 
 } // namespace cloud_topics::l1

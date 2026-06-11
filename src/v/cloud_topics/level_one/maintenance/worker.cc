@@ -83,23 +83,27 @@ compaction_worker::compaction_worker(
 
 ss::future<> compaction_worker::start() {
     _probe.setup_metrics();
-    start_work_loop();
     co_return;
 }
 
 ss::future<> compaction_worker::stop() {
-    terminate_compaction_job();
-    terminate_leveling_jobs();
-    _worker_state = worker_state::stopped;
     _as.request_abort();
-    _compaction_cv.broken();
-    _leveling_cv.broken();
 
     co_await _worker_update_queue.shutdown();
 
+    _worker_target_compaction_state = worker_state::stopped;
+    _worker_target_leveling_state = worker_state::stopped;
+
+    _compaction_cv.broken();
+    _leveling_cv.broken();
+
+    terminate_compaction_job();
+    terminate_leveling_jobs();
+
     auto close_fut = _gate.close();
 
-    co_await clear_work_futs();
+    co_await clear_compaction_work_fut();
+    co_await clear_leveling_work_fut();
 
     if (_map) {
         co_await _map->initialize(0);
@@ -109,22 +113,71 @@ ss::future<> compaction_worker::stop() {
     co_await std::move(close_fut);
 }
 
-void compaction_worker::start_work_loop() {
-    vassert(
-      !_compaction_work_fut.has_value() && !_leveling_work_fut.has_value(),
-      "Cannot start work loops when either is already running.");
+void compaction_worker::resume_compaction_work_loop() {
+    if (_worker_target_compaction_state == worker_state::stopped) {
+        return;
+    }
+    _worker_target_compaction_state = worker_state::active;
+    if (_compaction_work_fut.has_value()) {
+        return;
+    }
     _compaction_work_fut = ssx::spawn_with_gate_then(_gate, [this]() {
         return ss::with_scheduling_group(
           _compaction_sg, [this]() { return compaction_work_loop(); });
     });
+}
+
+void compaction_worker::resume_leveling_work_loop() {
+    if (_worker_target_leveling_state == worker_state::stopped) {
+        return;
+    }
+    _worker_target_leveling_state = worker_state::active;
+    if (_leveling_work_fut.has_value()) {
+        return;
+    }
     _leveling_work_fut = ssx::spawn_with_gate_then(_gate, [this]() {
         return ss::with_scheduling_group(
           _compaction_sg, [this]() { return leveling_work_loop(); });
     });
 }
 
+ss::future<> compaction_worker::pause_compaction_work_loop() {
+    if (_worker_target_compaction_state == worker_state::stopped) {
+        co_return;
+    }
+    _worker_target_compaction_state = worker_state::paused;
+    if (!_compaction_work_fut.has_value()) {
+        co_return;
+    }
+    vlog(compaction_log.info, "Pausing compaction loop on worker");
+    interrupt_compaction_job();
+    alert_compaction_fiber();
+    co_await clear_compaction_work_fut();
+}
+
+ss::future<> compaction_worker::pause_leveling_work_loop() {
+    if (_worker_target_leveling_state == worker_state::stopped) {
+        co_return;
+    }
+    _worker_target_leveling_state = worker_state::paused;
+    if (!_leveling_work_fut.has_value()) {
+        co_return;
+    }
+    vlog(compaction_log.info, "Pausing leveling loop on worker");
+    interrupt_leveling_jobs();
+    alert_leveling_fiber();
+    co_await clear_leveling_work_fut();
+
+    // `clear_leveling_work_fut` only awaits the loop future. Leveling jobs
+    // are backgrounded, and leveling is not effectively paused until they
+    // resolve.
+    co_await _leveling_drained_cv.wait(
+      [this] { return _inflight_leveling.empty(); });
+}
+
 ss::future<> compaction_worker::compaction_work_loop() {
-    while (is_active()) {
+    vlog(compaction_log.info, "Started compaction work loop");
+    while (should_run_compaction()) {
         auto poll_interval = _compaction_poll_interval();
         try {
             co_await _compaction_cv.wait(_compaction_poll_interval());
@@ -137,7 +190,7 @@ ss::future<> compaction_worker::compaction_work_loop() {
             continue;
         }
 
-        while (is_active()) {
+        while (should_run_compaction()) {
             auto maybe_work
               = co_await try_acquire_compaction_work_from_manager();
 
@@ -191,7 +244,8 @@ ss::future<> compaction_worker::level_range(
 }
 
 ss::future<> compaction_worker::leveling_work_loop() {
-    while (is_active()) {
+    vlog(compaction_log.info, "Started leveling work loop");
+    while (should_run_leveling()) {
         auto poll_interval = _leveling_poll_interval();
         try {
             co_await _leveling_cv.wait(poll_interval);
@@ -204,7 +258,7 @@ ss::future<> compaction_worker::leveling_work_loop() {
             continue;
         }
 
-        while (is_active()) {
+        while (should_run_leveling()) {
             auto units_opt = _leveling_sem.try_get_units(1);
             if (!units_opt.has_value()) {
                 break;
@@ -228,11 +282,14 @@ ss::future<> compaction_worker::leveling_work_loop() {
     }
 }
 
-ss::future<> compaction_worker::clear_work_futs() {
+ss::future<> compaction_worker::clear_compaction_work_fut() {
     if (_compaction_work_fut.has_value()) {
         co_await std::move(_compaction_work_fut).value();
         _compaction_work_fut.reset();
     }
+}
+
+ss::future<> compaction_worker::clear_leveling_work_fut() {
     if (_leveling_work_fut.has_value()) {
         co_await std::move(_leveling_work_fut).value();
         _leveling_work_fut.reset();
@@ -240,7 +297,7 @@ ss::future<> compaction_worker::clear_work_futs() {
 }
 
 ss::future<> compaction_worker::compact_log(compaction_job* job) {
-    if (!is_active()) {
+    if (!should_run_compaction()) {
         co_return;
     }
 
@@ -364,7 +421,7 @@ ss::future<> compaction_worker::compact_log(compaction_job* job) {
 }
 
 ss::future<> compaction_worker::do_level_range(leveling_job* job) {
-    if (!is_active()) {
+    if (!should_run_leveling()) {
         co_return;
     }
 
@@ -490,9 +547,14 @@ ss::future<> compaction_worker::complete_leveling_work_on_manager(
       });
 }
 
-bool compaction_worker::is_active() const {
+bool compaction_worker::should_run_compaction() const {
     return !_gate.is_closed() && !_as.abort_requested()
-           && _worker_state == worker_state::active;
+           && _worker_target_compaction_state == worker_state::active;
+}
+
+bool compaction_worker::should_run_leveling() const {
+    return !_gate.is_closed() && !_as.abort_requested()
+           && _worker_target_leveling_state == worker_state::active;
 }
 
 void compaction_worker::interrupt_compaction_job() {
@@ -515,67 +577,58 @@ void compaction_worker::terminate_compaction_job() {
     _compaction_job_state = compaction_job_state::hard_stop;
 }
 
-ss::future<> compaction_worker::pause_worker() {
+void compaction_worker::interrupt_leveling_jobs() {
+    for (auto& [_, handle] : _inflight_leveling) {
+        handle->state = compaction_job_state::soft_stop;
+    }
+}
+
+ss::future<> compaction_worker::pause_worker(maintenance_job_type kind) {
     ss::promise<> p;
-    _worker_update_queue.submit(
-      [&, this] { return do_pause_worker().finally([&] { p.set_value(); }); });
+    _worker_update_queue.submit([&, this] {
+        return do_pause_worker(kind).finally([&] { p.set_value(); });
+    });
     co_await p.get_future();
 }
 
-ss::future<> compaction_worker::do_pause_worker() {
-    // If worker is `stopped`, we shouldn't be able to resume it. If it is
-    // already `paused`, this is a no-op.
-    if (_worker_state != worker_state::active) {
-        co_return;
+ss::future<> compaction_worker::do_pause_worker(maintenance_job_type kind) {
+    const bool pause_compaction = kind == maintenance_job_type::compaction
+                                  || kind == maintenance_job_type::all;
+    const bool pause_leveling = kind == maintenance_job_type::leveling
+                                || kind == maintenance_job_type::all;
+
+    if (pause_compaction) {
+        co_await pause_compaction_work_loop();
     }
 
-    vlog(
-      compaction_log.info,
-      "Pausing compaction worker on shard {}",
-      ss::this_shard_id());
-
-    interrupt_compaction_job();
-    interrupt_leveling_jobs();
-
-    _worker_state = worker_state::paused;
-    // Signal both fibers in case they are currently waiting.
-    alert_compaction_fiber();
-    alert_leveling_fiber();
-    co_await clear_work_futs();
-
-    // `clear_work_futs` only awaits the loop futures. Leveling jobs are
-    // backgrounded, and the worker is not effectively paused until they
-    // resolve.
-    co_await _leveling_drained_cv.wait(
-      [this] { return _inflight_leveling.empty(); });
-
-    vlog(
-      compaction_log.info,
-      "Paused compaction worker on shard {}",
-      ss::this_shard_id());
+    if (pause_leveling) {
+        co_await pause_leveling_work_loop();
+    }
 }
 
-ss::future<> compaction_worker::resume_worker() {
+ss::future<> compaction_worker::resume_worker(maintenance_job_type kind) {
     ss::promise<> p;
-    _worker_update_queue.submit(
-      [&, this] { return do_resume_worker().finally([&] { p.set_value(); }); });
+    _worker_update_queue.submit([&, this] {
+        return do_resume_worker(kind).finally([&] { p.set_value(); });
+    });
     co_await p.get_future();
 }
 
-ss::future<> compaction_worker::do_resume_worker() {
-    // If worker is `stopped`, we shouldn't be able to resume it. If it is
-    // already `active`, this is a no-op.
-    if (_worker_state != worker_state::paused) {
-        co_return;
+ss::future<> compaction_worker::do_resume_worker(maintenance_job_type kind) {
+    const bool resume_compaction = kind == maintenance_job_type::compaction
+                                   || kind == maintenance_job_type::all;
+    const bool resume_leveling = kind == maintenance_job_type::leveling
+                                 || kind == maintenance_job_type::all;
+
+    if (resume_compaction) {
+        resume_compaction_work_loop();
     }
 
-    // Set state back to active and start a new background loop.
-    _worker_state = worker_state::active;
-    start_work_loop();
-    vlog(
-      compaction_log.info,
-      "Resumed compaction worker on shard {}",
-      ss::this_shard_id());
+    if (resume_leveling) {
+        resume_leveling_work_loop();
+    }
+
+    co_return;
 }
 
 void compaction_worker::alert_compaction_fiber() { _compaction_cv.signal(); }
@@ -585,12 +638,6 @@ void compaction_worker::alert_leveling_fiber() { _leveling_cv.signal(); }
 void compaction_worker::terminate_leveling_jobs() {
     for (auto& [_, handle] : _inflight_leveling) {
         handle->state = compaction_job_state::hard_stop;
-    }
-}
-
-void compaction_worker::interrupt_leveling_jobs() {
-    for (auto& [_, handle] : _inflight_leveling) {
-        handle->state = compaction_job_state::soft_stop;
     }
 }
 

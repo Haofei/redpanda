@@ -37,14 +37,26 @@ public:
           nullptr,
           ss::default_scheduling_group(),
           nullptr);
-        co_await manager._workers.invoke_on_all(&l1::compaction_worker::start);
+        co_await manager._workers.invoke_on_all(
+          &l1::compaction_worker::resume_compaction_work_loop);
+        co_await manager._workers.invoke_on_all(
+          &l1::compaction_worker::resume_leveling_work_loop);
     }
 
     ss::future<l1::compaction_worker::worker_state>
-    get_worker_state(l1::worker_manager& manager, ss::shard_id shard) {
+    get_compaction_state(l1::worker_manager& manager, ss::shard_id shard) {
         return manager._workers.invoke_on(
-          shard,
-          [](l1::compaction_worker& worker) { return worker._worker_state; });
+          shard, [](l1::compaction_worker& worker) {
+              return worker._worker_target_compaction_state;
+          });
+    }
+
+    ss::future<l1::compaction_worker::worker_state>
+    get_leveling_state(l1::worker_manager& manager, ss::shard_id shard) {
+        return manager._workers.invoke_on(
+          shard, [](l1::compaction_worker& worker) {
+              return worker._worker_target_leveling_state;
+          });
     }
 
     ss::future<bool>
@@ -116,18 +128,40 @@ TEST_F(WorkerManagerTestFixture, PauseAndResumeWorkers) {
     auto stop_manager = ss::defer([&manager] { manager.stop().get(); });
     using worker_state = l1::compaction_worker::worker_state;
     for (ss::shard_id i = 0; i < ss::this_smp_shard_count(); ++i) {
-        // Workers start in active state
-        ASSERT_EQ(get_worker_state(manager, i).get(), worker_state::active);
+        // Both kinds start active with both loop fibers running.
+        ASSERT_EQ(get_compaction_state(manager, i).get(), worker_state::active);
+        ASSERT_EQ(get_leveling_state(manager, i).get(), worker_state::active);
         ASSERT_TRUE(work_fut_has_value(manager, i).get());
 
-        // Pause workers and expect to see state reflect that.
-        manager.pause_worker(i).get();
-        ASSERT_EQ(get_worker_state(manager, i).get(), worker_state::paused);
+        // Pausing only compaction leaves leveling running.
+        manager.pause_worker(i, l1::maintenance_job_type::compaction).get();
+        ASSERT_EQ(get_compaction_state(manager, i).get(), worker_state::paused);
+        ASSERT_EQ(get_leveling_state(manager, i).get(), worker_state::active);
+
+        // Pausing leveling too tears down both loop fibers.
+        manager.pause_worker(i, l1::maintenance_job_type::leveling).get();
+        ASSERT_EQ(get_compaction_state(manager, i).get(), worker_state::paused);
+        ASSERT_EQ(get_leveling_state(manager, i).get(), worker_state::paused);
         ASSERT_FALSE(work_fut_has_value(manager, i).get());
 
-        // Resume workers and expect to see active state.
+        // A whole-worker resume brings both kinds back to active.
         manager.resume_worker(i).get();
-        ASSERT_EQ(get_worker_state(manager, i).get(), worker_state::active);
+        ASSERT_EQ(get_compaction_state(manager, i).get(), worker_state::active);
+        ASSERT_EQ(get_leveling_state(manager, i).get(), worker_state::active);
+        ASSERT_TRUE(work_fut_has_value(manager, i).get());
+
+        // A whole-worker pause followed by per-kind resumes round-trips.
+        manager.pause_worker(i).get();
+        ASSERT_EQ(get_compaction_state(manager, i).get(), worker_state::paused);
+        ASSERT_EQ(get_leveling_state(manager, i).get(), worker_state::paused);
+
+        manager.resume_worker(i, l1::maintenance_job_type::leveling).get();
+        ASSERT_EQ(get_compaction_state(manager, i).get(), worker_state::paused);
+        ASSERT_EQ(get_leveling_state(manager, i).get(), worker_state::active);
+
+        manager.resume_worker(i, l1::maintenance_job_type::compaction).get();
+        ASSERT_EQ(get_compaction_state(manager, i).get(), worker_state::active);
+        ASSERT_EQ(get_leveling_state(manager, i).get(), worker_state::active);
         ASSERT_TRUE(work_fut_has_value(manager, i).get());
     }
 }
@@ -392,7 +426,8 @@ TEST_F(WorkerManagerTestFixture, PauseWaitsForInflightLevelingJobs) {
     // Once the job winds down, pause must complete.
     drain_inflight_leveling(manager, shard).get();
     std::move(pause_fut).get();
-    ASSERT_EQ(get_worker_state(manager, shard).get(), worker_state::paused);
+    ASSERT_EQ(get_compaction_state(manager, shard).get(), worker_state::paused);
+    ASSERT_EQ(get_leveling_state(manager, shard).get(), worker_state::paused);
 }
 
 // Verifies that `dirty_ratio_scheduling_policy` orders partitions from

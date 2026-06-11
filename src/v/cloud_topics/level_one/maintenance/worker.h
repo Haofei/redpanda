@@ -34,6 +34,9 @@ namespace cloud_topics::l1 {
 
 class worker_manager;
 
+// Selects which job(s) of maintenance work a pause/resume applies to.
+enum class maintenance_job_type { compaction, leveling, all };
+
 // A per-shard worker that accepts compaction and leveling jobs and performs
 // either de-duplication (for compaction) or rewrites (for leveling) using a
 // `sink`, `source`, and `reducer`. Can be pre-empted to either cancel or stop
@@ -58,10 +61,10 @@ public:
     // Launches background loop.
     ss::future<> start();
 
-    // Closes concurrency primitives and sets `_compaction_job_state` and
-    // `_worker_state` to `stopped` to indicate to a potential inflight
-    // compaction job that it should exit early before waiting on and clearing
-    // `_compaction_work_fut`.
+    // Closes concurrency primitives and sets `_compaction_job_state` and both
+    // per-job worker states to `stopped` to indicate to a potential inflight
+    // compaction/leveling job that it should exit early before waiting on and
+    // clearing the `*_work_fut`s.
     ss::future<> stop();
 
     // Sets `_state = compaction_job_state::soft_stop`. This is a request to
@@ -85,11 +88,14 @@ public:
     // after this function is called.
     void terminate_compaction_job();
 
-    // Submits a `do_pause_worker()` job to the `_worker_update_queue`.
-    ss::future<> pause_worker();
+    // Submits a `do_pause_worker()` job to the `_worker_update_queue`, pausing
+    // the requested type(s) of work (compaction, leveling, or all) on this
+    // worker.
+    ss::future<> pause_worker(maintenance_job_type);
 
-    // Submits a `do_resume_worker()` job to the `_worker_update_queue`.
-    ss::future<> resume_worker();
+    // Submits a `do_resume_worker()` job to the `_worker_update_queue`,
+    // resuming the requested type(s) of work on this worker.
+    ss::future<> resume_worker(maintenance_job_type);
 
     // Alert the compaction fiber that new compaction work may be available.
     void alert_compaction_fiber();
@@ -100,17 +106,17 @@ public:
     // Hard-stops every inflight leveling job for every tidp on this worker.
     void terminate_leveling_jobs();
 
-    // Soft-stops every inflight leveling job on this worker, requesting a
-    // graceful wind-down. Used on pause, mirroring `interrupt_compaction_job`.
-    void interrupt_leveling_jobs();
-
     // Hard-stops every inflight leveling job for the given tidp on this worker.
     void terminate_leveling_jobs_for_tidp(model::topic_id_partition);
 
 private:
-    // Kicks off the two backgrounded loops held in `_compaction_work_fut` and
-    // `_leveling_work_fut`.
-    void start_work_loop();
+    // Launches a single backgrounded loop into its `*_work_fut`, if not
+    // already running.
+    void resume_compaction_work_loop();
+    void resume_leveling_work_loop();
+
+    ss::future<> pause_compaction_work_loop();
+    ss::future<> pause_leveling_work_loop();
 
     // The compaction loop which waits for jobs to become available.
     ss::future<> compaction_work_loop();
@@ -120,21 +126,23 @@ private:
     // via an `adjustable_semaphore` slot pool.
     ss::future<> leveling_work_loop();
 
-    // Waits for both background loops to resolve and clears their values.
-    ss::future<> clear_work_futs();
+    // Joins a single loop's future and clears it.
+    ss::future<> clear_compaction_work_fut();
+    ss::future<> clear_leveling_work_fut();
 
-    // Pauses the compaction worker by setting `_worker_state` to `paused` and
-    // waits for the backgrounded `_compaction_work_fut` to complete.
-    // `_compaction_work_fut` is left as `std::nullopt` as a result of this
-    // function- no new compaction jobs will be processed until the worker is
-    // resumed. If `_worker_state` is not `active`, this function is a no-op.
-    ss::future<> do_pause_worker();
+    // Soft-stops every inflight leveling job on this worker (a graceful
+    // wind-down request), e.g. when leveling is paused.
+    void interrupt_leveling_jobs();
 
-    // Resumes the compaction worker by setting `_worker_state` to `active` and
-    // launches a new backgrounded job held in `_compaction_work_fut`, allowing
-    // this worker to process new compaction jobs. If `_worker_state` is not
-    // `paused`, this function is a no-op.
-    ss::future<> do_resume_worker();
+    // Pauses the requested type(s) of work: interrupts the inflight job(s),
+    // marks the job as paused so its loop won't run, and joins the loop fiber,
+    // leaving the corresponding `*_work_fut` as `std::nullopt`. No new jobs of
+    // that kind are processed until resumed.
+    ss::future<> do_pause_worker(maintenance_job_type);
+
+    // Resumes the requested type(s) of work: clears the paused mark and
+    // relaunches the loop fiber.
+    ss::future<> do_resume_worker(maintenance_job_type);
 
     // Requests a compaction of the provided job's CTP against the metastore
     // sample it carries.
@@ -174,7 +182,8 @@ private:
     // Returns `true` iff the worker is currently in an `active` state. That is,
     // the worker has not been `paused`, nor has it been `stopped` or is in the
     // process of shutdown.
-    bool is_active() const;
+    bool should_run_compaction() const;
+    bool should_run_leveling() const;
 
 private:
     friend class ::WorkerManagerTestFixture;
@@ -191,17 +200,17 @@ private:
     // jobs.
     compaction_job_state _compaction_job_state{compaction_job_state::idle};
 
-    // The state of the worker, which is `active`, `paused`, or `stopped`.
-    // * A worker in an `active` state should have an active
-    // `_compaction_work_fut` value
-    //   which is accepting and completing compaction jobs.
-    // * A worker in a `paused` state has `_compaction_work_fut == std::nullopt`
-    // and is not
-    //   accepting compaction jobs.
+    // The state(s) of the worker, which are `active`, `paused`, or `stopped`.
+    // Compaction and leveling are independent.
+    // * A worker in an `active` state should have an active `_*_work_fut` value
+    //   which is accepting and completing maintenance jobs.
+    // * A worker in a `paused` state has `_*_work_fut == std::nullopt`
+    //   and is not accepting maintenance jobs.
     // * A worker in a `stopped` state is in the process of shutting down and
     //   therefore has its concurrency primitives closed and is not accepting
-    //   compaction jobs.
-    worker_state _worker_state{worker_state::active};
+    //   maintenance jobs.
+    worker_state _worker_target_compaction_state{worker_state::paused};
+    worker_state _worker_target_leveling_state{worker_state::paused};
 
     std::optional<model::ntp> _inflight_ntp;
 

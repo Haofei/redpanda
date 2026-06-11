@@ -4817,6 +4817,18 @@ configuration::configuration()
       "in time and blast radius. Lower values mean more, smaller jobs.",
       {.needs_restart = needs_restart::no, .visibility = visibility::tunable},
       1_GiB)
+  , cloud_topics_compaction_disabled(
+      *this,
+      "cloud_topics_compaction_disabled",
+      "When true, completely disables compaction of cloud topics.",
+      {.needs_restart = needs_restart::no, .visibility = visibility::tunable},
+      false)
+  , cloud_topics_leveling_disabled(
+      *this,
+      "cloud_topics_leveling_disabled",
+      "When true, completely disables leveling of cloud topics.",
+      {.needs_restart = needs_restart::no, .visibility = visibility::tunable},
+      false)
   , cloud_topics_compaction_key_map_memory(
       *this,
       "cloud_topics_compaction_key_map_memory",
