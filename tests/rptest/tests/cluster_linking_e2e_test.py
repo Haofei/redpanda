@@ -200,6 +200,13 @@ class ShadowLinkBasicTests(ShadowLinkTestBase):
     def _expect_connect_error(self, expected_code: ConnectErrorCode):
         return expect_exception(ConnectError, lambda e: e.code == expected_code)
 
+    def _schema_registry_api_sync_options(
+        self,
+    ) -> shadow_link_pb2.SchemaRegistrySyncOptions.ShadowSchemaRegistryApi:
+        return shadow_link_pb2.SchemaRegistrySyncOptions.ShadowSchemaRegistryApi(
+            source_url="http://schema-registry.example.com:8081"
+        )
+
     def _topics_are_present_in_target_cluster(self, topics):
         target_rpk = RpkTool(self.target_cluster.service)
         topics_in_target = {t for t in target_rpk.list_topics()}
@@ -211,6 +218,39 @@ class ShadowLinkBasicTests(ShadowLinkTestBase):
                 return False
 
         return True
+
+    @cluster(num_nodes=6)
+    def test_schema_registry_api_sync_rejected_when_feature_inactive(self):
+        self.target_cluster_service.set_feature_active("shadow_link_sr_api_sync", False)
+
+        create_req = self.create_default_link_request(
+            link_name="sr-api-link",
+            mirror_all_acls=False,
+            mirror_all_groups=False,
+            mirror_all_topics=False,
+        )
+        create_req.shadow_link.configurations.schema_registry_sync_options.shadow_schema_registry_api.CopyFrom(
+            self._schema_registry_api_sync_options()
+        )
+
+        with self._expect_connect_error(ConnectErrorCode.FAILED_PRECONDITION):
+            self.create_link_with_request(req=create_req)
+
+        shadow_link = self.create_link(
+            "test-link",
+            mirror_all_acls=False,
+            mirror_all_groups=False,
+            mirror_all_topics=False,
+        )
+        shadow_link.configurations.schema_registry_sync_options.shadow_schema_registry_api.CopyFrom(
+            self._schema_registry_api_sync_options()
+        )
+        update_mask = google.protobuf.field_mask_pb2.FieldMask(
+            paths=["configurations.schema_registry_sync_options"]
+        )
+
+        with self._expect_connect_error(ConnectErrorCode.FAILED_PRECONDITION):
+            self.update_link(shadow_link=shadow_link, update_mask=update_mask)
 
     @cluster(num_nodes=6)
     def test_create_default_link(self):
