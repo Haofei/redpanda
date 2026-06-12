@@ -23,9 +23,9 @@
 
 namespace instance_info {
 
-/// Detects this node's cloud instance type and, once known, exposes its info
-/// (vCPUs, memory, disk, network, IOPS) as Prometheus metrics on the internal
-/// and public endpoints.
+/// Detects the local node's cloud instance type and, once known, exposes its
+/// info (vCPUs, memory, disk, network, IOPS) as Prometheus metrics on the
+/// internal and public endpoints.
 ///
 /// Detection runs in the background (kicked off by start()), so startup is
 /// never blocked on the cloud metadata service. The "info" series is always
