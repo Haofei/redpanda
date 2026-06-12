@@ -63,6 +63,7 @@ shadow_link_service_impl::create_shadow_link(
           .create_shadow_link(serde::pb::rpc::context{}, std::move(req));
     }
     vlog(sllog.info, "create_shadow_link: {}", req);
+    bool validate_only = req.get_validate_only();
     auto md = convert_create_to_metadata(std::move(req));
     check_sr_api_sync_supported(
       md.configuration.schema_registry_sync_cfg, _feature_table->local());
@@ -70,6 +71,12 @@ shadow_link_service_impl::create_shadow_link(
     if (get_resp.has_value()) {
         throw serde::pb::rpc::already_exists_exception(
           ssx::sformat("Shadow link with name {} already exists", md.name));
+    }
+
+    if (validate_only) {
+        handle_error(
+          co_await _service->local().test_connection(md.name, md.connection));
+        co_return proto::admin::create_shadow_link_response{};
     }
 
     auto resp = handle_error(

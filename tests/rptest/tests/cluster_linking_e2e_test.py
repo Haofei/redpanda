@@ -1328,6 +1328,65 @@ class ShadowLinkBasicTests(ShadowLinkTestBase):
         self.create_link("link-with-partial-connectivity")
 
     @cluster(num_nodes=6)
+    def test_validate_only(self):
+        """
+        Tests the validate_only flag on CreateShadowLink:
+        - With a valid source cluster, the preflight connection checks pass and
+          the response is empty (no uid), without any link being persisted.
+        - With unreachable bootstrap servers, the call fails with
+          FAILED_PRECONDITION and no link is persisted.
+        - Without validate_only, the same request creates the link for real:
+          a non-empty uid is returned and the link appears in list_links.
+        - The duplicate-name check runs before the validate_only branch, so an
+          existing link name raises ALREADY_EXISTS even with validate_only=True.
+        """
+        link_name = "test-link"
+
+        # validate_only=True with a reachable source cluster: preflight passes,
+        # empty response returned, no link persisted.
+        req = self.create_default_link_request(link_name)
+        req.validate_only = True
+        resp_link = self.create_link_with_request(req=req)
+        assert resp_link.uid == "", (
+            f"Expected empty uid on validate_only response, got '{resp_link.uid}'"
+        )
+        links = self.list_links()
+        assert len(links) == 0, (
+            f"Expected no links after validate_only=True, got {len(links)}"
+        )
+
+        # validate_only=True with bad bootstrap servers: preflight fails with
+        # FAILED_PRECONDITION, still no link persisted.
+        bad_req = self.create_default_link_request(link_name)
+        bad_req.validate_only = True
+        bad_req.shadow_link.configurations.client_options.bootstrap_servers[:] = [
+            "non.existent.server:9092"
+        ]
+        with self._expect_connect_error(ConnectErrorCode.FAILED_PRECONDITION):
+            self.create_link_with_request(req=bad_req)
+        links = self.list_links()
+        assert len(links) == 0, (
+            f"Expected no links after failed validate_only, got {len(links)}"
+        )
+
+        # The same request without validate_only creates the link for real:
+        # non-empty uid returned and the link appears in list_links.
+        real_req = self.create_default_link_request(link_name)
+        real_link = self.create_link_with_request(req=real_req)
+        assert real_link.uid != "", (
+            f"Expected non-empty uid on real create response, got '{real_link.uid}'"
+        )
+        links = self.list_links()
+        assert len(links) == 1, f"Expected one link after real create, got {len(links)}"
+
+        # Confirm validate_only=True with a duplicate name raises ALREADY_EXISTS
+        # before even running preflight.
+        dup_req = self.create_default_link_request(link_name)
+        dup_req.validate_only = True
+        with self._expect_connect_error(ConnectErrorCode.ALREADY_EXISTS):
+            self.create_link_with_request(req=dup_req)
+
+    @cluster(num_nodes=6)
     def test_link_creation_incompatible_api(self):
         """
         Tests that link creation fails when the source cluster has an incompatible
