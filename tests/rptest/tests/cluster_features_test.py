@@ -1198,6 +1198,22 @@ PERTURB_TOPIC_PARTITIONS = 5
 PERTURB_RECORDS_PER_TOPIC = 100
 PERTURB_RECORD_SIZE = 128
 
+# Features the per-step perturbations exercise / deliberately skip, accumulated
+# across upgrade steps (today only v26.1 -> v26.2). The coverage guard
+# (_assert_feature_coverage) cross-checks these against the live feature table,
+# so a newly gated feature cannot be added -- in any major -- without either an
+# exercise or an explicit acknowledgement. Add a feature's name here when you
+# cover it or knowingly skip it; entries for features no longer gated by the
+# current upgrade are harmless extras, so no per-major pruning is needed.
+PERTURB_EXERCISED_FEATURES = frozenset({"tiered_cloud_topics"})
+PERTURB_ACKNOWLEDGED_FEATURES = frozenset(
+    {
+        # Cluster-linking features, out of scope for this single-cluster test.
+        "shadow_link_sr_api_sync",
+        "batch_mirror_topic_status",
+    }
+)
+
 
 class ManualFinalizationUpgradeTest(FeaturesTestBase):
     """
@@ -1337,6 +1353,10 @@ class ManualFinalizationUpgradeTest(FeaturesTestBase):
         this grows for v26.3 and beyond."""
         self.logger.info(f"perturb: phase={phase}")
         self._perturb_common(phase)
+        if "upgraded" in phase:
+            # Generic across majors: every feature gated by the upgrade under
+            # test must be exercised or acknowledged.
+            self._assert_feature_coverage()
         self._perturb_v26_1_to_v26_2(phase)
 
     def _perturb_common(self, phase):
@@ -1483,6 +1503,34 @@ class ManualFinalizationUpgradeTest(FeaturesTestBase):
             if f["name"] == name:
                 return f["state"]
         return None
+
+    def _assert_feature_coverage(self):
+        """Cross-check the perturbation's coverage against the live feature
+        table. Major-agnostic: it never names a specific release.
+
+        While the upgrade is unfinalized the active version is held at the old
+        release, so the features gated by the upgrade under test are exactly
+        those the features endpoint reports `unavailable`: they require the
+        not-yet-active version of the binary we upgraded to, and a binary never
+        carries features for a major beyond its own, so this is precisely the
+        immediate next-major set (features further out cannot exist here).
+
+        Every such feature must be exercised or explicitly acknowledged; fail --
+        with an actionable message -- if any is in neither registry, so a newly
+        gated feature cannot slip in untested. The registries are cumulative
+        across upgrade steps, so a feature no longer gated by the current step is
+        a harmless extra and needs no pruning."""
+        gated = {
+            f["name"]
+            for f in self.admin.get_features()["features"]
+            if f["state"] == "unavailable"
+        }
+        uncovered = gated - (PERTURB_EXERCISED_FEATURES | PERTURB_ACKNOWLEDGED_FEATURES)
+        assert not uncovered, (
+            f"the upgrade under test gates feature(s) {sorted(uncovered)} with no "
+            "perturbation coverage: add an exercise in the matching _perturb_* "
+            "step, or acknowledge them in PERTURB_ACKNOWLEDGED_FEATURES"
+        )
 
     def _disable_auto_finalization(self):
         self.redpanda.set_cluster_config({"features_auto_finalization": False})
@@ -1729,9 +1777,11 @@ class ManualFinalizationUpgradeTest(FeaturesTestBase):
         back to the prior release if a problem is found -- repeatedly -- before
         the upgrade is eventually finalized.
 
-        Foundation only: the perturbation applied in each state is a no-op
-        placeholder (see _perturb); what we do to stress the system is defined
-        later.
+        In each state the cluster is perturbed (see _perturb): a fixed set of
+        topics is seeded once and re-read after every transition -- and after an
+        in-place restart -- to confirm data survives, and on the upgraded
+        (unfinalized) binary the v26.2 feature gates are exercised and checked
+        for coverage.
         """
         self._start_at_old()
         self._disable_auto_finalization()
