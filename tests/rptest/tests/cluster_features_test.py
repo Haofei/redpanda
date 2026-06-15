@@ -18,6 +18,8 @@ from requests.exceptions import HTTPError
 
 from rptest.clients.admin.proto.redpanda.core.admin.v2 import features_pb2
 from rptest.clients.admin.v2 import Admin as AdminV2
+from rptest.clients.kafka_cli_tools import KafkaCliTools
+from rptest.clients.rpk import RpkTool
 from rptest.services.admin import Admin
 from rptest.services.cluster import cluster
 from rptest.services.redpanda import RESTART_LOG_ALLOW_LIST
@@ -1188,6 +1190,13 @@ MANUAL_FINALIZE_HOLD_DWELL_SEC = 20
 # finalizing -- the core capability the unfinalized-upgrade feature provides.
 DOWNGRADE_ROLLBACK_CYCLES = 2
 
+# Baseline perturbation: a fixed set of topics, seeded once, then re-read in
+# every state to confirm data survives the upgrade/downgrade transitions.
+PERTURB_TOPIC_COUNT = 10
+PERTURB_TOPIC_PARTITIONS = 5
+PERTURB_RECORDS_PER_TOPIC = 100
+PERTURB_RECORD_SIZE = 128
+
 
 class ManualFinalizationUpgradeTest(FeaturesTestBase):
     """
@@ -1218,6 +1227,9 @@ class ManualFinalizationUpgradeTest(FeaturesTestBase):
         self.old_logical = None
         self.new_logical = None
         self.old_release = None
+        # Topics created by _perturb_common on its first call; persisted across
+        # upgrade/downgrade transitions so data survival can be re-checked.
+        self._perturb_topics: list[str] = []
 
     def setUp(self):
         # Defer cluster start: the old release must be installed before the
@@ -1316,15 +1328,91 @@ class ManualFinalizationUpgradeTest(FeaturesTestBase):
         self._wait_for_cluster_settled()
 
     def _perturb(self, phase):
-        """Hook for stressing the cluster while it sits in a given state (e.g.
-        upgraded-but-unfinalized, or downgraded) -- produce/consume, topic and
-        config churn, leadership moves, etc. -- for a while.
+        """Perturb the cluster while it sits in `phase` (e.g.
+        "...-upgraded-unfinalized" on the new binary, or "...-downgraded" after a
+        rollback). Structured as 1 + N parts: shared baseline work, then one
+        function per supported unfinalized-upgrade step. Today N=1 -- the
+        v26.1 -> v26.2 step. See the note above the per-step functions for how
+        this grows for v26.3 and beyond."""
+        self.logger.info(f"perturb: phase={phase}")
+        self._perturb_common(phase)
+        self._perturb_v26_1_to_v26_2(phase)
 
-        Intentionally left empty for now: this commit establishes the
-        upgrade/downgrade groundwork only. The perturbation is fleshed out in a
-        later commit; until then this is a no-op so the skeleton can be exercised
-        on its own."""
-        self.logger.info(f"perturb (intentionally empty for now): phase={phase}")
+    def _perturb_common(self, phase):
+        """Baseline data-plane perturbation, run in every state. On the first
+        call it creates a fixed set of topics and seeds each with records. Every
+        call then reads all records back, restarts the whole cluster in place
+        (same binary), waits for it to return healthy, and reads the records
+        again. The topics persist across the upgrade/downgrade transitions, so
+        the read-backs confirm data produced on one binary stays intact in the
+        other and survives an in-place restart -- a feature-agnostic integrity
+        signal that holds regardless of which features are active."""
+        rpk = RpkTool(self.redpanda)
+        if not self._perturb_topics:
+            kafka = KafkaCliTools(self.redpanda)
+            for i in range(PERTURB_TOPIC_COUNT):
+                name = f"perturb-{i}"
+                rpk.create_topic(name, partitions=PERTURB_TOPIC_PARTITIONS)
+                kafka.produce(
+                    name, PERTURB_RECORDS_PER_TOPIC, PERTURB_RECORD_SIZE, acks=-1
+                )
+                self._perturb_topics.append(name)
+
+        self._perturb_verify_data(f"{phase} pre-restart")
+
+        # Restart the whole cluster in place (same binary) and confirm it comes
+        # back healthy with the data still readable.
+        self.redpanda.restart_nodes(self.redpanda.nodes)
+        self._wait_for_cluster_settled()
+        self._perturb_verify_data(f"{phase} post-restart")
+
+    def _perturb_verify_data(self, label):
+        """Read every record back from each perturbation topic and assert the
+        full count is still present."""
+        rpk = RpkTool(self.redpanda)
+        for name in self._perturb_topics:
+            consumed = rpk.consume(
+                name,
+                n=PERTURB_RECORDS_PER_TOPIC,
+                offset="start",
+                quiet=True,
+                timeout=30,
+            )
+            got = sum(1 for line in consumed.splitlines() if line)
+            assert got == PERTURB_RECORDS_PER_TOPIC, (
+                f"{name}: expected {PERTURB_RECORDS_PER_TOPIC} records intact "
+                f"({label}), read {got}"
+            )
+
+    # NOTE: growing this beyond the v26.1 -> v26.2 step.
+    #
+    # When v26.2 is released and v26.3 development begins, two things change:
+    #   1. Add a new per-step function, e.g. _perturb_v26_2_to_v26_3, exercising
+    #      the features gated by the unfinalized v26.2 -> v26.3 upgrade, and call
+    #      it from _perturb alongside the existing one.
+    #   2. Extend the harness to perform CHAINED unfinalized upgrades: an
+    #      unfinalized upgrade v26.1 -> v26.2, then a further unfinalized upgrade
+    #      v26.2 -> v26.3, perturbing (and exercising downgrade) at each step
+    #      instead of a single old -> HEAD hop.
+    # Keep older step functions and their harness coverage for as long as the
+    # support window allows upgrading from those releases; drop a step once its
+    # source release leaves the supported upgrade matrix.
+    def _perturb_v26_1_to_v26_2(self, phase):
+        """Per-step perturbation for the v26.1 -> v26.2 unfinalized upgrade (the
+        N=1 part of the 1 + N structure).
+
+        INTENTIONALLY EMPTY for now. As v26.2 development proceeds, fill this in
+        with operations that exercise the features GATED BY the unfinalized v26.2
+        upgrade -- behaviour that becomes available once the binaries are on
+        v26.2 but before finalization. The aim is to confirm those features
+        behave correctly (or are correctly unavailable) while unfinalized, and
+        that exercising them does not break a subsequent downgrade to v26.1.
+
+        `phase` tells you the current state: branch on it so v26.2-only
+        behaviour is driven only in the upgraded states ("...-upgraded-..."),
+        while the downgraded states ("...-downgraded") confirm v26.1 semantics
+        have returned."""
+        pass
 
     def _disable_auto_finalization(self):
         self.redpanda.set_cluster_config({"features_auto_finalization": False})
