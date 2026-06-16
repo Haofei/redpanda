@@ -205,11 +205,37 @@ void consensus::setup_metrics() {
 }
 
 void consensus::setup_public_metrics() {
+    namespace sm = ss::metrics;
+
     if (config::shard_local_cfg().disable_public_metrics()) {
         return;
     }
 
     _probe->setup_public_metrics(_log->config().ntp());
+
+    // Expose the leadership gauge for the controller group on the public
+    // endpoint so external consumers can identify the controller leader.
+    // Restricted to the controller to avoid a per-partition public series for
+    // every raft group.
+    if (_log->config().ntp() != model::controller_ntp) {
+        return;
+    }
+
+    // Public metrics carry redpanda_-prefixed label names, unlike the internal
+    // (bare) labels used by setup_metrics.
+    const auto& ntp = _log->config().ntp();
+    auto labels = {
+      metrics::make_namespaced_label("namespace")(ntp.ns()),
+      metrics::make_namespaced_label("topic")(ntp.tp.topic()),
+      metrics::make_namespaced_label("partition")(ntp.tp.partition())};
+    _public_metrics.add_group(
+      prometheus_sanitize::metrics_name("raft"),
+      {sm::make_gauge(
+         "leader_for",
+         [this] { return is_elected_leader(); },
+         sm::description("Indicates if this node is the controller leader"),
+         labels)
+         .aggregate({sm::shard_label})});
 }
 
 void consensus::do_step_down(std::string_view ctx) {
