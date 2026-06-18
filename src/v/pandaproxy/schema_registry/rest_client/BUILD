@@ -22,3 +22,35 @@ redpanda_cc_library(
         "@seastar",
     ],
 )
+
+redpanda_cc_library(
+    name = "error",
+    hdrs = [
+        "error.h",
+    ],
+    deps = [
+        ":parse",
+        "//src/v/base",
+        "//src/v/http:request_builder",
+        "//src/v/pandaproxy/schema_registry:types",
+        "//src/v/utils:named_type",
+        "@boost//:beast",
+        "@seastar",
+    ],
+)
+
+redpanda_cc_library(
+    name = "retry_policy",
+    srcs = [
+        "retry_policy.cc",
+    ],
+    hdrs = [
+        "retry_policy.h",
+    ],
+    deps = [
+        ":error",
+        "//src/v/http",
+        "//src/v/net",
+        "@seastar",
+    ],
+)

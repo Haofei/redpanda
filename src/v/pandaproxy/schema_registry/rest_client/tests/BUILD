@@ -17,3 +17,17 @@ redpanda_cc_gtest(
         "@seastar",
     ],
 )
+
+redpanda_cc_gtest(
+    name = "retry_policy_test",
+    timeout = "short",
+    srcs = [
+        "retry_policy_test.cc",
+    ],
+    cpu = 1,
+    deps = [
+        "//src/v/pandaproxy/schema_registry/rest_client:retry_policy",
+        "//src/v/test_utils:gtest",
+        "@googletest//:gtest",
+    ],
+)
