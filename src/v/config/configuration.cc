@@ -2232,6 +2232,7 @@ configuration::configuration()
       {
         "producer_upload:2",
         "consumer_fetch:2",
+        "metastore:2",
         "default_group:2",
       },
       [](const std::vector<ss::sstring>& specs) -> std::optional<ss::sstring> {
