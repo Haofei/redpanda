@@ -468,4 +468,59 @@ TEST_CORO(parse_subject_version_test, fragmented_input) {
     ASSERT_EQ_CORO(s.schema.def().refs().size(), size_t{1});
 }
 
+TEST_CORO(parse_error_body_test, full) {
+    auto res = co_await parse_error_body(
+      iobuf::from(R"({"error_code": 40401, "message": "Subject not found"})"));
+    ASSERT_TRUE_CORO(res.has_value());
+    ASSERT_EQ_CORO(res->error_code, 40401);
+    ASSERT_EQ_CORO(res->message, "Subject not found");
+}
+
+TEST_CORO(parse_error_body_test, ignores_unknown_fields) {
+    auto res = co_await parse_error_body(
+      iobuf::from(R"({"extra": {"a": [1, 2]}, "error_code": 50001})"));
+    ASSERT_TRUE_CORO(res.has_value());
+    ASSERT_EQ_CORO(res->error_code, 50001);
+    // message is optional; absent -> empty.
+    ASSERT_EQ_CORO(res->message, "");
+}
+
+TEST_CORO(parse_error_body_test, missing_error_code_is_nullopt) {
+    auto res = co_await parse_error_body(
+      iobuf::from(R"({"message": "no code here"})"));
+    ASSERT_FALSE_CORO(res.has_value());
+}
+
+TEST_CORO(parse_error_body_test, non_integer_error_code_is_nullopt) {
+    auto res = co_await parse_error_body(
+      iobuf::from(R"({"error_code": "40401"})"));
+    ASSERT_FALSE_CORO(res.has_value());
+}
+
+TEST_CORO(parse_error_body_test, non_object_is_nullopt) {
+    auto res = co_await parse_error_body(iobuf::from(R"([40401])"));
+    ASSERT_FALSE_CORO(res.has_value());
+}
+
+TEST_CORO(parse_error_body_test, non_json_is_nullopt) {
+    // Auth proxies may return an HTML or empty body instead of JSON.
+    auto res = co_await parse_error_body(
+      iobuf::from("<html>403 Forbidden</html>"));
+    ASSERT_FALSE_CORO(res.has_value());
+    auto empty = co_await parse_error_body(iobuf::from(""));
+    ASSERT_FALSE_CORO(empty.has_value());
+}
+
+TEST_CORO(parse_error_body_test, trailing_content_is_nullopt) {
+    // A complete object followed by garbage is not a valid JSON document.
+    auto res = co_await parse_error_body(
+      iobuf::from(R"({"error_code": 40401}garbage)"));
+    ASSERT_FALSE_CORO(res.has_value());
+    // Trailing whitespace is fine.
+    auto ok = co_await parse_error_body(
+      iobuf::from("{\"error_code\": 40401}  \n"));
+    ASSERT_TRUE_CORO(ok.has_value());
+    ASSERT_EQ_CORO(ok->error_code, 40401);
+}
+
 } // namespace pandaproxy::schema_registry::rest_client

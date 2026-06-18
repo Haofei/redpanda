@@ -54,3 +54,43 @@ redpanda_cc_library(
         "@seastar",
     ],
 )
+
+redpanda_cc_library(
+    name = "credentials",
+    hdrs = [
+        "credentials.h",
+    ],
+    deps = [
+        "//src/v/base",
+        "@seastar",
+    ],
+)
+
+redpanda_cc_library(
+    name = "client",
+    srcs = [
+        "client.cc",
+    ],
+    hdrs = [
+        "client.h",
+    ],
+    implementation_deps = [
+        ":parse",
+        "//src/v/http:request_builder",
+        "//src/v/pandaproxy:logger",
+        "//src/v/ssx:future_util",
+        "@boost//:beast",
+    ],
+    deps = [
+        ":credentials",
+        ":error",
+        ":retry_policy",
+        "//src/v/base",
+        "//src/v/bytes:iobuf",
+        "//src/v/container:chunked_vector",
+        "//src/v/http",
+        "//src/v/pandaproxy/schema_registry:types",
+        "//src/v/utils:retry_chain_node",
+        "@seastar",
+    ],
+)

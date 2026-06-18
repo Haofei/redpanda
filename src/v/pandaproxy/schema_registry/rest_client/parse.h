@@ -18,7 +18,9 @@
 #include <seastar/core/future.hh>
 #include <seastar/core/sstring.hh>
 
+#include <cstdint>
 #include <expected>
+#include <optional>
 
 namespace pandaproxy::schema_registry::rest_client {
 
@@ -80,5 +82,21 @@ parse_subject_versions(iobuf body);
 /// reference's `subject`). The function does not throw.
 ss::future<std::expected<stored_schema, parse_error>>
 parse_subject_version(iobuf body, qualified_subjects_enabled qualified);
+
+/// The structured error body Schema Registry returns on failures:
+/// `{"error_code": <int>, "message": "<text>"}`. `error_code` is finer-grained
+/// than the HTTP status (e.g. a 404 may carry 40401 subject-not-found vs 40402
+/// version-not-found).
+struct error_body {
+    int32_t error_code{0};
+    ss::sstring message;
+};
+
+/// Tolerantly parse a Schema Registry error response body. Returns nullopt when
+/// the body is empty, not a JSON object, not valid JSON, or carries no integer
+/// `error_code` — an auth proxy in front of the registry may return an HTML or
+/// empty body, in which case the caller falls back to the HTTP status. Unknown
+/// fields are ignored. The function does not throw.
+ss::future<std::optional<error_body>> parse_error_body(iobuf body);
 
 } // namespace pandaproxy::schema_registry::rest_client

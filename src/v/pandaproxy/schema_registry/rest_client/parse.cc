@@ -361,4 +361,58 @@ parse_subject_version(iobuf body, qualified_subjects_enabled qualified) {
     }
 }
 
+ss::future<std::optional<error_body>> parse_error_body(iobuf body) {
+    using token = serde::json::token;
+    // Tolerant: any structural problem yields nullopt rather than an error;
+    // the caller then falls back to the HTTP status.
+    try {
+        serde::json::parser p(std::move(body));
+
+        if (!co_await p.next() || p.token() != token::start_object) {
+            co_return std::nullopt;
+        }
+
+        std::optional<int32_t> code;
+        ss::sstring message;
+        while (co_await p.next()) {
+            if (p.token() == token::end_object) {
+                // Require the object to be the entire body: a complete object
+                // followed by trailing content, or one carrying no integer
+                // error_code, yields nullopt (the caller falls back to the
+                // HTTP status).
+                co_await p.next();
+                if (p.token() != token::eof || !code.has_value()) {
+                    co_return std::nullopt;
+                }
+                co_return error_body{
+                  .error_code = *code, .message = std::move(message)};
+            }
+            if (p.token() != token::key) {
+                co_return std::nullopt;
+            }
+            auto key = p.value_string().linearize_to_string();
+            if (!co_await p.next()) {
+                co_return std::nullopt;
+            }
+            if (key == "error_code" && p.token() == token::value_int) {
+                auto v = p.value_int();
+                if (
+                  v >= std::numeric_limits<int32_t>::min()
+                  && v <= std::numeric_limits<int32_t>::max()) {
+                    code = static_cast<int32_t>(v);
+                }
+            } else if (key == "message" && p.token() == token::value_string) {
+                message = p.value_string().linearize_to_string();
+            } else {
+                co_await p.skip_value();
+            }
+        }
+
+        // next() returned false before the closing '}'.
+        co_return std::nullopt;
+    } catch (const std::exception&) {
+        co_return std::nullopt;
+    }
+}
+
 } // namespace pandaproxy::schema_registry::rest_client

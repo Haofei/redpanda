@@ -31,3 +31,23 @@ redpanda_cc_gtest(
         "@googletest//:gtest",
     ],
 )
+
+redpanda_cc_gtest(
+    name = "client_test",
+    timeout = "short",
+    srcs = [
+        "client_test.cc",
+    ],
+    cpu = 1,
+    deps = [
+        "//src/v/bytes:iobuf",
+        "//src/v/http",
+        "//src/v/pandaproxy/schema_registry:types",
+        "//src/v/pandaproxy/schema_registry/rest_client:client",
+        "//src/v/pandaproxy/schema_registry/rest_client:error",
+        "//src/v/test_utils:gtest",
+        "//src/v/utils:retry_chain_node",
+        "@googletest//:gtest",
+        "@seastar",
+    ],
+)
