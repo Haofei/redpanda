@@ -1272,3 +1272,26 @@ redpanda_cc_gtest(
         "@googletest//:gtest",
     ],
 )
+
+redpanda_cc_btest(
+    name = "describe_redpanda_roles_dispatch_test",
+    timeout = "short",
+    srcs = [
+        "describe_redpanda_roles_dispatch_test.cc",
+    ],
+    env = {"RP_FIXTURE_ENV": "1"},
+    deps = [
+        "//src/v/cluster",
+        "//src/v/cluster:client_quota_backend",
+        "//src/v/cluster:controller_log_limiter",
+        "//src/v/cluster:data_migration_table",
+        "//src/v/cluster:feature_backend",
+        "//src/v/kafka/protocol",
+        "//src/v/kafka/protocol:describe_redpanda_roles",
+        "//src/v/kafka/server",
+        "//src/v/redpanda/tests:fixture",
+        "//src/v/test_utils:seastar_boost",
+        "@seastar",
+        "@seastar//:testing",
+    ],
+)
