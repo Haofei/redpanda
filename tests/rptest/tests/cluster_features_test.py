@@ -1610,51 +1610,19 @@ class ManualFinalizationUpgradeTest(FeaturesTestBase):
         )
 
     @cluster(num_nodes=3, log_allow_list=RESTART_LOG_ALLOW_LIST)
-    def test_manual_request_triggers_advance(self):
-        """
-        Real-upgrade analogue of
-        ManualFinalizationTest.test_manual_request_triggers_advance.
-
-        After a real upgrade with auto-finalization off, an explicit
-        FinalizeUpgrade RPC drives cluster_version forward to the version
-        reported uniformly by all members.
-        """
-        self._start_at_old()
-        self._disable_auto_finalization()
-
-        self._restart_at_new(self.redpanda.nodes)
-
-        # Confirm the cluster reached the deferred state before triggering:
-        # READY_TO_FINALIZE proves the controller saw the completed upgrade and
-        # held the version rather than advancing it.
-        ready = self._wait_for_status_state(
-            features_pb2.FINALIZATION_STATE_READY_TO_FINALIZE
-        )
-        assert self.admin.get_features()["cluster_version"] == self.old_logical
-        assert ready.version_after_finalization == self.new_logical
-
-        self._finalize()
-
-        self._wait_for_version_everywhere(self.new_logical)
-
-        # Once the advance lands, the status flips to finalized and the active
-        # version (the downgrade floor) catches up to the binaries.
-        finalized = self._wait_for_status_state(
-            features_pb2.FINALIZATION_STATE_FINALIZED
-        )
-        assert finalized.active_version == self.new_logical
-        assert finalized.version_after_finalization == self.new_logical
-
-    @cluster(num_nodes=3, log_allow_list=RESTART_LOG_ALLOW_LIST)
     def test_get_upgrade_status_reports_lifecycle(self):
         """
-        Real-upgrade analogue of
-        ManualFinalizationTest.test_get_upgrade_status_reports_lifecycle.
+        Real-upgrade analogue of two merged ManualFinalizationTest scenarios:
+        test_get_upgrade_status_reports_lifecycle and
+        test_manual_request_triggers_advance. A real upgrade is expensive, and
+        walking the lifecycle already exercises the manual-triggered advance, so
+        a single upgrade covers both: the v2 status reporting and the advance
+        that an explicit FinalizeUpgrade drives.
 
         The old release has no v2 RPCs, so (unlike the synthetic test) the
         FINALIZED-at-rest state cannot be observed before the upgrade; the
         lifecycle is observed from READY_TO_FINALIZE (post-upgrade) through
-        FINALIZED.
+        FINALIZED, checked against both the v2 status and the v1 features API.
         """
         self._start_at_old()
         self._disable_auto_finalization()
@@ -1668,6 +1636,9 @@ class ManualFinalizationUpgradeTest(FeaturesTestBase):
         )
         assert status.active_version == self.old_logical
         assert status.version_after_finalization == self.new_logical
+        # The v1 features API agrees with the v2 status: the advance is deferred,
+        # so cluster_version is still held at the old (downgrade-floor) version.
+        assert self.admin.get_features()["cluster_version"] == self.old_logical
         assert len(status.members) == len(self.redpanda.nodes)
         assert all(m.version_known and m.alive for m in status.members)
         assert all(m.logical_version == self.new_logical for m in status.members)
