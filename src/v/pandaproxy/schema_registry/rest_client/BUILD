@@ -47,6 +47,10 @@ redpanda_cc_library(
     hdrs = [
         "retry_policy.h",
     ],
+    implementation_deps = [
+        "//src/v/bytes:iobuf",
+        "//src/v/pandaproxy:logger",
+    ],
     deps = [
         ":error",
         "//src/v/http",

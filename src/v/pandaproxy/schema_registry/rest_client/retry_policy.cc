@@ -11,7 +11,9 @@
 
 #include "pandaproxy/schema_registry/rest_client/retry_policy.h"
 
+#include "bytes/iobuf.h"
 #include "net/connection.h"
+#include "pandaproxy/logger.h"
 
 #include <exception>
 
@@ -83,6 +85,19 @@ default_retry_policy::should_retry(http::downloaded_response response) const {
                     != retriable_statuses.end()
                   ? error_kind::retriable_http_status
                   : error_kind::permanent_failure;
+    // The error surfaced to callers truncates the body (below) to keep error
+    // messages bounded. Log the full body at trace level so it can be recovered
+    // when 400 bytes is not enough to diagnose a failure. Capped at the
+    // linearize limit since linearize_to_string() throws above it; share()
+    // clamps to the available size, so this is safe for any body size.
+    if (srlog.is_enabled(ss::log_level::trace)) {
+        vlog(
+          srlog.trace,
+          "schema registry error response (status={}): {}",
+          status,
+          response.body.share(0, iobuf::max_linearize_size)
+            .linearize_to_string());
+    }
     constexpr size_t max_body_size = 400;
     auto body = response.body.share(0, max_body_size).linearize_to_string();
     return std::unexpected(
