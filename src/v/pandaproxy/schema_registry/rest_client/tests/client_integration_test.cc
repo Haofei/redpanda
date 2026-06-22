@@ -134,11 +134,14 @@ FIXTURE_TEST(sr_rest_client_integration, pandaproxy_test_fixture) {
         auto res
           = sut.get_schema_by_version(multi, pps::schema_version{2}, rtc).get();
         BOOST_REQUIRE(res.has_value());
-        BOOST_REQUIRE_EQUAL(res->schema.sub(), multi);
-        BOOST_REQUIRE_EQUAL(res->version, pps::schema_version{2});
-        BOOST_REQUIRE_GE(res->id(), 1);
-        BOOST_REQUIRE(res->schema.def().type() == pps::schema_type::avro);
-        BOOST_REQUIRE(!res->schema.def().raw()().linearize_to_string().empty());
+        // Redpanda's SR emits only fields we model, so nothing is dropped.
+        BOOST_REQUIRE(res->unknown_fields.empty());
+        const auto& s = res->schema;
+        BOOST_REQUIRE_EQUAL(s.schema.sub(), multi);
+        BOOST_REQUIRE_EQUAL(s.version, pps::schema_version{2});
+        BOOST_REQUIRE_GE(s.id(), 1);
+        BOOST_REQUIRE(s.schema.def().type() == pps::schema_type::avro);
+        BOOST_REQUIRE(!s.schema.def().raw()().linearize_to_string().empty());
     }
 
     info("get_schema_by_version reaches a context-qualified subject (%3A)");
@@ -147,8 +150,9 @@ FIXTURE_TEST(sr_rest_client_integration, pandaproxy_test_fixture) {
           = sut.get_schema_by_version(ctx_sub, pps::schema_version{1}, rtc)
               .get();
         BOOST_REQUIRE(res.has_value());
-        BOOST_REQUIRE_EQUAL(res->schema.sub(), ctx_sub);
-        BOOST_REQUIRE_EQUAL(res->version, pps::schema_version{1});
+        const auto& s = res->schema;
+        BOOST_REQUIRE_EQUAL(s.schema.sub(), ctx_sub);
+        BOOST_REQUIRE_EQUAL(s.version, pps::schema_version{1});
     }
 
     info("a missing subject yields subject_not_found (real 40401)");
@@ -223,10 +227,10 @@ FIXTURE_TEST(sr_rest_client_integration, pandaproxy_test_fixture) {
                              pps::include_deleted::yes)
                            .get();
             BOOST_REQUIRE(found.has_value());
-            BOOST_REQUIRE_EQUAL(found->version, pps::schema_version{1});
+            BOOST_REQUIRE_EQUAL(found->schema.version, pps::schema_version{1});
             // Only the per-version response carries an explicit deleted flag;
             // confirm it round-trips into stored_schema.
-            BOOST_REQUIRE(found->deleted == pps::is_deleted::yes);
+            BOOST_REQUIRE(found->schema.deleted == pps::is_deleted::yes);
         }
 
         info("list_subjects hides a fully-deleted subject without deleted");

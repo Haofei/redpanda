@@ -79,7 +79,6 @@ redpanda_cc_library(
         "client.h",
     ],
     implementation_deps = [
-        ":parse",
         "//src/v/http:request_builder",
         "//src/v/http:utils",
         "//src/v/pandaproxy:logger",
@@ -89,6 +88,7 @@ redpanda_cc_library(
     deps = [
         ":credentials",
         ":error",
+        ":parse",
         ":retry_policy",
         "//src/v/base",
         "//src/v/bytes:iobuf",

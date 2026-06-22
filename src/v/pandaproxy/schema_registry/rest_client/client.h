@@ -16,6 +16,7 @@
 #include "http/client.h"
 #include "pandaproxy/schema_registry/rest_client/credentials.h"
 #include "pandaproxy/schema_registry/rest_client/error.h"
+#include "pandaproxy/schema_registry/rest_client/parse.h"
 #include "pandaproxy/schema_registry/rest_client/retry_policy.h"
 #include "pandaproxy/schema_registry/types.h"
 #include "utils/retry_chain_node.h"
@@ -83,7 +84,12 @@ public:
     /// subject's schema. With \p deleted set to yes, a soft-deleted version can
     /// be fetched. A missing subject yields subject_not_found; a missing
     /// version (of an existing subject) yields version_not_found.
-    ss::future<std::expected<stored_schema, domain_error>>
+    ///
+    /// The result wraps the schema together with the names of any response
+    /// fields the client did not model (parsed_schema::unknown_fields); a
+    /// caller that needs fidelity can inspect them and apply its own strictness
+    /// policy.
+    ss::future<std::expected<parsed_schema, domain_error>>
     get_schema_by_version(
       const context_subject& subject,
       schema_version version,

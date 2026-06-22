@@ -64,15 +64,34 @@ parse_subjects(iobuf body, qualified_subjects_enabled qualified);
 ss::future<std::expected<chunked_vector<schema_version>, parse_error>>
 parse_subject_versions(iobuf body);
 
+/// The outcome of parsing a get-schema-by-version response: the schema, plus
+/// the names of any top-level response fields the parser did not model.
+///
+/// parse_subject_version is deliberately lenient — it never rejects a response
+/// merely for carrying fields it doesn't model; it skips them and records their
+/// names here. This lets a caller that needs fidelity (e.g. schema migration)
+/// apply its own policy — reject, warn, or ignore — while a caller that doesn't
+/// care simply disregards the list. Only top-level keys are recorded; an
+/// unmodeled key nested inside a modeled field (e.g. within a reference) is
+/// skipped without being reported. It is therefore a best-effort signal that
+/// content was dropped, not a proof of a lossless round-trip.
+struct parsed_schema {
+    stored_schema schema;
+    chunked_vector<ss::sstring> unknown_fields;
+};
+
 /// Parse the body of a `GET /subjects/{subject}/versions/{version}` response
-/// into a stored_schema.
+/// into a parsed_schema (the schema plus the names of any unmodeled top-level
+/// fields).
 ///
 /// This is a faithful, lenient deserialization (the lowest layer): unknown or
 /// not-yet-modeled fields (`guid`, `ts`, `ruleSet`, `schemaTags`, `metadata`,
-/// ...) are ignored, and absent fields take their default/sentinel (absent
-/// `schemaType` -> AVRO, `deleted` -> false, `references` -> empty, and absent
-/// `subject`/`version`/`id`/`schema` -> the invalid sentinels). It does NOT
-/// enforce completeness — whether an incomplete response is acceptable (a
+/// ...) are skipped — their names are collected in
+/// parsed_schema::unknown_fields for the caller to act on — and absent fields
+/// take their default/sentinel (absent `schemaType` -> AVRO, `deleted` ->
+/// false, `references` -> empty, and absent `subject`/`version`/`id`/`schema`
+/// -> the invalid sentinels). It does NOT enforce completeness or reject for
+/// unmodeled fields — whether an incomplete or lossy response is acceptable (a
 /// strict mode) is a higher-layer concern. It rejects only inputs it cannot
 /// represent: a non-object body, malformed JSON, a present modeled field with a
 /// wrong-typed or out-of-range value, or an unknown `schemaType`.
@@ -80,7 +99,7 @@ parse_subject_versions(iobuf body);
 /// \p qualified is the caller-supplied policy for interpreting
 /// context-qualified subject strings (the response `subject` and each
 /// reference's `subject`). The function does not throw.
-ss::future<std::expected<stored_schema, parse_error>>
+ss::future<std::expected<parsed_schema, parse_error>>
 parse_subject_version(iobuf body, qualified_subjects_enabled qualified);
 
 /// The structured error body Schema Registry returns on failures:

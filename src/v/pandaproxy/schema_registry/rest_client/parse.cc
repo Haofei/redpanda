@@ -223,7 +223,7 @@ parse_references(serde::json::parser& p, qualified_subjects_enabled qualified) {
 
 } // namespace
 
-ss::future<std::expected<stored_schema, parse_error>>
+ss::future<std::expected<parsed_schema, parse_error>>
 parse_subject_version(iobuf body, qualified_subjects_enabled qualified) {
     using token = serde::json::token;
     // Firewall exceptions from the parser: malformed input is reported via the
@@ -243,6 +243,7 @@ parse_subject_version(iobuf body, qualified_subjects_enabled qualified) {
         schema_type type{schema_type::avro};
         schema_definition::references refs;
         is_deleted deleted{false};
+        chunked_vector<ss::sstring> unknown_fields;
 
         while (co_await p.next()) {
             if (p.token() == token::end_object) {
@@ -255,19 +256,22 @@ parse_subject_version(iobuf body, qualified_subjects_enabled qualified) {
                         .reason = "trailing content after schema object"});
                 }
                 // Absent fields fall back to defaults/sentinels; completeness
-                // is a higher-layer concern.
-                co_return stored_schema{
-                  .schema = subject_schema{
-                    subject.value_or(invalid_subject),
-                    schema_definition{
-                      schema_definition::raw_string{
-                        std::move(schema).value_or(iobuf{})},
-                      type,
-                      std::move(refs),
-                      std::nullopt}},
-                  .version = version.value_or(invalid_schema_version),
-                  .id = id.value_or(invalid_schema_id),
-                  .deleted = deleted};
+                // is a higher-layer concern. Unmodeled fields were recorded in
+                // unknown_fields above for the caller to act on.
+                co_return parsed_schema{
+                  .schema = stored_schema{
+                    .schema = subject_schema{
+                      subject.value_or(invalid_subject),
+                      schema_definition{
+                        schema_definition::raw_string{
+                          std::move(schema).value_or(iobuf{})},
+                        type,
+                        std::move(refs),
+                        std::nullopt}},
+                    .version = version.value_or(invalid_schema_version),
+                    .id = id.value_or(invalid_schema_id),
+                    .deleted = deleted},
+                  .unknown_fields = std::move(unknown_fields)};
             }
             if (p.token() != token::key) {
                 co_return std::unexpected(
@@ -346,7 +350,10 @@ parse_subject_version(iobuf body, qualified_subjects_enabled qualified) {
                 refs = std::move(*r);
             } else {
                 // Unknown / not-yet-modeled field (guid, ts, ruleSet,
-                // schemaTags, metadata, ...): ignore it.
+                // schemaTags, metadata, ...): skip its value, but record the
+                // top-level key so the caller can decide whether dropping it is
+                // acceptable.
+                unknown_fields.push_back(std::move(key));
                 co_await p.skip_value();
             }
         }
