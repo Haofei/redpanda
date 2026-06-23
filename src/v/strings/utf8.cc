@@ -207,6 +207,16 @@ iobuf replace_invalid_utf8(const iobuf& input) {
 
 } // namespace
 
+bool is_valid_utf8(std::string_view s) {
+    utf8_scan_state state;
+    for (const auto& c : s) {
+        if (!accept_utf8_byte(state, static_cast<uint8_t>(c))) {
+            return false;
+        }
+    }
+    return state.pending == 0;
+}
+
 bool is_valid_utf8(const iobuf& buf) {
     utf8_scan_state state;
     for (const auto& frag : buf) {

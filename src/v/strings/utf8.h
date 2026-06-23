@@ -141,20 +141,15 @@ inline size_t validate_and_truncate(std::string_view s) {
     return valid_length;
 }
 
-inline bool is_valid_utf8(std::string_view s) {
-    auto begin = s.cbegin();
-    auto end = s.cend();
+/// Returns true iff \p s is valid UTF-8. Rejects surrogates, overlong
+/// encodings, and truncated sequences.
+bool is_valid_utf8(std::string_view s);
 
-    while (begin != end) {
-        const boost::locale::utf::code_point c
-          = boost::locale::utf::utf_traits<char>::decode(begin, end);
-        if (!boost::locale::utf::is_valid_codepoint(c)) {
-            return false;
-        }
-        // continue
-    }
-    return true;
-}
+/// Fragment-aware UTF-8 validation with no allocation.
+///
+/// Returns true iff \p buf is valid UTF-8. Rejects surrogates, overlong
+/// encodings, and truncated sequences.
+bool is_valid_utf8(const iobuf& buf);
 
 template<typename Thrower>
 requires ExceptionThrower<Thrower>
@@ -189,12 +184,6 @@ std::string_view utf8_truncate_min(std::string_view s, size_t max_bytes);
 /// byte length.
 std::optional<std::string>
 utf8_truncate_max(std::string_view s, size_t max_bytes);
-
-/// Fragment-aware UTF-8 validation with no allocation.
-///
-/// Returns false if \p buf contains any byte sequence that is not valid
-/// UTF-8, including surrogates, overlong encodings, and truncated sequences.
-bool is_valid_utf8(const iobuf& buf);
 
 /// Replace invalid UTF-8 byte sequences with U+FFFD (EF BF BD).
 ///
