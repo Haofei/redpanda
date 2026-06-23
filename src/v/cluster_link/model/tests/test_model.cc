@@ -9,6 +9,7 @@
  * by the Apache License, Version 2.0
  */
 
+#include "cluster_link/model/filter_utils.h"
 #include "cluster_link/model/types.h"
 #include "serde/rw/rw.h"
 
@@ -195,5 +196,23 @@ TEST(test_model, role_sync_config_serde_round_trip) {
     EXPECT_EQ(decoded.role_sync_cfg.is_enabled, enabled_t::no);
     EXPECT_EQ(
       decoded.role_sync_cfg.get_task_interval(), std::chrono::seconds{45});
+}
+TEST(test_model, select_role_include_exclude_prefix) {
+    using namespace cluster_link::model;
+    chunked_vector<resource_name_filter_pattern> patterns;
+    patterns.push_back(
+      resource_name_filter_pattern{
+        .pattern_type = filter_pattern_type::prefix,
+        .filter = filter_type::include,
+        .pattern = "analytics-"});
+    patterns.push_back(
+      resource_name_filter_pattern{
+        .pattern_type = filter_pattern_type::literal,
+        .filter = filter_type::exclude,
+        .pattern = "analytics-secret"});
+
+    EXPECT_TRUE(select_role("analytics-reader", patterns));
+    EXPECT_FALSE(select_role("analytics-secret", patterns)); // excluded
+    EXPECT_FALSE(select_role("ops-admin", patterns));        // no include match
 }
 } // namespace cluster_link::model::tests
