@@ -83,6 +83,7 @@ redpanda_cc_library(
         "//src/v/cluster:plugin_backend",
         "//src/v/cluster:types",
         "//src/v/cluster_link/utils:topic_properties_utils",
+        "//src/v/features",
     ],
     visibility = ["//src/v/cluster_link:__subpackages__"],
     deps = [
@@ -109,6 +110,7 @@ redpanda_cc_library(
         "//src/v/kafka/data/rpc",
         "//src/v/metrics",
         "//src/v/model",
+        "//src/v/security",
         "//src/v/ssx:future_util",
         "//src/v/ssx:mutex",
         "//src/v/ssx:work_queue",

@@ -1279,7 +1279,10 @@ ss::future<> service::maybe_start_manager() {
         _shard_table, _partition_manager, _smp_group),
       topic_metadata_cache::make_default(_metadata_cache),
       topic_creator::make_default(_controller),
-      security_service::make_default(_security_fe),
+      security_service::make_default(
+        _security_fe,
+        &_controller->get_role_store(),
+        &_controller->get_feature_table()),
       std::make_unique<link_registry_adapter>(&_plf->local(), this),
       std::make_unique<default_link_factory>(
         _partition_manager,
