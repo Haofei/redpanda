@@ -178,6 +178,20 @@ redpanda_cc_gtest(
 )
 
 redpanda_cc_gtest(
+    name = "role_reconcile_test",
+    timeout = "short",
+    srcs = [
+        "role_reconcile_test.cc",
+    ],
+    deps = [
+        "//src/v/cluster_link:role_reconcile",
+        "//src/v/security",
+        "//src/v/test_utils:gtest",
+        "@googletest//:gtest",
+    ],
+)
+
+redpanda_cc_gtest(
     name = "partition_replicator_fixture_test",
     timeout = "short",
     srcs = [

@@ -268,6 +268,22 @@ redpanda_cc_library(
 )
 
 redpanda_cc_library(
+    name = "role_reconcile",
+    srcs = [
+        "role_reconcile.cc",
+    ],
+    hdrs = [
+        "role_reconcile.h",
+    ],
+    visibility = ["//src/v/cluster_link:__subpackages__"],
+    deps = [
+        "//src/v/container:chunked_hash_map",
+        "//src/v/container:chunked_vector",
+        "//src/v/security",
+    ],
+)
+
+redpanda_cc_library(
     name = "rpc_service",
     srcs = [
         "rpc_service.cc",
