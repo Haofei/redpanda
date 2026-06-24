@@ -4904,7 +4904,7 @@ configuration::configuration()
       "Maximum number of leveling jobs that may run concurrently on a single "
       "shard. Live-adjustable.",
       {.needs_restart = needs_restart::no, .visibility = visibility::tunable},
-      5,
+      1,
       {.min = size_t{1}, .max = size_t{64}})
   , cloud_topics_leveling_min_extent_size_ratio(
       *this,
