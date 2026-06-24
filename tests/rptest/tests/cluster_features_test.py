@@ -1214,6 +1214,12 @@ PERTURB_ACKNOWLEDGED_FEATURES = frozenset(
         # Iceberg extended-mode topic-config gate; exercising it needs Iceberg
         # topic setup orthogonal to the finalization behavior under test.
         "iceberg_extended_mode_config",
+        # Bootstrap-time internal RPC: while gated, a restarting node simply
+        # skips the controller-snapshot fetch and falls back to its local
+        # config cache (indistinguishable from prior behavior, with no
+        # distinctive signal to assert here). Its active-state
+        # behavior is covered by ClusterConfigMultiNodeBootstrapTest.
+        "fetch_controller_snapshot_rpc",
     }
 )
 
