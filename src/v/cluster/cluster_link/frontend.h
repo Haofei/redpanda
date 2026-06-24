@@ -27,6 +27,8 @@
 
 #include <seastar/core/sharded.hh>
 
+#include <string_view>
+
 namespace cluster::cluster_link {
 class frontend : public ss::peering_sharded_service<frontend> {
     using cluster_link_cmd = std::variant<
@@ -147,9 +149,14 @@ public:
     /// True if any Schema Registry shadowing mode is active.
     bool schema_registry_shadowing_active() const;
 
-    /// True if Schema Registry writes from this source must be rejected.
+    /// True if a Schema Registry write from this source to the given context
+    /// must be rejected. With API-mode shadowing, only contexts owned by the
+    /// mirroring (per source_filter/destination) are blocked; topic-mode
+    /// shadowing blocks every context. The context is identified by name (the
+    /// underlying value of pandaproxy::schema_registry::context).
     bool schema_registry_writes_disabled(
-      pandaproxy::schema_registry::write_source) const;
+      pandaproxy::schema_registry::write_source,
+      std::string_view context) const;
 
     /// True if this node must not create a local _schemas topic because
     /// topic-mode shadowing owns it.

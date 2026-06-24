@@ -399,13 +399,25 @@ bool api_mode_shadows_context(
 }
 
 bool link_disables_schema_registry_writes(
-  const ::cluster_link::model::metadata& md, ppsr::write_source source) {
+  const ::cluster_link::model::metadata& md,
+  ppsr::write_source source,
+  std::string_view context) {
     switch (source) {
     case ppsr::write_source::client:
-        return link_shadows_schema_registry_topic(md)
-               || md.configuration.schema_registry_sync_cfg.api_mode()
-                    != nullptr;
+        // Topic-mode shadowing owns the whole _schemas topic, so it blocks
+        // every context.
+        if (link_shadows_schema_registry_topic(md)) {
+            return true;
+        }
+        // API-mode shadowing only blocks the contexts it mirrors, identified
+        // by source_filter/destination.
+        if (auto* api = md.configuration.schema_registry_sync_cfg.api_mode()) {
+            return api_mode_shadows_context(*api, context);
+        }
+        return false;
     case ppsr::write_source::schema_registry_sync:
+        // The sync importer writes to the local _schemas topic, which is only
+        // blocked under topic-mode shadowing.
         return link_shadows_schema_registry_topic(md);
     }
     __builtin_unreachable();
@@ -414,28 +426,39 @@ bool link_disables_schema_registry_writes(
 } // namespace
 
 bool frontend::schema_registry_shadowing_active() const {
-    return schema_registry_writes_disabled(ppsr::write_source::client);
+    if (!cluster_link_active()) {
+        return false;
+    }
+    auto link_ids = get_all_link_ids();
+    return std::ranges::any_of(link_ids, [this](id_t link_id) -> bool {
+        const auto md = find_link_by_id(link_id);
+        return md && link_shadows_schema_registry(*md);
+    });
 }
 
 bool frontend::schema_registry_writes_disabled(
-  ppsr::write_source source) const {
+  ppsr::write_source source, std::string_view context) const {
     if (!cluster_link_active()) {
         return false;
     }
 
     auto link_ids = get_all_link_ids();
-    return std::ranges::any_of(link_ids, [this, source](id_t link_id) -> bool {
-        const auto md = find_link_by_id(link_id);
-        if (!md) {
-            return false;
-        }
-        return link_disables_schema_registry_writes(*md, source);
-    });
+    return std::ranges::any_of(
+      link_ids, [this, source, context](id_t link_id) -> bool {
+          const auto md = find_link_by_id(link_id);
+          if (!md) {
+              return false;
+          }
+          return link_disables_schema_registry_writes(*md, source, context);
+      });
 }
 
 bool frontend::schema_registry_internal_topic_creation_blocked() const {
+    // Topic-creation blocking is context-independent: only topic-mode
+    // shadowing owns the local _schemas topic. The context argument is unused
+    // by the sync write source.
     return schema_registry_writes_disabled(
-      ppsr::write_source::schema_registry_sync);
+      ppsr::write_source::schema_registry_sync, ppsr::default_context());
 }
 
 ss::future<errc> frontend::do_mutation(
