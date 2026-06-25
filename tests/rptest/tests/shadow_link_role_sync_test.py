@@ -22,8 +22,13 @@ from rptest.clients.admin.proto.redpanda.core.admin.v2 import (
     shadow_link_pb2,
 )
 from rptest.clients.admin.v2 import Admin as AdminV2
+from rptest.clients.types import TopicSpec
 from rptest.services.cluster import cluster
-from rptest.services.multi_cluster_services import SecondaryClusterArgs
+from rptest.services.multi_cluster_services import (
+    SecondaryClusterArgs,
+    SecondaryClusterSpec,
+    ServiceType,
+)
 from rptest.tests.cluster_linking_test_base import ShadowLinkTestBase
 from rptest.tests.rbac_test_v2 import AdminV2RoleWrapper
 from rptest.util import expect_timeout
@@ -283,3 +288,70 @@ class ShadowLinkRoleSyncTest(RoleSyncTestBase):
         assert self._dst_role_members("unmanaged-role") == {"local-admin"}, (
             "out-of-scope destination role's membership was altered by the migrator"
         )
+
+
+class ShadowLinkRoleSyncKafkaSourceTest(RoleSyncTestBase):
+    """Role sync degrades gracefully when the source is an Apache Kafka cluster
+    that does not implement DescribeRedpandaRoles (Kafka API key 15000)."""
+
+    def __init__(self, test_context: TestContext):
+        super().__init__(
+            test_context=test_context,
+            num_brokers=3,
+            secondary_cluster_args=SecondaryClusterArgs(),
+        )
+
+    def get_source_cluster_spec(self) -> SecondaryClusterSpec:
+        return SecondaryClusterSpec(
+            ServiceType.KAFKA,
+            kafka_version="3.8.0",
+            kafka_quorum="COMBINED_KRAFT",
+        )
+
+    @cluster(num_nodes=6)
+    def test_roles_park_but_link_still_syncs_topics(self):
+        # No RBAC roles exist on an Apache Kafka source; the roles task cannot
+        # negotiate the custom DescribeRedpandaRoles API (Kafka API key 15000)
+        # and parks. The rest of the link rides standard Kafka APIs, so it must
+        # keep working: one task parking is isolated from its siblings.
+        topic = TopicSpec(name="mirror-topic", partition_count=3, replication_factor=3)
+        self.source_default_client().create_topic(topic)
+
+        self._create_link_with_role_sync()
+
+        def parked() -> bool:
+            task = self._roles_task()
+            return (
+                task is not None
+                and task.state == shadow_link_pb2.TASK_STATE_LINK_UNAVAILABLE
+            )
+
+        wait_until(
+            parked,
+            timeout_sec=60,
+            backoff_sec=1,
+            err_msg="roles task did not park LINK_UNAVAILABLE against a Kafka source",
+        )
+        task = self._roles_task()
+        assert task is not None and task.reason, (
+            "expected a non-empty reason explaining the unsupported API"
+        )
+        assert task.state != shadow_link_pb2.TASK_STATE_FAULTED, (
+            "roles task must park (LINK_UNAVAILABLE), not fault, on an unsupported source"
+        )
+        # Nothing was mirrored.
+        assert not [
+            n for n in self._dst.list_role_names() if n.startswith("synced-")
+        ], "no roles should be mirrored from a Kafka source"
+
+        # The parked roles task does not impair the data plane: a topic created
+        # on the Kafka source still syncs to the target over standard Kafka APIs.
+        wait_until(
+            lambda: self.topic_partitions_exists_in_target(topic),
+            timeout_sec=60,
+            backoff_sec=1,
+            err_msg="topic did not sync to target while the roles task was parked",
+        )
+
+        # Topic sync completing did not un-park or fault the roles task.
+        assert parked(), "roles task should remain parked after topic sync"
