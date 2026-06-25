@@ -35,7 +35,9 @@
 using namespace datalake;
 
 namespace {
-structured_data_translator translator;
+// Configured to match record_schema_resolver (schema_id_prefix val mode).
+record_translator translator{
+  {}, {model::iceberg_mode::schema_mode::schema_id_prefix}, {}};
 const model::ntp
   ntp(model::ns{"rp"}, model::topic{"t"}, model::partition_id{0});
 const model::revision_id topic_rev{123};
@@ -592,7 +594,7 @@ TEST_F(RecordMultiplexerTest, TestRecordTimestamp) {
     // Make sure we respect client vs broker timestamps.
     binary_type_resolver kv_resolver; // This test doesn't need schemas
     direct_table_creator table_creator(kv_resolver, schema_mgr);
-    key_value_translator kv_translator;
+    record_translator kv_translator;
     auto mux = record_multiplexer(
       ntp,
       topic_rev,

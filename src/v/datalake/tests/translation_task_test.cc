@@ -39,7 +39,7 @@ using namespace std::chrono_literals;
 using namespace testing;
 using namespace datalake;
 namespace {
-auto translator = std::make_unique<default_translator>();
+auto translator = std::make_unique<record_translator>();
 const auto ntp = model::ntp{};
 const auto rev = model::revision_id{123};
 } // namespace

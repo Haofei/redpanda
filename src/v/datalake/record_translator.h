@@ -28,6 +28,12 @@ struct record_type {
     iceberg::struct_type type;
 };
 
+/// Translates Kafka records into Iceberg rows. Key, value, and header handling
+/// are each driven by the section configs baked in at construction time:
+///
+/// - val_cfg.mode binary:  value stored as a raw binary "value" blob column.
+/// - val_cfg.mode schema:  value is schema-decoded and its fields are promoted
+///                         to top-level columns.
 class record_translator {
 public:
     enum class errc {
@@ -45,27 +51,16 @@ public:
         }
     }
 
-    virtual record_type
-    build_type(std::optional<shared_resolved_type_t> val_type) = 0;
-    virtual ss::future<checked<iceberg::struct_value, errc>> translate_data(
-      model::partition_id pid,
-      kafka::offset o,
-      std::optional<iobuf> key,
-      const std::optional<shared_resolved_type_t>& val_type,
-      std::optional<iobuf> parsable_val,
-      model::timestamp ts,
-      model::timestamp_type ts_t,
-      const chunked_vector<model::record_header>& headers) = 0;
-    virtual ~record_translator() = default;
-};
-
-class key_value_translator : public record_translator {
-public:
-    explicit key_value_translator(
+    explicit record_translator(
+      model::iceberg_mode::key_config key_cfg = {},
+      model::iceberg_mode::value_config val_cfg = {},
       model::iceberg_mode::headers_config headers_cfg = {})
-      : _headers_cfg(headers_cfg) {}
-    record_type
-    build_type(std::optional<shared_resolved_type_t> val_type) override;
+      : _key_cfg(key_cfg)
+      , _val_cfg(val_cfg)
+      , _headers_cfg(headers_cfg) {}
+
+    record_type build_type(std::optional<shared_resolved_type_t> val_type);
+
     ss::future<checked<iceberg::struct_value, errc>> translate_data(
       model::partition_id pid,
       kafka::offset o,
@@ -74,61 +69,12 @@ public:
       std::optional<iobuf> parsable_val,
       model::timestamp ts,
       model::timestamp_type ts_t,
-      const chunked_vector<model::record_header>& headers) override;
-    ~key_value_translator() override = default;
+      const chunked_vector<model::record_header>& headers);
 
 private:
+    model::iceberg_mode::key_config _key_cfg;
+    model::iceberg_mode::value_config _val_cfg;
     model::iceberg_mode::headers_config _headers_cfg;
-};
-
-class structured_data_translator : public record_translator {
-public:
-    explicit structured_data_translator(
-      model::iceberg_mode::headers_config headers_cfg = {})
-      : _headers_cfg(headers_cfg) {}
-    record_type
-    build_type(std::optional<shared_resolved_type_t> val_type) override;
-    ss::future<checked<iceberg::struct_value, errc>> translate_data(
-      model::partition_id pid,
-      kafka::offset o,
-      std::optional<iobuf> key,
-      const std::optional<shared_resolved_type_t>& val_type,
-      std::optional<iobuf> parsable_val,
-      model::timestamp ts,
-      model::timestamp_type ts_t,
-      const chunked_vector<model::record_header>& headers) override;
-    ~structured_data_translator() override = default;
-
-private:
-    model::iceberg_mode::headers_config _headers_cfg;
-};
-
-// Switches between key-value and structured translator, depending on if there
-// is an input schema.
-// XXX: this is a temporary hack for tests to pass as we transition to toggling
-// mode with a topic config! Instead, callers should explicitly choose.
-class default_translator : public record_translator {
-public:
-    explicit default_translator(
-      model::iceberg_mode::headers_config headers_cfg = {})
-      : kv_translator(headers_cfg)
-      , structured_translator(headers_cfg) {}
-    record_type
-    build_type(std::optional<shared_resolved_type_t> val_type) override;
-    ss::future<checked<iceberg::struct_value, errc>> translate_data(
-      model::partition_id pid,
-      kafka::offset o,
-      std::optional<iobuf> key,
-      const std::optional<shared_resolved_type_t>& val_type,
-      std::optional<iobuf> parsable_val,
-      model::timestamp ts,
-      model::timestamp_type ts_t,
-      const chunked_vector<model::record_header>& headers) override;
-    ~default_translator() override = default;
-
-private:
-    key_value_translator kv_translator;
-    structured_data_translator structured_translator;
 };
 
 } // namespace datalake

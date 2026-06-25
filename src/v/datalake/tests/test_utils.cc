@@ -65,7 +65,7 @@ direct_table_creator::ensure_table(
         val_type = std::move(type_res.value());
     }
 
-    auto record_type = default_translator{}.build_type(std::move(val_type));
+    auto record_type = record_translator{}.build_type(std::move(val_type));
     auto ensure_res = co_await schema_mgr_.ensure_table_schema(
       table_id,
       record_type.type,
@@ -90,7 +90,7 @@ direct_table_creator::ensure_dlq_table(
   const model::topic& topic, model::revision_id) const {
     auto table_id = table_id_provider::dlq_table_id(topic);
 
-    auto record_type = key_value_translator{}.build_type(std::nullopt);
+    auto record_type = record_translator{}.build_type(std::nullopt);
     auto ensure_res = co_await schema_mgr_.ensure_table_schema(
       table_id,
       record_type.type,

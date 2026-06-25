@@ -451,8 +451,9 @@ struct coordinator::main_table_schema_provider
             val_type = std::move(type_res.value());
         }
 
-        auto record_type = default_translator{mode.headers()}.build_type(
-          std::move(val_type));
+        auto record_type
+          = record_translator{mode.key(), mode.value(), mode.headers()}
+              .build_type(std::move(val_type));
         co_return std::move(record_type.type);
     }
 
@@ -520,7 +521,7 @@ struct coordinator::dlq_table_schema_provider
         if (mode.is_disabled()) {
             co_return errc::failed;
         }
-        co_return key_value_translator{mode.headers()}
+        co_return record_translator{{}, {}, mode.headers()}
           .build_type(std::nullopt)
           .type;
     }

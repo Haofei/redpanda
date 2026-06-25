@@ -556,7 +556,9 @@ private:
     datalake::catalog_schema_manager _schema_mgr;
     datalake::record_schema_resolver _type_resolver;
     datalake::tests::record_generator _record_gen;
-    datalake::default_translator _translator;
+    // Configured to match record_schema_resolver (schema_id_prefix val mode).
+    datalake::record_translator _translator{
+      {}, {model::iceberg_mode::schema_mode::schema_id_prefix}, {}};
     datalake::direct_table_creator _table_creator;
     datalake::translation_probe _translation_probe{ntp};
     chunked_vector<model::record_batch> _batch_data;

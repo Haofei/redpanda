@@ -79,13 +79,8 @@ make_record_translator(const model::iceberg_mode& mode) {
     vassert(
       !mode.is_disabled(),
       "Cannot make record translator when iceberg is disabled, logic bug.");
-    switch (mode.value().mode) {
-    case model::iceberg_mode::schema_mode::binary:
-        return std::make_unique<key_value_translator>(mode.headers());
-    case model::iceberg_mode::schema_mode::schema_id_prefix:
-    case model::iceberg_mode::schema_mode::schema_latest:
-        return std::make_unique<structured_data_translator>(mode.headers());
-    }
+    return std::make_unique<record_translator>(
+      mode.key(), mode.value(), mode.headers());
 }
 } // namespace
 

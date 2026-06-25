@@ -39,7 +39,7 @@ direct_table_creator t_creator{bin_resolver, simple_schema_mgr};
 const model::ntp
   ntp(model::ns{"rp"}, model::topic{"t"}, model::partition_id{0});
 const model::revision_id rev{123};
-default_translator translator;
+record_translator translator;
 ss::abort_source as;
 } // namespace
 

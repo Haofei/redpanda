@@ -555,7 +555,7 @@ record_multiplexer::handle_invalid_record(
                 }
             }
 
-            auto record_type = key_value_translator{}.build_type(std::nullopt);
+            auto record_type = record_translator{}.build_type(std::nullopt);
             if (!load_res.value().fill_registered_ids(
                   record_type.type, _norm)) {
                 // This shouldn't happen because we ensured the schema with the
@@ -595,7 +595,7 @@ record_multiplexer::handle_invalid_record(
         auto resolved_buf_type = co_await invalid_record_type_resolver
                                    .resolve_buf_type(std::move(val));
 
-        auto record_data_res = co_await key_value_translator{}.translate_data(
+        auto record_data_res = co_await record_translator{}.translate_data(
           _ntp.tp.partition,
           offset,
           std::move(key),
