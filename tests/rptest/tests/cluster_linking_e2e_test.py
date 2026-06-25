@@ -409,7 +409,20 @@ class ShadowLinkBasicTests(ShadowLinkTestBase):
     def test_task_states_change(self):
         topic = TopicSpec(name="test-topic", partition_count=3, replication_factor=3)
         self.source_default_client().create_topic(topic)
-        self.create_link("test-link")
+        req = self.create_default_link_request("test-link")
+        req.shadow_link.configurations.role_sync_options.CopyFrom(
+            shadow_link_pb2.RoleSyncOptions(
+                interval=google.protobuf.duration_pb2.Duration(seconds=1),
+                role_name_filters=[
+                    shadow_link_pb2.NameFilter(
+                        pattern_type=shadow_link_pb2.PATTERN_TYPE_PREFIX,
+                        filter_type=shadow_link_pb2.FILTER_TYPE_INCLUDE,
+                        name="e2e-roles-",
+                    )
+                ],
+            )
+        )
+        self.create_link_with_request(req)
 
         wait_until(
             lambda: self._topics_are_present_in_target_cluster([topic]),

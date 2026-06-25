@@ -99,6 +99,7 @@ DISALLOWED_SYNCED_TOPIC_PROPERTIES = [
 CONTROLLER_LOCKED_TASKS = [
     "Source Topic Sync",
     "Security Migrator Task",
+    "Roles Migrator Task",
 ]
 
 ALL_STORAGE_MODES = [
