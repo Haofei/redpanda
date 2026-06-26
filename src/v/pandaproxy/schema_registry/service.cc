@@ -676,7 +676,7 @@ ss::future<> service::create_internal_topic() {
     if (
       _controller->get_cluster_link_frontend()
         .local()
-        .schema_registry_internal_topic_creation_blocked()) {
+        .schema_registry_local_topic_writes_disabled()) {
         throw std::runtime_error(
           "Shadow Linking actively mirroring schema "
           "registry topic.  Topic will not be created");

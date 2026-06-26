@@ -342,29 +342,28 @@ bool link_shadows_schema_registry(const ::cluster_link::model::metadata& md) {
 bool filter_selects_source_context(
   const ::cluster_link::model::schema_registry_sync_config::source_filter&
     filter,
-  std::string_view source_context) {
+  const ppsr::context& source_context) {
+    // An empty filter selects every source context.
+    if (filter.contexts.empty() && filter.subjects.empty()) {
+        return true;
+    }
     if (
-      std::ranges::find(filter.contexts, source_context)
+      std::ranges::find(filter.contexts, source_context())
       != filter.contexts.end()) {
         return true;
     }
     return std::ranges::any_of(
-      filter.subjects, [source_context](const auto& subject) {
+      filter.subjects, [&source_context](const auto& subject) {
           const auto parsed = ppsr::context_subject::from_string(
             subject, ppsr::qualified_subjects_enabled::yes);
-          return std::string_view{parsed.ctx()} == source_context;
+          return parsed.ctx == source_context;
       });
 }
 
 bool api_mode_shadows_context(
   const ::cluster_link::model::schema_registry_sync_config::
     shadow_schema_registry_api& api,
-  std::string_view dest_context) {
-    // No filters
-    if (api.filter.contexts.empty() && api.filter.subjects.empty()) {
-        return true;
-    }
-
+  const ppsr::context& dest_context) {
     // Identity mapping: the destination context name equals the source name.
     if (!api.destination) {
         return filter_selects_source_context(api.filter, dest_context);
@@ -372,14 +371,14 @@ bool api_mode_shadows_context(
 
     return ss::visit(
       *api.destination,
-      [&api, dest_context](
+      [&api, &dest_context](
         const ::cluster_link::model::schema_registry_sync_config::
           identity_context_mapping&) {
           // Identity mapping: the destination context name equals the source
           // name.
           return filter_selects_source_context(api.filter, dest_context);
       },
-      [&api, dest_context](
+      [&api, &dest_context](
         const ::cluster_link::model::schema_registry_sync_config::
           exact_context_mapping& destination) {
           // Exact mapping: a destination context is owned only when some
@@ -389,8 +388,9 @@ bool api_mode_shadows_context(
           // destination name alone would over-block.
           for (const auto& [src_ctx, dst_ctx] : destination.mappings) {
               if (
-                dst_ctx == dest_context
-                && filter_selects_source_context(api.filter, src_ctx)) {
+                dest_context == dst_ctx
+                && filter_selects_source_context(
+                  api.filter, ppsr::context{src_ctx})) {
                   return true;
               }
           }
@@ -398,29 +398,19 @@ bool api_mode_shadows_context(
       });
 }
 
-bool link_disables_schema_registry_writes(
-  const ::cluster_link::model::metadata& md,
-  ppsr::write_source source,
-  std::string_view context) {
-    switch (source) {
-    case ppsr::write_source::client:
-        // Topic-mode shadowing owns the whole _schemas topic, so it blocks
-        // every context.
-        if (link_shadows_schema_registry_topic(md)) {
-            return true;
-        }
-        // API-mode shadowing only blocks the contexts it mirrors, identified
-        // by source_filter/destination.
-        if (auto* api = md.configuration.schema_registry_sync_cfg.api_mode()) {
-            return api_mode_shadows_context(*api, context);
-        }
-        return false;
-    case ppsr::write_source::schema_registry_sync:
-        // The sync importer writes to the local _schemas topic, which is only
-        // blocked under topic-mode shadowing.
-        return link_shadows_schema_registry_topic(md);
+bool link_disables_client_writes(
+  const ::cluster_link::model::metadata& md, const ppsr::context& context) {
+    // Topic-mode shadowing owns the whole _schemas topic, so it blocks every
+    // context.
+    if (link_shadows_schema_registry_topic(md)) {
+        return true;
     }
-    __builtin_unreachable();
+    // API-mode shadowing only blocks the contexts it mirrors, identified by
+    // source_filter/destination.
+    if (auto* api = md.configuration.schema_registry_sync_cfg.api_mode()) {
+        return api_mode_shadows_context(*api, context);
+    }
+    return false;
 }
 
 } // namespace
@@ -436,29 +426,31 @@ bool frontend::schema_registry_shadowing_active() const {
     });
 }
 
-bool frontend::schema_registry_writes_disabled(
-  ppsr::write_source source, std::string_view context) const {
+bool frontend::schema_registry_client_writes_disabled(
+  std::string_view context) const {
+    if (!cluster_link_active()) {
+        return false;
+    }
+
+    ppsr::context local_context{ss::sstring{context}};
+    auto link_ids = get_all_link_ids();
+    return std::ranges::any_of(
+      link_ids, [this, &local_context](id_t link_id) -> bool {
+          const auto md = find_link_by_id(link_id);
+          return md && link_disables_client_writes(*md, local_context);
+      });
+}
+
+bool frontend::schema_registry_local_topic_writes_disabled() const {
     if (!cluster_link_active()) {
         return false;
     }
 
     auto link_ids = get_all_link_ids();
-    return std::ranges::any_of(
-      link_ids, [this, source, context](id_t link_id) -> bool {
-          const auto md = find_link_by_id(link_id);
-          if (!md) {
-              return false;
-          }
-          return link_disables_schema_registry_writes(*md, source, context);
-      });
-}
-
-bool frontend::schema_registry_internal_topic_creation_blocked() const {
-    // Topic-creation blocking is context-independent: only topic-mode
-    // shadowing owns the local _schemas topic. The context argument is unused
-    // by the sync write source.
-    return schema_registry_writes_disabled(
-      ppsr::write_source::schema_registry_sync, ppsr::default_context());
+    return std::ranges::any_of(link_ids, [this](id_t link_id) -> bool {
+        const auto md = find_link_by_id(link_id);
+        return md && link_shadows_schema_registry_topic(*md);
+    });
 }
 
 ss::future<errc> frontend::do_mutation(
