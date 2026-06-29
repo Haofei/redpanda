@@ -1812,10 +1812,15 @@ class ManualFinalizationUpgradeTest(FeaturesTestBase):
         + [
             # The old binary aborts via vassert when it detects the cluster
             # advanced past the version it supports. Allow the rejection message
-            # plus the generic crash artifacts the intentional abort emits.
+            # plus the generic crash artifacts the intentional abort emits. Both
+            # crash-file variants are allowed: vassert records the crash, then
+            # the SIGILL handler from __builtin_trap() finds the writer already
+            # consumed and skips -- a benign double-tap on a single shard, not a
+            # real second crash.
             "Incompatible downgrade detected",
             "assert - Backtrace:",
             "Recorded crash reason to crash file",
+            "Skipping recording crash reason to crash file",
         ],
     )
     def test_downgrade_rejected_after_finalize(self):
@@ -1844,7 +1849,24 @@ class ManualFinalizationUpgradeTest(FeaturesTestBase):
         victim = self.redpanda.nodes[-1]
         self.redpanda.stop_node(victim)
         self.installer.install([victim], old_release)
-        self.redpanda.start_node(victim, expect_fail=True)
+
+        # The abort runs through vassert -> __builtin_trap() -> SIGILL, whose
+        # default disposition writes a core dump. Flushing a full core of a
+        # multi-GB process can take longer than the expect_fail termination
+        # timeout on a loaded CI host, leaving the process alive past the
+        # deadline and flaking the test (CORE-16744). Two mitigations, because
+        # whether a core dump can be suppressed depends on the CI host's
+        # core_pattern (file vs pipe): disable core dumps for this start (a
+        # deliberately aborted node needs no core -- the reason is already in the
+        # log and the crash file), and double the termination timeout as an
+        # environment-independent backstop. The HEAD rejoin below runs outside
+        # the block and still dumps core if it crashes unexpectedly.
+        with self.redpanda.core_dumps_disabled():
+            self.redpanda.start_node(
+                victim,
+                expect_fail=True,
+                timeout=2 * self.redpanda.node_ready_timeout_s,
+            )
         assert self.redpanda.search_log_node(
             victim, "Incompatible downgrade detected"
         ), "old binary should refuse to start after finalization"
