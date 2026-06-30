@@ -54,6 +54,17 @@ direct_table_creator::ensure_table(
   record_schema_components comps) const {
     auto table_id = table_id_provider::table_id(topic);
 
+    std::optional<shared_resolved_type_t> key_type;
+    if (comps.key_identifier) {
+        auto type_res = co_await type_resolver_.resolve_identifier(
+          comps.key_identifier.value(),
+          pandaproxy::schema_registry::default_context);
+        if (type_res.has_error()) {
+            co_return errc::failed;
+        }
+        key_type = std::move(type_res.value());
+    }
+
     std::optional<shared_resolved_type_t> val_type;
     if (comps.val_identifier) {
         auto type_res = co_await type_resolver_.resolve_identifier(
@@ -65,7 +76,8 @@ direct_table_creator::ensure_table(
         val_type = std::move(type_res.value());
     }
 
-    auto record_type = default_translator{}.build_type(std::move(val_type));
+    auto record_type = record_translator{}.build_type(
+      std::move(key_type), std::move(val_type));
     auto ensure_res = co_await schema_mgr_.ensure_table_schema(
       table_id,
       record_type.type,
@@ -90,7 +102,8 @@ direct_table_creator::ensure_dlq_table(
   const model::topic& topic, model::revision_id) const {
     auto table_id = table_id_provider::dlq_table_id(topic);
 
-    auto record_type = key_value_translator{}.build_type(std::nullopt);
+    auto record_type = record_translator{}.build_type(
+      std::nullopt, std::nullopt);
     auto ensure_res = co_await schema_mgr_.ensure_table_schema(
       table_id,
       record_type.type,

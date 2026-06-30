@@ -876,6 +876,103 @@ class DatalakeE2ETests(RedpandaTest):
             assert len(rows) == 1
             assert rows[0][0] is True, f"SQL string header check failed: {rows[0]}"
 
+    @cluster(num_nodes=3)
+    @matrix(
+        cloud_storage_type=supported_storage_types(),
+        query_engine=[QueryEngineType.SPARK],
+        catalog_type=[CatalogType.REST_JDBC],
+    )
+    def test_key_schema_mode(self, cloud_storage_type, query_engine, catalog_type):
+        """Verify that key:mode=schema_id_prefix decodes Avro-encoded keys via
+        the schema registry and promotes the decoded struct into the
+        redpanda.key iceberg field (replacing the default binary type)."""
+        topic = "key_schema_mode"
+        table = f"redpanda.{topic}"
+        key_schema_str = json.dumps(
+            {
+                "type": "record",
+                "name": "Key",
+                "namespace": "com.test",
+                "fields": [{"name": "id", "type": "long"}],
+            }
+        )
+        val_schema_str = json.dumps(
+            {
+                "type": "record",
+                "name": "Value",
+                "namespace": "com.test",
+                "fields": [{"name": "name", "type": "string"}],
+            }
+        )
+        key_record = {"id": 42}
+        val_record = {"name": "hello"}
+
+        with DatalakeServices(
+            self.test_ctx,
+            redpanda=self.redpanda,
+            include_query_engines=[query_engine],
+            catalog_type=catalog_type,
+        ) as dl:
+            dl.create_iceberg_enabled_topic(
+                topic,
+                iceberg_mode="key:mode=schema_id_prefix;value:mode=schema_id_prefix",
+            )
+            sr_url = self.redpanda.schema_reg().split(",")[0]
+            producer = AvroProducer(
+                {
+                    "bootstrap.servers": self.redpanda.brokers(),
+                    "schema.registry.url": sr_url,
+                },
+                default_key_schema=avro.loads(key_schema_str),
+                default_value_schema=avro.loads(val_schema_str),
+            )
+            producer.produce(topic=topic, key=key_record, value=val_record)
+            producer.flush()
+            dl.wait_for_translation(topic, msg_count=1)
+
+            # pyiceberg: verify that the key column is a struct (not bytes) and
+            # that the decoded value round-trips correctly.
+            tbl = dl.catalog_client().load_table(("redpanda", topic))
+            pydict = tbl.scan().to_arrow().to_pydict()
+            rp_row = pydict["redpanda"][0]
+            key_val = rp_row["key"]
+            assert isinstance(key_val, dict), (
+                f"expected redpanda.key to be a dict (decoded struct), got {key_val!r}"
+            )
+            assert key_val.get("id") == 42, (
+                f"expected redpanda.key.id == 42, got {key_val!r}"
+            )
+            assert pydict.get("name", [None])[0] == "hello", (
+                f"expected top-level 'name' column == 'hello', got {pydict.get('name')!r}"
+            )
+
+            # Verify table structure: redpanda.key should be a struct (not
+            # binary) and the value schema fields should be top-level columns.
+            spark = dl.spark()
+            spark_expected_out = [
+                (
+                    "redpanda",
+                    "struct<partition:int,offset:bigint,timestamp:timestamp,headers:array<struct<key:string,value:binary>>,key:struct<id:bigint>,timestamp_type:int>",
+                    None,
+                ),
+                ("name", "string", None),
+                ("", "", ""),
+                ("# Partitioning", "", ""),
+                ("Part 0", "hours(redpanda.timestamp)", ""),
+            ]
+            spark_describe_out = spark.run_query_fetch_all(f"describe {table}")
+            assert spark_describe_out == spark_expected_out, str(spark_describe_out)
+
+            # SQL engine: verify key.id is queryable as a numeric value.
+            engine = dl.query_engine(query_engine)
+            rows = engine.run_query_fetch_all(
+                f"SELECT (redpanda.key.id = 42) AS key_ok,"
+                f" (name = 'hello') AS val_ok FROM {table}"
+            )
+            assert len(rows) == 1
+            assert rows[0][0] is True, f"key.id SQL check failed: {rows[0]}"
+            assert rows[0][1] is True, f"name SQL check failed: {rows[0]}"
+
     # Note: nothing unique about this test so run it with single catalog/query engine.
     @cluster(num_nodes=3)
     @matrix(

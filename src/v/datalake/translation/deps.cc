@@ -451,7 +451,8 @@ public:
       model::revision_id topic_revision,
       cloud_data_io& uploader,
       schema_manager& schema_mgr,
-      std::unique_ptr<type_resolver> type_resolver,
+      std::unique_ptr<type_resolver> val_type_resolver,
+      std::unique_ptr<type_resolver> key_type_resolver,
       std::unique_ptr<record_translator> record_translator,
       std::unique_ptr<table_creator> table_creator,
       location_provider location_provider,
@@ -464,7 +465,8 @@ public:
       , _topic_revision(topic_revision)
       , _cloud_io(uploader)
       , _schema_mgr(schema_mgr)
-      , _type_resolver(std::move(type_resolver))
+      , _val_type_resolver(std::move(val_type_resolver))
+      , _key_type_resolver(std::move(key_type_resolver))
       , _record_translator(std::move(record_translator))
       , _table_creator(std::move(table_creator))
       , _location_provider(std::move(location_provider))
@@ -492,7 +494,8 @@ public:
                 _cloud_io,
                 &_features,
                 _schema_mgr,
-                *_type_resolver,
+                *_val_type_resolver,
+                *_key_type_resolver,
                 *_record_translator,
                 *_table_creator,
                 _invalid_record_action,
@@ -642,7 +645,8 @@ private:
     model::revision_id _topic_revision;
     cloud_data_io& _cloud_io;
     schema_manager& _schema_mgr;
-    std::unique_ptr<type_resolver> _type_resolver;
+    std::unique_ptr<type_resolver> _val_type_resolver;
+    std::unique_ptr<type_resolver> _key_type_resolver;
     std::unique_ptr<record_translator> _record_translator;
     std::unique_ptr<table_creator> _table_creator;
     location_provider _location_provider;
@@ -664,7 +668,8 @@ translation_context::make_default_translation_context(
   model::revision_id topic_revision,
   cloud_data_io& uploader,
   schema_manager& schema_mgr,
-  std::unique_ptr<type_resolver> type_resolver,
+  std::unique_ptr<type_resolver> val_type_resolver,
+  std::unique_ptr<type_resolver> key_type_resolver,
   std::unique_ptr<record_translator> record_translator,
   std::unique_ptr<table_creator> table_creator,
   location_provider location_provider,
@@ -678,7 +683,8 @@ translation_context::make_default_translation_context(
       topic_revision,
       uploader,
       schema_mgr,
-      std::move(type_resolver),
+      std::move(val_type_resolver),
+      std::move(key_type_resolver),
       std::move(record_translator),
       std::move(table_creator),
       std::move(location_provider),

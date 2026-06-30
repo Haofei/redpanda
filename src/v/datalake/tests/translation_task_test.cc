@@ -39,7 +39,7 @@ using namespace std::chrono_literals;
 using namespace testing;
 using namespace datalake;
 namespace {
-auto translator = std::make_unique<default_translator>();
+auto translator = std::make_unique<record_translator>();
 const auto ntp = model::ntp{};
 const auto rev = model::revision_id{123};
 } // namespace
@@ -176,6 +176,7 @@ public:
           &features,
           *schema_mgr,
           *schema_resolver,
+          *schema_resolver,
           *translator,
           *t_creator,
           model::iceberg_invalid_record_action::dlq_table,
@@ -288,6 +289,7 @@ TEST_F(TranslateTaskTest, TestUploadError) {
       &features,
       *schema_mgr,
       *schema_resolver,
+      *schema_resolver,
       *translator,
       *t_creator,
       model::iceberg_invalid_record_action::dlq_table,
@@ -334,6 +336,7 @@ TEST_F(TranslateTaskTest, TestCleanupAfterOOMError) {
       &features,
       *schema_mgr,
       *schema_resolver,
+      *schema_resolver,
       *translator,
       *t_creator,
       model::iceberg_invalid_record_action::dlq_table,
@@ -373,6 +376,7 @@ TEST_F(TranslateTaskTest, TestCleanupAfterTransientError) {
       cloud_io,
       &features,
       *schema_mgr,
+      *schema_resolver,
       *schema_resolver,
       *translator,
       *t_creator,
@@ -416,6 +420,7 @@ TEST_F(TranslateTaskTest, TestCleanupAfterTransientErrorDiscard) {
       cloud_io,
       &features,
       *schema_mgr,
+      *schema_resolver,
       *schema_resolver,
       *translator,
       *t_creator,
