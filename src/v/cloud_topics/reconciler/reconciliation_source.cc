@@ -10,7 +10,7 @@
 
 #include "cloud_topics/reconciler/reconciliation_source.h"
 
-#include "cloud_io/scheduler_types.h"
+#include "cloud_io/admission_control_types.h"
 #include "cloud_topics/data_plane_api.h"
 #include "cloud_topics/frontend/frontend.h"
 #include "cloud_topics/level_zero/stm/ctp_stm.h"

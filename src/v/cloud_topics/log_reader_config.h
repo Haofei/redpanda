@@ -11,7 +11,7 @@
 #pragma once
 
 #include "base/format_to.h"
-#include "cloud_io/scheduler_types.h"
+#include "cloud_io/admission_control_types.h"
 #include "cloud_topics/types.h"
 #include "model/fundamental.h"
 #include "model/record_batch_types.h"

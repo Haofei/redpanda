@@ -22,7 +22,8 @@ namespace lsm::io {
 /// SST files are read from object storage in chunks of `sst_chunk_size`
 /// bytes, hydrated into the cache on demand; the binding is read per open so
 /// the size can change at runtime. `gid` tags every cloud operation this
-/// persistence issues for the cloud_io scheduler; defaults to default_group.
+/// persistence issues for cloud_io admission control; defaults to
+/// default_group.
 ss::future<std::unique_ptr<data_persistence>> open_cloud_cache_data_persistence(
   cloud_io::cache* cache,
   cloud_io::remote* remote,
@@ -32,7 +33,7 @@ ss::future<std::unique_ptr<data_persistence>> open_cloud_cache_data_persistence(
   cloud_io::group_id gid = cloud_io::group_id::default_group);
 
 /// Open a metadata persistence backed by cloud storage. `gid` tags every
-/// cloud operation this persistence issues for the cloud_io scheduler;
+/// cloud operation this persistence issues for cloud_io admission control;
 /// defaults to default_group.
 ss::future<std::unique_ptr<metadata_persistence>>
 open_cloud_metadata_persistence(

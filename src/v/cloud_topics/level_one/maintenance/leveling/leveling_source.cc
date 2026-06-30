@@ -10,7 +10,7 @@
 
 #include "cloud_topics/level_one/maintenance/leveling/leveling_source.h"
 
-#include "cloud_io/scheduler_types.h"
+#include "cloud_io/admission_control_types.h"
 #include "cloud_topics/level_one/frontend_reader/level_one_reader.h"
 #include "cloud_topics/log_reader_config.h"
 #include "model/record_batch_reader.h"

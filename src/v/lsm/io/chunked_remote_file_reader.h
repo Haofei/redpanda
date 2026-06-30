@@ -11,9 +11,9 @@
 #pragma once
 
 #include "base/seastarx.h"
+#include "cloud_io/admission_control_types.h"
 #include "cloud_io/cache_service.h"
 #include "cloud_io/remote.h"
-#include "cloud_io/scheduler_types.h"
 #include "cloud_storage_clients/types.h"
 #include "container/chunked_hash_map.h"
 #include "lsm/io/persistence.h"

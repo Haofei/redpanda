@@ -10,7 +10,7 @@
 
 #include "cloud_topics/level_one/maintenance/compaction/compaction_source.h"
 
-#include "cloud_io/scheduler_types.h"
+#include "cloud_io/admission_control_types.h"
 #include "cloud_topics/level_one/frontend_reader/level_one_reader.h"
 #include "cloud_topics/level_one/maintenance/compaction/compaction_filter.h"
 #include "cloud_topics/level_one/maintenance/logger.h"
