@@ -111,8 +111,14 @@ level_one_log_reader_impl::open_reader_at(
       extent, abort_source, _config.group, _config.skip_cache));
     if (stream_fut.failed()) {
         auto ex = stream_fut.get_exception();
-        vlog(
-          _log.error, "Exception opening stream for L1 object {}: {}", oid, ex);
+        auto log_level = ssx::is_shutdown_exception(ex) ? ss::log_level::debug
+                                                        : ss::log_level::error;
+        vlogl(
+          _log,
+          log_level,
+          "Exception opening stream for L1 object {}: {}",
+          oid,
+          ex);
         std::rethrow_exception(ex);
     }
     auto stream_result = stream_fut.get();
@@ -498,7 +504,14 @@ level_one_log_reader_impl::materialize_batches_from_object_offset(
       read_batches(*_current_stream->reader));
     if (read_fut.failed()) {
         auto ex = read_fut.get_exception();
-        vlog(_log.error, "Exception reading L1 object {}: {}", object.oid, ex);
+        auto log_level = ssx::is_shutdown_exception(ex) ? ss::log_level::debug
+                                                        : ss::log_level::error;
+        vlogl(
+          _log,
+          log_level,
+          "Exception reading L1 object {}: {}",
+          object.oid,
+          ex);
         co_await close_current_stream();
         co_await ss::coroutine::return_exception_ptr(std::move(ex));
     }
